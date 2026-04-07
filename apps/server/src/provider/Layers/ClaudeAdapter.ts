@@ -2874,12 +2874,12 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     // "plan" maps directly to the SDK's "plan" permission mode;
     // "default" restores the session's original permission mode.
     // When interactionMode is absent we leave the current mode unchanged.
-    if (input.interactionMode === "plan") {
+    if (input.interactionMode === "plan" || input.interactionMode === "ask") {
       yield* Effect.tryPromise({
         try: () => context.query.setPermissionMode("plan"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
       });
-    } else if (input.interactionMode === "default") {
+    } else if (input.interactionMode === "default" || input.interactionMode === "act") {
       yield* Effect.tryPromise({
         try: () =>
           context.query.setPermissionMode(context.basePermissionMode ?? "bypassPermissions"),

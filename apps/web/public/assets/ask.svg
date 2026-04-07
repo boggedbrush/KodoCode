@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="240" height="56" viewBox="0 0 240 56">
+  <!-- selected pill (Ask) -->
+  <rect x="4" y="4" width="80" height="48" rx="24" fill="#5c6bc0"/>
+
+  <!-- Ask -->
+  <text x="44" y="34"
+        text-anchor="middle"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
+        font-size="18"
+        font-weight="700"
+        fill="#000">
+    Ask
+  </text>
+
+  <!-- Plan -->
+  <text x="120" y="34"
+        text-anchor="middle"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
+        font-size="18"
+        font-weight="600"
+        fill="#c8954a">
+    Plan
+  </text>
+
+  <!-- Act -->
+  <text x="200" y="34"
+        text-anchor="middle"
+        font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
+        font-size="18"
+        font-weight="600"
+        fill="#2e7d32">
+    Act
+  </text>
+</svg>

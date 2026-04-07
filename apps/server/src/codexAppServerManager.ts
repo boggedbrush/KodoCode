@@ -332,7 +332,7 @@ export function normalizeCodexModelSlug(
 }
 
 function buildCodexCollaborationMode(input: {
-  readonly interactionMode?: "default" | "plan";
+  readonly interactionMode?: "default" | "plan" | "ask" | "act";
   readonly model?: string;
   readonly effort?: string;
 }):
@@ -348,9 +348,10 @@ function buildCodexCollaborationMode(input: {
   if (input.interactionMode === undefined) {
     return undefined;
   }
+  const codexMode = input.interactionMode === "plan" ? "plan" : "default";
   const model = normalizeCodexModelSlug(input.model) ?? "gpt-5.3-codex";
   return {
-    mode: input.interactionMode,
+    mode: codexMode,
     settings: {
       model,
       reasoning_effort: input.effort ?? "medium",

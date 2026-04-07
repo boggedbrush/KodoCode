@@ -93,7 +93,6 @@ import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings"
 import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
-  BotIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -164,6 +163,7 @@ import { ComposerPrimaryActions } from "./chat/ComposerPrimaryActions";
 import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPanel";
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./chat/ComposerPlanFollowUpBanner";
+import { InteractionModePill } from "./chat/InteractionModePill";
 import {
   getComposerProviderState,
   renderProviderTraitsMenuContent,
@@ -2000,8 +2000,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ],
   );
   const toggleInteractionMode = useCallback(() => {
-    handleInteractionModeChange(interactionMode === "plan" ? "default" : "plan");
+    const next = interactionMode === "ask" ? "plan" : interactionMode === "plan" ? "act" : "ask";
+    handleInteractionModeChange(next);
   }, [handleInteractionModeChange, interactionMode]);
+  const modeAccentColor =
+    interactionMode === "ask" ? "#5c6bc0" : interactionMode === "plan" ? "#c8954a" : "#2e7d32";
   const toggleRuntimeMode = useCallback(() => {
     void handleRuntimeModeChange(
       runtimeMode === "full-access" ? "approval-required" : "full-access",
@@ -3307,7 +3310,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       interactionMode: nextInteractionMode,
     }: {
       text: string;
-      interactionMode: "default" | "plan";
+      interactionMode: ProviderInteractionMode;
     }) => {
       const api = readNativeApi();
       if (
@@ -4053,6 +4056,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   "group rounded-[22px] p-px transition-colors duration-200",
                   composerProviderState.composerFrameClassName,
                 )}
+                style={
+                  composerProviderState.composerFrameClassName
+                    ? undefined
+                    : { background: modeAccentColor }
+                }
                 onDragEnter={onComposerDragEnter}
                 onDragOver={onComposerDragOver}
                 onDragLeave={onComposerDragLeave}
@@ -4060,8 +4068,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
               >
                 <div
                   className={cn(
-                    "rounded-[20px] border bg-card transition-colors duration-200 has-focus-visible:border-ring/45",
-                    isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-border",
+                    "rounded-[20px] border bg-card transition-colors duration-200",
+                    isDragOverComposer ? "border-primary/70 bg-accent/30" : "border-transparent",
                     composerProviderState.composerSurfaceClassName,
                   )}
                 >
@@ -4271,7 +4279,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             planSidebarOpen={planSidebarOpen}
                             runtimeMode={runtimeMode}
                             traitsMenuContent={providerTraitsMenuContent}
-                            onToggleInteractionMode={toggleInteractionMode}
+                            onSetInteractionMode={handleInteractionModeChange}
                             onTogglePlanSidebar={togglePlanSidebar}
                             onToggleRuntimeMode={toggleRuntimeMode}
                           />
@@ -4292,23 +4300,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               className="mx-0.5 hidden h-4 sm:block"
                             />
 
-                            <Button
-                              variant="ghost"
-                              className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                              size="sm"
-                              type="button"
-                              onClick={toggleInteractionMode}
-                              title={
-                                interactionMode === "plan"
-                                  ? "Plan mode — click to return to normal build mode"
-                                  : "Default mode — click to enter plan mode"
-                              }
-                            >
-                              <BotIcon />
-                              <span className="sr-only sm:not-sr-only">
-                                {interactionMode === "plan" ? "Plan" : "Build"}
-                              </span>
-                            </Button>
+                            <InteractionModePill
+                              interactionMode={interactionMode}
+                              onSetMode={handleInteractionModeChange}
+                            />
 
                             <Separator
                               orientation="vertical"
@@ -4388,6 +4383,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         ) : null}
                         <ComposerPrimaryActions
                           compact={isComposerPrimaryActionsCompact}
+                          accentColor={modeAccentColor}
                           pendingAction={
                             activePendingProgress
                               ? {
