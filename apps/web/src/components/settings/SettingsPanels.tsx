@@ -13,6 +13,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   PROVIDER_DISPLAY_NAMES,
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   type ProviderKind,
   type ServerProvider,
   type ServerProviderModel,
@@ -600,7 +601,19 @@ export function GeneralSettingsPanel() {
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
 
-  // ── Clox: plan/act model settings ────────────────────────────────
+  // ── Clox: ask/plan/act model settings ────────────────────────────────
+  const askSelection = settings.askModelSelection;
+  const askProvider = askSelection?.provider ?? "codex";
+  const askModel = askSelection?.model ?? "";
+  const askModelOptions = askSelection?.options;
+  const askModelOptionsByProvider = getCustomModelOptionsByProvider(
+    settings,
+    serverProviders,
+    askProvider,
+    askModel || undefined,
+  );
+  const isAskModelDirty = askSelection !== null && askSelection !== undefined;
+
   const planSelection = settings.planModelSelection;
   const planProvider = planSelection?.provider ?? "codex";
   const planModel = planSelection?.model ?? "";
@@ -1100,6 +1113,66 @@ export function GeneralSettingsPanel() {
       {/* ── Clox: Mode-specific model settings ──────────────────── */}
       <SettingsSection title="Mode models">
         <SettingsRow
+          title="Ask mode model"
+          description="Model and reasoning level used when in Ask mode. Leave unset to use the default model."
+          resetAction={
+            isAskModelDirty ? (
+              <SettingResetButton
+                label="ask model"
+                onClick={() => updateSettings({ askModelSelection: null })}
+              />
+            ) : null
+          }
+          control={
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <ProviderModelPicker
+                provider={askProvider}
+                model={askModel}
+                lockedProvider={null}
+                providers={serverProviders}
+                modelOptionsByProvider={askModelOptionsByProvider}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                onProviderModelChange={(provider, model) => {
+                  updateSettings({
+                    askModelSelection: resolveModeModelSelectionState(
+                      { provider, model },
+                      settings,
+                      serverProviders,
+                    ),
+                  });
+                }}
+              />
+              <TraitsPicker
+                provider={askProvider}
+                models={serverProviders.find((p) => p.provider === askProvider)?.models ?? []}
+                model={askModel}
+                prompt=""
+                onPromptChange={() => {}}
+                modelOptions={askModelOptions}
+                allowPromptInjectedEffort={false}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                fallbackModel={DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[askProvider]}
+                onModelOptionsChange={(nextOptions) => {
+                  updateSettings({
+                    askModelSelection: resolveModeModelSelectionState(
+                      {
+                        provider: askProvider,
+                        model: askModel || "gpt-5.4",
+                        ...(nextOptions ? { options: nextOptions } : {}),
+                      },
+                      settings,
+                      serverProviders,
+                    ),
+                  });
+                }}
+              />
+            </div>
+          }
+        />
+
+        <SettingsRow
           title="Plan mode model"
           description="Model and reasoning level used when in Plan mode. Leave unset to use the default model."
           resetAction={
@@ -1140,6 +1213,7 @@ export function GeneralSettingsPanel() {
                 allowPromptInjectedEffort={false}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                fallbackModel={DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[planProvider]}
                 onModelOptionsChange={(nextOptions) => {
                   updateSettings({
                     planModelSelection: resolveModeModelSelectionState(
@@ -1160,7 +1234,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           title="Act mode model"
-          description="Model and reasoning level used when in Act (Build) mode. Leave unset to use the default model."
+          description="Model and reasoning level used when in Act mode. Leave unset to use the default model."
           resetAction={
             isActModelDirty ? (
               <SettingResetButton
@@ -1199,6 +1273,7 @@ export function GeneralSettingsPanel() {
                 allowPromptInjectedEffort={false}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                fallbackModel={DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[actProvider]}
                 onModelOptionsChange={(nextOptions) => {
                   updateSettings({
                     actModelSelection: resolveModeModelSelectionState(

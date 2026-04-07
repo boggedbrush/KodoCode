@@ -94,6 +94,11 @@ function makeSettings(overrides?: Partial<UnifiedSettings>): UnifiedSettings {
 // ── Tests ─────────────────────────────────────────────────────────
 
 describe("resolveModeModelSelection", () => {
+  it("returns null when no ask model is configured", () => {
+    const result = resolveModeModelSelection("ask", makeSettings(), makeProviders());
+    expect(result).toBeNull();
+  });
+
   it("returns null when no plan model is configured", () => {
     const result = resolveModeModelSelection("plan", makeSettings(), makeProviders());
     expect(result).toBeNull();
@@ -102,6 +107,20 @@ describe("resolveModeModelSelection", () => {
   it("returns null when no act model is configured", () => {
     const result = resolveModeModelSelection("default", makeSettings(), makeProviders());
     expect(result).toBeNull();
+  });
+
+  it("returns the ask model selection when ask mode is active and ask model is configured", () => {
+    const askModelSelection: ModelSelection = {
+      provider: "claudeAgent",
+      model: "claude-sonnet-4-6",
+      options: { thinking: true },
+    };
+    const settings = makeSettings({ askModelSelection });
+    const result = resolveModeModelSelection("ask", settings, makeProviders());
+
+    expect(result).not.toBeNull();
+    expect(result!.provider).toBe("claudeAgent");
+    expect(result!.model).toBe("claude-sonnet-4-6");
   });
 
   it("returns the plan model selection when plan mode is active and plan model is configured", () => {
@@ -146,7 +165,12 @@ describe("resolveModeModelSelection", () => {
     expect(result!.provider).toBe("codex");
   });
 
-  it("returns plan model for plan mode and act model for default mode independently", () => {
+  it("returns ask, plan, and act models independently", () => {
+    const askModelSelection: ModelSelection = {
+      provider: "claudeAgent",
+      model: "claude-sonnet-4-6",
+      options: { thinking: true },
+    };
     const planModelSelection: ModelSelection = {
       provider: "codex",
       model: "gpt-5.3-codex",
@@ -157,14 +181,38 @@ describe("resolveModeModelSelection", () => {
       model: "gpt-5.4",
       options: { reasoningEffort: "low" },
     };
-    const settings = makeSettings({ planModelSelection, actModelSelection });
+    const settings = makeSettings({ askModelSelection, planModelSelection, actModelSelection });
     const providers = makeProviders();
 
+    const askResult = resolveModeModelSelection("ask", settings, providers);
     const planResult = resolveModeModelSelection("plan", settings, providers);
     const actResult = resolveModeModelSelection("default", settings, providers);
 
+    expect(askResult!.model).toBe("claude-sonnet-4-6");
     expect(planResult!.model).toBe("gpt-5.3-codex");
     expect(actResult!.model).toBe("gpt-5.4");
+  });
+
+  it("ask model does not affect plan mode resolution", () => {
+    const askModelSelection: ModelSelection = {
+      provider: "claudeAgent",
+      model: "claude-sonnet-4-6",
+      options: { thinking: true },
+    };
+    const settings = makeSettings({ askModelSelection, planModelSelection: null });
+    const result = resolveModeModelSelection("plan", settings, makeProviders());
+    expect(result).toBeNull();
+  });
+
+  it("plan model does not affect ask mode resolution", () => {
+    const planModelSelection: ModelSelection = {
+      provider: "codex",
+      model: "gpt-5.3-codex",
+      options: { reasoningEffort: "high" },
+    };
+    const settings = makeSettings({ planModelSelection, askModelSelection: null });
+    const result = resolveModeModelSelection("ask", settings, makeProviders());
+    expect(result).toBeNull();
   });
 
   it("plan model does not affect act mode resolution", () => {

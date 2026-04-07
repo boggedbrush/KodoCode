@@ -67,7 +67,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const activeProvider = props.lockedProvider ?? props.provider;
   const selectedProviderOptions = props.modelOptionsByProvider[activeProvider];
   const selectedModelLabel =
-    selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
+    selectedProviderOptions.find((option) => option.slug === props.model)?.name ||
+    props.model ||
+    "Current Model";
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[activeProvider];
   const handleModelChange = (provider: ProviderKind, value: string) => {
     if (props.disabled) return;
@@ -114,14 +116,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             props.compact ? "max-w-36 sm:pl-1" : undefined,
           )}
         >
-          <ProviderIcon
-            aria-hidden="true"
-            className={cn(
-              "size-4 shrink-0",
-              providerIconClassName(activeProvider, "text-muted-foreground/70"),
-              props.activeProviderIconClassName,
-            )}
-          />
+          {props.model && (
+            <ProviderIcon
+              aria-hidden="true"
+              className={cn(
+                "size-4 shrink-0",
+                providerIconClassName(activeProvider, "text-muted-foreground/70"),
+                props.activeProviderIconClassName,
+              )}
+            />
+          )}
           <span className="min-w-0 flex-1 truncate">{selectedModelLabel}</span>
           <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
         </span>
@@ -129,6 +133,15 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <MenuPopup align="start">
         {props.lockedProvider !== null ? (
           <MenuGroup>
+            <MenuItem
+              onClick={() => {
+                props.onProviderModelChange(props.lockedProvider!, "");
+                setIsMenuOpen(false);
+              }}
+            >
+              <span className="text-muted-foreground/70">Current Model</span>
+            </MenuItem>
+            <MenuDivider />
             <MenuRadioGroup
               value={props.model}
               onValueChange={(value) => handleModelChange(props.lockedProvider!, value)}

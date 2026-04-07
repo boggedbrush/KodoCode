@@ -1830,7 +1830,12 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           return;
         }
         const nextInteractionMode =
-          interactionMode === "plan" || interactionMode === "default" ? interactionMode : null;
+          interactionMode === "ask" ||
+          interactionMode === "plan" ||
+          interactionMode === "act" ||
+          interactionMode === "default"
+            ? interactionMode
+            : null;
         set((state) => {
           const existing = state.draftsByThreadId[threadId];
           if (!existing && nextInteractionMode === null) {

@@ -243,7 +243,31 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  // ── Clox: plan/act model selection persistence ──────────────────
+  // ── Clox: ask/plan/act model selection persistence ──────────────────
+
+  it.effect("persists askModelSelection and reads it back", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      const next = yield* serverSettings.updateSettings({
+        askModelSelection: {
+          provider: "claudeAgent",
+          model: "claude-sonnet-4-6",
+          options: {
+            thinking: true,
+          },
+        },
+      });
+
+      assert.deepEqual(next.askModelSelection, {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        options: {
+          thinking: true,
+        },
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
 
   it.effect("persists planModelSelection and reads it back", () =>
     Effect.gen(function* () {
@@ -293,6 +317,26 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("clears askModelSelection when set to null", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      yield* serverSettings.updateSettings({
+        askModelSelection: {
+          provider: "claudeAgent",
+          model: "claude-sonnet-4-6",
+          options: { thinking: true },
+        },
+      });
+
+      const next = yield* serverSettings.updateSettings({
+        askModelSelection: null,
+      });
+
+      assert.equal(next.askModelSelection, null);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("clears planModelSelection when set to null", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
@@ -313,11 +357,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  it.effect("plan and act model selections are independent", () =>
+  it.effect("ask, plan, and act model selections are independent", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
 
       yield* serverSettings.updateSettings({
+        askModelSelection: {
+          provider: "claudeAgent",
+          model: "claude-sonnet-4-6",
+          options: { thinking: true },
+        },
         planModelSelection: {
           provider: "codex",
           model: "gpt-5.3-codex",
@@ -330,39 +379,63 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         },
       });
 
-      // Update only plan selection — act should be untouched
+      // Update only plan selection — ask and act should be untouched
       const next = yield* serverSettings.updateSettings({
         planModelSelection: {
           model: "gpt-5.4",
         },
       });
 
+      const askModelSelection = next.askModelSelection;
+      assert.ok(askModelSelection);
+      if (askModelSelection.provider !== "claudeAgent") {
+        throw new Error(`expected claudeAgent selection, got ${askModelSelection.provider}`);
+      }
+      assert.equal(askModelSelection.model, "claude-sonnet-4-6");
+
       const actModelSelection = next.actModelSelection;
       assert.ok(actModelSelection);
       if (actModelSelection.provider !== "codex") {
         throw new Error(`expected codex selection, got ${actModelSelection.provider}`);
       }
-
       assert.equal(actModelSelection.model, "gpt-5.4");
       assert.equal(actModelSelection.options?.reasoningEffort, "low");
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  it.effect("defaults planModelSelection and actModelSelection to null", () =>
+  it.effect("defaults askModelSelection, planModelSelection, and actModelSelection to null", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
 
-      // Read initial settings — plan/act should default to null
+      // Read initial settings — ask/plan/act should default to null
       const initial = yield* serverSettings.updateSettings({});
 
+      assert.equal(initial.askModelSelection, null);
       assert.equal(initial.planModelSelection, null);
       assert.equal(initial.actModelSelection, null);
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  it.effect("decodes plan/act model selection patches", () =>
+  it.effect("decodes ask/plan/act model selection patches", () =>
     Effect.sync(() => {
       const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+      assert.deepEqual(
+        decodePatch({
+          askModelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+            options: { thinking: true },
+          },
+        }),
+        {
+          askModelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+            options: { thinking: true },
+          },
+        },
+      );
 
       assert.deepEqual(
         decodePatch({

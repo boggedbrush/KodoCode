@@ -91,8 +91,9 @@ export const ServerSettings = Schema.Struct({
 
   // ── Clox: per-mode model selections ────────────────────────────
   // When set, these override the composer model selection for the
-  // corresponding Plan / Act mode.  When unset the existing default
+  // corresponding Ask / Plan / Act mode.  When unset the existing default
   // model behavior is preserved (no regression).
+  askModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
   planModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
   actModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
 
@@ -174,6 +175,7 @@ export const ServerSettingsPatch = Schema.Struct({
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
 
   // Clox: per-mode model selection patches (null clears the override)
+  askModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
   planModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
   actModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
 

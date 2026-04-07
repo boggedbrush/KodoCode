@@ -148,6 +148,7 @@ export interface TraitsMenuContentProps {
   allowPromptInjectedEffort?: boolean;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
+  fallbackModel?: string;
 }
 
 export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
@@ -158,6 +159,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   onPromptChange,
   modelOptions,
   allowPromptInjectedEffort = true,
+  fallbackModel,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
@@ -182,7 +184,14 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     defaultContextWindow,
     ultrathinkPromptControlled,
     ultrathinkInBodyText,
-  } = getSelectedTraits(provider, models, model, prompt, modelOptions, allowPromptInjectedEffort);
+  } = getSelectedTraits(
+    provider,
+    models,
+    model || fallbackModel,
+    prompt,
+    modelOptions,
+    allowPromptInjectedEffort,
+  );
   const defaultEffort = getDefaultEffort(caps);
 
   const handleEffortChange = useCallback(
@@ -329,6 +338,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   allowPromptInjectedEffort = true,
   triggerVariant,
   triggerClassName,
+  fallbackModel,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -351,19 +361,20 @@ export const TraitsPicker = memo(function TraitsPicker({
     contextWindowOptions.length > 1 && contextWindow !== defaultContextWindow
       ? (contextWindowOptions.find((o) => o.value === contextWindow)?.label ?? null)
       : null;
-  const triggerLabel = [
-    ultrathinkPromptControlled
-      ? "Ultrathink"
-      : effortLabel
-        ? effortLabel
-        : thinkingEnabled === null
-          ? null
-          : `Thinking ${thinkingEnabled ? "On" : "Off"}`,
-    ...(caps.supportsFastMode && fastModeEnabled ? ["Fast"] : []),
-    ...(contextWindowLabel ? [contextWindowLabel] : []),
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const triggerLabel =
+    [
+      ultrathinkPromptControlled
+        ? "Ultrathink"
+        : effortLabel
+          ? effortLabel
+          : thinkingEnabled === null
+            ? null
+            : `Thinking ${thinkingEnabled ? "On" : "Off"}`,
+      ...(caps.supportsFastMode && fastModeEnabled ? ["Fast"] : []),
+      ...(contextWindowLabel ? [contextWindowLabel] : []),
+    ]
+      .filter(Boolean)
+      .join(" · ") || "Current Effort";
 
   const isCodexStyle = provider === "codex";
 
@@ -409,6 +420,7 @@ export const TraitsPicker = memo(function TraitsPicker({
           onPromptChange={onPromptChange}
           modelOptions={modelOptions}
           allowPromptInjectedEffort={allowPromptInjectedEffort}
+          {...(fallbackModel !== undefined && { fallbackModel })}
           {...persistence}
         />
       </MenuPopup>

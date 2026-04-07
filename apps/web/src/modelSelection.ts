@@ -204,7 +204,7 @@ export function resolveAppModelSelectionState(
 
 /**
  * Resolve the ModelSelection that should be active for a given interaction
- * mode based on the Clox plan/act model settings.
+ * mode based on the Clox ask/plan/act model settings.
  *
  * Returns `null` when no mode-specific override is configured, signalling
  * the caller should keep using the existing default model selection.
@@ -214,7 +214,12 @@ export function resolveModeModelSelection(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
 ): ModelSelection | null {
-  const modeSelection = mode === "plan" ? settings.planModelSelection : settings.actModelSelection;
+  const modeSelection =
+    mode === "ask"
+      ? settings.askModelSelection
+      : mode === "plan"
+        ? settings.planModelSelection
+        : settings.actModelSelection;
   if (!modeSelection) {
     return null;
   }
