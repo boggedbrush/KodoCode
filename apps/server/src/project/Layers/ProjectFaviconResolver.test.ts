@@ -46,6 +46,19 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
       }),
     );
 
+    it.effect("resolves prod logo assets", () =>
+      Effect.gen(function* () {
+        const resolver = yield* ProjectFaviconResolver;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "assets/prod/logo.svg", "<svg>prod</svg>");
+
+        const resolved = yield* resolver.resolvePath(cwd);
+
+        expect(resolved).not.toBeNull();
+        expect(resolved).toContain("assets/prod/logo.svg");
+      }),
+    );
+
     it.effect("resolves icon hrefs from project source files", () =>
       Effect.gen(function* () {
         const resolver = yield* ProjectFaviconResolver;

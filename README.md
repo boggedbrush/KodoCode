@@ -1,10 +1,10 @@
-![Kodo Code banner](./assets/banner-logo.svg)
+![Kodo Code banner](./assets/prod/banner-logo.svg)
 
 # Kodo Code
 
 **Code with intention.**
 
-![Kodo Code logo](./assets/logo.svg) ![Phase 1](https://img.shields.io/badge/phase-1-implemented-green) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Kodo Code logo](./assets/prod/logo.svg) ![Phase 1](https://img.shields.io/badge/phase-1%20implemented-green) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ---
 

@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 300" width="100%" height="100%" role="img" aria-label="Kōdo Code Logo">
+  <defs>
+    <style>
+      .bg { fill: #0d0d0f; }
+      .oct {
+        fill: #141418;
+        stroke: #2a2a2e;
+        stroke-width: 1.5;
+        stroke-linejoin: miter;
+      }
+      .oct-inner {
+        fill: none;
+        stroke: #3a3a40;
+        stroke-width: 0.5;
+        stroke-linejoin: miter;
+      }
+      .kanji {
+        font-family: 'Noto Serif JP', 'Yu Mincho', serif;
+        font-size: 72px;
+        font-weight: 500;
+        fill: #c4bba8;
+        text-anchor: middle;
+      }
+      .brand {
+        font-family: 'Noto Serif', 'Yu Mincho', 'Hiragino Mincho ProN', serif;
+        font-size: 56px;
+        font-weight: 500;
+        fill: #c4bba8;
+        letter-spacing: 0.03em;
+      }
+      .tagline {
+        font-family: 'Noto Serif', 'Times New Roman', Georgia, serif;
+        font-size: 22px;
+        font-style: italic;
+        font-weight: 400;
+        fill: #7a7264;
+        letter-spacing: 0.01em;
+      }
+      .rule {
+        stroke: #2a2a2e;
+        stroke-width: 1;
+      }
+      .dot {
+        fill: #a08050;
+      }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect class="bg" width="800" height="300"/>
+
+  <!-- Octagon — double stroke -->
+  <polygon
+    class="oct"
+    points="91.4,45 208.6,45 255,91.4 255,208.6 208.6,255 91.4,255 45,208.6 45,91.4"
+  />
+  <polygon
+    class="oct-inner"
+    points="98,54 202,54 246,98 246,202 202,246 98,246 54,202 54,98"
+  />
+
+  <!-- Kanji -->
+  <text x="150" y="138" class="kanji">香</text>
+  <text x="150" y="218" class="kanji">道</text>
+
+  <!-- Brand — Kōdo with macron -->
+  <text x="320" y="142" class="brand">Kōdo Code</text>
+
+  <!-- Tagline -->
+  <text x="320" y="172" class="tagline">code with intention</text>
+
+  <!-- Rule -->
+  <line x1="320" y1="204" x2="600" y2="204" class="rule"/>
+
+  <!-- Dot -->
+  <circle cx="320" cy="204" r="4" class="dot"/>
+</svg>
