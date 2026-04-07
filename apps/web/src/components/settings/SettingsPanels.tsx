@@ -601,7 +601,7 @@ export function GeneralSettingsPanel() {
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
 
-  // ── Clox: ask/plan/act model settings ────────────────────────────────
+  // ── Clox: ask/plan/code model settings ────────────────────────────────
   const askSelection = settings.askModelSelection;
   const askProvider = askSelection?.provider ?? "codex";
   const askModel = askSelection?.model ?? "";
@@ -626,17 +626,17 @@ export function GeneralSettingsPanel() {
   );
   const isPlanModelDirty = planSelection !== null && planSelection !== undefined;
 
-  const actSelection = settings.actModelSelection;
-  const actProvider = actSelection?.provider ?? "codex";
-  const actModel = actSelection?.model ?? "";
-  const actModelOptions = actSelection?.options;
-  const actModelOptionsByProvider = getCustomModelOptionsByProvider(
+  const codeSelection = settings.codeModelSelection;
+  const codeProvider = codeSelection?.provider ?? "codex";
+  const codeModel = codeSelection?.model ?? "";
+  const codeModelOptions = codeSelection?.options;
+  const codeModelOptionsByProvider = getCustomModelOptionsByProvider(
     settings,
     serverProviders,
-    actProvider,
-    actModel || undefined,
+    codeProvider,
+    codeModel || undefined,
   );
-  const isActModelDirty = actSelection !== null && actSelection !== undefined;
+  const isCodeModelDirty = codeSelection !== null && codeSelection !== undefined;
 
   const openInPreferredEditor = useCallback(
     (target: "keybindings" | "logsDirectory", path: string | null, failureMessage: string) => {
@@ -1233,29 +1233,29 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          title="Act mode model"
-          description="Model and reasoning level used when in Act mode. Leave unset to use the default model."
+          title="Code mode model"
+          description="Model and reasoning level used when in Code mode. Leave unset to use the default model."
           resetAction={
-            isActModelDirty ? (
+            isCodeModelDirty ? (
               <SettingResetButton
-                label="act model"
-                onClick={() => updateSettings({ actModelSelection: null })}
+                label="code model"
+                onClick={() => updateSettings({ codeModelSelection: null })}
               />
             ) : null
           }
           control={
             <div className="flex flex-wrap items-center justify-end gap-1.5">
               <ProviderModelPicker
-                provider={actProvider}
-                model={actModel}
+                provider={codeProvider}
+                model={codeModel}
                 lockedProvider={null}
                 providers={serverProviders}
-                modelOptionsByProvider={actModelOptionsByProvider}
+                modelOptionsByProvider={codeModelOptionsByProvider}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
                 onProviderModelChange={(provider, model) => {
                   updateSettings({
-                    actModelSelection: resolveModeModelSelectionState(
+                    codeModelSelection: resolveModeModelSelectionState(
                       { provider, model },
                       settings,
                       serverProviders,
@@ -1264,22 +1264,22 @@ export function GeneralSettingsPanel() {
                 }}
               />
               <TraitsPicker
-                provider={actProvider}
-                models={serverProviders.find((p) => p.provider === actProvider)?.models ?? []}
-                model={actModel}
+                provider={codeProvider}
+                models={serverProviders.find((p) => p.provider === codeProvider)?.models ?? []}
+                model={codeModel}
                 prompt=""
                 onPromptChange={() => {}}
-                modelOptions={actModelOptions}
+                modelOptions={codeModelOptions}
                 allowPromptInjectedEffort={false}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                fallbackModel={DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[actProvider]}
+                fallbackModel={DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[codeProvider]}
                 onModelOptionsChange={(nextOptions) => {
                   updateSettings({
-                    actModelSelection: resolveModeModelSelectionState(
+                    codeModelSelection: resolveModeModelSelectionState(
                       {
-                        provider: actProvider,
-                        model: actModel || "gpt-5.4",
+                        provider: codeProvider,
+                        model: codeModel || "gpt-5.4",
                         ...(nextOptions ? { options: nextOptions } : {}),
                       },
                       settings,

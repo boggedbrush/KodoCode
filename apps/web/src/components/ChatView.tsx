@@ -2000,11 +2000,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ],
   );
   const toggleInteractionMode = useCallback(() => {
-    const next = interactionMode === "ask" ? "plan" : interactionMode === "plan" ? "act" : "ask";
+    const next = interactionMode === "ask" ? "plan" : interactionMode === "plan" ? "code" : "ask";
     handleInteractionModeChange(next);
   }, [handleInteractionModeChange, interactionMode]);
   const modeAccentColor =
-    interactionMode === "ask" ? "#5c6bc0" : interactionMode === "plan" ? "#c8954a" : "#2e7d32";
+    interactionMode === "ask" ? "#64B5F6" : interactionMode === "plan" ? "#c8954a" : "#5236CC";
   const toggleRuntimeMode = useCallback(() => {
     void handleRuntimeModeChange(
       runtimeMode === "full-access" ? "approval-required" : "full-access",

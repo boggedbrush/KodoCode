@@ -53,7 +53,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         >
           <MenuRadioItem value="ask">Ask</MenuRadioItem>
           <MenuRadioItem value="plan">Plan</MenuRadioItem>
-          <MenuRadioItem value="act">Act</MenuRadioItem>
+          <MenuRadioItem value="code">Code</MenuRadioItem>
         </MenuRadioGroup>
         <MenuDivider />
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>

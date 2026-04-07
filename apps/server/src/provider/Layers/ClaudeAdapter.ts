@@ -2879,7 +2879,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         try: () => context.query.setPermissionMode("plan"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
       });
-    } else if (input.interactionMode === "default" || input.interactionMode === "act") {
+    } else if (input.interactionMode === "default" || input.interactionMode === "code") {
       yield* Effect.tryPromise({
         try: () =>
           context.query.setPermissionMode(context.basePermissionMode ?? "bypassPermissions"),

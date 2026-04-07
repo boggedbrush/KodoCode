@@ -2,9 +2,9 @@ import { type ProviderInteractionMode } from "@t3tools/contracts";
 import { memo, useState } from "react";
 
 const MODES = [
-  { mode: "ask" as const, label: "Ask", color: "#5c6bc0" },
+  { mode: "ask" as const, label: "Ask", color: "#64B5F6" },
   { mode: "plan" as const, label: "Plan", color: "#c8954a" },
-  { mode: "act" as const, label: "Act", color: "#2e7d32" },
+  { mode: "code" as const, label: "Code", color: "#5236CC" },
 ];
 
 export const InteractionModePill = memo(function InteractionModePill({
@@ -32,7 +32,7 @@ export const InteractionModePill = memo(function InteractionModePill({
             title={`Switch to ${label} mode`}
             style={{
               backgroundColor: isActive || isHovered ? color : "transparent",
-              color: isActive || isHovered ? "#000" : color,
+              color: isActive || isHovered ? "#fff" : color,
             }}
           >
             {label}

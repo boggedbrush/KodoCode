@@ -104,8 +104,8 @@ describe("resolveModeModelSelection", () => {
     expect(result).toBeNull();
   });
 
-  it("returns null when no act model is configured", () => {
-    const result = resolveModeModelSelection("default", makeSettings(), makeProviders());
+  it("returns null when no code model is configured", () => {
+    const result = resolveModeModelSelection("code", makeSettings(), makeProviders());
     expect(result).toBeNull();
   });
 
@@ -137,14 +137,14 @@ describe("resolveModeModelSelection", () => {
     expect(result!.model).toBe("gpt-5.3-codex");
   });
 
-  it("returns the act model selection when default (act) mode is active and act model is configured", () => {
-    const actModelSelection: ModelSelection = {
+  it("returns the code model selection when code mode is active and code model is configured", () => {
+    const codeModelSelection: ModelSelection = {
       provider: "codex",
       model: "gpt-5.4",
       options: { reasoningEffort: "medium" },
     };
-    const settings = makeSettings({ actModelSelection });
-    const result = resolveModeModelSelection("default", settings, makeProviders());
+    const settings = makeSettings({ codeModelSelection });
+    const result = resolveModeModelSelection("code", settings, makeProviders());
 
     expect(result).not.toBeNull();
     expect(result!.provider).toBe("codex");
@@ -165,7 +165,7 @@ describe("resolveModeModelSelection", () => {
     expect(result!.provider).toBe("codex");
   });
 
-  it("returns ask, plan, and act models independently", () => {
+  it("returns ask, plan, and code models independently", () => {
     const askModelSelection: ModelSelection = {
       provider: "claudeAgent",
       model: "claude-sonnet-4-6",
@@ -176,21 +176,21 @@ describe("resolveModeModelSelection", () => {
       model: "gpt-5.3-codex",
       options: { reasoningEffort: "high" },
     };
-    const actModelSelection: ModelSelection = {
+    const codeModelSelection: ModelSelection = {
       provider: "codex",
       model: "gpt-5.4",
       options: { reasoningEffort: "low" },
     };
-    const settings = makeSettings({ askModelSelection, planModelSelection, actModelSelection });
+    const settings = makeSettings({ askModelSelection, planModelSelection, codeModelSelection });
     const providers = makeProviders();
 
     const askResult = resolveModeModelSelection("ask", settings, providers);
     const planResult = resolveModeModelSelection("plan", settings, providers);
-    const actResult = resolveModeModelSelection("default", settings, providers);
+    const codeResult = resolveModeModelSelection("code", settings, providers);
 
     expect(askResult!.model).toBe("claude-sonnet-4-6");
     expect(planResult!.model).toBe("gpt-5.3-codex");
-    expect(actResult!.model).toBe("gpt-5.4");
+    expect(codeResult!.model).toBe("gpt-5.4");
   });
 
   it("ask model does not affect plan mode resolution", () => {
@@ -215,24 +215,24 @@ describe("resolveModeModelSelection", () => {
     expect(result).toBeNull();
   });
 
-  it("plan model does not affect act mode resolution", () => {
+  it("plan model does not affect code mode resolution", () => {
     const planModelSelection: ModelSelection = {
       provider: "codex",
       model: "gpt-5.3-codex",
       options: { reasoningEffort: "high" },
     };
-    const settings = makeSettings({ planModelSelection, actModelSelection: null });
-    const result = resolveModeModelSelection("default", settings, makeProviders());
+    const settings = makeSettings({ planModelSelection, codeModelSelection: null });
+    const result = resolveModeModelSelection("code", settings, makeProviders());
     expect(result).toBeNull();
   });
 
-  it("act model does not affect plan mode resolution", () => {
-    const actModelSelection: ModelSelection = {
+  it("code model does not affect plan mode resolution", () => {
+    const codeModelSelection: ModelSelection = {
       provider: "codex",
       model: "gpt-5.4",
       options: { reasoningEffort: "medium" },
     };
-    const settings = makeSettings({ actModelSelection, planModelSelection: null });
+    const settings = makeSettings({ codeModelSelection, planModelSelection: null });
     const result = resolveModeModelSelection("plan", settings, makeProviders());
     expect(result).toBeNull();
   });

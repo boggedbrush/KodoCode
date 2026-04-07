@@ -1832,7 +1832,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         const nextInteractionMode =
           interactionMode === "ask" ||
           interactionMode === "plan" ||
-          interactionMode === "act" ||
+          interactionMode === "code" ||
           interactionMode === "default"
             ? interactionMode
             : null;

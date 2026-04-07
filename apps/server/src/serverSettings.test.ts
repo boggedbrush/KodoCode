@@ -243,7 +243,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  // ── Clox: ask/plan/act model selection persistence ──────────────────
+  // ── Clox: ask/plan/code model selection persistence ──────────────────
 
   it.effect("persists askModelSelection and reads it back", () =>
     Effect.gen(function* () {
@@ -293,12 +293,12 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  it.effect("persists actModelSelection and reads it back", () =>
+  it.effect("persists codeModelSelection and reads it back", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
 
       const next = yield* serverSettings.updateSettings({
-        actModelSelection: {
+        codeModelSelection: {
           provider: "codex",
           model: "gpt-5.4",
           options: {
@@ -307,7 +307,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         },
       });
 
-      assert.deepEqual(next.actModelSelection, {
+      assert.deepEqual(next.codeModelSelection, {
         provider: "codex",
         model: "gpt-5.4",
         options: {
@@ -357,7 +357,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  it.effect("ask, plan, and act model selections are independent", () =>
+  it.effect("ask, plan, and code model selections are independent", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
 
@@ -372,14 +372,14 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           model: "gpt-5.3-codex",
           options: { reasoningEffort: "high" },
         },
-        actModelSelection: {
+        codeModelSelection: {
           provider: "codex",
           model: "gpt-5.4",
           options: { reasoningEffort: "low" },
         },
       });
 
-      // Update only plan selection — ask and act should be untouched
+      // Update only plan selection — ask and code should be untouched
       const next = yield* serverSettings.updateSettings({
         planModelSelection: {
           model: "gpt-5.4",
@@ -393,30 +393,30 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       }
       assert.equal(askModelSelection.model, "claude-sonnet-4-6");
 
-      const actModelSelection = next.actModelSelection;
-      assert.ok(actModelSelection);
-      if (actModelSelection.provider !== "codex") {
-        throw new Error(`expected codex selection, got ${actModelSelection.provider}`);
+      const codeModelSelection = next.codeModelSelection;
+      assert.ok(codeModelSelection);
+      if (codeModelSelection.provider !== "codex") {
+        throw new Error(`expected codex selection, got ${codeModelSelection.provider}`);
       }
-      assert.equal(actModelSelection.model, "gpt-5.4");
-      assert.equal(actModelSelection.options?.reasoningEffort, "low");
+      assert.equal(codeModelSelection.model, "gpt-5.4");
+      assert.equal(codeModelSelection.options?.reasoningEffort, "low");
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  it.effect("defaults askModelSelection, planModelSelection, and actModelSelection to null", () =>
+  it.effect("defaults askModelSelection, planModelSelection, and codeModelSelection to null", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
 
-      // Read initial settings — ask/plan/act should default to null
+      // Read initial settings — ask/plan/code should default to null
       const initial = yield* serverSettings.updateSettings({});
 
       assert.equal(initial.askModelSelection, null);
       assert.equal(initial.planModelSelection, null);
-      assert.equal(initial.actModelSelection, null);
+      assert.equal(initial.codeModelSelection, null);
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  it.effect("decodes ask/plan/act model selection patches", () =>
+  it.effect("decodes ask/plan/code model selection patches", () =>
     Effect.sync(() => {
       const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 
@@ -454,7 +454,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         },
       );
 
-      assert.deepEqual(decodePatch({ actModelSelection: null }), { actModelSelection: null });
+      assert.deepEqual(decodePatch({ codeModelSelection: null }), { codeModelSelection: null });
     }),
   );
 });

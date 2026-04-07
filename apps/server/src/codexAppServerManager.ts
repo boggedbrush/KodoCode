@@ -332,7 +332,7 @@ export function normalizeCodexModelSlug(
 }
 
 function buildCodexCollaborationMode(input: {
-  readonly interactionMode?: "default" | "plan" | "ask" | "act";
+  readonly interactionMode?: "default" | "plan" | "ask" | "code";
   readonly model?: string;
   readonly effort?: string;
 }):

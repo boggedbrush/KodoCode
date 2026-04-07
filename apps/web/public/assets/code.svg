@@ -1,18 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="240" height="56" viewBox="0 0 240 56">
-  <!-- selected pill (Act) -->
-  <rect x="156" y="4" width="80" height="48" rx="24" fill="#2e7d32"/>
+  <rect x="0" y="0" width="240" height="56" rx="28" fill="#1a1a1a"/>
 
-  <!-- Ask -->
+  <rect x="156" y="4" width="80" height="48" rx="24" fill="#5236CC"/>
+
   <text x="40" y="34"
         text-anchor="middle"
         font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
         font-size="18"
         font-weight="600"
-        fill="#5c6bc0">
+        fill="#7986CB">
     Ask
   </text>
 
-  <!-- Plan -->
   <text x="120" y="34"
         text-anchor="middle"
         font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
@@ -22,13 +21,12 @@
     Plan
   </text>
 
-  <!-- Act -->
   <text x="196" y="34"
         text-anchor="middle"
         font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif"
         font-size="18"
         font-weight="700"
-        fill="#000">
-    Act
+        fill="#000000">
+    Code
   </text>
 </svg>

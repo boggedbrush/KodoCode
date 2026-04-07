@@ -125,7 +125,7 @@ const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "textGenerationModelSelection",
   "askModelSelection",
   "planModelSelection",
-  "actModelSelection",
+  "codeModelSelection",
 ]);
 
 function stripDefaultServerSettings(current: unknown, defaults: unknown): unknown | undefined {
