@@ -691,7 +691,7 @@ function SortableProjectItem({
 }
 
 export default function Sidebar() {
-  const { toggleSidebar } = useSidebar();
+  const { toggleSidebar, open: sidebarOpen } = useSidebar();
   const projects = useStore((store) => store.projects);
   const sidebarThreadsById = useStore((store) => store.sidebarThreadsById);
   const threadIdsByProjectId = useStore((store) => store.threadIdsByProjectId);
@@ -2105,8 +2105,11 @@ export default function Sidebar() {
                 <Link
                   aria-label="Go to threads"
                   className={cn(
-                    "flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2",
+                    "flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-[opacity,color] ease-linear hover:text-foreground focus-visible:ring-2",
                     shouldShowSidebarLogo ? "ml-1" : undefined,
+                    sidebarOpen
+                      ? "opacity-100 duration-200"
+                      : "opacity-0 pointer-events-none duration-75",
                   )}
                   to="/"
                 >
