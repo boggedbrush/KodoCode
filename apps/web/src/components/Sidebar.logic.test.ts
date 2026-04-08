@@ -20,6 +20,10 @@ import {
   sortThreadsForSidebar,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
+import {
+  PLAN_READY_THREAD_STATUS_COLOR_CLASSES,
+  WORKING_THREAD_STATUS_COLOR_CLASSES,
+} from "../modeColors";
 import { OrchestrationLatestTurn, ProjectId, ThreadId } from "@t3tools/contracts";
 import {
   DEFAULT_INTERACTION_MODE,
@@ -540,8 +544,8 @@ describe("resolveProjectStatusIndicator", () => {
         },
         {
           label: "Working",
-          colorClass: "text-sky-600",
-          dotClass: "bg-sky-500",
+          colorClass: WORKING_THREAD_STATUS_COLOR_CLASSES.colorClass,
+          dotClass: WORKING_THREAD_STATUS_COLOR_CLASSES.dotClass,
           pulse: true,
         },
       ]),
@@ -559,12 +563,15 @@ describe("resolveProjectStatusIndicator", () => {
         },
         {
           label: "Plan Ready",
-          colorClass: "text-violet-600",
-          dotClass: "bg-violet-500",
+          colorClass: PLAN_READY_THREAD_STATUS_COLOR_CLASSES.colorClass,
+          dotClass: PLAN_READY_THREAD_STATUS_COLOR_CLASSES.dotClass,
           pulse: false,
         },
       ]),
-    ).toMatchObject({ label: "Plan Ready", dotClass: "bg-violet-500" });
+    ).toMatchObject({
+      label: "Plan Ready",
+      dotClass: PLAN_READY_THREAD_STATUS_COLOR_CLASSES.dotClass,
+    });
   });
 });
 

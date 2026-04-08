@@ -1,10 +1,12 @@
 import { type ProviderInteractionMode } from "@t3tools/contracts";
 import { memo, useState } from "react";
 
+import { INTERACTION_MODE_ACCENT_COLORS } from "../../modeColors";
+
 const MODES = [
-  { mode: "ask" as const, label: "Ask", color: "#64B5F6" },
-  { mode: "plan" as const, label: "Plan", color: "#c8954a" },
-  { mode: "code" as const, label: "Code", color: "#5236CC" },
+  { mode: "ask" as const, label: "Ask", color: INTERACTION_MODE_ACCENT_COLORS.ask },
+  { mode: "plan" as const, label: "Plan", color: INTERACTION_MODE_ACCENT_COLORS.plan },
+  { mode: "code" as const, label: "Code", color: INTERACTION_MODE_ACCENT_COLORS.code },
 ];
 
 export const InteractionModePill = memo(function InteractionModePill({

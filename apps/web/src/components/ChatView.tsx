@@ -164,6 +164,7 @@ import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPane
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./chat/ComposerPlanFollowUpBanner";
 import { InteractionModePill } from "./chat/InteractionModePill";
+import { getInteractionModeAccentColor } from "../modeColors";
 import {
   getComposerProviderState,
   renderProviderTraitsMenuContent,
@@ -2009,8 +2010,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const next = interactionMode === "ask" ? "plan" : interactionMode === "plan" ? "code" : "ask";
     handleInteractionModeChange(next);
   }, [handleInteractionModeChange, interactionMode]);
-  const modeAccentColor =
-    interactionMode === "ask" ? "#64B5F6" : interactionMode === "plan" ? "#c8954a" : "#5236CC";
+  const modeAccentColor = getInteractionModeAccentColor(interactionMode);
   const toggleRuntimeMode = useCallback(() => {
     void handleRuntimeModeChange(
       runtimeMode === "full-access" ? "approval-required" : "full-access",

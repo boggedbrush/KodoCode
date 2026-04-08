@@ -3,6 +3,10 @@ import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/c
 import type { SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
+import {
+  PLAN_READY_THREAD_STATUS_COLOR_CLASSES,
+  WORKING_THREAD_STATUS_COLOR_CLASSES,
+} from "../modeColors";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
@@ -334,8 +338,8 @@ export function resolveThreadStatusPill(input: {
   if (thread.session?.status === "running") {
     return {
       label: "Working",
-      colorClass: "text-sky-600 dark:text-sky-300/80",
-      dotClass: "bg-sky-500 dark:bg-sky-300/80",
+      colorClass: WORKING_THREAD_STATUS_COLOR_CLASSES.colorClass,
+      dotClass: WORKING_THREAD_STATUS_COLOR_CLASSES.dotClass,
       pulse: true,
     };
   }
@@ -357,8 +361,8 @@ export function resolveThreadStatusPill(input: {
   if (hasPlanReadyPrompt) {
     return {
       label: "Plan Ready",
-      colorClass: "text-violet-600 dark:text-violet-300/90",
-      dotClass: "bg-violet-500 dark:bg-violet-300/90",
+      colorClass: PLAN_READY_THREAD_STATUS_COLOR_CLASSES.colorClass,
+      dotClass: PLAN_READY_THREAD_STATUS_COLOR_CLASSES.dotClass,
       pulse: false,
     };
   }
