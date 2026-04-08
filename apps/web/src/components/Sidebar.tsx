@@ -131,6 +131,9 @@ import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "../rpc/serverState";
 import { useSidebarThreadSummaryById } from "../storeSelectors";
 import type { Project } from "../types";
+import devLogo from "../../../../assets/dev/blueprint.svg";
+import prodLogo from "../../../../assets/prod/logo.svg";
+
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -145,6 +148,7 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
 } as const;
+const sidebarWordmarkLogo = import.meta.env.DEV ? devLogo : prodLogo;
 
 type SidebarProjectSnapshot = Project & {
   expanded: boolean;
@@ -725,6 +729,7 @@ export default function Sidebar() {
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const isMacDesktop = isElectron && isMacPlatform(navigator.platform);
   const shouldShowSidebarWordmark = !isLinuxDesktop;
+  const shouldShowSidebarLogo = isMacDesktop && shouldShowSidebarWordmark;
   const platform = navigator.platform;
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
   const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
@@ -2042,10 +2047,18 @@ export default function Sidebar() {
             render={
               <Link
                 aria-label="Go to threads"
-                className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
+                className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
                 to="/"
               >
-                <span className="truncate text-sm font-semibold tracking-tight text-foreground">
+                {shouldShowSidebarLogo ? (
+                  <img
+                    src={sidebarWordmarkLogo}
+                    alt=""
+                    aria-hidden="true"
+                    className="size-6 shrink-0"
+                  />
+                ) : null}
+                <span className="truncate text-xs font-semibold tracking-tight text-foreground">
                   {APP_BASE_NAME}
                 </span>
                 <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
