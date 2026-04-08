@@ -1,5 +1,5 @@
 export const BRAND_ASSET_PATHS = {
-  productionMacIconPng: "assets/prod/kodo-black-macos-1024.png",
+  productionMacIconIcns: "apps/desktop/resources/icon.icns",
   productionLinuxIconPng: "assets/prod/kodo-black-universal-1024.png",
   productionWindowsIconIco: "assets/prod/kodo-black-windows.ico",
   productionWebFaviconIco: "assets/prod/kodo-black-web-favicon.ico",

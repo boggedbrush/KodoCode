@@ -758,6 +758,16 @@ function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
   return resolveResourcePath(`icon.${ext}`);
 }
 
+function resolveMacDockIcon(): Electron.NativeImage | null {
+  const iconPath = resolveIconPath("icns");
+  if (!iconPath) {
+    return null;
+  }
+
+  const icon = nativeImage.createFromPath(iconPath);
+  return icon.isEmpty() ? null : icon;
+}
+
 function resolveVectorIconPath(): string | null {
   const candidate = isDevelopment
     ? Path.join(ROOT_DIR, "assets/dev/blueprint.svg")
@@ -831,7 +841,7 @@ function configureAppIdentity(): void {
   }
 
   if (process.platform === "darwin" && app.dock) {
-    const icon = resolveNativeAppIcon("png");
+    const icon = resolveMacDockIcon();
     if (icon) {
       app.dock.setIcon(icon);
     }
