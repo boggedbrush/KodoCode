@@ -26,6 +26,7 @@ import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readNativeApi } from "../nativeApi";
+import { resolveShortcutCommand } from "../keybindings";
 import {
   getServerConfigUpdatedNotification,
   ServerConfigUpdatedNotification,
@@ -50,6 +51,7 @@ import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 import { deriveReplayRetryDecision } from "../orchestrationRecovery";
 import { getWsRpcClient } from "~/wsRpcClient";
+import { useServerKeybindings } from "~/rpc/serverState";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -81,6 +83,7 @@ function RootRouteView() {
       <ToastProvider>
         <AnchoredToastProvider>
           <ServerStateBootstrap />
+          <GlobalAppShortcuts />
           <EventRouter />
           <WebSocketConnectionCoordinator />
           <SlowRpcAckToastCoordinator />
@@ -210,6 +213,40 @@ const MAX_NO_PROGRESS_REPLAY_RETRIES = 3;
 
 function ServerStateBootstrap() {
   useEffect(() => startServerStateSync(getWsRpcClient().server), []);
+
+  return null;
+}
+
+function GlobalAppShortcuts() {
+  const keybindings = useServerKeybindings();
+
+  useEffect(() => {
+    const onWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+
+      const command = resolveShortcutCommand(event, keybindings);
+      const isBrowserHardRefreshChord =
+        (event.key.toLowerCase() === "r" || event.code === "KeyR") &&
+        event.shiftKey &&
+        !event.altKey &&
+        (event.metaKey || event.ctrlKey);
+
+      if (command !== "app.reload" && !(isBrowserHardRefreshChord && command === null)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (command === "app.reload") {
+        window.location.reload();
+      }
+    };
+
+    window.addEventListener("keydown", onWindowKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onWindowKeyDown);
+    };
+  }, [keybindings]);
 
   return null;
 }

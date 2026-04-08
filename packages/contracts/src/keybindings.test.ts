@@ -53,11 +53,23 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedLocal.command, "chat.newLocal");
 
+    const parsedReviewMode = yield* decode(KeybindingRule, {
+      key: "mod+shift+r",
+      command: "composer.mode.review",
+    });
+    assert.strictEqual(parsedReviewMode.command, "composer.mode.review");
+
     const parsedThreadPrevious = yield* decode(KeybindingRule, {
       key: "mod+shift+[",
       command: "thread.previous",
     });
     assert.strictEqual(parsedThreadPrevious.command, "thread.previous");
+
+    const parsedReload = yield* decode(KeybindingRule, {
+      key: "f5",
+      command: "app.reload",
+    });
+    assert.strictEqual(parsedReload.command, "app.reload");
   }),
 );
 

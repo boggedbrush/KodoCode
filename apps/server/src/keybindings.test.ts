@@ -174,6 +174,11 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
       assert.equal(defaultsByCommand.get("thread.previous"), "mod+shift+[");
       assert.equal(defaultsByCommand.get("thread.next"), "mod+shift+]");
       assert.equal(defaultsByCommand.get("sidebar.toggle"), "mod+b");
+      assert.equal(defaultsByCommand.get("composer.mode.ask"), "mod+shift+a");
+      assert.equal(defaultsByCommand.get("composer.mode.plan"), "mod+shift+p");
+      assert.equal(defaultsByCommand.get("composer.mode.code"), "mod+shift+c");
+      assert.equal(defaultsByCommand.get("composer.mode.review"), "mod+shift+r");
+      assert.equal(defaultsByCommand.get("app.reload"), "f5");
       assert.equal(defaultsByCommand.get("thread.jump.1"), "mod+1");
       assert.equal(defaultsByCommand.get("thread.jump.9"), "mod+9");
     }),

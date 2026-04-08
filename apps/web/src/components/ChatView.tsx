@@ -2773,6 +2773,26 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
 
+      if (
+        command === "composer.mode.ask" ||
+        command === "composer.mode.plan" ||
+        command === "composer.mode.code" ||
+        command === "composer.mode.review"
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        const nextMode =
+          command === "composer.mode.ask"
+            ? "ask"
+            : command === "composer.mode.plan"
+              ? "plan"
+              : command === "composer.mode.code"
+                ? "code"
+                : "review";
+        handleInteractionModeChange(nextMode);
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -2794,6 +2814,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     runProjectScript,
     splitTerminal,
     keybindings,
+    handleInteractionModeChange,
     onToggleDiff,
     toggleTerminalVisibility,
   ]);

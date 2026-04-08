@@ -36,6 +36,11 @@ const STATIC_KEYBINDING_COMMANDS = [
   "sidebar.toggle",
   "chat.new",
   "chat.newLocal",
+  "composer.mode.ask",
+  "composer.mode.plan",
+  "composer.mode.code",
+  "composer.mode.review",
+  "app.reload",
   "editor.openFavorite",
   ...THREAD_KEYBINDING_COMMANDS,
 ] as const;
