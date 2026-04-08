@@ -20,9 +20,12 @@ const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const APP_DISPLAY_NAME = isDevelopment ? "Kodo Code (Dev)" : "Kodo Code (Alpha)";
 const APP_BUNDLE_ID = "com.kodo.code";
 const LAUNCHER_VERSION = 1;
+const ELECTRON_INSTALL_CANDIDATES = ["node", "bun"];
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const desktopDir = resolve(__dirname, "..");
+const require = createRequire(import.meta.url);
+const electronPackageDir = dirname(require.resolve("electron/package.json"));
 
 function setPlistString(plistPath, key, value) {
   const replaceResult = spawnSync("plutil", ["-replace", key, "-string", value, plistPath], {
@@ -97,6 +100,87 @@ function readJson(path) {
   }
 }
 
+function getElectronPlatformPath() {
+  switch (process.platform) {
+    case "darwin":
+      return "Electron.app/Contents/MacOS/Electron";
+    case "linux":
+      return "electron";
+    case "win32":
+      return "electron.exe";
+    default:
+      throw new Error(`Electron is not supported on platform: ${process.platform}`);
+  }
+}
+
+function getInstalledElectronBinaryPath() {
+  const pathFile = join(electronPackageDir, "path.txt");
+  const executablePath = existsSync(pathFile) ? readFileSync(pathFile, "utf8").trim() : "";
+  const resolvedExecutablePath = executablePath || getElectronPlatformPath();
+
+  const distRoot = process.env.ELECTRON_OVERRIDE_DIST_PATH || join(electronPackageDir, "dist");
+  return join(distRoot, resolvedExecutablePath);
+}
+
+function installElectronBinary() {
+  if (process.env.ELECTRON_SKIP_BINARY_DOWNLOAD) {
+    throw new Error(
+      "Electron binary is missing and ELECTRON_SKIP_BINARY_DOWNLOAD is set. " +
+        "Reinstall dependencies or run the Electron installer manually.",
+    );
+  }
+
+  const installScriptPath = join(electronPackageDir, "install.js");
+  const lastErrors = [];
+
+  for (const command of ELECTRON_INSTALL_CANDIDATES) {
+    const result = spawnSync(command, [installScriptPath], {
+      cwd: electronPackageDir,
+      encoding: "utf8",
+      env: process.env,
+    });
+
+    if (result.status === 0) {
+      return;
+    }
+
+    const stderr = [result.stderr, result.stdout].filter(Boolean).join("\n").trim();
+    lastErrors.push(
+      `${command}: ${stderr || result.error?.message || `exited with code ${result.status ?? "unknown"}`}`,
+    );
+  }
+
+  throw new Error(
+    [
+      "Electron binary is missing and could not be installed automatically.",
+      `Install script: ${installScriptPath}`,
+      ...lastErrors.map((error) => `- ${error}`),
+    ].join("\n"),
+  );
+}
+
+function ensureElectronBinary() {
+  const existingBinaryPath = getInstalledElectronBinaryPath();
+  if (existingBinaryPath && existsSync(existingBinaryPath)) {
+    return existingBinaryPath;
+  }
+
+  installElectronBinary();
+
+  const installedBinaryPath = getInstalledElectronBinaryPath();
+  if (!installedBinaryPath || !existsSync(installedBinaryPath)) {
+    throw new Error(
+      [
+        "Electron installation finished but the executable is still missing.",
+        `Expected binary path: ${installedBinaryPath || "<unresolved>"}`,
+        `Package dir: ${electronPackageDir}`,
+      ].join("\n"),
+    );
+  }
+
+  return installedBinaryPath;
+}
+
 function buildMacLauncher(electronBinaryPath) {
   const sourceAppBundlePath = resolve(electronBinaryPath, "../../..");
   const runtimeDir = join(desktopDir, ".electron-runtime");
@@ -133,8 +217,7 @@ function buildMacLauncher(electronBinaryPath) {
 }
 
 export function resolveElectronPath() {
-  const require = createRequire(import.meta.url);
-  const electronBinaryPath = require("electron");
+  const electronBinaryPath = ensureElectronBinary();
 
   if (process.platform !== "darwin") {
     return electronBinaryPath;
