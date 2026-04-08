@@ -4,8 +4,11 @@ import { desktopDir, resolveElectronPath } from "./electron-launcher.mjs";
 
 const childEnv = { ...process.env };
 delete childEnv.ELECTRON_RUN_AS_NODE;
+const DEVTOOLS_ARG = "--devtools";
+const forwardDevtools = process.argv.includes(DEVTOOLS_ARG);
+const electronArgs = ["dist-electron/main.js", ...(forwardDevtools ? [DEVTOOLS_ARG] : [])];
 
-const child = spawn(resolveElectronPath(), ["dist-electron/main.js"], {
+const child = spawn(resolveElectronPath(), electronArgs, {
   stdio: "inherit",
   cwd: desktopDir,
   env: childEnv,

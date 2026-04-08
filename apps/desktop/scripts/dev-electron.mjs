@@ -19,6 +19,8 @@ const watchedDirectories = [
 const forcedShutdownTimeoutMs = 1_500;
 const restartDebounceMs = 120;
 const childTreeGracePeriodMs = 1_200;
+const DEVTOOLS_ARG = "--devtools";
+const forwardDevtools = process.argv.includes(DEVTOOLS_ARG);
 
 await waitForResources({
   baseDir: desktopDir,
@@ -59,7 +61,11 @@ function startApp() {
 
   const app = spawn(
     resolveElectronPath(),
-    [`--kodo-code-dev-root=${desktopDir}`, "dist-electron/main.js"],
+    [
+      `--kodo-code-dev-root=${desktopDir}`,
+      "dist-electron/main.js",
+      ...(forwardDevtools ? [DEVTOOLS_ARG] : []),
+    ],
     {
       cwd: desktopDir,
       env: {

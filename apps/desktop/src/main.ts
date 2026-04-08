@@ -94,6 +94,7 @@ const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
 const LINUX_TRANSPARENT_WINDOW_ARG = "--kodo-linux-transparent-window=1";
+const DEVTOOLS_ARG = "--devtools";
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 type LinuxDesktopNamedApp = Electron.App & {
@@ -124,6 +125,7 @@ const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
 });
 const initialUpdateState = (): DesktopUpdateState =>
   createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo);
+const shouldOpenDevTools = process.argv.includes(DEVTOOLS_ARG);
 
 function logTimestamp(): string {
   return new Date().toISOString();
@@ -1440,7 +1442,7 @@ function registerIpcHandlers(): void {
   });
 }
 
-function getIconOption(): { icon: string } | Record<string, never> {
+function getIconOption(): { icon: Electron.NativeImage } | Record<string, never> {
   if (process.platform === "darwin") return {}; // macOS uses .icns from app bundle
   const ext = process.platform === "win32" ? "ico" : "png";
   const icon = resolveNativeAppIcon(ext);
@@ -1542,7 +1544,9 @@ function createWindow(): BrowserWindow {
 
   if (isDevelopment) {
     void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
-    window.webContents.openDevTools({ mode: "detach" });
+    if (shouldOpenDevTools) {
+      window.webContents.openDevTools({ mode: "detach" });
+    }
   } else {
     void window.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
   }
