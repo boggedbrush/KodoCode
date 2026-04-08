@@ -27,6 +27,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import * as Equal from "effect/Equal";
 import { useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
@@ -702,6 +703,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }));
   const [isReviewSetupDialogOpen, setIsReviewSetupDialogOpen] = useState(false);
   const [isSubmittingReviewSetup, setIsSubmittingReviewSetup] = useState(false);
+  const reviewModeSeedSelectionRef = useRef<ModelSelection | null>(null);
   const [terminalLaunchContext, setTerminalLaunchContext] = useState<TerminalLaunchContext | null>(
     null,
   );
@@ -2016,6 +2018,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (modeSelection) {
         setComposerDraftModelSelection(threadId, modeSelection);
       }
+      reviewModeSeedSelectionRef.current = mode === "review" ? modeSelection : null;
 
       scheduleComposerFocus();
     },
@@ -2031,6 +2034,34 @@ export default function ChatView({ threadId }: ChatViewProps) {
       threadId,
     ],
   );
+
+  useEffect(() => {
+    if (interactionMode !== "review" || !activeThread) {
+      return;
+    }
+
+    const modeSelection = resolveModeModelSelection("review", settings, providerStatuses);
+    if (!modeSelection) {
+      return;
+    }
+
+    const currentSelection = composerDraft.modelSelectionByProvider[modeSelection.provider] ?? null;
+    if (!Equal.equals(reviewModeSeedSelectionRef.current, currentSelection)) {
+      return;
+    }
+
+    if (!Equal.equals(currentSelection, modeSelection)) {
+      setComposerDraftModelSelection(activeThread.id, modeSelection);
+      reviewModeSeedSelectionRef.current = modeSelection;
+    }
+  }, [
+    activeThread,
+    composerDraft.modelSelectionByProvider,
+    interactionMode,
+    providerStatuses,
+    settings,
+    setComposerDraftModelSelection,
+  ]);
   const toggleInteractionMode = useCallback(() => {
     const next =
       interactionMode === "ask"

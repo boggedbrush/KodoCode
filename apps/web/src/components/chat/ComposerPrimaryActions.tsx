@@ -204,8 +204,12 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             : isPreparingWorktree
               ? "Preparing worktree"
               : isSendBusy
-                ? "Reviewing"
-                : "Review"
+                ? promptHasText
+                  ? "Adding details"
+                  : "Reviewing"
+                : promptHasText
+                  ? "Add details"
+                  : "Review"
           : isConnecting
             ? "Connecting"
             : isPreparingWorktree
@@ -235,7 +239,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           />
         </svg>
       ) : interactionMode === "review" ? (
-        <span className="text-sm font-semibold">Review</span>
+        <span className="text-sm font-semibold">{promptHasText ? "Add Details" : "Review"}</span>
       ) : (
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
           <path

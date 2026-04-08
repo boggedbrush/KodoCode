@@ -64,7 +64,7 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain(`border-color:${INTERACTION_MODE_ACCENT_COLORS.plan}`);
   });
 
-  it("renders a Review button when review mode is active", () => {
+  it("renders an Add Details button when review mode has typed content", () => {
     const markup = renderToStaticMarkup(
       <ComposerPrimaryActions
         compact={false}
@@ -85,6 +85,6 @@ describe("ComposerPrimaryActions", () => {
       />,
     );
 
-    expect(markup).toContain(">Review<");
+    expect(markup).toContain(">Add Details<");
   });
 });
