@@ -57,7 +57,7 @@ import {
 import { isElectron } from "../env";
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
+import { cn, isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import { useStore } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
@@ -723,6 +723,8 @@ export default function Sidebar() {
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+  const isMacDesktop = isElectron && isMacPlatform(navigator.platform);
+  const shouldShowSidebarWordmark = !isLinuxDesktop;
   const platform = navigator.platform;
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
   const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
@@ -2034,37 +2036,47 @@ export default function Sidebar() {
   const wordmark = (
     <div className="flex items-center gap-2">
       <SidebarTrigger className="shrink-0 md:hidden" />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Link
-              aria-label="Go to threads"
-              className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
-              to="/"
-            >
-              <span className="truncate text-sm font-semibold tracking-tight text-foreground">
-                {APP_BASE_NAME}
-              </span>
-              <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-                {APP_STAGE_LABEL}
-              </span>
-            </Link>
-          }
-        />
-        <TooltipPopup side="bottom" sideOffset={2}>
-          Version {APP_VERSION}
-        </TooltipPopup>
-      </Tooltip>
+      {shouldShowSidebarWordmark ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Link
+                aria-label="Go to threads"
+                className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
+                to="/"
+              >
+                <span className="truncate text-sm font-semibold tracking-tight text-foreground">
+                  {APP_BASE_NAME}
+                </span>
+                <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+                  {APP_STAGE_LABEL}
+                </span>
+              </Link>
+            }
+          />
+          <TooltipPopup side="bottom" sideOffset={2}>
+            Version {APP_VERSION}
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
     </div>
   );
 
   return (
     <>
-      {isElectron ? (
-        <SidebarHeader className="drag-region h-[52px] flex-row items-center gap-2 px-4 py-0 pl-[90px]">
+      {isLinuxDesktop ? null : isElectron ? (
+        // macOS: drag region + extra left padding to clear traffic-light buttons.
+        // Windows and other non-Linux platforms: drag region, no extra padding.
+        <SidebarHeader
+          className={cn(
+            "drag-region h-[52px] flex-row items-center gap-2 px-4 py-0",
+            isMacDesktop && "pl-[90px]",
+          )}
+        >
           {wordmark}
         </SidebarHeader>
       ) : (
+        // Browser: normal padding, no drag region.
         <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">
           {wordmark}
         </SidebarHeader>

@@ -30,6 +30,9 @@ import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
+import { isLinuxPlatform } from "../lib/utils";
+
+const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
   clampCollapsedComposerCursor,
@@ -3938,7 +3941,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             </div>
           </header>
         )}
-        {isElectron && (
+        {isElectron && !isLinuxDesktop && (
           <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
             <span className="text-xs text-muted-foreground/50">No active thread</span>
           </div>
@@ -3958,7 +3961,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       <header
         className={cn(
           "border-b border-border px-3 sm:px-5",
-          isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
+          isElectron && !isLinuxDesktop ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
         )}
       >
         <ChatHeader
@@ -4507,7 +4510,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       {expandedImage && expandedImageItem && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 [-webkit-app-region:no-drag]"
+          className="fixed z-50 flex items-center justify-center bg-black/75 px-4 py-6 [-webkit-app-region:no-drag] [inset:var(--desktop-window-safe-inset)]"
           role="dialog"
           aria-modal="true"
           aria-label="Expanded image preview"

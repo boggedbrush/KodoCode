@@ -80,9 +80,9 @@ const PlanSidebar = memo(function PlanSidebar({
   timestampFormat,
   onClose,
 }: PlanSidebarProps) {
-  const [proposedPlanExpandedOverride, setProposedPlanExpandedOverride] = useState<
-    boolean | null
-  >(null);
+  const [proposedPlanExpandedOverride, setProposedPlanExpandedOverride] = useState<boolean | null>(
+    null,
+  );
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
 

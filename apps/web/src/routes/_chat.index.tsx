@@ -1,7 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
+import { isLinuxPlatform } from "../lib/utils";
 import { SidebarTrigger } from "../components/ui/sidebar";
+
+const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
 
 function ChatIndexRouteView() {
   return (
@@ -15,7 +18,7 @@ function ChatIndexRouteView() {
         </header>
       )}
 
-      {isElectron && (
+      {isElectron && !isLinuxDesktop && (
         <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
           <span className="text-xs text-muted-foreground/50">No active thread</span>
         </div>

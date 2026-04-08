@@ -22,7 +22,7 @@ function SheetBackdrop({ className, ...props }: SheetPrimitive.Backdrop.Props) {
   return (
     <SheetPrimitive.Backdrop
       className={cn(
-        "fixed inset-0 z-50 bg-black/32 backdrop-blur-sm transition-all duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0",
+        "fixed z-50 bg-black/32 backdrop-blur-sm [inset:var(--desktop-window-safe-inset)] transition-all duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0",
         className,
       )}
       data-slot="sheet-backdrop"
@@ -43,7 +43,7 @@ function SheetViewport({
   return (
     <SheetPrimitive.Viewport
       className={cn(
-        "fixed inset-0 z-50 grid",
+        "fixed z-50 grid [inset:var(--desktop-window-safe-inset)]",
         side === "bottom" && "grid grid-rows-[1fr_auto] pt-12",
         side === "top" && "grid grid-rows-[auto_1fr] pb-12",
         side === "left" && "flex justify-start",

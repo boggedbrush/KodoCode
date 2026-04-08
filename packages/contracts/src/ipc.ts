@@ -105,6 +105,14 @@ export interface DesktopUpdateCheckResult {
   state: DesktopUpdateState;
 }
 
+export interface DesktopWindowControls {
+  minimize: () => void;
+  toggleMaximize: () => void;
+  close: () => void;
+  isMaximized: () => Promise<boolean>;
+  onMaximizedChange: (listener: (isMaximized: boolean) => void) => () => void;
+}
+
 export interface DesktopBridge {
   getWsUrl: () => string | null;
   pickFolder: () => Promise<string | null>;
@@ -121,6 +129,7 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  windowControls: DesktopWindowControls;
 }
 
 export interface NativeApi {

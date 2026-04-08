@@ -1,14 +1,16 @@
 import type { ReactNode } from "react";
 
 import { isElectron } from "~/env";
-import { cn } from "~/lib/utils";
+import { cn, isLinuxPlatform } from "~/lib/utils";
 
 import { Skeleton } from "./ui/skeleton";
 
 export type DiffPanelMode = "inline" | "sheet" | "sidebar";
 
+const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+
 function getDiffPanelHeaderRowClassName(mode: DiffPanelMode) {
-  const shouldUseDragRegion = isElectron && mode !== "sheet";
+  const shouldUseDragRegion = isElectron && !isLinuxDesktop && mode !== "sheet";
   return cn(
     "flex items-center justify-between gap-2 px-4",
     shouldUseDragRegion ? "drag-region h-[52px] border-b border-border" : "h-12",
@@ -20,7 +22,7 @@ export function DiffPanelShell(props: {
   header: ReactNode;
   children: ReactNode;
 }) {
-  const shouldUseDragRegion = isElectron && props.mode !== "sheet";
+  const shouldUseDragRegion = isElectron && !isLinuxDesktop && props.mode !== "sheet";
 
   return (
     <div

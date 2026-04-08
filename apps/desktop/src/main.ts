@@ -60,6 +60,11 @@ const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
+const WINDOW_MINIMIZE_CHANNEL = "desktop:window-minimize";
+const WINDOW_TOGGLE_MAXIMIZE_CHANNEL = "desktop:window-toggle-maximize";
+const WINDOW_CLOSE_CHANNEL = "desktop:window-close";
+const WINDOW_IS_MAXIMIZED_CHANNEL = "desktop:window-is-maximized";
+const WINDOW_MAXIMIZED_CHANGE_CHANNEL = "desktop:window-maximized-change";
 const BASE_DIR =
   process.env.KODOCODE_HOME?.trim() ||
   process.env.T3CODE_HOME?.trim() ||
@@ -88,6 +93,7 @@ const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
+const LINUX_TRANSPARENT_WINDOW_ARG = "--kodo-linux-transparent-window=1";
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 type LinuxDesktopNamedApp = Electron.App & {
@@ -726,7 +732,53 @@ function resolveResourcePath(fileName: string): string | null {
 }
 
 function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
+  const brandAssetCandidates =
+    ext === "png"
+      ? [
+          isDevelopment
+            ? Path.join(ROOT_DIR, "assets/dev/blueprint-universal-1024.png")
+            : Path.join(ROOT_DIR, "assets/prod/kodo-black-universal-1024.png"),
+        ]
+      : ext === "ico"
+        ? [
+            isDevelopment
+              ? Path.join(ROOT_DIR, "assets/dev/blueprint-windows.ico")
+              : Path.join(ROOT_DIR, "assets/prod/kodo-black-windows.ico"),
+          ]
+        : [];
+
+  for (const candidate of brandAssetCandidates) {
+    if (FS.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
   return resolveResourcePath(`icon.${ext}`);
+}
+
+function resolveVectorIconPath(): string | null {
+  const candidate = isDevelopment
+    ? Path.join(ROOT_DIR, "assets/dev/blueprint.svg")
+    : Path.join(ROOT_DIR, "assets/prod/logo.svg");
+  return FS.existsSync(candidate) ? candidate : null;
+}
+
+function resolveNativeAppIcon(ext: "ico" | "icns" | "png"): Electron.NativeImage | null {
+  const vectorIconPath = resolveVectorIconPath();
+  if (vectorIconPath) {
+    const vectorIcon = nativeImage.createFromPath(vectorIconPath);
+    if (!vectorIcon.isEmpty()) {
+      return vectorIcon;
+    }
+  }
+
+  const rasterIconPath = resolveIconPath(ext);
+  if (!rasterIconPath) {
+    return null;
+  }
+
+  const rasterIcon = nativeImage.createFromPath(rasterIconPath);
+  return rasterIcon.isEmpty() ? null : rasterIcon;
 }
 
 /**
@@ -777,9 +829,9 @@ function configureAppIdentity(): void {
   }
 
   if (process.platform === "darwin" && app.dock) {
-    const iconPath = resolveIconPath("png");
-    if (iconPath) {
-      app.dock.setIcon(iconPath);
+    const icon = resolveNativeAppIcon("png");
+    if (icon) {
+      app.dock.setIcon(icon);
     }
   }
 }
@@ -1357,16 +1409,51 @@ function registerIpcHandlers(): void {
       state: updateState,
     } satisfies DesktopUpdateCheckResult;
   });
+
+  ipcMain.removeAllListeners(WINDOW_MINIMIZE_CHANNEL);
+  ipcMain.on(WINDOW_MINIMIZE_CHANNEL, () => {
+    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    window?.minimize();
+  });
+
+  ipcMain.removeAllListeners(WINDOW_TOGGLE_MAXIMIZE_CHANNEL);
+  ipcMain.on(WINDOW_TOGGLE_MAXIMIZE_CHANNEL, () => {
+    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    if (!window) return;
+    if (window.isMaximized()) {
+      window.unmaximize();
+    } else {
+      window.maximize();
+    }
+  });
+
+  ipcMain.removeAllListeners(WINDOW_CLOSE_CHANNEL);
+  ipcMain.on(WINDOW_CLOSE_CHANNEL, () => {
+    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    window?.close();
+  });
+
+  ipcMain.removeHandler(WINDOW_IS_MAXIMIZED_CHANNEL);
+  ipcMain.handle(WINDOW_IS_MAXIMIZED_CHANNEL, () => {
+    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    return window?.isMaximized() ?? false;
+  });
 }
 
 function getIconOption(): { icon: string } | Record<string, never> {
   if (process.platform === "darwin") return {}; // macOS uses .icns from app bundle
   const ext = process.platform === "win32" ? "ico" : "png";
-  const iconPath = resolveIconPath(ext);
-  return iconPath ? { icon: iconPath } : {};
+  const icon = resolveNativeAppIcon(ext);
+  return icon ? { icon } : {};
+}
+
+function shouldUseLinuxTransparentWindow(): boolean {
+  return process.platform === "linux" && process.env.KODO_DISABLE_LINUX_TRANSPARENT_WINDOW !== "1";
 }
 
 function createWindow(): BrowserWindow {
+  const isLinux = process.platform === "linux";
+  const linuxTransparentWindowEnabled = shouldUseLinuxTransparentWindow();
   const window = new BrowserWindow({
     width: 1100,
     height: 780,
@@ -1376,9 +1463,21 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: true,
     ...getIconOption(),
     title: APP_DISPLAY_NAME,
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 18 },
+    ...(isLinux ? { frame: false } : {}),
+    ...(linuxTransparentWindowEnabled
+      ? {
+          backgroundColor: "#00000000",
+          transparent: true,
+        }
+      : {}),
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hiddenInset" as const,
+          trafficLightPosition: { x: 16, y: 18 },
+        }
+      : {}),
     webPreferences: {
+      additionalArguments: linuxTransparentWindowEnabled ? [LINUX_TRANSPARENT_WINDOW_ARG] : [],
       preload: Path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
@@ -1432,6 +1531,13 @@ function createWindow(): BrowserWindow {
   });
   window.once("ready-to-show", () => {
     window.show();
+  });
+
+  window.on("maximize", () => {
+    window.webContents.send(WINDOW_MAXIMIZED_CHANGE_CHANNEL, true);
+  });
+  window.on("unmaximize", () => {
+    window.webContents.send(WINDOW_MAXIMIZED_CHANGE_CHANNEL, false);
   });
 
   if (isDevelopment) {

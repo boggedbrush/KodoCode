@@ -198,11 +198,11 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
         className={cn(
           "fixed z-50 mx-auto flex w-[calc(100%-var(--toast-inset)*2)] max-w-90 [--toast-header-offset:52px] [--toast-inset:--spacing(4)] sm:[--toast-inset:--spacing(8)]",
           // Vertical positioning
-          "data-[position*=top]:top-[calc(var(--toast-inset)+var(--toast-header-offset))]",
-          "data-[position*=bottom]:bottom-(--toast-inset)",
+          "data-[position*=top]:top-[calc(var(--desktop-window-safe-inset)+var(--toast-inset)+var(--toast-header-offset))]",
+          "data-[position*=bottom]:bottom-[calc(var(--desktop-window-safe-inset)+var(--toast-inset))]",
           // Horizontal positioning
-          "data-[position*=left]:left-(--toast-inset)",
-          "data-[position*=right]:right-(--toast-inset)",
+          "data-[position*=left]:left-[calc(var(--desktop-window-safe-inset)+var(--toast-inset))]",
+          "data-[position*=right]:right-[calc(var(--desktop-window-safe-inset)+var(--toast-inset))]",
           "data-[position*=center]:-translate-x-1/2 data-[position*=center]:left-1/2",
         )}
         data-position={position}

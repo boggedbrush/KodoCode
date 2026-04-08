@@ -10,15 +10,19 @@ export function showContextMenuFallback<T extends string>(
   position?: { x: number; y: number },
 ): Promise<T | null> {
   return new Promise<T | null>((resolve) => {
+    const safeInsetPx = Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue("--desktop-window-safe-inset"),
+    );
+    const safeInset = Number.isFinite(safeInsetPx) ? Math.max(0, safeInsetPx) : 0;
     const overlay = document.createElement("div");
-    overlay.style.cssText = "position:fixed;inset:0;z-index:9999";
+    overlay.style.cssText = `position:fixed;inset:${safeInset}px;z-index:9999`;
 
     const menu = document.createElement("div");
     menu.className =
       "fixed z-[10000] min-w-[140px] rounded-md border border-border bg-popover py-1 shadow-xl animate-in fade-in zoom-in-95";
 
-    const x = position?.x ?? 0;
-    const y = position?.y ?? 0;
+    const x = Math.max(safeInset, position?.x ?? 0);
+    const y = Math.max(safeInset, position?.y ?? 0);
     menu.style.top = `${y}px`;
     menu.style.left = `${x}px`;
 
@@ -63,11 +67,13 @@ export function showContextMenuFallback<T extends string>(
     // Adjust if menu overflows viewport
     requestAnimationFrame(() => {
       const rect = menu.getBoundingClientRect();
-      if (rect.right > window.innerWidth) {
-        menu.style.left = `${window.innerWidth - rect.width - 4}px`;
+      const maxRight = window.innerWidth - safeInset;
+      const maxBottom = window.innerHeight - safeInset;
+      if (rect.right > maxRight) {
+        menu.style.left = `${maxRight - rect.width - 4}px`;
       }
-      if (rect.bottom > window.innerHeight) {
-        menu.style.top = `${window.innerHeight - rect.height - 4}px`;
+      if (rect.bottom > maxBottom) {
+        menu.style.top = `${maxBottom - rect.height - 4}px`;
       }
     });
   });

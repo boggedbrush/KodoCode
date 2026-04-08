@@ -30,7 +30,7 @@ function CommandDialogBackdrop({ className, ...props }: CommandDialogPrimitive.B
   return (
     <CommandDialogPrimitive.Backdrop
       className={cn(
-        "fixed inset-0 z-50 bg-black/32 backdrop-blur-sm transition-all duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0",
+        "fixed z-50 bg-black/32 backdrop-blur-sm [inset:var(--desktop-window-safe-inset)] transition-all duration-200 data-ending-style:opacity-0 data-starting-style:opacity-0",
         className,
       )}
       data-slot="command-dialog-backdrop"
@@ -43,7 +43,7 @@ function CommandDialogViewport({ className, ...props }: CommandDialogPrimitive.V
   return (
     <CommandDialogPrimitive.Viewport
       className={cn(
-        "fixed inset-0 z-50 flex flex-col items-center px-4 py-[max(--spacing(4),4vh)] sm:py-[10vh]",
+        "fixed z-50 flex flex-col items-center px-4 py-[max(--spacing(4),4vh)] sm:py-[10vh] [inset:var(--desktop-window-safe-inset)]",
         className,
       )}
       data-slot="command-dialog-viewport"

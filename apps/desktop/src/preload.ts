@@ -13,6 +13,11 @@ const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
+const WINDOW_MINIMIZE_CHANNEL = "desktop:window-minimize";
+const WINDOW_TOGGLE_MAXIMIZE_CHANNEL = "desktop:window-toggle-maximize";
+const WINDOW_CLOSE_CHANNEL = "desktop:window-close";
+const WINDOW_IS_MAXIMIZED_CHANNEL = "desktop:window-is-maximized";
+const WINDOW_MAXIMIZED_CHANGE_CHANNEL = "desktop:window-maximized-change";
 
 contextBridge.exposeInMainWorld("desktopBridge", {
   getWsUrl: () => {
@@ -49,5 +54,20 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     return () => {
       ipcRenderer.removeListener(UPDATE_STATE_CHANNEL, wrappedListener);
     };
+  },
+  windowControls: {
+    minimize: () => ipcRenderer.send(WINDOW_MINIMIZE_CHANNEL),
+    toggleMaximize: () => ipcRenderer.send(WINDOW_TOGGLE_MAXIMIZE_CHANNEL),
+    close: () => ipcRenderer.send(WINDOW_CLOSE_CHANNEL),
+    isMaximized: () => ipcRenderer.invoke(WINDOW_IS_MAXIMIZED_CHANNEL) as Promise<boolean>,
+    onMaximizedChange: (listener) => {
+      const wrappedListener = (_event: Electron.IpcRendererEvent, isMaximized: unknown) => {
+        if (typeof isMaximized === "boolean") listener(isMaximized);
+      };
+      ipcRenderer.on(WINDOW_MAXIMIZED_CHANGE_CHANNEL, wrappedListener);
+      return () => {
+        ipcRenderer.removeListener(WINDOW_MAXIMIZED_CHANGE_CHANNEL, wrappedListener);
+      };
+    },
   },
 } satisfies DesktopBridge);

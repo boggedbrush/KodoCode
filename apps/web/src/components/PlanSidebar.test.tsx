@@ -56,18 +56,15 @@ describe("PlanSidebar", () => {
       ),
     ).toBe(false);
     expect(
-      shouldAutoExpandPlanMarkdown(
-        null,
-        {
-          id: "plan-1",
-          createdAt: "2026-04-08T12:00:00.000Z",
-          updatedAt: "2026-04-08T12:00:00.000Z",
-          turnId: null,
-          planMarkdown: "# One plan",
-          implementedAt: null,
-          implementationThreadId: null,
-        } satisfies LatestProposedPlanState,
-      ),
+      shouldAutoExpandPlanMarkdown(null, {
+        id: "plan-1",
+        createdAt: "2026-04-08T12:00:00.000Z",
+        updatedAt: "2026-04-08T12:00:00.000Z",
+        turnId: null,
+        planMarkdown: "# One plan",
+        implementedAt: null,
+        implementationThreadId: null,
+      } satisfies LatestProposedPlanState),
     ).toBe(true);
   });
 

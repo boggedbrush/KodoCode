@@ -1,12 +1,16 @@
 import { useEffect, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
+import { isElectron } from "../env";
+import { isLinuxPlatform } from "../lib/utils";
 import ThreadSidebar from "./Sidebar";
 import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
 
 const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
+
+const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
@@ -27,8 +31,10 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
     };
   }, [navigate]);
 
-  return (
-    <SidebarProvider defaultOpen>
+  const sidebarLayout = (
+    // On Linux we override min-h-svh → min-h-0 so the sidebar fills only the
+    // remaining space below the custom title bar (tailwind-merge resolves the conflict).
+    <SidebarProvider defaultOpen className={isLinuxDesktop ? "min-h-0 flex-1" : undefined}>
       <Sidebar
         side="left"
         collapsible="offcanvas"
@@ -46,4 +52,6 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
       {children}
     </SidebarProvider>
   );
+
+  return sidebarLayout;
 }
