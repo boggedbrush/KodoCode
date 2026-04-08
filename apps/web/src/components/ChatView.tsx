@@ -117,7 +117,7 @@ import {
   nextProjectScriptId,
   projectScriptIdFromCommand,
 } from "~/projectScripts";
-import { SidebarTrigger } from "./ui/sidebar";
+import { SidebarTrigger, useSidebar } from "./ui/sidebar";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import {
@@ -580,6 +580,7 @@ function PersistentThreadTerminalDrawer({
 }
 
 export default function ChatView({ threadId }: ChatViewProps) {
+  const { open: sidebarOpen } = useSidebar();
   const serverThread = useThreadById(threadId);
   const setStoreThreadError = useStore((store) => store.setError);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
@@ -3942,7 +3943,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
           </header>
         )}
         {isElectron && !isLinuxDesktop && (
-          <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
+          <div
+            className={cn(
+              "drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5 transition-[padding] duration-200 ease-linear",
+              !sidebarOpen && /mac/i.test(navigator.platform) && "pl-[90px]",
+            )}
+          >
             <span className="text-xs text-muted-foreground/50">No active thread</span>
           </div>
         )}
@@ -3960,8 +3966,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {/* Top bar */}
       <header
         className={cn(
-          "sticky top-0 z-20 shrink-0 border-b border-border bg-background/95 px-3 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-5",
+          "sticky top-0 z-20 shrink-0 border-b border-border bg-background/95 px-3 transition-[padding] duration-200 ease-linear supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-5",
           isElectron && !isLinuxDesktop ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
+          isElectron && /mac/i.test(navigator.platform) && !sidebarOpen && "pl-[90px]",
         )}
       >
         <ChatHeader

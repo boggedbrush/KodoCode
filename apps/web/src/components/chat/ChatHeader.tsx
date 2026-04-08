@@ -11,8 +11,11 @@ import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
-import { SidebarTrigger } from "../ui/sidebar";
+import { SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
+import { SidebarBrandToggleButton } from "../SidebarBrandToggleButton";
+import { isElectron } from "~/env";
+import { cn, isMacPlatform } from "~/lib/utils";
 
 interface ChatHeaderProps {
   activeThreadId: ThreadId;
@@ -61,10 +64,20 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleTerminal,
   onToggleDiff,
 }: ChatHeaderProps) {
+  const { open: sidebarOpen } = useSidebar();
+  const shouldOffsetForMacTrafficLights =
+    isElectron && isMacPlatform(navigator.platform) && !sidebarOpen;
+
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
-      <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden sm:gap-3">
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 items-center gap-2 overflow-hidden transition-[padding] duration-200 ease-linear sm:gap-3",
+          shouldOffsetForMacTrafficLights && "pl-16",
+        )}
+      >
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        <SidebarBrandToggleButton className="hidden md:inline-flex" />
         <h2
           className="min-w-0 shrink truncate text-sm font-medium text-foreground"
           title={activeThreadTitle}

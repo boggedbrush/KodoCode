@@ -4,11 +4,15 @@ import { useEffect, useState } from "react";
 
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
-import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
+import { SidebarInset, SidebarTrigger, useSidebar } from "../components/ui/sidebar";
 import { isElectron } from "../env";
-import { isLinuxPlatform } from "../lib/utils";
+import { cn, isLinuxPlatform, isMacPlatform } from "../lib/utils";
+import { SidebarBrandToggleButton } from "../components/SidebarBrandToggleButton";
 
 function SettingsContentLayout() {
+  const { open: sidebarOpen } = useSidebar();
+  const shouldOffsetForMacTrafficLights =
+    isElectron && isMacPlatform(navigator.platform) && !sidebarOpen;
   const [restoreSignal, setRestoreSignal] = useState(0);
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(() =>
     setRestoreSignal((value) => value + 1),
@@ -36,6 +40,7 @@ function SettingsContentLayout() {
           <header className="border-b border-border px-3 py-2 sm:px-5">
             <div className="flex items-center gap-2">
               <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+              <SidebarBrandToggleButton className="hidden md:inline-flex" />
               <span className="text-sm font-medium text-foreground">Settings</span>
               <div className="ms-auto flex items-center gap-2">
                 <Button
@@ -53,7 +58,13 @@ function SettingsContentLayout() {
         )}
 
         {isElectron && !isLinuxPlatform(navigator.platform) && (
-          <div className="drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5">
+          <div
+            className={cn(
+              "drag-region flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-5 transition-[padding] duration-200 ease-linear",
+              shouldOffsetForMacTrafficLights && "pl-[90px]",
+            )}
+          >
+            <SidebarBrandToggleButton className={cn(shouldOffsetForMacTrafficLights && "ml-16")} />
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
               Settings
             </span>

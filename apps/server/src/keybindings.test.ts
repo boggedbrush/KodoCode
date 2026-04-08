@@ -173,6 +173,7 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
 
       assert.equal(defaultsByCommand.get("thread.previous"), "mod+shift+[");
       assert.equal(defaultsByCommand.get("thread.next"), "mod+shift+]");
+      assert.equal(defaultsByCommand.get("sidebar.toggle"), "mod+b");
       assert.equal(defaultsByCommand.get("thread.jump.1"), "mod+1");
       assert.equal(defaultsByCommand.get("thread.jump.9"), "mod+9");
     }),

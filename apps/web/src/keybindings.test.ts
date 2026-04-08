@@ -101,6 +101,10 @@ const DEFAULT_BINDINGS = compile([
     command: "diff.toggle",
     whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
+  {
+    shortcut: modShortcut("b"),
+    command: "sidebar.toggle",
+  },
   { shortcut: modShortcut("o", { shiftKey: true }), command: "chat.new" },
   { shortcut: modShortcut("n", { shiftKey: true }), command: "chat.newLocal" },
   { shortcut: modShortcut("o"), command: "editor.openFavorite" },
@@ -123,6 +127,35 @@ describe("isTerminalToggleShortcut", () => {
   it("matches Ctrl+J on non-macOS", () => {
     assert.isTrue(
       isTerminalToggleShortcut(event({ ctrlKey: true }), DEFAULT_BINDINGS, { platform: "Win32" }),
+    );
+  });
+});
+
+describe("sidebar toggle shortcut", () => {
+  it("matches Cmd/Ctrl+B when terminal is not focused", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "b", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+      "sidebar.toggle",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "b", ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Win32",
+        context: { terminalFocus: false },
+      }),
+      "sidebar.toggle",
+    );
+  });
+
+  it("still matches while terminal is focused", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "b", metaKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: true },
+      }),
+      "sidebar.toggle",
     );
   });
 });
@@ -249,6 +282,10 @@ describe("shortcutLabelForCommand", () => {
   it("returns effective labels for non-terminal commands", () => {
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "chat.new", "MacIntel"), "⇧⌘O");
     assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, "diff.toggle", "Linux"), "Ctrl+D");
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "sidebar.toggle", "MacIntel"),
+      "⌘B",
+    );
     assert.strictEqual(
       shortcutLabelForCommand(DEFAULT_BINDINGS, "editor.openFavorite", "Linux"),
       "Ctrl+O",

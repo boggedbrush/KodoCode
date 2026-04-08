@@ -105,6 +105,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
@@ -149,6 +150,33 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   easing: "ease-out",
 } as const;
 const sidebarWordmarkLogo = import.meta.env.DEV ? devLogo : prodLogo;
+
+function SidebarCollapseGlyph() {
+  return (
+    <svg viewBox="0 0 48 48" fill="none" aria-hidden="true" className="size-full">
+      <rect
+        x="12"
+        y="15"
+        width="24"
+        height="18"
+        rx="4.5"
+        ry="4.5"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        fill="none"
+      />
+      <line
+        x1="18"
+        y1="21"
+        x2="18"
+        y2="27"
+        stroke="currentColor"
+        strokeWidth="2.2"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
 
 type SidebarProjectSnapshot = Project & {
   expanded: boolean;
@@ -663,6 +691,7 @@ function SortableProjectItem({
 }
 
 export default function Sidebar() {
+  const { toggleSidebar } = useSidebar();
   const projects = useStore((store) => store.projects);
   const sidebarThreadsById = useStore((store) => store.sidebarThreadsById);
   const threadIdsByProjectId = useStore((store) => store.threadIdsByProjectId);
@@ -729,7 +758,7 @@ export default function Sidebar() {
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const isMacDesktop = isElectron && isMacPlatform(navigator.platform);
   const shouldShowSidebarWordmark = !isLinuxDesktop;
-  const shouldShowSidebarLogo = isMacDesktop && shouldShowSidebarWordmark;
+  const shouldShowSidebarLogo = shouldShowSidebarWordmark;
   const platform = navigator.platform;
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
   const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
@@ -1542,14 +1571,19 @@ export default function Sidebar() {
         }),
       );
 
-      if (event.defaultPrevented || event.repeat) {
-        return;
-      }
-
       const command = resolveShortcutCommand(event, keybindings, {
         platform,
         context: getShortcutContext(),
       });
+      if (command === "sidebar.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        toggleSidebar();
+        return;
+      }
+      if (event.defaultPrevented || event.repeat) {
+        return;
+      }
       const traversalDirection = threadTraversalDirectionFromCommand(command);
       if (traversalDirection !== null) {
         const targetThreadId = resolveAdjacentThreadId({
@@ -1612,6 +1646,7 @@ export default function Sidebar() {
     routeTerminalOpen,
     routeThreadId,
     threadJumpThreadIds,
+    toggleSidebar,
     updateThreadJumpHintsVisibility,
   ]);
 
@@ -2045,26 +2080,44 @@ export default function Sidebar() {
         <Tooltip>
           <TooltipTrigger
             render={
-              <Link
-                aria-label="Go to threads"
-                className="ml-1 flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2"
-                to="/"
-              >
+              <div className="flex min-w-0 items-center">
                 {shouldShowSidebarLogo ? (
-                  <img
-                    src={sidebarWordmarkLogo}
-                    alt=""
-                    aria-hidden="true"
-                    className="size-6 shrink-0"
-                  />
+                  <button
+                    type="button"
+                    aria-label="Collapse sidebar"
+                    data-testid="sidebar-inline-logo-toggle"
+                    className="group/logo inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 outline-hidden ring-ring transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 [-webkit-app-region:no-drag]"
+                    onClick={toggleSidebar}
+                  >
+                    <span className="relative flex size-6 shrink-0 items-center justify-center">
+                      <img
+                        src={sidebarWordmarkLogo}
+                        alt=""
+                        aria-hidden="true"
+                        className="size-6 transition-opacity duration-150 group-hover/logo:opacity-0 group-focus-visible/logo:opacity-0"
+                      />
+                      <span className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-150 group-hover/logo:opacity-100 group-focus-visible/logo:opacity-100">
+                        <SidebarCollapseGlyph />
+                      </span>
+                    </span>
+                  </button>
                 ) : null}
-                <span className="truncate text-xs font-semibold tracking-tight text-foreground">
-                  {APP_BASE_NAME}
-                </span>
-                <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-                  {APP_STAGE_LABEL}
-                </span>
-              </Link>
+                <Link
+                  aria-label="Go to threads"
+                  className={cn(
+                    "flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-colors hover:text-foreground focus-visible:ring-2",
+                    shouldShowSidebarLogo ? "ml-1" : undefined,
+                  )}
+                  to="/"
+                >
+                  <span className="truncate text-xs font-semibold tracking-tight text-foreground">
+                    {APP_BASE_NAME}
+                  </span>
+                  <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+                    {APP_STAGE_LABEL}
+                  </span>
+                </Link>
+              </div>
             }
           />
           <TooltipPopup side="bottom" sideOffset={2}>
