@@ -7,6 +7,7 @@ import { Effect } from "effect";
 import {
   createDevRunnerEnv,
   findFirstAvailableOffset,
+  isInheritedDesktopDevUrl,
   resolveModePortOffsets,
   resolveOffset,
 } from "./dev-runner.ts";
@@ -46,7 +47,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
   });
 
   describe("createDevRunnerEnv", () => {
-    it.effect("defaults T3CODE_HOME to ~/.t3 when not provided", () =>
+    it.effect("defaults T3CODE_HOME to ~/.kodo-code when not provided", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
           mode: "dev",
@@ -63,7 +64,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_HOME, resolve(homedir(), ".t3"));
+        assert.equal(env.T3CODE_HOME, resolve(homedir(), ".kodo-code"));
       }),
     );
 
@@ -312,6 +313,37 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         });
 
         assert.deepStrictEqual(offsets, { serverOffset: 0, webOffset: 0 });
+      }),
+    );
+  });
+
+  describe("isInheritedDesktopDevUrl", () => {
+    it.effect("matches renderer env that came from a previous desktop dev run", () =>
+      Effect.sync(() => {
+        const inherited = isInheritedDesktopDevUrl(
+          {
+            PORT: "5733",
+            ELECTRON_RENDERER_PORT: "5733",
+            VITE_DEV_SERVER_URL: "http://localhost:5733",
+          },
+          new URL("http://localhost:5733"),
+        );
+
+        assert.equal(inherited, true);
+      }),
+    );
+
+    it.effect("ignores unrelated or incomplete env values", () =>
+      Effect.sync(() => {
+        const inherited = isInheritedDesktopDevUrl(
+          {
+            PORT: "5733",
+            VITE_DEV_SERVER_URL: "http://localhost:5733",
+          },
+          new URL("http://localhost:5733"),
+        );
+
+        assert.equal(inherited, false);
       }),
     );
   });

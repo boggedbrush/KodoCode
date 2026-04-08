@@ -69,6 +69,37 @@ it.layer(NetService.layer)("NetService", (it) => {
       ),
     );
 
+    it.effect("isPortAvailableOnLoopback reports false for an IPv6 loopback listener", () =>
+      Effect.acquireUseRelease(
+        openServer("::1"),
+        (server) =>
+          Effect.gen(function* () {
+            const net = yield* NetService;
+            const port = getPort(server);
+
+            const available = yield* net.isPortAvailableOnLoopback(port);
+            assert.equal(available, false);
+          }),
+        closeServer,
+      ).pipe(
+        Effect.catchTag("NetError", (error) => {
+          const code =
+            typeof error.cause === "object" &&
+            error.cause !== null &&
+            "code" in error.cause &&
+            typeof (error.cause as { readonly code: unknown }).code === "string"
+              ? (error.cause as { readonly code: string }).code
+              : undefined;
+
+          if (code === "EADDRNOTAVAIL") {
+            return Effect.void;
+          }
+
+          return Effect.fail(error);
+        }),
+      ),
+    );
+
     it.effect("findAvailablePort returns preferred when it is free", () =>
       Effect.gen(function* () {
         const net = yield* NetService;

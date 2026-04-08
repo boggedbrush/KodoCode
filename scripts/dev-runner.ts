@@ -362,6 +362,36 @@ interface DevRunnerCliInput {
   readonly turboArgs: ReadonlyArray<string>;
 }
 
+export function isInheritedDesktopDevUrl(
+  baseEnv: NodeJS.ProcessEnv,
+  devUrl: URL | undefined,
+): devUrl is URL {
+  if (devUrl === undefined) {
+    return false;
+  }
+
+  const port = baseEnv.PORT?.trim();
+  const rendererPort = baseEnv.ELECTRON_RENDERER_PORT?.trim();
+  const rawDevUrl = baseEnv.VITE_DEV_SERVER_URL?.trim();
+  if (!port || !rendererPort || !rawDevUrl || port !== rendererPort) {
+    return false;
+  }
+
+  let envDevUrl: URL;
+  try {
+    envDevUrl = new URL(rawDevUrl);
+  } catch {
+    return false;
+  }
+
+  return (
+    devUrl.toString() === envDevUrl.toString() &&
+    devUrl.hostname === "localhost" &&
+    devUrl.port === port &&
+    (devUrl.pathname === "/" || devUrl.pathname === "")
+  );
+}
+
 const readOptionalBooleanEnv = (name: string): boolean | undefined => {
   const value = process.env[name];
   if (value === undefined) {
@@ -418,11 +448,15 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       logWebSocketEvents: readOptionalBooleanEnv("T3CODE_LOG_WS_EVENTS"),
     };
 
+    const inheritedDesktopDevUrl =
+      input.mode === "dev:desktop" && isInheritedDesktopDevUrl(process.env, input.devUrl);
+    const effectiveDevUrl = inheritedDesktopDevUrl ? undefined : input.devUrl;
+
     const { serverOffset, webOffset } = yield* resolveModePortOffsets({
       mode: input.mode,
       startOffset: offset,
       hasExplicitServerPort: input.port !== undefined,
-      hasExplicitDevUrl: input.devUrl !== undefined,
+      hasExplicitDevUrl: effectiveDevUrl !== undefined,
     });
 
     const env = yield* createDevRunnerEnv({
@@ -443,7 +477,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       ),
       host: input.host,
       port: input.port,
-      devUrl: input.devUrl,
+      devUrl: effectiveDevUrl,
     });
 
     const selectionSuffix =
