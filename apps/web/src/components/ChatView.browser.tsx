@@ -8,6 +8,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type ProjectId,
+  type ProviderInteractionMode,
   type ServerConfig,
   type ServerLifecycleWelcomePayload,
   type ThreadId,
@@ -159,6 +160,21 @@ function createBaseServerConfig(): ServerConfig {
   };
 }
 
+function createCodexModel(slug: string, name: string) {
+  return {
+    slug,
+    name,
+    isCustom: false,
+    capabilities: {
+      reasoningEffortLevels: [],
+      supportsFastMode: true,
+      supportsThinkingToggle: false,
+      contextWindowOptions: [],
+      promptInjectedEffortLevels: [],
+    },
+  } satisfies ServerConfig["providers"][number]["models"][number];
+}
+
 function createUserMessage(options: {
   id: MessageId;
   text: string;
@@ -219,6 +235,7 @@ function createSnapshotForTargetUser(options: {
   targetText: string;
   targetAttachmentCount?: number;
   sessionStatus?: OrchestrationSessionStatus;
+  interactionMode?: ProviderInteractionMode;
 }): OrchestrationReadModel {
   const messages: Array<OrchestrationReadModel["threads"][number]["messages"][number]> = [];
 
@@ -281,7 +298,7 @@ function createSnapshotForTargetUser(options: {
           provider: "codex",
           model: "gpt-5",
         },
-        interactionMode: "default",
+        interactionMode: options.interactionMode ?? "default",
         runtimeMode: "full-access",
         branch: "main",
         worktreePath: null,
@@ -481,6 +498,28 @@ function setDraftThreadWithoutWorktree(): void {
     },
     projectDraftThreadIdByProjectId: {
       [PROJECT_ID]: THREAD_ID,
+    },
+  });
+}
+
+function setStoredProjectDraftThread(
+  threadId: ThreadId,
+  options?: { interactionMode?: "default" | "code" },
+) {
+  useComposerDraftStore.setState({
+    draftThreadsByThreadId: {
+      [threadId]: {
+        projectId: PROJECT_ID,
+        createdAt: NOW_ISO,
+        runtimeMode: "full-access",
+        interactionMode: options?.interactionMode ?? "default",
+        branch: null,
+        worktreePath: null,
+        envMode: "local",
+      },
+    },
+    projectDraftThreadIdByProjectId: {
+      [PROJECT_ID]: threadId,
     },
   });
 }
@@ -771,6 +810,10 @@ async function waitForProductionStyles(): Promise<void> {
 async function waitForElement<T extends Element>(
   query: () => T | null,
   errorMessage: string,
+  options?: {
+    intervalMs?: number;
+    timeoutMs?: number;
+  },
 ): Promise<T> {
   let element: T | null = null;
   await vi.waitFor(
@@ -779,8 +822,8 @@ async function waitForElement<T extends Element>(
       expect(element, errorMessage).toBeTruthy();
     },
     {
-      timeout: 8_000,
-      interval: 16,
+      timeout: options?.timeoutMs ?? 8_000,
+      interval: options?.intervalMs ?? 16,
     },
   );
   if (!element) {
@@ -883,7 +926,7 @@ async function expectComposerActionsContained(): Promise<void> {
 }
 
 async function waitForInteractionModeButton(
-  expectedLabel: "Build" | "Plan",
+  expectedLabel: "Code" | "Plan",
 ): Promise<HTMLButtonElement> {
   return waitForElement(
     () =>
@@ -891,6 +934,7 @@ async function waitForInteractionModeButton(
         (button) => button.textContent?.trim() === expectedLabel,
       ) as HTMLButtonElement | null,
     `Unable to find ${expectedLabel} interaction mode button.`,
+    { timeoutMs: 12_000 },
   );
 }
 
@@ -2120,8 +2164,8 @@ describe("ChatView timeline estimator parity (full app)", () => {
     });
 
     try {
-      const initialModeButton = await waitForInteractionModeButton("Build");
-      expect(initialModeButton.title).toContain("enter plan mode");
+      const initialModeButton = await waitForInteractionModeButton("Code");
+      expect(initialModeButton.title).toContain("Switch to Code mode");
 
       window.dispatchEvent(
         new KeyboardEvent("keydown", {
@@ -2133,7 +2177,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       );
       await waitForLayout();
 
-      expect((await waitForInteractionModeButton("Build")).title).toContain("enter plan mode");
+      expect((await waitForInteractionModeButton("Code")).title).toContain("Switch to Code mode");
 
       const composerEditor = await waitForComposerEditor();
       composerEditor.focus();
@@ -2149,7 +2193,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       await vi.waitFor(
         async () => {
           expect((await waitForInteractionModeButton("Plan")).title).toContain(
-            "return to normal build mode",
+            "Switch to Plan mode",
           );
         },
         { timeout: 8_000, interval: 16 },
@@ -2166,7 +2210,9 @@ describe("ChatView timeline estimator parity (full app)", () => {
 
       await vi.waitFor(
         async () => {
-          expect((await waitForInteractionModeButton("Build")).title).toContain("enter plan mode");
+          expect((await waitForInteractionModeButton("Code")).title).toContain(
+            "Switch to Code mode",
+          );
         },
         { timeout: 8_000, interval: 16 },
       );
@@ -2696,6 +2742,143 @@ describe("ChatView timeline estimator parity (full app)", () => {
         },
         activeProvider: "codex",
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("prefers mode defaults over sticky codex memory for fresh drafts", async () => {
+    useComposerDraftStore.setState({
+      stickyModelSelectionByProvider: {
+        codex: {
+          provider: "codex",
+          model: "gpt-5.3-codex",
+          options: {
+            reasoningEffort: "medium",
+            fastMode: true,
+          },
+        },
+      },
+      stickyActiveProvider: "codex",
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-mode-default-priority-test" as MessageId,
+        targetText: "mode default priority test",
+        interactionMode: "ask",
+      }),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [
+            {
+              provider: "codex",
+              enabled: true,
+              installed: true,
+              version: "0.116.0",
+              status: "ready",
+              auth: { status: "authenticated" },
+              checkedAt: NOW_ISO,
+              models: [
+                createCodexModel("gpt-5.3-codex", "GPT-5.3 Codex"),
+                createCodexModel("gpt-5.4", "GPT-5.4"),
+              ],
+            },
+          ],
+          settings: {
+            ...nextFixture.serverConfig.settings,
+            codeModelSelection: {
+              provider: "codex",
+              model: "gpt-5.4",
+            },
+          },
+        };
+      },
+    });
+
+    try {
+      const newThreadButton = page.getByTestId("new-thread-button");
+      await expect.element(newThreadButton).toBeInTheDocument();
+
+      await newThreadButton.click();
+
+      const newThreadPath = await waitForURL(
+        mounted.router,
+        (path) => UUID_ROUTE_RE.test(path),
+        "Route should have changed to a fresh draft thread UUID.",
+      );
+      const newThreadId = newThreadPath.slice(1) as ThreadId;
+
+      const draftThread = useComposerDraftStore.getState().draftsByThreadId[newThreadId];
+      const draftThreadContext =
+        useComposerDraftStore.getState().draftThreadsByThreadId[newThreadId];
+      const codeButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Code",
+          ) as HTMLButtonElement | null,
+        "Unable to find Code interaction mode button.",
+      );
+      expect(window.getComputedStyle(codeButton).backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+      expect(window.getComputedStyle(codeButton).backgroundColor).not.toBe("transparent");
+      expect(draftThread?.modelSelectionByProvider.codex).toMatchObject({
+        provider: "codex",
+        model: "gpt-5.4",
+      });
+      expect(draftThreadContext?.interactionMode).toBe("code");
+
+      const picker = await waitForElement(
+        () => findComposerProviderModelPicker(),
+        "Unable to find composer provider/model picker.",
+      );
+      expect(picker.textContent ?? "").toContain("Auto");
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("upgrades a reused blank draft thread to code mode", async () => {
+    const storedDraftThreadId = "11111111-1111-4111-8111-111111111111" as ThreadId;
+    setStoredProjectDraftThread(storedDraftThreadId, { interactionMode: "default" });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotForTargetUser({
+        targetMessageId: "msg-user-reused-blank-draft-mode-test" as MessageId,
+        targetText: "reused blank draft mode test",
+      }),
+    });
+
+    try {
+      const newThreadButton = page.getByTestId("new-thread-button");
+      await expect.element(newThreadButton).toBeInTheDocument();
+
+      await newThreadButton.click();
+
+      await waitForURL(
+        mounted.router,
+        (path) => path === `/${storedDraftThreadId}`,
+        "New-thread should reuse the stored blank draft thread.",
+      );
+
+      const reusedDraftThread =
+        useComposerDraftStore.getState().draftThreadsByThreadId[storedDraftThreadId];
+      expect(
+        useComposerDraftStore.getState().draftsByThreadId[storedDraftThreadId],
+      ).toBeUndefined();
+      expect(reusedDraftThread?.interactionMode).toBe("code");
+
+      const codeButton = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Code",
+          ) as HTMLButtonElement | null,
+        "Unable to find Code interaction mode button for reused draft.",
+      );
+      expect(window.getComputedStyle(codeButton).backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
+      expect(window.getComputedStyle(codeButton).backgroundColor).not.toBe("transparent");
     } finally {
       await mounted.cleanup();
     }

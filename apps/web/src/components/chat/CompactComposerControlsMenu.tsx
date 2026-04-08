@@ -22,6 +22,9 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   onTogglePlanSidebar: () => void;
   onToggleRuntimeMode: () => void;
 }) {
+  const selectedInteractionMode =
+    props.interactionMode === "default" ? "code" : props.interactionMode;
+
   return (
     <Menu>
       <MenuTrigger
@@ -45,9 +48,9 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         ) : null}
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
         <MenuRadioGroup
-          value={props.interactionMode}
+          value={selectedInteractionMode}
           onValueChange={(value) => {
-            if (!value || value === props.interactionMode) return;
+            if (!value || value === selectedInteractionMode) return;
             props.onSetInteractionMode(value as ProviderInteractionMode);
           }}
         >

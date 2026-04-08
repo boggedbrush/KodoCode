@@ -17,11 +17,12 @@ export const InteractionModePill = memo(function InteractionModePill({
   onSetMode: (mode: ProviderInteractionMode) => void;
 }) {
   const [hoveredMode, setHoveredMode] = useState<ProviderInteractionMode | null>(null);
+  const activeMode = interactionMode === "default" ? "code" : interactionMode;
 
   return (
     <div className="flex items-center gap-0.5 rounded-full bg-black/10 px-1 py-0.5 dark:bg-white/5">
       {MODES.map(({ mode, label, color }) => {
-        const isActive = interactionMode === mode;
+        const isActive = activeMode === mode;
         const isHovered = hoveredMode === mode;
         return (
           <button
