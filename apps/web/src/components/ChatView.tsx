@@ -3956,11 +3956,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       {/* Top bar */}
       <header
         className={cn(
-          "border-b border-border px-3 sm:px-5",
+          "sticky top-0 z-20 shrink-0 border-b border-border bg-background/95 px-3 supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-5",
           isElectron && !isLinuxDesktop ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
         )}
       >

@@ -11,6 +11,7 @@ const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 
 const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+const sidebarLayoutClassName = isLinuxDesktop ? "min-h-0 flex-1" : "h-dvh min-h-0";
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
@@ -32,9 +33,9 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   const sidebarLayout = (
-    // On Linux we override min-h-svh → min-h-0 so the sidebar fills only the
-    // remaining space below the custom title bar (tailwind-merge resolves the conflict).
-    <SidebarProvider defaultOpen className={isLinuxDesktop ? "min-h-0 flex-1" : undefined}>
+    // Browser and non-Linux desktop shells should stay locked to the viewport height.
+    // Linux desktop still needs flex-driven sizing beneath the custom title bar.
+    <SidebarProvider defaultOpen className={sidebarLayoutClassName}>
       <Sidebar
         side="left"
         collapsible="offcanvas"
