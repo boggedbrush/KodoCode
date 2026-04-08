@@ -1,6 +1,7 @@
 import { memo } from "react";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
+import { KODO_PURPLE } from "../../modeColors";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 
@@ -138,6 +139,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           type="submit"
           size="sm"
           className={cn("h-9 rounded-l-full rounded-r-none sm:h-8", compact ? "px-3" : "px-4")}
+          style={{ backgroundColor: KODO_PURPLE, borderColor: KODO_PURPLE }}
           disabled={isSendBusy || isConnecting}
         >
           {isConnecting || isSendBusy ? "Sending..." : "Implement"}
@@ -150,6 +152,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 variant="default"
                 className="h-9 rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8"
                 aria-label="Implementation actions"
+                style={{ backgroundColor: KODO_PURPLE, borderColor: KODO_PURPLE }}
                 disabled={isSendBusy || isConnecting}
               />
             }

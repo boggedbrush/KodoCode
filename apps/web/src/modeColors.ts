@@ -17,6 +17,8 @@ export const PLAN_READY_THREAD_STATUS_COLOR_CLASSES = {
   dotClass: "bg-[#c8954a]",
 } as const;
 
+export const KODO_PURPLE = INTERACTION_MODE_ACCENT_COLORS.code;
+
 export function getInteractionModeAccentColor(mode: ProviderInteractionMode): string {
   return INTERACTION_MODE_ACCENT_COLORS[mode];
 }
