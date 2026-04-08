@@ -109,6 +109,7 @@ import {
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
+  getProjectThreadsForSidebar,
   getVisibleSidebarThreadIds,
   getVisibleThreadsForProject,
   resolveAdjacentThreadId,
@@ -798,10 +799,10 @@ export default function Sidebar() {
   const focusMostRecentThreadForProject = useCallback(
     (projectId: ProjectId) => {
       const latestThread = sortThreadsForSidebar(
-        (threadIdsByProjectId[projectId] ?? [])
-          .map((threadId) => sidebarThreadsById[threadId])
-          .filter((thread): thread is NonNullable<typeof thread> => thread !== undefined)
-          .filter((thread) => thread.archivedAt === null),
+        getProjectThreadsForSidebar({
+          threadIds: threadIdsByProjectId[projectId] ?? [],
+          threadsById: sidebarThreadsById,
+        }),
         appSettings.sidebarThreadSortOrder,
       )[0];
       if (!latestThread) return;
@@ -1280,8 +1281,11 @@ export default function Sidebar() {
       }
       if (clicked !== "delete") return;
 
-      const projectThreadIds = threadIdsByProjectId[projectId] ?? [];
-      if (projectThreadIds.length > 0) {
+      const projectThreads = getProjectThreadsForSidebar({
+        threadIds: threadIdsByProjectId[projectId] ?? [],
+        threadsById: sidebarThreadsById,
+      });
+      if (projectThreads.length > 0) {
         toastManager.add({
           type: "warning",
           title: "Project is not empty",
@@ -1428,10 +1432,10 @@ export default function Sidebar() {
             },
           });
         const projectThreads = sortThreadsForSidebar(
-          (threadIdsByProjectId[project.id] ?? [])
-            .map((threadId) => sidebarThreadsById[threadId])
-            .filter((thread): thread is NonNullable<typeof thread> => thread !== undefined)
-            .filter((thread) => thread.archivedAt === null),
+          getProjectThreadsForSidebar({
+            threadIds: threadIdsByProjectId[project.id] ?? [],
+            threadsById: sidebarThreadsById,
+          }),
           appSettings.sidebarThreadSortOrder,
         );
         const projectStatus = resolveProjectStatusIndicator(

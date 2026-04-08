@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createThreadJumpHintVisibilityController,
+  getProjectThreadsForSidebar,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
@@ -1027,5 +1028,28 @@ describe("sortProjectsForSidebar", () => {
     );
 
     expect(timestamp).toBe(Date.parse("2026-03-09T10:10:00.000Z"));
+  });
+});
+
+describe("getProjectThreadsForSidebar", () => {
+  it("filters out stale thread ids and archived threads", () => {
+    const liveThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-live"),
+      archivedAt: null,
+    });
+    const archivedThread = makeThread({
+      id: ThreadId.makeUnsafe("thread-archived"),
+      archivedAt: "2026-03-09T10:11:00.000Z",
+    });
+
+    const result = getProjectThreadsForSidebar({
+      threadIds: [ThreadId.makeUnsafe("thread-missing"), liveThread.id, archivedThread.id],
+      threadsById: {
+        [liveThread.id]: liveThread,
+        [archivedThread.id]: archivedThread,
+      },
+    });
+
+    expect(result.map((thread) => thread.id)).toEqual([liveThread.id]);
   });
 });

@@ -7,6 +7,7 @@ import {
   launchStartupHeartbeat,
   makeCommandGate,
   ServerRuntimeStartupError,
+  shouldAutoBootstrapProjectFromCwd,
 } from "./serverRuntimeStartup.ts";
 
 it.effect("enqueueCommand waits for readiness and then drains queued work", () =>
@@ -79,4 +80,28 @@ it.effect("launchStartupHeartbeat does not block the caller while counts are loa
       );
     }),
   ),
+);
+
+it.effect("skips cwd bootstrap when a dev URL is configured", () =>
+  Effect.sync(() => {
+    assert.equal(
+      shouldAutoBootstrapProjectFromCwd({
+        autoBootstrapProjectFromCwd: true,
+        devUrl: new URL("http://127.0.0.1:5173"),
+      }),
+      false,
+    );
+  }),
+);
+
+it.effect("keeps cwd bootstrap enabled outside dev when requested", () =>
+  Effect.sync(() => {
+    assert.equal(
+      shouldAutoBootstrapProjectFromCwd({
+        autoBootstrapProjectFromCwd: true,
+        devUrl: undefined,
+      }),
+      true,
+    );
+  }),
 );

@@ -19,7 +19,7 @@ import {
   ServiceMap,
 } from "effect";
 
-import { ServerConfig } from "./config";
+import { ServerConfig, type ServerConfigShape } from "./config";
 import { Keybindings } from "./keybindings";
 import { Open } from "./open";
 import { OrchestrationEngineService } from "./orchestration/Services/OrchestrationEngine";
@@ -34,6 +34,10 @@ const isWildcardHost = (host: string | undefined): boolean =>
 
 const formatHostForUrl = (host: string): string =>
   host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
+
+export const shouldAutoBootstrapProjectFromCwd = (
+  serverConfig: Pick<ServerConfigShape, "autoBootstrapProjectFromCwd" | "devUrl">,
+): boolean => serverConfig.autoBootstrapProjectFromCwd && serverConfig.devUrl === undefined;
 
 export class ServerRuntimeStartupError extends Data.TaggedError("ServerRuntimeStartupError")<{
   readonly message: string;
@@ -157,7 +161,7 @@ const autoBootstrapWelcome = Effect.gen(function* () {
   let bootstrapProjectId: ProjectId | undefined;
   let bootstrapThreadId: ThreadId | undefined;
 
-  if (serverConfig.autoBootstrapProjectFromCwd) {
+  if (shouldAutoBootstrapProjectFromCwd(serverConfig)) {
     yield* Effect.gen(function* () {
       const existingProject = yield* projectionReadModelQuery.getActiveProjectByWorkspaceRoot(
         serverConfig.cwd,

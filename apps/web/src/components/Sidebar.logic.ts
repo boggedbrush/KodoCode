@@ -22,6 +22,8 @@ type SidebarThreadSortInput = Pick<Thread, "createdAt" | "updatedAt"> & {
   messages?: Pick<Thread["messages"][number], "createdAt" | "role">[];
 };
 
+type SidebarProjectThreadInput = Pick<Thread, "id" | "archivedAt">;
+
 export type ThreadTraversalDirection = "previous" | "next";
 
 export interface ThreadStatusPill {
@@ -395,6 +397,15 @@ export function resolveProjectStatusIndicator(
   }
 
   return highestPriorityStatus;
+}
+
+export function getProjectThreadsForSidebar<T extends SidebarProjectThreadInput>(input: {
+  threadIds: readonly string[];
+  threadsById: Readonly<Record<string, T | undefined>>;
+}): T[] {
+  return input.threadIds
+    .map((threadId) => input.threadsById[threadId])
+    .filter((thread): thread is T => thread !== undefined && thread.archivedAt === null);
 }
 
 export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input: {
