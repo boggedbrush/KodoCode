@@ -44,6 +44,14 @@ export const DEFAULT_CLIENT_SETTINGS: ClientSettings = Schema.decodeSync(ClientS
 export const ThreadEnvMode = Schema.Literals(["local", "worktree"]);
 export type ThreadEnvMode = typeof ThreadEnvMode.Type;
 
+export const CommitMessageStyle = Schema.Literals([
+  "summary",
+  "type-summary",
+  "type-scope-summary",
+]);
+export type CommitMessageStyle = typeof CommitMessageStyle.Type;
+export const DEFAULT_COMMIT_MESSAGE_STYLE: CommitMessageStyle = "summary";
+
 const makeBinaryPathSetting = (fallback: string) =>
   TrimmedString.pipe(
     Schema.decodeTo(
@@ -81,6 +89,9 @@ export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
     Schema.withDecodingDefault(() => "local" as const satisfies ThreadEnvMode),
+  ),
+  commitMessageStyle: CommitMessageStyle.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_COMMIT_MESSAGE_STYLE),
   ),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(() => ({
@@ -172,6 +183,7 @@ const ClaudeSettingsPatch = Schema.Struct({
 export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
+  commitMessageStyle: Schema.optionalKey(CommitMessageStyle),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
 
   // Kodo: per-mode model selection patches (null clears the override)

@@ -8,6 +8,7 @@ import { TextGeneration } from "../Services/TextGeneration.ts";
 import { sanitizeThreadTitle } from "../Utils.ts";
 import { ClaudeTextGenerationLive } from "./ClaudeTextGeneration.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { DEFAULT_COMMIT_MESSAGE_STYLE } from "@t3tools/contracts/settings";
 
 const ClaudeTextGenerationTestLayer = ClaudeTextGenerationLive.pipe(
   Layer.provideMerge(ServerSettingsService.layerTest()),
@@ -198,6 +199,7 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGenerationLive", (it) => {
           branch: "feature/claude-effect",
           stagedSummary: "M README.md",
           stagedPatch: "diff --git a/README.md b/README.md",
+          commitMessageStyle: DEFAULT_COMMIT_MESSAGE_STYLE,
           modelSelection: {
             provider: "claudeAgent",
             model: "claude-haiku-4-5",
@@ -245,6 +247,64 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGenerationLive", (it) => {
         });
 
         expect(generated.title).toBe("Improve orchestration flow");
+      }),
+    ),
+  );
+
+  it.effect("adds summary style instructions when requested", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: {
+            subject: "Add important change",
+            body: "",
+          },
+        }),
+        stdinMustContain: "subject must be a plain imperative sentence",
+      },
+      Effect.gen(function* () {
+        const textGeneration = yield* TextGeneration;
+
+        yield* textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/claude-effect",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          commitMessageStyle: "summary",
+          modelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+          },
+        });
+      }),
+    ),
+  );
+
+  it.effect("adds type-scope-summary instructions when requested", () =>
+    withFakeClaudeEnv(
+      {
+        output: JSON.stringify({
+          structured_output: {
+            subject: "feat(git): add important change",
+            body: "",
+          },
+        }),
+        stdinMustContain: "subject must be formatted exactly as <type>(<scope>): <summary>",
+      },
+      Effect.gen(function* () {
+        const textGeneration = yield* TextGeneration;
+
+        yield* textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/claude-effect",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          commitMessageStyle: "type-scope-summary",
+          modelSelection: {
+            provider: "claudeAgent",
+            model: "claude-sonnet-4-6",
+          },
+        });
       }),
     ),
   );

@@ -7,9 +7,11 @@ import { it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, PlatformError, Scope } from "effect";
 import { expect } from "vitest";
 import type {
+  CommitMessageStyle,
   GitActionProgressEvent,
   GitPreparePullRequestThreadInput,
   ModelSelection,
+  ServerSettings,
   ThreadId,
 } from "@t3tools/contracts";
 
@@ -59,6 +61,7 @@ interface FakeGitTextGeneration {
     branch: string | null;
     stagedSummary: string;
     stagedPatch: string;
+    commitMessageStyle: CommitMessageStyle;
     includeBranch?: boolean;
     modelSelection: ModelSelection;
   }) => Effect.Effect<
@@ -612,6 +615,7 @@ function makeManager(input?: {
   ghScenario?: FakeGhScenario;
   textGeneration?: Partial<FakeGitTextGeneration>;
   setupScriptRunner?: ProjectSetupScriptRunnerShape;
+  serverSettings?: Partial<ServerSettings>;
 }) {
   const { service: gitHubCli, ghCalls } = createGitHubCliWithFakeGh(input?.ghScenario);
   const textGeneration = createTextGeneration(input?.textGeneration);
@@ -619,7 +623,7 @@ function makeManager(input?: {
     prefix: "t3-git-manager-test-",
   });
 
-  const serverSettingsLayer = ServerSettingsService.layerTest();
+  const serverSettingsLayer = ServerSettingsService.layerTest(input?.serverSettings);
 
   const gitCoreLayer = GitCoreLive.pipe(
     Layer.provideMerge(NodeServices.layer),
@@ -1106,6 +1110,40 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
           Effect.map((result) => result.stdout.trim()),
         ),
       ).toBe("Implement stacked git actions");
+    }),
+  );
+
+  it.effect("passes commitMessageStyle from server settings into text generation", () =>
+    Effect.gen(function* () {
+      const repoDir = yield* makeTempDir("t3code-git-manager-");
+      yield* initRepo(repoDir);
+      fs.writeFileSync(path.join(repoDir, "README.md"), "hello\nworld\n");
+      let seenStyle: CommitMessageStyle | null = null;
+
+      const { manager } = yield* makeManager({
+        serverSettings: {
+          commitMessageStyle: "summary",
+        },
+        textGeneration: {
+          generateCommitMessage: (input) =>
+            Effect.sync(() => {
+              seenStyle = input.commitMessageStyle;
+              return {
+                subject: "Implement stacked git actions",
+                body: "",
+                ...(input.includeBranch ? { branch: "feature/implement-stacked-git-actions" } : {}),
+              };
+            }),
+        },
+      });
+
+      const result = yield* runStackedAction(manager, {
+        cwd: repoDir,
+        action: "commit",
+      });
+
+      expect(result.commit.status).toBe("created");
+      expect(seenStyle).toBe("summary");
     }),
   );
 

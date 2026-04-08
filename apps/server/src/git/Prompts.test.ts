@@ -9,13 +9,18 @@ import {
 import { normalizeCliError, sanitizeThreadTitle } from "./Utils.ts";
 import { TextGenerationError } from "@t3tools/contracts";
 
+const DEFAULT_COMMIT_MESSAGE_PROMPT = {
+  branch: "main",
+  stagedSummary: "M README.md",
+  stagedPatch: "diff --git a/README.md b/README.md\n+hello",
+  includeBranch: false,
+  style: "type-scope-summary" as const,
+};
+
 describe("buildCommitMessagePrompt", () => {
   it("includes staged patch and summary in the prompt", () => {
     const result = buildCommitMessagePrompt({
-      branch: "main",
-      stagedSummary: "M README.md",
-      stagedPatch: "diff --git a/README.md b/README.md\n+hello",
-      includeBranch: false,
+      ...DEFAULT_COMMIT_MESSAGE_PROMPT,
     });
 
     expect(result.prompt).toContain("Staged files:");
@@ -29,8 +34,8 @@ describe("buildCommitMessagePrompt", () => {
 
   it("includes branch generation instruction when includeBranch is true", () => {
     const result = buildCommitMessagePrompt({
+      ...DEFAULT_COMMIT_MESSAGE_PROMPT,
       branch: "feature/foo",
-      stagedSummary: "M README.md",
       stagedPatch: "diff",
       includeBranch: true,
     });
@@ -41,13 +46,52 @@ describe("buildCommitMessagePrompt", () => {
 
   it("shows (detached) when branch is null", () => {
     const result = buildCommitMessagePrompt({
+      ...DEFAULT_COMMIT_MESSAGE_PROMPT,
       branch: null,
       stagedSummary: "M a.ts",
       stagedPatch: "diff",
-      includeBranch: false,
     });
 
     expect(result.prompt).toContain("Branch: (detached)");
+  });
+
+  it("uses plain sentence rules for summary style", () => {
+    const result = buildCommitMessagePrompt({
+      ...DEFAULT_COMMIT_MESSAGE_PROMPT,
+      style: "summary",
+    });
+
+    expect(result.prompt).toContain("plain imperative sentence");
+    expect(result.prompt).toContain("do not include a type prefix");
+    expect(result.prompt).toContain("do not include a scope prefix");
+    expect(result.prompt).not.toContain("<type>: <summary>");
+  });
+
+  it("uses conventional commit type rules for type-summary style", () => {
+    const result = buildCommitMessagePrompt({
+      ...DEFAULT_COMMIT_MESSAGE_PROMPT,
+      style: "type-summary",
+    });
+
+    expect(result.prompt).toContain("subject must be formatted exactly as <type>: <summary>");
+    expect(result.prompt).toContain(
+      "feat, fix, chore, docs, refactor, test, ci, build, perf, style",
+    );
+  });
+
+  it("uses type and scope rules for type-scope-summary style", () => {
+    const result = buildCommitMessagePrompt({
+      ...DEFAULT_COMMIT_MESSAGE_PROMPT,
+      style: "type-scope-summary",
+    });
+
+    expect(result.prompt).toContain(
+      "subject must be formatted exactly as <type>(<scope>): <summary>",
+    );
+    expect(result.prompt).toContain(
+      "scope must be a short lowercase subsystem or feature identifier",
+    );
+    expect(result.prompt).toContain("do not omit scope");
   });
 });
 

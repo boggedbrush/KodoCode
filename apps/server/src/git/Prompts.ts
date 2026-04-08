@@ -7,9 +7,24 @@
  * @module textGenerationPrompts
  */
 import { Schema } from "effect";
-import type { ChatAttachment } from "@t3tools/contracts";
+import type { ChatAttachment, CommitMessageStyle } from "@t3tools/contracts";
+import { DEFAULT_COMMIT_MESSAGE_STYLE } from "@t3tools/contracts/settings";
 
 import { limitSection } from "./Utils.ts";
+
+const COMMIT_MESSAGE_TYPES = [
+  "feat",
+  "fix",
+  "chore",
+  "docs",
+  "refactor",
+  "test",
+  "ci",
+  "build",
+  "perf",
+  "style",
+] as const;
+const COMMIT_MESSAGE_TYPES_LIST = COMMIT_MESSAGE_TYPES.join(", ");
 
 // ---------------------------------------------------------------------------
 // Commit message
@@ -19,11 +34,42 @@ export interface CommitMessagePromptInput {
   branch: string | null;
   stagedSummary: string;
   stagedPatch: string;
+  style: CommitMessageStyle;
   includeBranch: boolean;
+}
+
+function buildCommitMessageStyleRules(style: CommitMessageStyle): ReadonlyArray<string> {
+  switch (style) {
+    case "summary":
+      return [
+        "subject must be a plain imperative sentence",
+        "do not include a type prefix",
+        "do not include a scope prefix",
+      ];
+    case "type-summary":
+      return [
+        "subject must be formatted exactly as <type>: <summary>",
+        `type must be one of: ${COMMIT_MESSAGE_TYPES_LIST}`,
+        "summary must remain imperative after the type prefix",
+      ];
+    case "type-scope-summary":
+      return [
+        "subject must be formatted exactly as <type>(<scope>): <summary>",
+        `type must be one of: ${COMMIT_MESSAGE_TYPES_LIST}`,
+        "scope must be a short lowercase subsystem or feature identifier derived from the primary area changed",
+        "prefer stable scopes from repo structure or feature areas such as settings, git, server, web, contracts, provider, or ui",
+        "if changes span multiple areas, choose the single dominant scope",
+        "do not omit scope",
+        "summary must remain imperative after the type and scope prefix",
+      ];
+  }
 }
 
 export function buildCommitMessagePrompt(input: CommitMessagePromptInput) {
   const wantsBranch = input.includeBranch;
+  const styleRules = buildCommitMessageStyleRules(input.style ?? DEFAULT_COMMIT_MESSAGE_STYLE).map(
+    (rule) => `- ${rule}`,
+  );
 
   const prompt = [
     "You write concise git commit messages.",
@@ -37,6 +83,7 @@ export function buildCommitMessagePrompt(input: CommitMessagePromptInput) {
       ? ["- branch must be a short semantic git branch fragment for this change"]
       : []),
     "- capture the primary user-visible or developer-visible change",
+    ...styleRules,
     "",
     `Branch: ${input.branch ?? "(detached)"}`,
     "",

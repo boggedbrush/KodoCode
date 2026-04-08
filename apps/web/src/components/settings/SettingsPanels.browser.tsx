@@ -88,4 +88,31 @@ describe("GeneralSettingsPanel observability", () => {
 
     expect(openInEditor).toHaveBeenCalledWith("/repo/project/.t3/logs", "cursor");
   });
+
+  it("shows and updates the commit message style setting", async () => {
+    const updateSettings = vi
+      .fn<NativeApi["server"]["updateSettings"]>()
+      .mockResolvedValue(DEFAULT_SERVER_SETTINGS);
+    window.nativeApi = {
+      server: {
+        updateSettings,
+      },
+    } as unknown as NativeApi;
+
+    setServerConfigSnapshot(createBaseServerConfig());
+
+    await render(
+      <AppAtomRegistryProvider>
+        <GeneralSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByText("Commit message style")).toBeInTheDocument();
+    await expect.element(page.getByText("Summary", { exact: true })).toBeInTheDocument();
+
+    await page.getByLabelText("Commit message style").click();
+    await page.getByRole("option", { name: /^Summary$/ }).click();
+
+    expect(updateSettings).toHaveBeenCalledWith({ commitMessageStyle: "summary" });
+  });
 });

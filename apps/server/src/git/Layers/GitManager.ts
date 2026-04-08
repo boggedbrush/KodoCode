@@ -8,6 +8,7 @@ import {
   GitCommandError,
   GitRunStackedActionResult,
   GitStackedAction,
+  type CommitMessageStyle,
   type GitStatusLocalResult,
   type GitStatusRemoteResult,
   ModelSelection,
@@ -1099,6 +1100,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       cwd: string;
       branch: string | null;
       commitMessage?: string;
+      commitMessageStyle: CommitMessageStyle;
       /** When true, also produce a semantic feature branch name. */
       includeBranch?: boolean;
       filePaths?: readonly string[];
@@ -1127,6 +1129,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
           branch: input.branch,
           stagedSummary: limitContext(context.stagedSummary, 8_000),
           stagedPatch: limitContext(context.stagedPatch, 50_000),
+          commitMessageStyle: input.commitMessageStyle,
           ...(input.includeBranch ? { includeBranch: true } : {}),
           modelSelection: input.modelSelection,
         })
@@ -1143,6 +1146,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
 
   const runCommitStep = Effect.fn("runCommitStep")(function* (
     modelSelection: ModelSelection,
+    commitMessageStyle: CommitMessageStyle,
     cwd: string,
     action: "commit" | "commit_push" | "commit_push_pr",
     branch: string | null,
@@ -1177,6 +1181,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         branch,
         ...(commitMessage ? { commitMessage } : {}),
         ...(filePaths ? { filePaths } : {}),
+        commitMessageStyle,
         modelSelection,
       });
     }
@@ -1560,6 +1565,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
 
   const runFeatureBranchStep = Effect.fn("runFeatureBranchStep")(function* (
     modelSelection: ModelSelection,
+    commitMessageStyle: CommitMessageStyle,
     cwd: string,
     branch: string | null,
     commitMessage?: string,
@@ -1569,6 +1575,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
       cwd,
       branch,
       ...(commitMessage ? { commitMessage } : {}),
+      commitMessageStyle,
       ...(filePaths ? { filePaths } : {}),
       includeBranch: true,
       modelSelection,
@@ -1658,12 +1665,13 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
         let commitMessageForStep = input.commitMessage;
         let preResolvedCommitSuggestion: CommitAndBranchSuggestion | undefined = undefined;
 
-        const modelSelection = yield* serverSettingsService.getSettings.pipe(
-          Effect.map((settings) => settings.textGenerationModelSelection),
+        const settings = yield* serverSettingsService.getSettings.pipe(
           Effect.mapError((cause) =>
             gitManagerError("runStackedAction", "Failed to get server settings.", cause),
           ),
         );
+        const modelSelection = settings.textGenerationModelSelection;
+        const commitMessageStyle = settings.commitMessageStyle;
 
         if (input.featureBranch) {
           yield* Ref.set(currentPhase, Option.some("branch"));
@@ -1674,6 +1682,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
           });
           const result = yield* runFeatureBranchStep(
             modelSelection,
+            commitMessageStyle,
             input.cwd,
             initialStatus.branch,
             input.commitMessage,
@@ -1694,6 +1703,7 @@ export const makeGitManager = Effect.fn("makeGitManager")(function* () {
               Effect.flatMap(() =>
                 runCommitStep(
                   modelSelection,
+                  commitMessageStyle,
                   input.cwd,
                   commitAction,
                   currentBranch,

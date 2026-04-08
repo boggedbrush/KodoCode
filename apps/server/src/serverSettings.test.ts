@@ -44,6 +44,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }),
   );
 
+  it.effect("decodes commitMessageStyle patches", () =>
+    Effect.sync(() => {
+      const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+      assert.deepEqual(decodePatch({ commitMessageStyle: "summary" }), {
+        commitMessageStyle: "summary",
+      });
+    }),
+  );
+
   it.effect("deep merges nested settings updates without dropping siblings", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
@@ -215,6 +225,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const serverConfig = yield* ServerConfig;
       const fileSystem = yield* FileSystem.FileSystem;
       const next = yield* serverSettings.updateSettings({
+        commitMessageStyle: "type-summary",
         observability: {
           otlpTracesUrl: "http://localhost:4318/v1/traces",
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",
@@ -230,6 +241,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
 
       const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
       assert.deepEqual(JSON.parse(raw), {
+        commitMessageStyle: "type-summary",
         observability: {
           otlpTracesUrl: "http://localhost:4318/v1/traces",
           otlpMetricsUrl: "http://localhost:4318/v1/metrics",
@@ -240,6 +252,32 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           },
         },
       });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("defaults commitMessageStyle to summary", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      const next = yield* serverSettings.updateSettings({});
+
+      assert.equal(next.commitMessageStyle, "summary");
+      assert.equal(DEFAULT_SERVER_SETTINGS.commitMessageStyle, "summary");
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("omits default commitMessageStyle when persisting sparse settings", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      yield* serverSettings.updateSettings({
+        commitMessageStyle: DEFAULT_SERVER_SETTINGS.commitMessageStyle,
+      });
+
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.deepEqual(JSON.parse(raw), {});
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 

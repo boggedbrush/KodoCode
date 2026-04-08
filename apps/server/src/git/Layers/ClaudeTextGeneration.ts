@@ -213,6 +213,7 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
       branch: input.branch,
       stagedSummary: input.stagedSummary,
       stagedPatch: input.stagedPatch,
+      style: input.commitMessageStyle,
       includeBranch: input.includeBranch === true,
     });
 

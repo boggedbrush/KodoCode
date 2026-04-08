@@ -19,7 +19,10 @@ import {
   type ServerProviderModel,
   ThreadId,
 } from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_COMMIT_MESSAGE_STYLE,
+  DEFAULT_UNIFIED_SETTINGS,
+} from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
@@ -481,6 +484,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
         ? ["Delete confirmation"]
         : []),
+      ...(settings.commitMessageStyle !== DEFAULT_UNIFIED_SETTINGS.commitMessageStyle
+        ? ["Commit message style"]
+        : []),
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
       ...(areProviderSettingsDirty ? ["Providers"] : []),
     ],
@@ -489,6 +495,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       isGitWritingModelDirty,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
+      settings.commitMessageStyle,
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
@@ -1106,6 +1113,54 @@ export function GeneralSettingsPanel() {
                 }}
               />
             </div>
+          }
+        />
+
+        <SettingsRow
+          title="Commit message style"
+          description="Choose the format used for generated commit message subjects."
+          resetAction={
+            settings.commitMessageStyle !== DEFAULT_COMMIT_MESSAGE_STYLE ? (
+              <SettingResetButton
+                label="commit message style"
+                onClick={() => updateSettings({ commitMessageStyle: DEFAULT_COMMIT_MESSAGE_STYLE })}
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.commitMessageStyle}
+              onValueChange={(value) => {
+                if (
+                  value === "summary" ||
+                  value === "type-summary" ||
+                  value === "type-scope-summary"
+                ) {
+                  updateSettings({ commitMessageStyle: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-56" aria-label="Commit message style">
+                <SelectValue>
+                  {settings.commitMessageStyle === "summary"
+                    ? "Summary"
+                    : settings.commitMessageStyle === "type-summary"
+                      ? "type: summary"
+                      : "type(scope): summary"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="summary">
+                  Summary
+                </SelectItem>
+                <SelectItem hideIndicator value="type-summary">
+                  type: summary
+                </SelectItem>
+                <SelectItem hideIndicator value="type-scope-summary">
+                  type(scope): summary
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
       </SettingsSection>

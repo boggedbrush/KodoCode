@@ -8,6 +8,7 @@ import { CodexTextGenerationLive } from "./CodexTextGeneration.ts";
 import { TextGenerationError } from "@t3tools/contracts";
 import { TextGeneration } from "../Services/TextGeneration.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { DEFAULT_COMMIT_MESSAGE_STYLE } from "@t3tools/contracts/settings";
 
 const DEFAULT_TEST_MODEL_SELECTION = {
   provider: "codex" as const,
@@ -212,6 +213,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
           branch: "feature/codex-effect",
           stagedSummary: "M README.md",
           stagedPatch: "diff --git a/README.md b/README.md",
+          commitMessageStyle: DEFAULT_COMMIT_MESSAGE_STYLE,
           modelSelection: DEFAULT_TEST_MODEL_SELECTION,
         });
 
@@ -244,6 +246,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
             branch: "feature/codex-effect",
             stagedSummary: "M README.md",
             stagedPatch: "diff --git a/README.md b/README.md",
+            commitMessageStyle: DEFAULT_COMMIT_MESSAGE_STYLE,
             modelSelection: {
               provider: "codex",
               model: "gpt-5.4",
@@ -274,6 +277,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
           branch: "feature/codex-effect",
           stagedSummary: "M README.md",
           stagedPatch: "diff --git a/README.md b/README.md",
+          commitMessageStyle: DEFAULT_COMMIT_MESSAGE_STYLE,
           modelSelection: DEFAULT_TEST_MODEL_SELECTION,
         });
       }),
@@ -299,11 +303,61 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
           stagedSummary: "M README.md",
           stagedPatch: "diff --git a/README.md b/README.md",
           includeBranch: true,
+          commitMessageStyle: DEFAULT_COMMIT_MESSAGE_STYLE,
           modelSelection: DEFAULT_TEST_MODEL_SELECTION,
         });
 
         expect(generated.subject).toBe("Add important change");
         expect(generated.branch).toBe("feature/fix/important-system-change");
+      }),
+    ),
+  );
+
+  it.effect("adds summary style instructions when requested", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          subject: "Add important change",
+          body: "",
+        }),
+        stdinMustContain: "subject must be a plain imperative sentence",
+        stdinMustNotContain: "subject must be formatted exactly as <type>: <summary>",
+      },
+      Effect.gen(function* () {
+        const textGeneration = yield* TextGeneration;
+
+        yield* textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/codex-effect",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          commitMessageStyle: "summary",
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        });
+      }),
+    ),
+  );
+
+  it.effect("adds type-scope-summary instructions when requested", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          subject: "feat(git): add important change",
+          body: "",
+        }),
+        stdinMustContain: "subject must be formatted exactly as <type>(<scope>): <summary>",
+      },
+      Effect.gen(function* () {
+        const textGeneration = yield* TextGeneration;
+
+        yield* textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/codex-effect",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          commitMessageStyle: "type-scope-summary",
+          modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+        });
       }),
     ),
   );
@@ -620,6 +674,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
             branch: "feature/codex-error",
             stagedSummary: "M README.md",
             stagedPatch: "diff --git a/README.md b/README.md",
+            commitMessageStyle: DEFAULT_COMMIT_MESSAGE_STYLE,
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           })
           .pipe(Effect.result);
