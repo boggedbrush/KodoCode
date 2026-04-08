@@ -164,7 +164,7 @@ import { ComposerPendingApprovalPanel } from "./chat/ComposerPendingApprovalPane
 import { ComposerPendingUserInputPanel } from "./chat/ComposerPendingUserInputPanel";
 import { ComposerPlanFollowUpBanner } from "./chat/ComposerPlanFollowUpBanner";
 import { InteractionModePill } from "./chat/InteractionModePill";
-import { getInteractionModeAccentColor } from "../modeColors";
+import { getInteractionModeAccentColor, INTERACTION_MODE_ACCENT_COLORS } from "../modeColors";
 import {
   getComposerProviderState,
   renderProviderTraitsMenuContent,
@@ -2019,9 +2019,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const togglePlanSidebar = useCallback(() => {
     setPlanSidebarOpen((open) => {
       if (open) {
-        const turnKey = activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? null;
-        if (turnKey) {
-          planSidebarDismissedForTurnRef.current = turnKey;
+        const planKey =
+          activePlan && !sidebarProposedPlan
+            ? (activePlan.turnId ?? activePlan.createdAt)
+            : !activePlan && sidebarProposedPlan
+              ? (sidebarProposedPlan.turnId ?? sidebarProposedPlan.id)
+              : (activePlan?.turnId ??
+                activePlan?.createdAt ??
+                sidebarProposedPlan?.turnId ??
+                null);
+        if (planKey) {
+          planSidebarDismissedForTurnRef.current = planKey;
         }
       } else {
         planSidebarDismissedForTurnRef.current = null;
@@ -4092,6 +4100,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       <ComposerPendingUserInputPanel
                         pendingUserInputs={pendingUserInputs}
                         respondingRequestIds={respondingRequestIds}
+                        accentColor={modeAccentColor}
                         answers={activePendingDraftAnswers}
                         questionIndex={activePendingQuestionIndex}
                         onToggleOption={onToggleActivePendingUserInputOption}
@@ -4353,12 +4362,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
                                   className={cn(
                                     "shrink-0 whitespace-nowrap px-2 sm:px-3",
                                     planSidebarOpen
-                                      ? "text-blue-400 hover:text-blue-300"
+                                      ? ""
                                       : "text-muted-foreground/70 hover:text-foreground/80",
                                   )}
                                   size="sm"
                                   type="button"
                                   onClick={togglePlanSidebar}
+                                  style={
+                                    planSidebarOpen
+                                      ? { color: INTERACTION_MODE_ACCENT_COLORS.plan }
+                                      : undefined
+                                  }
                                   title={
                                     planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"
                                   }
@@ -4392,6 +4406,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         <ComposerPrimaryActions
                           compact={isComposerPrimaryActionsCompact}
                           accentColor={modeAccentColor}
+                          pendingActionAccentColor={modeAccentColor}
                           pendingAction={
                             activePendingProgress
                               ? {

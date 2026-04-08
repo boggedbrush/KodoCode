@@ -16,6 +16,7 @@ interface PendingActionState {
 interface ComposerPrimaryActionsProps {
   compact: boolean;
   accentColor: string;
+  pendingActionAccentColor: string;
   pendingAction: PendingActionState | null;
   isRunning: boolean;
   showPlanFollowUpPrompt: boolean;
@@ -46,6 +47,7 @@ const formatPendingPrimaryActionLabel = (input: {
 export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
   accentColor,
+  pendingActionAccentColor,
   pendingAction,
   isRunning,
   showPlanFollowUpPrompt,
@@ -88,7 +90,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         <Button
           type="submit"
           size="sm"
-          className={cn("rounded-full", compact ? "px-3" : "px-4")}
+          className={cn("rounded-full border-transparent text-white", compact ? "px-3" : "px-4")}
+          style={{
+            backgroundColor: pendingActionAccentColor,
+            borderColor: pendingActionAccentColor,
+          }}
           disabled={
             pendingAction.isResponding ||
             (pendingAction.isLastQuestion ? !pendingAction.isComplete : !pendingAction.canAdvance)

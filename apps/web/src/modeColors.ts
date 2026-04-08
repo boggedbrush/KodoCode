@@ -22,3 +22,24 @@ export const KODO_PURPLE = INTERACTION_MODE_ACCENT_COLORS.code;
 export function getInteractionModeAccentColor(mode: ProviderInteractionMode): string {
   return INTERACTION_MODE_ACCENT_COLORS[mode];
 }
+
+export function hexColorToRgba(hexColor: string, alpha: number): string {
+  const normalizedHex = hexColor.replace("#", "");
+  const hex =
+    normalizedHex.length === 3
+      ? normalizedHex
+          .split("")
+          .map((value) => value + value)
+          .join("")
+      : normalizedHex;
+
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) {
+    return hexColor;
+  }
+
+  const red = Number.parseInt(hex.slice(0, 2), 16);
+  const green = Number.parseInt(hex.slice(2, 4), 16);
+  const blue = Number.parseInt(hex.slice(4, 6), 16);
+
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}

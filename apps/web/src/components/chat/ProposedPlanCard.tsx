@@ -1,4 +1,4 @@
-import { memo, useState, useId } from "react";
+import { memo, useEffect, useId, useState } from "react";
 import {
   buildCollapsedProposedPlanPreviewMarkdown,
   buildProposedPlanMarkdownFilename,
@@ -31,12 +31,14 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   planMarkdown,
   cwd,
   workspaceRoot,
+  defaultExpanded = false,
 }: {
   planMarkdown: string;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
+  defaultExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [savePath, setSavePath] = useState("");
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
@@ -54,6 +56,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const lineCount = planMarkdown.split("\n").length;
   const canCollapse = planMarkdown.length > 900 || lineCount > 20;
   const displayedPlanMarkdown = stripDisplayedPlanMarkdown(planMarkdown);
+  const expanded = expandedOverride ?? defaultExpanded;
   const collapsedPreview = canCollapse
     ? buildCollapsedProposedPlanPreviewMarkdown(planMarkdown, { maxLines: 10 })
     : null;
@@ -67,6 +70,10 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const handleCopyPlan = () => {
     copyToClipboard(saveContents);
   };
+
+  useEffect(() => {
+    setExpandedOverride(null);
+  }, [defaultExpanded, planMarkdown]);
 
   const openSaveDialog = () => {
     if (!workspaceRoot) {
@@ -168,7 +175,9 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
               size="sm"
               variant="outline"
               data-scroll-anchor-ignore
-              onClick={() => setExpanded((value) => !value)}
+              onClick={() =>
+                setExpandedOverride((current) => (current === null ? !defaultExpanded : !current))
+              }
             >
               {expanded ? "Collapse plan" : "Expand plan"}
             </Button>

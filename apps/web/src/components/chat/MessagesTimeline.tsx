@@ -161,6 +161,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       }),
     [timelineEntries, completionDividerBeforeEntryId, isWorking, activeTurnStartedAt],
   );
+  const shouldDefaultExpandProposedPlan = useMemo(
+    () => rows.filter((row) => row.kind === "proposed-plan").length === 1,
+    [rows],
+  );
 
   const firstUnvirtualizedRowIndex = useMemo(() => {
     const firstTailRowIndex = Math.max(rows.length - ALWAYS_UNVIRTUALIZED_TAIL_ROWS, 0);
@@ -533,6 +537,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             planMarkdown={row.proposedPlan.planMarkdown}
             cwd={markdownCwd}
             workspaceRoot={workspaceRoot}
+            defaultExpanded={shouldDefaultExpandProposedPlan}
           />
         </div>
       )}

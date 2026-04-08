@@ -55,6 +55,9 @@ const PROJECT_ID = "project-1" as ProjectId;
 const NOW_ISO = "2026-03-04T12:00:00.000Z";
 const BASE_TIME_MS = Date.parse(NOW_ISO);
 const ATTACHMENT_SVG = "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'></svg>";
+const PLAN_ACCENT_RGB = "rgb(200, 149, 74)";
+const PLAN_ACCENT_BORDER_RGBA = "rgba(200, 149, 74, 0.4)";
+const PLAN_ACCENT_BACKGROUND_RGBA = "rgba(200, 149, 74, 0.08)";
 
 interface TestFixture {
   snapshot: OrchestrationReadModel;
@@ -2988,37 +2991,26 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
-  it("keeps long proposed plans lightweight until the user expands them", async () => {
+  it("auto-expands a single long proposed plan by default", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,
       snapshot: createSnapshotWithLongProposedPlan(),
     });
 
     try {
-      await waitForElement(
-        () =>
-          Array.from(document.querySelectorAll("button")).find(
-            (button) => button.textContent?.trim() === "Expand plan",
-          ) as HTMLButtonElement | null,
-        "Unable to find Expand plan button.",
-      );
-
-      expect(document.body.textContent).not.toContain("deep hidden detail only after expand");
-
-      const expandButton = await waitForElement(
-        () =>
-          Array.from(document.querySelectorAll("button")).find(
-            (button) => button.textContent?.trim() === "Expand plan",
-          ) as HTMLButtonElement | null,
-        "Unable to find Expand plan button.",
-      );
-      expandButton.click();
-
       await vi.waitFor(
         () => {
           expect(document.body.textContent).toContain("deep hidden detail only after expand");
         },
         { timeout: 8_000, interval: 16 },
+      );
+
+      await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll("button")).find(
+            (button) => button.textContent?.trim() === "Collapse plan",
+          ) as HTMLButtonElement | null,
+        "Unable to find Collapse plan button.",
       );
     } finally {
       await mounted.cleanup();
@@ -3173,6 +3165,16 @@ describe("ChatView timeline estimator parity (full app)", () => {
       serverOption.click();
       await waitForLayout();
 
+      await vi.waitFor(
+        () => {
+          expect(window.getComputedStyle(serverOption).backgroundColor).toBe(
+            PLAN_ACCENT_BACKGROUND_RGBA,
+          );
+          expect(window.getComputedStyle(serverOption).borderColor).toBe(PLAN_ACCENT_BORDER_RGBA);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
       expect(document.body.textContent).toContain("Which areas should this change cover?");
 
       const webOption = await waitForButtonContainingText("Web");
@@ -3198,6 +3200,13 @@ describe("ChatView timeline estimator parity (full app)", () => {
       balancedOption.click();
 
       const submitButton = await waitForButtonByText("Submit answers");
+      await vi.waitFor(
+        () => {
+          expect(window.getComputedStyle(submitButton).backgroundColor).toBe(PLAN_ACCENT_RGB);
+          expect(window.getComputedStyle(submitButton).borderColor).toBe(PLAN_ACCENT_RGB);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
       expect(submitButton.disabled).toBe(false);
       submitButton.click();
 
