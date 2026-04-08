@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
-import { KODO_PURPLE } from "../../modeColors";
+import { INTERACTION_MODE_ACCENT_COLORS, KODO_PURPLE } from "../../modeColors";
 import { Button } from "../ui/button";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 
@@ -125,7 +125,14 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         <Button
           type="submit"
           size="sm"
-          className={cn("rounded-full", compact ? "h-9 px-3 sm:h-8" : "h-9 px-4 sm:h-8")}
+          className={cn(
+            "rounded-full border-transparent text-white",
+            compact ? "h-9 px-3 sm:h-8" : "h-9 px-4 sm:h-8",
+          )}
+          style={{
+            backgroundColor: INTERACTION_MODE_ACCENT_COLORS.plan,
+            borderColor: INTERACTION_MODE_ACCENT_COLORS.plan,
+          }}
           disabled={isSendBusy || isConnecting}
         >
           {isConnecting || isSendBusy ? "Sending..." : "Refine"}
