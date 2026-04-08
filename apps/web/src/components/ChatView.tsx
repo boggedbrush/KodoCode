@@ -1031,6 +1031,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [selectedModel, selectedModelOptionsForDispatch, selectedProvider],
   );
   const selectedModelForPicker = selectedModel;
+  // Show "Auto" for model/effort pickers when a predefined per-mode model selection from
+  // settings is driving the current selection (as opposed to an explicit per-conversation pick).
+  const isModelFromModeSettings = useMemo(() => {
+    const modeSelection = resolveModeModelSelection(interactionMode, settings, providerStatuses);
+    return modeSelection !== null && selectedModel === modeSelection.model;
+  }, [interactionMode, settings, providerStatuses, selectedModel]);
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
@@ -3616,6 +3622,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     modelOptions: composerModelOptions?.[selectedProvider],
     prompt,
     onPromptChange: setPromptFromTraits,
+    showAsAuto: isModelFromModeSettings,
   });
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {
@@ -4261,6 +4268,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           lockedProvider={lockedProvider}
                           providers={providerStatuses}
                           modelOptionsByProvider={modelOptionsByProvider}
+                          showAsAuto={isModelFromModeSettings}
                           {...(composerProviderState.modelPickerIconClassName
                             ? {
                                 activeProviderIconClassName:

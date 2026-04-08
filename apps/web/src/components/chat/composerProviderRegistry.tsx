@@ -47,6 +47,7 @@ type ProviderRegistryEntry = {
     modelOptions: ProviderModelOptions[ProviderKind] | undefined;
     prompt: string;
     onPromptChange: (prompt: string) => void;
+    showAsAuto?: boolean;
   }) => ReactNode;
 };
 
@@ -111,7 +112,15 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
         onPromptChange={onPromptChange}
       />
     ),
-    renderTraitsPicker: ({ threadId, model, models, modelOptions, prompt, onPromptChange }) => (
+    renderTraitsPicker: ({
+      threadId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+      showAsAuto,
+    }) => (
       <TraitsPicker
         provider="codex"
         models={models}
@@ -120,6 +129,7 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
         modelOptions={modelOptions}
         prompt={prompt}
         onPromptChange={onPromptChange}
+        {...(showAsAuto !== undefined ? { showAsAuto } : {})}
       />
     ),
   },
@@ -143,7 +153,15 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
         onPromptChange={onPromptChange}
       />
     ),
-    renderTraitsPicker: ({ threadId, model, models, modelOptions, prompt, onPromptChange }) => (
+    renderTraitsPicker: ({
+      threadId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+      showAsAuto,
+    }) => (
       <TraitsPicker
         provider="claudeAgent"
         models={models}
@@ -152,6 +170,7 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
         modelOptions={modelOptions}
         prompt={prompt}
         onPromptChange={onPromptChange}
+        {...(showAsAuto !== undefined ? { showAsAuto } : {})}
       />
     ),
   },
@@ -188,6 +207,7 @@ export function renderProviderTraitsPicker(input: {
   modelOptions: ProviderModelOptions[ProviderKind] | undefined;
   prompt: string;
   onPromptChange: (prompt: string) => void;
+  showAsAuto?: boolean;
 }): ReactNode {
   return composerProviderRegistry[input.provider].renderTraitsPicker({
     threadId: input.threadId,
@@ -196,5 +216,6 @@ export function renderProviderTraitsPicker(input: {
     modelOptions: input.modelOptions,
     prompt: input.prompt,
     onPromptChange: input.onPromptChange,
+    ...(input.showAsAuto !== undefined ? { showAsAuto: input.showAsAuto } : {}),
   });
 }
