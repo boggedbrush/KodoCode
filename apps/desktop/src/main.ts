@@ -706,12 +706,15 @@ function configureApplicationMenu(): void {
 }
 
 function resolveResourcePath(fileName: string): string | null {
-  const candidates = [
+  const developmentCandidates = [
     Path.join(__dirname, "../resources", fileName),
-    Path.join(__dirname, "../prod-resources", fileName),
     Path.join(process.resourcesPath, "resources", fileName),
+  ];
+  const productionCandidates = [
+    Path.join(__dirname, "../prod-resources", fileName),
     Path.join(process.resourcesPath, fileName),
   ];
+  const candidates = isDevelopment ? developmentCandidates : productionCandidates;
 
   for (const candidate of candidates) {
     if (FS.existsSync(candidate)) {
