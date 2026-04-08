@@ -601,7 +601,7 @@ export function GeneralSettingsPanel() {
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
 
-  // ── Clox: ask/plan/code model settings ────────────────────────────────
+  // ── Kodo: ask/plan/code model settings ────────────────────────────────
   const askSelection = settings.askModelSelection;
   const askProvider = askSelection?.provider ?? "codex";
   const askModel = askSelection?.model ?? "";
@@ -1110,7 +1110,7 @@ export function GeneralSettingsPanel() {
         />
       </SettingsSection>
 
-      {/* ── Clox: Mode-specific model settings ──────────────────── */}
+      {/* ── Kodo Code: Mode-specific model settings ──────────────────── */}
       <SettingsSection title="Mode models">
         <SettingsRow
           title="Ask mode model"

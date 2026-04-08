@@ -89,7 +89,7 @@ export const ServerSettings = Schema.Struct({
     })),
   ),
 
-  // ── Clox: per-mode model selections ────────────────────────────
+  // ── Kodo: per-mode model selections ────────────────────────────
   // When set, these override the composer model selection for the
   // corresponding Ask / Plan / Code mode.  When unset the existing default
   // model behavior is preserved (no regression).
@@ -174,7 +174,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
 
-  // Clox: per-mode model selection patches (null clears the override)
+  // Kodo: per-mode model selection patches (null clears the override)
   askModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
   planModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
   codeModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),

@@ -1985,7 +1985,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         setDraftThreadContext(threadId, { interactionMode: mode });
       }
 
-      // Clox: apply mode-specific model/reasoning when switching modes
+      // Kodo: apply mode-specific model/reasoning when switching modes
       const modeSelection = resolveModeModelSelection(mode, settings, providerStatuses);
       if (modeSelection) {
         setComposerDraftModelSelection(threadId, modeSelection);

@@ -243,7 +243,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  // ── Clox: ask/plan/code model selection persistence ──────────────────
+  // ── Kodo: ask/plan/code model selection persistence ──────────────────
 
   it.effect("persists askModelSelection and reads it back", () =>
     Effect.gen(function* () {

@@ -200,11 +200,11 @@ export function resolveAppModelSelectionState(
   };
 }
 
-// ── Clox: mode-aware model resolution ─────────────────────────────
+// ── Kodo: mode-aware model resolution ─────────────────────────────
 
 /**
  * Resolve the ModelSelection that should be active for a given interaction
- * mode based on the Clox ask/plan/code model settings.
+ * mode based on the Kodo ask/plan/code model settings.
  *
  * Returns `null` when no mode-specific override is configured, signalling
  * the caller should keep using the existing default model selection.
