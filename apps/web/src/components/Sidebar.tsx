@@ -2325,7 +2325,7 @@ export default function Sidebar() {
                 <SidebarMenuButton
                   size="sm"
                   className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground"
-                  onClick={() => void navigate({ to: "/settings" })}
+                  onClick={() => void navigate({ to: "/settings/general" })}
                 >
                   <SettingsIcon className="size-3.5" />
                   <span className="text-xs">Settings</span>
