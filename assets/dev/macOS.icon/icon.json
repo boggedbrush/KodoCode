@@ -1,0 +1,33 @@
+{
+  "fill": "automatic",
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "blueprint.svg",
+          "name": "blueprint",
+          "position-specializations": [
+            {
+              "idiom": "square",
+              "value": {
+                "scale": 4,
+                "translation-in-points": [0, 0]
+              }
+            }
+          ]
+        }
+      ],
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.5
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": ["macOS"]
+  }
+}

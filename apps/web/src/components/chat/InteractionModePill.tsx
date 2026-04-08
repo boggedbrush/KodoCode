@@ -7,6 +7,7 @@ const MODES = [
   { mode: "ask" as const, label: "Ask", color: INTERACTION_MODE_ACCENT_COLORS.ask },
   { mode: "plan" as const, label: "Plan", color: INTERACTION_MODE_ACCENT_COLORS.plan },
   { mode: "code" as const, label: "Code", color: INTERACTION_MODE_ACCENT_COLORS.code },
+  { mode: "review" as const, label: "Review", color: INTERACTION_MODE_ACCENT_COLORS.review },
 ];
 
 export const InteractionModePill = memo(function InteractionModePill({

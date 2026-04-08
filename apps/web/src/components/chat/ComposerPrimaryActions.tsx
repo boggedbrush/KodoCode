@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { type ProviderInteractionMode } from "@t3tools/contracts";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { INTERACTION_MODE_ACCENT_COLORS, KODO_PURPLE } from "../../modeColors";
@@ -25,6 +26,7 @@ interface ComposerPrimaryActionsProps {
   isConnecting: boolean;
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
+  interactionMode: ProviderInteractionMode;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
   onImplementPlanInNewThread: () => void;
@@ -56,6 +58,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isConnecting,
   isPreparingWorktree,
   hasSendableContent,
+  interactionMode,
   onPreviousPendingQuestion,
   onInterrupt,
   onImplementPlanInNewThread,
@@ -188,17 +191,28 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   return (
     <button
       type="submit"
-      className="flex h-9 w-9 enabled:cursor-pointer items-center justify-center rounded-full text-white transition-all duration-150 hover:scale-105 disabled:pointer-events-none disabled:opacity-30 disabled:hover:scale-100 sm:h-8 sm:w-8"
+      className={cn(
+        "flex h-9 enabled:cursor-pointer items-center justify-center rounded-full text-white transition-all duration-150 hover:scale-105 disabled:pointer-events-none disabled:opacity-30 disabled:hover:scale-100 sm:h-8",
+        interactionMode === "review" ? "px-4" : "w-9 sm:w-8",
+      )}
       style={{ backgroundColor: accentColor }}
-      disabled={isSendBusy || isConnecting || !hasSendableContent}
+      disabled={isSendBusy || isConnecting || (!hasSendableContent && interactionMode !== "review")}
       aria-label={
-        isConnecting
-          ? "Connecting"
-          : isPreparingWorktree
-            ? "Preparing worktree"
-            : isSendBusy
-              ? "Sending"
-              : "Send message"
+        interactionMode === "review"
+          ? isConnecting
+            ? "Connecting"
+            : isPreparingWorktree
+              ? "Preparing worktree"
+              : isSendBusy
+                ? "Reviewing"
+                : "Review"
+          : isConnecting
+            ? "Connecting"
+            : isPreparingWorktree
+              ? "Preparing worktree"
+              : isSendBusy
+                ? "Sending"
+                : "Send message"
       }
     >
       {isConnecting || isSendBusy ? (
@@ -220,6 +234,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             strokeDasharray="20 12"
           />
         </svg>
+      ) : interactionMode === "review" ? (
+        <span className="text-sm font-semibold">Review</span>
       ) : (
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
           <path

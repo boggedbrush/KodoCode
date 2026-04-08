@@ -1,4 +1,4 @@
-import { type MessageId, type TurnId } from "@t3tools/contracts";
+import { type MessageId, type ProviderInteractionMode, type TurnId } from "@t3tools/contracts";
 import {
   memo,
   useCallback,
@@ -56,6 +56,8 @@ import {
 import { cn } from "~/lib/utils";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
+import { parseReviewReport, type ReviewFinding } from "../../review";
+import { ReviewReportCard } from "./ReviewReportCard";
 import {
   buildInlineTerminalContextText,
   formatInlineTerminalContextLabel,
@@ -86,6 +88,10 @@ interface MessagesTimelineProps {
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
+  interactionMode?: ProviderInteractionMode | null;
+  onReviewImplementFinding?: (finding: ReviewFinding) => void;
+  onReviewImplementAll?: (findings: ReviewFinding[]) => void;
+  onReviewDismissAll?: () => void;
   onVirtualizerSnapshot?: (snapshot: {
     totalSize: number;
     measurements: ReadonlyArray<{
@@ -121,6 +127,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   resolvedTheme,
   timestampFormat,
   workspaceRoot,
+  interactionMode,
+  onReviewImplementFinding,
+  onReviewImplementAll,
+  onReviewDismissAll,
   onVirtualizerSnapshot,
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
@@ -443,6 +453,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "assistant" &&
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
+          const reviewReport =
+            interactionMode === "review" && !row.message.streaming
+              ? parseReviewReport(messageText)
+              : null;
           return (
             <>
               {row.showCompletionDivider && (
@@ -455,11 +469,22 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                 </div>
               )}
               <div className="min-w-0 px-1 py-0.5">
-                <ChatMarkdown
-                  text={messageText}
-                  cwd={markdownCwd}
-                  isStreaming={Boolean(row.message.streaming)}
-                />
+                {reviewReport ? (
+                  <ReviewReportCard
+                    report={reviewReport}
+                    {...(onReviewImplementFinding
+                      ? { onImplementFinding: onReviewImplementFinding }
+                      : {})}
+                    {...(onReviewImplementAll ? { onImplementAll: onReviewImplementAll } : {})}
+                    {...(onReviewDismissAll ? { onDismissAll: onReviewDismissAll } : {})}
+                  />
+                ) : (
+                  <ChatMarkdown
+                    text={messageText}
+                    cwd={markdownCwd}
+                    isStreaming={Boolean(row.message.streaming)}
+                  />
+                )}
                 {(() => {
                   const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
                   if (!turnSummary) return null;

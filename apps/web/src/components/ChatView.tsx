@@ -77,6 +77,12 @@ import {
   resolvePlanFollowUpSubmission,
 } from "../proposedPlan";
 import {
+  buildReviewRequestPrompt,
+  buildReviewImplementationPrompt,
+  type ReviewFinding,
+  type ReviewRequestDraft,
+} from "../review";
+import {
   DEFAULT_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
   DEFAULT_THREAD_TERMINAL_ID,
@@ -154,6 +160,7 @@ import {
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
+import { ReviewSetupDialog } from "./chat/ReviewSetupDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
 import { ContextWindowMeter } from "./chat/ContextWindowMeter";
@@ -688,6 +695,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
+  const [reviewSetupDraft, setReviewSetupDraft] = useState<ReviewRequestDraft>(() => ({
+    targetKind: "uncommitted",
+    targetRef: "",
+    focus: ["correctness"],
+  }));
+  const [isReviewSetupDialogOpen, setIsReviewSetupDialogOpen] = useState(false);
+  const [isSubmittingReviewSetup, setIsSubmittingReviewSetup] = useState(false);
   const [terminalLaunchContext, setTerminalLaunchContext] = useState<TerminalLaunchContext | null>(
     null,
   );
@@ -1484,6 +1498,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
           description: "Switch this thread into plan mode",
         },
         {
+          id: "slash:review",
+          type: "slash-command",
+          command: "review",
+          label: "/review",
+          description: "Switch this thread into review mode",
+        },
+        {
           id: "slash:default",
           type: "slash-command",
           command: "default",
@@ -2011,9 +2032,29 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ],
   );
   const toggleInteractionMode = useCallback(() => {
-    const next = interactionMode === "ask" ? "plan" : interactionMode === "plan" ? "code" : "ask";
+    const next =
+      interactionMode === "ask"
+        ? "plan"
+        : interactionMode === "plan"
+          ? "code"
+          : interactionMode === "code"
+            ? "review"
+            : "ask";
     handleInteractionModeChange(next);
   }, [handleInteractionModeChange, interactionMode]);
+  const closeReviewSetupDialog = useCallback(() => {
+    setIsReviewSetupDialogOpen(false);
+    setReviewSetupDraft({
+      targetKind: "uncommitted",
+      targetRef: "",
+      focus: ["correctness"],
+    });
+  }, []);
+  useEffect(() => {
+    if (interactionMode !== "review") {
+      closeReviewSetupDialog();
+    }
+  }, [closeReviewSetupDialog, interactionMode]);
   const modeAccentColor = getInteractionModeAccentColor(interactionMode);
   const toggleRuntimeMode = useCallback(() => {
     void handleRuntimeModeChange(
@@ -2882,6 +2923,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     e?.preventDefault();
     const api = readNativeApi();
     if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
+    if (interactionMode === "review") {
+      setIsReviewSetupDialogOpen(true);
+      return;
+    }
     if (activePendingProgress) {
       onAdvanceActivePendingUserInput();
       return;
@@ -3158,6 +3203,167 @@ export default function ChatView({ threadId }: ChatViewProps) {
       resetLocalDispatch();
     }
   };
+
+  const onSubmitReviewSetup = useCallback(async () => {
+    const api = readNativeApi();
+    if (
+      !api ||
+      !activeThread ||
+      !activeProject ||
+      isSendBusy ||
+      isConnecting ||
+      sendInFlightRef.current ||
+      isSubmittingReviewSetup
+    ) {
+      return;
+    }
+
+    const threadIdForSend = activeThread.id;
+    const supplementalInstructions = promptRef.current.trim();
+    const reviewPrompt = buildReviewRequestPrompt(reviewSetupDraft);
+    const outgoingReviewPrompt = formatOutgoingPrompt({
+      provider: selectedProvider,
+      model: selectedModel,
+      models: selectedProviderModels,
+      effort: selectedPromptEffort,
+      text: supplementalInstructions
+        ? `${reviewPrompt}\n\nAdditional instructions from the user:\n${supplementalInstructions}`
+        : reviewPrompt,
+    });
+    const messageIdForSend = newMessageId();
+    const messageCreatedAt = new Date().toISOString();
+    const title = truncate("Review");
+    const threadCreateModelSelection: ModelSelection = {
+      provider: selectedProvider,
+      model:
+        selectedModel ||
+        activeProject?.defaultModelSelection?.model ||
+        DEFAULT_MODEL_BY_PROVIDER.codex,
+      ...(selectedModelSelection.options ? { options: selectedModelSelection.options } : {}),
+    };
+
+    sendInFlightRef.current = true;
+    setIsSubmittingReviewSetup(true);
+    beginLocalDispatch({ preparingWorktree: false });
+    setThreadError(threadIdForSend, null);
+    setOptimisticUserMessages((existing) => [
+      ...existing,
+      {
+        id: messageIdForSend,
+        role: "user",
+        text: outgoingReviewPrompt,
+        createdAt: messageCreatedAt,
+        streaming: false,
+      },
+    ]);
+    shouldAutoScrollRef.current = true;
+    forceStickToBottom();
+
+    promptRef.current = "";
+    clearComposerDraftContent(threadIdForSend);
+    setComposerHighlightedItemId(null);
+    setComposerCursor(0);
+    setComposerTrigger(null);
+
+    let turnStartSucceeded = false;
+    try {
+      if (isServerThread) {
+        await persistThreadSettingsForNextTurn({
+          threadId: threadIdForSend,
+          createdAt: messageCreatedAt,
+          ...(selectedModel ? { modelSelection: selectedModelSelection } : {}),
+          runtimeMode,
+          interactionMode: "review",
+        });
+      }
+
+      const bootstrap = isLocalDraftThread
+        ? {
+            createThread: {
+              projectId: activeProject.id,
+              title,
+              modelSelection: threadCreateModelSelection,
+              runtimeMode,
+              interactionMode: "review" as const,
+              branch: activeThread.branch,
+              worktreePath: activeThread.worktreePath,
+              createdAt: activeThread.createdAt,
+            },
+          }
+        : undefined;
+
+      beginLocalDispatch({ preparingWorktree: false });
+      await api.orchestration.dispatchCommand({
+        type: "thread.turn.start",
+        commandId: newCommandId(),
+        threadId: threadIdForSend,
+        message: {
+          messageId: messageIdForSend,
+          role: "user",
+          text: outgoingReviewPrompt,
+          attachments: [],
+        },
+        modelSelection: selectedModelSelection,
+        titleSeed: title,
+        runtimeMode,
+        interactionMode: "review",
+        ...(bootstrap ? { bootstrap } : {}),
+        createdAt: messageCreatedAt,
+      });
+      turnStartSucceeded = true;
+      closeReviewSetupDialog();
+    } catch (err) {
+      setOptimisticUserMessages((existing) =>
+        existing.filter((message) => message.id !== messageIdForSend),
+      );
+      if (supplementalInstructions.length > 0) {
+        promptRef.current = supplementalInstructions;
+        setPrompt(supplementalInstructions);
+        setComposerCursor(
+          collapseExpandedComposerCursor(supplementalInstructions, supplementalInstructions.length),
+        );
+        setComposerTrigger(
+          detectComposerTrigger(supplementalInstructions, supplementalInstructions.length),
+        );
+      }
+      setThreadError(
+        threadIdForSend,
+        err instanceof Error ? err.message : "Failed to start review.",
+      );
+    }
+
+    sendInFlightRef.current = false;
+    setIsSubmittingReviewSetup(false);
+    if (!turnStartSucceeded) {
+      resetLocalDispatch();
+    }
+  }, [
+    activeProject,
+    activeThread,
+    beginLocalDispatch,
+    closeReviewSetupDialog,
+    forceStickToBottom,
+    isConnecting,
+    isLocalDraftThread,
+    isSubmittingReviewSetup,
+    isSendBusy,
+    setOptimisticUserMessages,
+    persistThreadSettingsForNextTurn,
+    resetLocalDispatch,
+    runtimeMode,
+    selectedModel,
+    selectedModelSelection,
+    selectedProvider,
+    selectedProviderModels,
+    selectedPromptEffort,
+    setComposerHighlightedItemId,
+    setComposerCursor,
+    setComposerTrigger,
+    setThreadError,
+    reviewSetupDraft,
+    setPrompt,
+    isServerThread,
+  ]);
 
   const onInterrupt = async () => {
     const api = readNativeApi();
@@ -3569,6 +3775,146 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedModel,
   ]);
 
+  const onImplementReviewFindingsInNewThread = useCallback(
+    async (findings: ReviewFinding[]) => {
+      const api = readNativeApi();
+      if (
+        !api ||
+        !activeThread ||
+        !activeProject ||
+        !isServerThread ||
+        isSendBusy ||
+        isConnecting ||
+        sendInFlightRef.current
+      ) {
+        return;
+      }
+
+      const implementableFindings = findings.filter((finding) => finding.canImplement);
+      if (implementableFindings.length === 0) {
+        return;
+      }
+
+      const confirmed = await api.dialogs.confirm(
+        [
+          "Implement the selected review findings in a new code thread?",
+          "",
+          "Findings:",
+          ...implementableFindings.flatMap((finding) => [
+            `- ${finding.title}`,
+            finding.affectedFiles.length > 0
+              ? `  Files: ${finding.affectedFiles.join(", ")}`
+              : "  Files: not listed",
+          ]),
+          "",
+          "The implementation will stay focused on the approved findings.",
+        ].join("\n"),
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      const createdAt = new Date().toISOString();
+      const nextThreadId = newThreadId();
+      const implementationPrompt = buildReviewImplementationPrompt({
+        findingTitles: implementableFindings.map((finding) => finding.title),
+        targetSummary: `Implement ${implementableFindings.length} approved review finding(s) from ${activeThread.title}.`,
+      });
+      const outgoingImplementationPrompt = formatOutgoingPrompt({
+        provider: selectedProvider,
+        model: selectedModel,
+        models: selectedProviderModels,
+        effort: selectedPromptEffort,
+        text: implementationPrompt,
+      });
+      const nextThreadTitle = truncate(`Review fixes: ${activeThread.title}`);
+      const nextThreadModelSelection: ModelSelection = selectedModelSelection;
+
+      sendInFlightRef.current = true;
+      beginLocalDispatch({ preparingWorktree: false });
+      const finish = () => {
+        sendInFlightRef.current = false;
+        resetLocalDispatch();
+      };
+
+      await api.orchestration
+        .dispatchCommand({
+          type: "thread.create",
+          commandId: newCommandId(),
+          threadId: nextThreadId,
+          projectId: activeProject.id,
+          title: nextThreadTitle,
+          modelSelection: nextThreadModelSelection,
+          runtimeMode,
+          interactionMode: "default",
+          branch: activeThread.branch,
+          worktreePath: activeThread.worktreePath,
+          createdAt,
+        })
+        .then(() => {
+          return api.orchestration.dispatchCommand({
+            type: "thread.turn.start",
+            commandId: newCommandId(),
+            threadId: nextThreadId,
+            message: {
+              messageId: newMessageId(),
+              role: "user",
+              text: outgoingImplementationPrompt,
+              attachments: [],
+            },
+            modelSelection: selectedModelSelection,
+            titleSeed: nextThreadTitle,
+            runtimeMode,
+            interactionMode: "default",
+            createdAt,
+          });
+        })
+        .then(() => {
+          return waitForStartedServerThread(nextThreadId);
+        })
+        .then(() => {
+          return navigate({
+            to: "/$threadId",
+            params: { threadId: nextThreadId },
+          });
+        })
+        .catch(async (err) => {
+          await api.orchestration
+            .dispatchCommand({
+              type: "thread.delete",
+              commandId: newCommandId(),
+              threadId: nextThreadId,
+            })
+            .catch(() => undefined);
+          toastManager.add({
+            type: "error",
+            title: "Could not start review implementation thread",
+            description:
+              err instanceof Error
+                ? err.message
+                : "An error occurred while creating the new thread.",
+          });
+        })
+        .then(finish, finish);
+    },
+    [
+      activeProject,
+      activeThread,
+      beginLocalDispatch,
+      isConnecting,
+      isSendBusy,
+      isServerThread,
+      navigate,
+      resetLocalDispatch,
+      runtimeMode,
+      selectedPromptEffort,
+      selectedModelSelection,
+      selectedProvider,
+      selectedProviderModels,
+      selectedModel,
+    ],
+  );
+
   const onProviderModelSelect = useCallback(
     (provider: ProviderKind, model: string) => {
       if (!activeThread) return;
@@ -3767,7 +4113,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           return;
         }
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
+        void handleInteractionModeChange(
+          item.command === "plan" ? "plan" : item.command === "review" ? "review" : "default",
+        );
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
@@ -4050,6 +4398,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
                 workspaceRoot={activeWorkspaceRoot}
+                interactionMode={interactionMode}
+                onReviewImplementFinding={(finding) =>
+                  void onImplementReviewFindingsInNewThread([finding])
+                }
+                onReviewImplementAll={(findings) =>
+                  void onImplementReviewFindingsInNewThread(findings)
+                }
               />
             </div>
 
@@ -4437,6 +4792,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           isConnecting={isConnecting}
                           isPreparingWorktree={isPreparingWorktree}
                           hasSendableContent={composerSendState.hasSendableContent}
+                          interactionMode={interactionMode}
                           onPreviousPendingQuestion={onPreviousActivePendingUserInputQuestion}
                           onInterrupt={() => void onInterrupt()}
                           onImplementPlanInNewThread={() => void onImplementPlanInNewThread()}
@@ -4473,6 +4829,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 }
               }}
               onPrepared={handlePreparedPullRequestThread}
+            />
+          ) : null}
+          {isReviewSetupDialogOpen ? (
+            <ReviewSetupDialog
+              open
+              draft={reviewSetupDraft}
+              isSubmitting={isSubmittingReviewSetup}
+              onChangeDraft={setReviewSetupDraft}
+              onClose={closeReviewSetupDialog}
+              onSubmit={() => void onSubmitReviewSetup()}
             />
           ) : null}
         </div>

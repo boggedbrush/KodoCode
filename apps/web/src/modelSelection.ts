@@ -219,7 +219,9 @@ export function resolveModeModelSelection(
       ? settings.askModelSelection
       : mode === "plan"
         ? settings.planModelSelection
-        : settings.codeModelSelection;
+        : mode === "review"
+          ? settings.reviewModelSelection
+          : settings.codeModelSelection;
   if (!modeSelection) {
     return null;
   }

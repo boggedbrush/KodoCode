@@ -645,6 +645,18 @@ export function GeneralSettingsPanel() {
   );
   const isCodeModelDirty = codeSelection !== null && codeSelection !== undefined;
 
+  const reviewSelection = settings.reviewModelSelection;
+  const reviewProvider = reviewSelection?.provider ?? "codex";
+  const reviewModel = reviewSelection?.model ?? "";
+  const reviewModelOptions = reviewSelection?.options;
+  const reviewModelOptionsByProvider = getCustomModelOptionsByProvider(
+    settings,
+    serverProviders,
+    reviewProvider,
+    reviewModel || undefined,
+  );
+  const isReviewModelDirty = reviewSelection !== null && reviewSelection !== undefined;
+
   const openInPreferredEditor = useCallback(
     (target: "keybindings" | "logsDirectory", path: string | null, failureMessage: string) => {
       if (!path) return;
@@ -1335,6 +1347,66 @@ export function GeneralSettingsPanel() {
                       {
                         provider: codeProvider,
                         model: codeModel || "gpt-5.4",
+                        ...(nextOptions ? { options: nextOptions } : {}),
+                      },
+                      settings,
+                      serverProviders,
+                    ),
+                  });
+                }}
+              />
+            </div>
+          }
+        />
+
+        <SettingsRow
+          title="Review mode model"
+          description="Model and reasoning level used when in Review mode. Leave unset to use the default model."
+          resetAction={
+            isReviewModelDirty ? (
+              <SettingResetButton
+                label="review model"
+                onClick={() => updateSettings({ reviewModelSelection: null })}
+              />
+            ) : null
+          }
+          control={
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <ProviderModelPicker
+                provider={reviewProvider}
+                model={reviewModel}
+                lockedProvider={null}
+                providers={serverProviders}
+                modelOptionsByProvider={reviewModelOptionsByProvider}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                onProviderModelChange={(provider, model) => {
+                  updateSettings({
+                    reviewModelSelection: resolveModeModelSelectionState(
+                      { provider, model },
+                      settings,
+                      serverProviders,
+                    ),
+                  });
+                }}
+              />
+              <TraitsPicker
+                provider={reviewProvider}
+                models={serverProviders.find((p) => p.provider === reviewProvider)?.models ?? []}
+                model={reviewModel}
+                prompt=""
+                onPromptChange={() => {}}
+                modelOptions={reviewModelOptions}
+                allowPromptInjectedEffort={false}
+                triggerVariant="outline"
+                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+                fallbackModel={DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[reviewProvider]}
+                onModelOptionsChange={(nextOptions) => {
+                  updateSettings({
+                    reviewModelSelection: resolveModeModelSelectionState(
+                      {
+                        provider: reviewProvider,
+                        model: reviewModel || "gpt-5.4",
                         ...(nextOptions ? { options: nextOptions } : {}),
                       },
                       settings,

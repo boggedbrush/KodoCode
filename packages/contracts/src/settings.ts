@@ -102,11 +102,12 @@ export const ServerSettings = Schema.Struct({
 
   // ── Kodo: per-mode model selections ────────────────────────────
   // When set, these override the composer model selection for the
-  // corresponding Ask / Plan / Code mode.  When unset the existing default
+  // corresponding Ask / Plan / Code / Review mode.  When unset the existing default
   // model behavior is preserved (no regression).
   askModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
   planModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
   codeModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
+  reviewModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
 
   // Provider specific settings
   providers: Schema.Struct({
@@ -190,6 +191,7 @@ export const ServerSettingsPatch = Schema.Struct({
   askModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
   planModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
   codeModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
+  reviewModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
 
   observability: Schema.optionalKey(
     Schema.Struct({

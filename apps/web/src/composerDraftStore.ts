@@ -788,6 +788,7 @@ function normalizePersistedDraftThreads(
             : DEFAULT_RUNTIME_MODE,
         interactionMode:
           candidateDraftThread.interactionMode === "plan" ||
+          candidateDraftThread.interactionMode === "review" ||
           candidateDraftThread.interactionMode === "default"
             ? candidateDraftThread.interactionMode
             : DEFAULT_INTERACTION_MODE,
@@ -872,7 +873,9 @@ function normalizePersistedDraftsByThreadId(
         ? draftCandidate.runtimeMode
         : null;
     const interactionMode =
-      draftCandidate.interactionMode === "plan" || draftCandidate.interactionMode === "default"
+      draftCandidate.interactionMode === "plan" ||
+      draftCandidate.interactionMode === "review" ||
+      draftCandidate.interactionMode === "default"
         ? draftCandidate.interactionMode
         : null;
     const prompt = ensureInlineTerminalContextPlaceholders(
@@ -1832,6 +1835,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
         const nextInteractionMode =
           interactionMode === "ask" ||
           interactionMode === "plan" ||
+          interactionMode === "review" ||
           interactionMode === "code" ||
           interactionMode === "default"
             ? interactionMode

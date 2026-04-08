@@ -4,6 +4,7 @@ export const INTERACTION_MODE_ACCENT_COLORS = {
   ask: "#64B5F6",
   plan: "#c8954a",
   code: "#5236CC",
+  review: "#4DB6AC",
   default: "#5236CC",
 } as const satisfies Record<ProviderInteractionMode, string>;
 

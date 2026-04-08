@@ -1,4 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
+import { ProviderInteractionMode } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import { INTERACTION_MODE_ACCENT_COLORS } from "../../modeColors";
@@ -19,6 +20,7 @@ describe("ComposerPrimaryActions", () => {
         isConnecting={false}
         isPreparingWorktree={false}
         hasSendableContent={true}
+        interactionMode={"default" as ProviderInteractionMode}
         onPreviousPendingQuestion={() => {}}
         onInterrupt={() => {}}
         onImplementPlanInNewThread={() => {}}
@@ -50,6 +52,7 @@ describe("ComposerPrimaryActions", () => {
         isConnecting={false}
         isPreparingWorktree={false}
         hasSendableContent={true}
+        interactionMode={"default" as ProviderInteractionMode}
         onPreviousPendingQuestion={() => {}}
         onInterrupt={() => {}}
         onImplementPlanInNewThread={() => {}}
@@ -59,5 +62,29 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).toContain("Submit answers");
     expect(markup).toContain(`background-color:${INTERACTION_MODE_ACCENT_COLORS.plan}`);
     expect(markup).toContain(`border-color:${INTERACTION_MODE_ACCENT_COLORS.plan}`);
+  });
+
+  it("renders a Review button when review mode is active", () => {
+    const markup = renderToStaticMarkup(
+      <ComposerPrimaryActions
+        compact={false}
+        accentColor={INTERACTION_MODE_ACCENT_COLORS.review}
+        pendingActionAccentColor={INTERACTION_MODE_ACCENT_COLORS.review}
+        pendingAction={null}
+        isRunning={false}
+        showPlanFollowUpPrompt={false}
+        promptHasText={true}
+        isSendBusy={false}
+        isConnecting={false}
+        isPreparingWorktree={false}
+        hasSendableContent={true}
+        interactionMode={"review" as ProviderInteractionMode}
+        onPreviousPendingQuestion={() => {}}
+        onInterrupt={() => {}}
+        onImplementPlanInNewThread={() => {}}
+      />,
+    );
+
+    expect(markup).toContain(">Review<");
   });
 });

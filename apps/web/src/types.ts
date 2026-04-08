@@ -61,6 +61,24 @@ export interface ProposedPlan {
   updatedAt: string;
 }
 
+export type ReviewSeverity = "critical" | "high" | "medium" | "low" | "info";
+
+export interface ReviewFinding {
+  severity: ReviewSeverity;
+  title: string;
+  affectedFiles: string[];
+  rationale: string;
+  suggestedFix: string;
+  canImplement: boolean;
+}
+
+export interface ReviewReport {
+  summary: string;
+  findings: ReviewFinding[];
+  openQuestions: string[];
+  verdict: string;
+}
+
 export interface TurnDiffFileChange {
   path: string;
   kind?: string | undefined;

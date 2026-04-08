@@ -289,6 +289,34 @@ The \`request_user_input\` tool is unavailable in Default mode. If you call it w
 In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
 </collaboration_mode>`;
 
+export const CODEX_REVIEW_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Review Mode (Read-only)
+
+You are in Review mode. You must not modify files.
+
+Your job is to review the provided changes as a senior code reviewer.
+
+Prioritize:
+1. correctness bugs
+2. regressions
+3. edge cases
+4. security or privacy risks
+5. data-loss risks
+6. performance issues caused by the change
+7. mismatches between likely intent and actual implementation
+
+Rules:
+- Be concise.
+- Prefer high-signal findings only.
+- Do not comment on style unless it affects correctness or maintainability.
+- Ground every finding in the supplied diff or visible repo state.
+- Ask clarifying questions if missing context blocks a reliable conclusion.
+- When appropriate, present a short implementation plan for how accepted findings should be fixed.
+- Do not rewrite code unless explicitly asked to implement fixes.
+- Return a compact structured review result with summary, findings, open questions, and verdict.
+
+If you need clarification, use request_user_input.
+</collaboration_mode>`;
+
 function mapCodexRuntimeMode(runtimeMode: RuntimeMode): {
   readonly approvalPolicy: "on-request" | "never";
   readonly sandbox: "workspace-write" | "danger-full-access";
@@ -332,7 +360,7 @@ export function normalizeCodexModelSlug(
 }
 
 function buildCodexCollaborationMode(input: {
-  readonly interactionMode?: "default" | "plan" | "ask" | "code";
+  readonly interactionMode?: "default" | "plan" | "ask" | "code" | "review";
   readonly model?: string;
   readonly effort?: string;
 }):
@@ -348,7 +376,8 @@ function buildCodexCollaborationMode(input: {
   if (input.interactionMode === undefined) {
     return undefined;
   }
-  const codexMode = input.interactionMode === "plan" ? "plan" : "default";
+  const codexMode =
+    input.interactionMode === "plan" || input.interactionMode === "review" ? "plan" : "default";
   const model = normalizeCodexModelSlug(input.model) ?? "gpt-5.3-codex";
   return {
     mode: codexMode,
@@ -358,7 +387,9 @@ function buildCodexCollaborationMode(input: {
       developer_instructions:
         input.interactionMode === "plan"
           ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
-          : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
+          : input.interactionMode === "review"
+            ? CODEX_REVIEW_MODE_DEVELOPER_INSTRUCTIONS
+            : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
     },
   };
 }
