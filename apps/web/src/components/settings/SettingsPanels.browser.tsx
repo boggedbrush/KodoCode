@@ -8,7 +8,7 @@ import { render } from "vitest-browser-react";
 import { __resetNativeApiForTests } from "../../nativeApi";
 import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
 import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/serverState";
-import { SettingsAboutPanel, SettingsModelsPanel } from "./SettingsPanels";
+import { SettingsAboutPanel, SettingsGitPanel } from "./SettingsPanels";
 
 function createBaseServerConfig(): ServerConfig {
   return {
@@ -103,7 +103,7 @@ describe("Settings panels", () => {
 
     await render(
       <AppAtomRegistryProvider>
-        <SettingsModelsPanel />
+        <SettingsGitPanel />
       </AppAtomRegistryProvider>,
     );
 

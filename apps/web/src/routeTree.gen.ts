@@ -14,7 +14,9 @@ import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
 import { Route as SettingsProvidersRouteImport } from './routes/settings.providers'
 import { Route as SettingsModelsRouteImport } from './routes/settings.models'
+import { Route as SettingsGitRouteImport } from './routes/settings.git'
 import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
+import { Route as SettingsEnhanceRouteImport } from './routes/settings.enhance'
 import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
 import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
 import { Route as SettingsAdvancedRouteImport } from './routes/settings.advanced'
@@ -45,9 +47,19 @@ const SettingsModelsRoute = SettingsModelsRouteImport.update({
   path: '/models',
   getParentRoute: () => SettingsRoute,
 } as any)
+const SettingsGitRoute = SettingsGitRouteImport.update({
+  id: '/git',
+  path: '/git',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
   id: '/general',
   path: '/general',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsEnhanceRoute = SettingsEnhanceRouteImport.update({
+  id: '/enhance',
+  path: '/enhance',
   getParentRoute: () => SettingsRoute,
 } as any)
 const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
@@ -84,7 +96,9 @@ export interface FileRoutesByFullPath {
   '/settings/advanced': typeof SettingsAdvancedRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/enhance': typeof SettingsEnhanceRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/git': typeof SettingsGitRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
 }
@@ -95,7 +109,9 @@ export interface FileRoutesByTo {
   '/settings/advanced': typeof SettingsAdvancedRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/enhance': typeof SettingsEnhanceRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/git': typeof SettingsGitRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/': typeof ChatIndexRoute
@@ -109,7 +125,9 @@ export interface FileRoutesById {
   '/settings/advanced': typeof SettingsAdvancedRoute
   '/settings/appearance': typeof SettingsAppearanceRoute
   '/settings/archived': typeof SettingsArchivedRoute
+  '/settings/enhance': typeof SettingsEnhanceRoute
   '/settings/general': typeof SettingsGeneralRoute
+  '/settings/git': typeof SettingsGitRoute
   '/settings/models': typeof SettingsModelsRoute
   '/settings/providers': typeof SettingsProvidersRoute
   '/_chat/': typeof ChatIndexRoute
@@ -124,7 +142,9 @@ export interface FileRouteTypes {
     | '/settings/advanced'
     | '/settings/appearance'
     | '/settings/archived'
+    | '/settings/enhance'
     | '/settings/general'
+    | '/settings/git'
     | '/settings/models'
     | '/settings/providers'
   fileRoutesByTo: FileRoutesByTo
@@ -135,7 +155,9 @@ export interface FileRouteTypes {
     | '/settings/advanced'
     | '/settings/appearance'
     | '/settings/archived'
+    | '/settings/enhance'
     | '/settings/general'
+    | '/settings/git'
     | '/settings/models'
     | '/settings/providers'
     | '/'
@@ -148,7 +170,9 @@ export interface FileRouteTypes {
     | '/settings/advanced'
     | '/settings/appearance'
     | '/settings/archived'
+    | '/settings/enhance'
     | '/settings/general'
+    | '/settings/git'
     | '/settings/models'
     | '/settings/providers'
     | '/_chat/'
@@ -196,11 +220,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsModelsRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/settings/git': {
+      id: '/settings/git'
+      path: '/git'
+      fullPath: '/settings/git'
+      preLoaderRoute: typeof SettingsGitRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/settings/general': {
       id: '/settings/general'
       path: '/general'
       fullPath: '/settings/general'
       preLoaderRoute: typeof SettingsGeneralRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/enhance': {
+      id: '/settings/enhance'
+      path: '/enhance'
+      fullPath: '/settings/enhance'
+      preLoaderRoute: typeof SettingsEnhanceRouteImport
       parentRoute: typeof SettingsRoute
     }
     '/settings/archived': {
@@ -258,7 +296,9 @@ interface SettingsRouteChildren {
   SettingsAdvancedRoute: typeof SettingsAdvancedRoute
   SettingsAppearanceRoute: typeof SettingsAppearanceRoute
   SettingsArchivedRoute: typeof SettingsArchivedRoute
+  SettingsEnhanceRoute: typeof SettingsEnhanceRoute
   SettingsGeneralRoute: typeof SettingsGeneralRoute
+  SettingsGitRoute: typeof SettingsGitRoute
   SettingsModelsRoute: typeof SettingsModelsRoute
   SettingsProvidersRoute: typeof SettingsProvidersRoute
 }
@@ -268,7 +308,9 @@ const SettingsRouteChildren: SettingsRouteChildren = {
   SettingsAdvancedRoute: SettingsAdvancedRoute,
   SettingsAppearanceRoute: SettingsAppearanceRoute,
   SettingsArchivedRoute: SettingsArchivedRoute,
+  SettingsEnhanceRoute: SettingsEnhanceRoute,
   SettingsGeneralRoute: SettingsGeneralRoute,
+  SettingsGitRoute: SettingsGitRoute,
   SettingsModelsRoute: SettingsModelsRoute,
   SettingsProvidersRoute: SettingsProvidersRoute,
 }

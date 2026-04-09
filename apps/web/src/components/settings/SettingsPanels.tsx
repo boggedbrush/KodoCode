@@ -1,6 +1,8 @@
 export { GeneralSettingsPanel, useSettingsRestore } from "./SettingsGeneralPanel";
 export { SettingsAppearancePanel } from "./SettingsAppearancePanel";
 export { SettingsModelsPanel } from "./SettingsModelsPanel";
+export { SettingsGitPanel } from "./SettingsGitPanel";
+export { SettingsEnhancePanel } from "./SettingsEnhancePanel";
 export { SettingsProvidersPanel } from "./SettingsProvidersPanel";
 export { SettingsAdvancedPanel } from "./SettingsAdvancedPanel";
 export { SettingsAboutPanel } from "./SettingsAboutPanel";

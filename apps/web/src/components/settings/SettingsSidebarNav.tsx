@@ -3,13 +3,16 @@ import {
   ArchiveIcon,
   ArrowLeftIcon,
   CircleDashedIcon,
+  GitBranchIcon,
   MonitorCogIcon,
   PaletteIcon,
   Settings2Icon,
-  SparklesIcon,
+  SlidersHorizontalIcon,
   WrenchIcon,
 } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
+import { cn } from "~/lib/utils";
+import { EnhanceGlyph } from "../chat/EnhanceGlyph";
 
 import {
   SidebarContent,
@@ -24,6 +27,8 @@ import {
 export type SettingsSectionPath =
   | "/settings/general"
   | "/settings/appearance"
+  | "/settings/git"
+  | "/settings/enhance"
   | "/settings/models"
   | "/settings/providers"
   | "/settings/advanced"
@@ -34,10 +39,18 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   label: string;
   to: SettingsSectionPath;
   icon: ComponentType<{ className?: string }>;
+  iconClassName?: string;
 }> = [
   { label: "General", to: "/settings/general", icon: Settings2Icon },
   { label: "Appearance", to: "/settings/appearance", icon: PaletteIcon },
-  { label: "Models", to: "/settings/models", icon: SparklesIcon },
+  { label: "Git", to: "/settings/git", icon: GitBranchIcon },
+  {
+    label: "Enhance",
+    to: "/settings/enhance",
+    icon: ({ className }) => <EnhanceGlyph monochrome {...(className ? { className } : {})} />,
+    iconClassName: "-ml-0.5 size-5",
+  },
+  { label: "Models", to: "/settings/models", icon: SlidersHorizontalIcon },
   { label: "Providers", to: "/settings/providers", icon: CircleDashedIcon },
   { label: "Advanced", to: "/settings/advanced", icon: WrenchIcon },
   { label: "About", to: "/settings/about", icon: MonitorCogIcon },
@@ -68,11 +81,12 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     onClick={() => void navigate({ to: item.to, replace: true })}
                   >
                     <Icon
-                      className={
+                      className={cn(
                         isActive
                           ? "size-4 shrink-0 text-foreground"
-                          : "size-4 shrink-0 text-muted-foreground"
-                      }
+                          : "size-4 shrink-0 text-muted-foreground",
+                        item.iconClassName,
+                      )}
                     />
                     <span className="truncate">{item.label}</span>
                   </SidebarMenuButton>
