@@ -1,4 +1,5 @@
 import { DEFAULT_SERVER_SETTINGS, WS_METHODS } from "@t3tools/contracts";
+import { Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -598,6 +599,110 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("does not retry stream subscriptions after application-level failures", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let attempts = 0;
+
+    const unsubscribe = transport.subscribe(
+      () =>
+        Stream.suspend(() => {
+          attempts += 1;
+          return Stream.fail(new Error("Git command failed in GitCore.statusDetails"));
+        }),
+      vi.fn(),
+      { retryDelay: 10 },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    getSocket().open();
+
+    await waitFor(() => {
+      expect(attempts).toBe(1);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(attempts).toBe(1);
+    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription failed", {
+      error: "Git command failed in GitCore.statusDetails",
+    });
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      "WebSocket RPC subscription disconnected",
+      expect.anything(),
+    );
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
+  it("keeps retrying stream subscriptions after transport failures", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let attempts = 0;
+
+    const unsubscribe = transport.subscribe(
+      () =>
+        Stream.suspend(() => {
+          attempts += 1;
+          return Stream.fail(new Error("SocketCloseError: WebSocket closed"));
+        }),
+      vi.fn(),
+      { retryDelay: 10 },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    getSocket().open();
+
+    await waitFor(() => {
+      expect(attempts).toBeGreaterThanOrEqual(2);
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription disconnected", {
+      error: "SocketCloseError: WebSocket closed",
+    });
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
+  it("logs a transport disconnect once even when multiple subscriptions fail together", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const unsubscribeA = transport.subscribe(
+      () => Stream.fail(new Error("SocketCloseError: 1006")),
+      vi.fn(),
+      { retryDelay: 10 },
+    );
+    const unsubscribeB = transport.subscribe(
+      () => Stream.fail(new Error("SocketCloseError: 1006")),
+      vi.fn(),
+      { retryDelay: 10 },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    getSocket().open();
+
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    });
+    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription disconnected", {
+      error: "SocketCloseError: 1006",
+    });
+
+    unsubscribeA();
+    unsubscribeB();
+    await transport.dispose();
+  });
   it("streams finite request events without re-subscribing", async () => {
     const transport = new WsTransport("ws://localhost:3020");
     const listener = vi.fn();

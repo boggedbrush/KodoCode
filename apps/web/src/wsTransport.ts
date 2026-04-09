@@ -17,6 +17,7 @@ import {
   makeWsRpcProtocolClient,
   type WsRpcProtocolClient,
 } from "./rpc/protocol";
+import { isTransportConnectionErrorMessage } from "./rpc/transportError";
 
 interface SubscribeOptions {
   readonly retryDelay?: Duration.Input;
@@ -47,6 +48,7 @@ export class WsTransport {
   private readonly tracingReady: Promise<void>;
   private readonly url: string | undefined;
   private disposed = false;
+  private hasReportedTransportDisconnect = false;
   private reconnectChain: Promise<void> = Promise.resolve();
   private session: TransportSession;
 
@@ -132,6 +134,7 @@ export class WsTransport {
             listener,
             () => active,
             () => {
+              this.hasReportedTransportDisconnect = false;
               hasReceivedValue = true;
             },
           );
@@ -144,9 +147,20 @@ export class WsTransport {
             return;
           }
 
-          console.warn("WebSocket RPC subscription disconnected", {
-            error: formatErrorMessage(error),
-          });
+          const formattedError = formatErrorMessage(error);
+          if (!isTransportConnectionErrorMessage(formattedError)) {
+            console.warn("WebSocket RPC subscription failed", {
+              error: formattedError,
+            });
+            return;
+          }
+
+          if (!this.hasReportedTransportDisconnect) {
+            console.warn("WebSocket RPC subscription disconnected", {
+              error: formattedError,
+            });
+          }
+          this.hasReportedTransportDisconnect = true;
           await sleep(retryDelayMs);
         }
       }
