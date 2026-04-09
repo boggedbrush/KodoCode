@@ -53,6 +53,7 @@ import {
 } from "./checkpointing/Services/CheckpointDiffQuery.ts";
 import { GitCore, type GitCoreShape } from "./git/Services/GitCore.ts";
 import { GitManager, type GitManagerShape } from "./git/Services/GitManager.ts";
+import { TextGeneration, type TextGenerationShape } from "./git/Services/TextGeneration.ts";
 import { GitStatusBroadcasterLive } from "./git/Layers/GitStatusBroadcaster.ts";
 import { Keybindings, type KeybindingsShape } from "./keybindings.ts";
 import { Open, type OpenShape } from "./open.ts";
@@ -270,6 +271,7 @@ const buildAppUnderTest = (options?: {
     browserTraceCollector?: Partial<BrowserTraceCollectorShape>;
     serverLifecycleEvents?: Partial<ServerLifecycleEventsShape>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
+    textGeneration?: Partial<TextGenerationShape>;
   };
 }) =>
   Effect.gen(function* () {
@@ -306,6 +308,14 @@ const buildAppUnderTest = (options?: {
     const layerConfig = Layer.succeed(ServerConfig, config);
     const gitManagerLayer = Layer.mock(GitManager)({
       ...options?.layers?.gitManager,
+    });
+    const textGenerationLayer = Layer.mock(TextGeneration)({
+      generateCommitMessage: () => Effect.succeed({ subject: "Test commit message", body: "" }),
+      generatePrContent: () => Effect.succeed({ title: "Test pull request", body: "" }),
+      generateBranchName: () => Effect.succeed({ branch: "test-branch" }),
+      generateThreadTitle: () => Effect.succeed({ title: "Test thread" }),
+      generatePromptEnhancement: (input) => Effect.succeed({ prompt: input.prompt }),
+      ...options?.layers?.textGeneration,
     });
     const gitStatusBroadcasterLayer = GitStatusBroadcasterLive.pipe(Layer.provide(gitManagerLayer));
 
@@ -416,6 +426,7 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.serverRuntimeStartup,
         }),
       ),
+      Layer.provide(textGenerationLayer),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(layerConfig),

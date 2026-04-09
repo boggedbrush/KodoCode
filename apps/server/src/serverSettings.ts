@@ -3,7 +3,7 @@
  *
  * Owns persistence, validation, and change notification of settings that affect
  * server-side behavior (binary paths, streaming mode, env mode, custom models,
- * text generation model selection).
+ * text generation model selection, prompt enhancement model selection).
  *
  * Follows the same pattern as `keybindings.ts`: JSON file + Cache + PubSub +
  * Semaphore + FileSystem.watch for concurrency and external edit detection.
@@ -100,29 +100,43 @@ const PROVIDER_ORDER: readonly ProviderKind[] = ["codex", "claudeAgent"];
  * persisted preference is preserved for when a provider is re-enabled.
  */
 function resolveTextGenerationProvider(settings: ServerSettings): ServerSettings {
-  const selection = settings.textGenerationModelSelection;
+  const selection = resolveModelSelectionProvider(settings, settings.textGenerationModelSelection);
+  return selection ? { ...settings, textGenerationModelSelection: selection } : settings;
+}
+
+function resolvePromptEnhanceProvider(settings: ServerSettings): ServerSettings {
+  const selection = resolveModelSelectionProvider(settings, settings.promptEnhanceModelSelection);
+  return selection ? { ...settings, promptEnhanceModelSelection: selection } : settings;
+}
+
+function resolveModelSelectionProvider(
+  settings: ServerSettings,
+  selection: ModelSelection,
+): ModelSelection | null {
   if (settings.providers[selection.provider].enabled) {
-    return settings;
+    return selection;
   }
 
   const fallback = PROVIDER_ORDER.find((p) => settings.providers[p].enabled);
   if (!fallback) {
     // No providers enabled — return as-is; callers will report the error.
-    return settings;
+    return null;
   }
 
   return {
-    ...settings,
-    textGenerationModelSelection: {
-      provider: fallback,
-      model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback],
-    } as ModelSelection,
-  };
+    provider: fallback,
+    model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[fallback],
+  } as ModelSelection;
+}
+
+function resolveEnabledModelSelections(settings: ServerSettings): ServerSettings {
+  return resolvePromptEnhanceProvider(resolveTextGenerationProvider(settings));
 }
 
 // Values under these keys are compared as a whole — never stripped field-by-field.
 const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "textGenerationModelSelection",
+  "promptEnhanceModelSelection",
   "askModelSelection",
   "planModelSelection",
   "codeModelSelection",
@@ -314,7 +328,7 @@ const makeServerSettings = Effect.gen(function* () {
   return {
     start,
     ready: Deferred.await(startedDeferred),
-    getSettings: getSettingsFromCache.pipe(Effect.map(resolveTextGenerationProvider)),
+    getSettings: getSettingsFromCache.pipe(Effect.map(resolveEnabledModelSelections)),
     updateSettings: (patch) =>
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
@@ -332,11 +346,11 @@ const makeServerSettings = Effect.gen(function* () {
           yield* writeSettingsAtomically(next);
           yield* Cache.set(settingsCache, cacheKey, next);
           yield* emitChange(next);
-          return resolveTextGenerationProvider(next);
+          return resolveEnabledModelSelections(next);
         }),
       ),
     get streamChanges() {
-      return Stream.fromPubSub(changesPubSub).pipe(Stream.map(resolveTextGenerationProvider));
+      return Stream.fromPubSub(changesPubSub).pipe(Stream.map(resolveEnabledModelSelections));
     },
   } satisfies ServerSettingsShape;
 });

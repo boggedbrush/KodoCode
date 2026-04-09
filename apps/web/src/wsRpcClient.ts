@@ -5,6 +5,8 @@ import {
   type GitStatusResult,
   type GitStatusStreamEvent,
   type NativeApi,
+  type PromptEnhanceInput,
+  type PromptEnhanceResult,
   ORCHESTRATION_WS_METHODS,
   type ServerSettingsPatch,
   WS_METHODS,
@@ -96,6 +98,7 @@ export interface WsRpcClient {
     readonly updateSettings: (
       patch: ServerSettingsPatch,
     ) => ReturnType<RpcUnaryMethod<typeof WS_METHODS.serverUpdateSettings>>;
+    readonly enhancePrompt: RpcUnaryMethod<typeof WS_METHODS.serverEnhancePrompt>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
   };
@@ -213,6 +216,8 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
       getSettings: () => transport.request((client) => client[WS_METHODS.serverGetSettings]({})),
       updateSettings: (patch) =>
         transport.request((client) => client[WS_METHODS.serverUpdateSettings]({ patch })),
+      enhancePrompt: (input: PromptEnhanceInput) =>
+        transport.request((client) => client[WS_METHODS.serverEnhancePrompt](input)),
       subscribeConfig: (listener, options) =>
         transport.subscribe(
           (client) => client[WS_METHODS.subscribeServerConfig]({}),

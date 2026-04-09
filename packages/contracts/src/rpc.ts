@@ -3,6 +3,7 @@ import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
 import { OpenError, OpenInEditorInput } from "./editor";
+import { PromptEnhanceInput, PromptEnhanceResult } from "./enhance";
 import {
   GitActionProgressEvent,
   GitCheckoutInput,
@@ -111,6 +112,7 @@ export const WS_METHODS = {
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
+  serverEnhancePrompt: "server.enhancePrompt",
 
   // Streaming subscriptions
   subscribeGitStatus: "subscribeGitStatus",
@@ -147,6 +149,11 @@ export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSetting
   payload: Schema.Struct({ patch: ServerSettingsPatch }),
   success: ServerSettings,
   error: ServerSettingsError,
+});
+
+export const WsServerEnhancePromptRpc = Rpc.make(WS_METHODS.serverEnhancePrompt, {
+  payload: PromptEnhanceInput,
+  success: PromptEnhanceResult,
 });
 
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
@@ -340,6 +347,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerUpsertKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
+  WsServerEnhancePromptRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
   WsShellOpenInEditorRpc,

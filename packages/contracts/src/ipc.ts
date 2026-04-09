@@ -29,6 +29,7 @@ import type {
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingResult,
 } from "./server";
+import type { PromptEnhanceInput, PromptEnhanceResult } from "./enhance";
 import type {
   TerminalClearInput,
   TerminalCloseInput,
@@ -189,6 +190,7 @@ export interface NativeApi {
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
+    enhancePrompt: (input: PromptEnhanceInput) => Promise<PromptEnhanceResult>;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

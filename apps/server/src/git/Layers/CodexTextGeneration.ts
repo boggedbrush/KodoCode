@@ -11,6 +11,7 @@ import { ServerConfig } from "../../config.ts";
 import { TextGenerationError } from "@t3tools/contracts";
 import {
   type BranchNameGenerationInput,
+  type PromptEnhancementGenerationResult,
   type ThreadTitleGenerationResult,
   type TextGenerationShape,
   TextGeneration,
@@ -21,6 +22,7 @@ import {
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "../Prompts.ts";
+import { buildPromptEnhancementPrompt } from "../../promptEnhancement.ts";
 import {
   normalizeCliError,
   sanitizeCommitSubject,
@@ -134,7 +136,8 @@ const makeCodexTextGeneration = Effect.gen(function* () {
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generatePromptEnhancement";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -406,11 +409,43 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     } satisfies ThreadTitleGenerationResult;
   });
 
+  const generatePromptEnhancement: TextGenerationShape["generatePromptEnhancement"] = Effect.fn(
+    "CodexTextGeneration.generatePromptEnhancement",
+  )(function* (input) {
+    if (input.modelSelection.provider !== "codex") {
+      return yield* new TextGenerationError({
+        operation: "generatePromptEnhancement",
+        detail: "Invalid model selection.",
+      });
+    }
+
+    const workspaceContext = input.workspaceContext?.trim();
+    const { prompt, outputSchema } = buildPromptEnhancementPrompt({
+      cwd: input.cwd,
+      prompt: input.prompt,
+      preset: input.preset,
+      ...(workspaceContext ? { workspaceContext } : {}),
+    });
+
+    const generated = yield* runCodexJson({
+      operation: "generatePromptEnhancement",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      prompt: generated.prompt.trim(),
+    } satisfies PromptEnhancementGenerationResult;
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generatePromptEnhancement,
   } satisfies TextGenerationShape;
 });
 

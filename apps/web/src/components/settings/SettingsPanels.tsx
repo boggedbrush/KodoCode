@@ -14,7 +14,10 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } fro
 import {
   PROVIDER_DISPLAY_NAMES,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  type ModelSelection,
   type ProviderKind,
+  type PromptEnhancePreset,
+  type ProviderModelOptions,
   type ServerProvider,
   type ServerProviderModel,
   ThreadId,
@@ -51,6 +54,7 @@ import {
   resolveModeModelSelectionState,
 } from "../../modelSelection";
 import { ensureNativeApi, readNativeApi } from "../../nativeApi";
+import { enhancePresetLabel, ENHANCE_PRESET_LABELS } from "../../enhancePreset";
 import { useStore } from "../../store";
 import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
 import { cn } from "../../lib/utils";
@@ -289,6 +293,56 @@ function SettingsRow({
   );
 }
 
+function ModelSelectionControl({
+  provider,
+  model,
+  modelOptions,
+  models,
+  modelOptionsByProvider,
+  providers,
+  fallbackModel,
+  onProviderModelChange,
+  onModelOptionsChange,
+}: {
+  provider: ProviderKind;
+  model: string;
+  modelOptions: ProviderModelOptions[ProviderKind] | null | undefined;
+  models: ReadonlyArray<ServerProviderModel>;
+  modelOptionsByProvider: ReturnType<typeof getCustomModelOptionsByProvider>;
+  providers: ReadonlyArray<ServerProvider>;
+  fallbackModel?: string;
+  onProviderModelChange: (provider: ProviderKind, model: string) => void;
+  onModelOptionsChange: (nextOptions: ProviderModelOptions[ProviderKind] | undefined) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
+      <ProviderModelPicker
+        provider={provider}
+        model={model}
+        lockedProvider={null}
+        providers={providers}
+        modelOptionsByProvider={modelOptionsByProvider}
+        triggerVariant="outline"
+        triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+        onProviderModelChange={onProviderModelChange}
+      />
+      <TraitsPicker
+        provider={provider}
+        models={models}
+        model={model}
+        prompt=""
+        onPromptChange={() => {}}
+        modelOptions={modelOptions}
+        allowPromptInjectedEffort={false}
+        triggerVariant="outline"
+        triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
+        fallbackModel={fallbackModel ?? DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[provider]}
+        onModelOptionsChange={onModelOptionsChange}
+      />
+    </div>
+  );
+}
+
 function SettingResetButton({ label, onClick }: { label: string; onClick: () => void }) {
   return (
     <Tooltip>
@@ -457,6 +511,10 @@ export function useSettingsRestore(onRestored?: () => void) {
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
   );
+  const isPromptEnhanceModelDirty = !Equal.equals(
+    settings.promptEnhanceModelSelection ?? null,
+    DEFAULT_UNIFIED_SETTINGS.promptEnhanceModelSelection ?? null,
+  );
   const areProviderSettingsDirty = PROVIDER_SETTINGS.some((providerSettings) => {
     const currentSettings = settings.providers[providerSettings.provider];
     const defaultSettings = DEFAULT_UNIFIED_SETTINGS.providers[providerSettings.provider];
@@ -487,18 +545,25 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.commitMessageStyle !== DEFAULT_UNIFIED_SETTINGS.commitMessageStyle
         ? ["Commit message style"]
         : []),
+      ...(settings.promptEnhancePreset !== DEFAULT_UNIFIED_SETTINGS.promptEnhancePreset
+        ? ["Enhance style"]
+        : []),
+      ...(isPromptEnhanceModelDirty ? ["Enhance model"] : []),
       ...(isGitWritingModelDirty ? ["Git writing model"] : []),
       ...(areProviderSettingsDirty ? ["Providers"] : []),
     ],
     [
       areProviderSettingsDirty,
       isGitWritingModelDirty,
+      isPromptEnhanceModelDirty,
       settings.confirmThreadArchive,
       settings.confirmThreadDelete,
       settings.commitMessageStyle,
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.promptEnhanceModelSelection,
+      settings.promptEnhancePreset,
       settings.timestampFormat,
       theme,
     ],
@@ -606,6 +671,25 @@ export function GeneralSettingsPanel() {
   const isGitWritingModelDirty = !Equal.equals(
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
+  );
+
+  const promptEnhanceModelSelection = resolveAppModelSelectionState(
+    settings,
+    serverProviders,
+    settings.promptEnhanceModelSelection,
+  );
+  const promptEnhanceProvider = promptEnhanceModelSelection.provider;
+  const promptEnhanceModel = promptEnhanceModelSelection.model;
+  const promptEnhanceModelOptions = promptEnhanceModelSelection.options;
+  const promptEnhanceModelOptionsByProvider = getCustomModelOptionsByProvider(
+    settings,
+    serverProviders,
+    promptEnhanceProvider,
+    promptEnhanceModel,
+  );
+  const isPromptEnhanceModelDirty = !Equal.equals(
+    settings.promptEnhanceModelSelection ?? null,
+    DEFAULT_UNIFIED_SETTINGS.promptEnhanceModelSelection ?? null,
   );
 
   // ── Kodo: ask/plan/code model settings ────────────────────────────────
@@ -1058,7 +1142,7 @@ export function GeneralSettingsPanel() {
         />
 
         <SettingsRow
-          title="Text generation model"
+          title="Commit generation model"
           description="Configure the model used for generated commit messages, PR titles, and similar Git text."
           resetAction={
             isGitWritingModelDirty ? (
@@ -1074,57 +1158,39 @@ export function GeneralSettingsPanel() {
             ) : null
           }
           control={
-            <div className="flex flex-wrap items-center justify-end gap-1.5">
-              <ProviderModelPicker
-                provider={textGenProvider}
-                model={textGenModel}
-                lockedProvider={null}
-                providers={serverProviders}
-                modelOptionsByProvider={gitModelOptionsByProvider}
-                triggerVariant="outline"
-                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                onProviderModelChange={(provider, model) => {
-                  updateSettings({
-                    textGenerationModelSelection: resolveAppModelSelectionState(
-                      {
-                        ...settings,
-                        textGenerationModelSelection: { provider, model },
-                      },
-                      serverProviders,
-                    ),
-                  });
-                }}
-              />
-              <TraitsPicker
-                provider={textGenProvider}
-                models={
-                  serverProviders.find((provider) => provider.provider === textGenProvider)
-                    ?.models ?? []
-                }
-                model={textGenModel}
-                prompt=""
-                onPromptChange={() => {}}
-                modelOptions={textGenModelOptions}
-                allowPromptInjectedEffort={false}
-                triggerVariant="outline"
-                triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                onModelOptionsChange={(nextOptions) => {
-                  updateSettings({
-                    textGenerationModelSelection: resolveAppModelSelectionState(
-                      {
-                        ...settings,
-                        textGenerationModelSelection: {
-                          provider: textGenProvider,
-                          model: textGenModel,
-                          ...(nextOptions ? { options: nextOptions } : {}),
-                        },
-                      },
-                      serverProviders,
-                    ),
-                  });
-                }}
-              />
-            </div>
+            <ModelSelectionControl
+              provider={textGenProvider}
+              model={textGenModel}
+              models={
+                serverProviders.find((provider) => provider.provider === textGenProvider)?.models ??
+                []
+              }
+              modelOptions={textGenModelOptions}
+              modelOptionsByProvider={gitModelOptionsByProvider}
+              providers={serverProviders}
+              onProviderModelChange={(provider, model) => {
+                updateSettings({
+                  textGenerationModelSelection: resolveAppModelSelectionState(
+                    settings,
+                    serverProviders,
+                    { provider, model },
+                  ),
+                });
+              }}
+              onModelOptionsChange={(nextOptions) => {
+                updateSettings({
+                  textGenerationModelSelection: resolveAppModelSelectionState(
+                    settings,
+                    serverProviders,
+                    {
+                      provider: textGenProvider,
+                      model: textGenModel,
+                      ...(nextOptions ? { options: nextOptions } : {}),
+                    },
+                  ),
+                });
+              }}
+            />
           }
         />
 
@@ -1171,6 +1237,86 @@ export function GeneralSettingsPanel() {
                 <SelectItem hideIndicator value="type-scope-summary">
                   type(scope): summary
                 </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Enhance prompt generation model"
+          description="Configure the model used to rewrite prompts before they are sent to the coding agent."
+          resetAction={
+            isPromptEnhanceModelDirty ? (
+              <SettingResetButton
+                label="enhance prompt generation model"
+                onClick={() =>
+                  updateSettings({
+                    promptEnhanceModelSelection:
+                      DEFAULT_UNIFIED_SETTINGS.promptEnhanceModelSelection,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <ModelSelectionControl
+              provider={promptEnhanceProvider}
+              model={promptEnhanceModel}
+              models={
+                serverProviders.find((provider) => provider.provider === promptEnhanceProvider)
+                  ?.models ?? []
+              }
+              modelOptions={promptEnhanceModelOptions}
+              modelOptionsByProvider={promptEnhanceModelOptionsByProvider}
+              providers={serverProviders}
+              onProviderModelChange={(provider, model) => {
+                updateSettings({ promptEnhanceModelSelection: { provider, model } });
+              }}
+              onModelOptionsChange={(nextOptions) => {
+                const selection: ModelSelection = {
+                  provider: promptEnhanceProvider,
+                  model: promptEnhanceModel,
+                  ...(nextOptions ? { options: nextOptions } : {}),
+                };
+                updateSettings({ promptEnhanceModelSelection: selection });
+              }}
+            />
+          }
+        />
+
+        <SettingsRow
+          title="Enhance style"
+          description="Default preset used by the composer Enhance button."
+          resetAction={
+            settings.promptEnhancePreset !== DEFAULT_UNIFIED_SETTINGS.promptEnhancePreset ? (
+              <SettingResetButton
+                label="enhance style"
+                onClick={() =>
+                  updateSettings({
+                    promptEnhancePreset: DEFAULT_UNIFIED_SETTINGS.promptEnhancePreset,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.promptEnhancePreset}
+              onValueChange={(value) => {
+                if (value === "minimal" || value === "balanced" || value === "vibe") {
+                  updateSettings({ promptEnhancePreset: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Enhance style">
+                <SelectValue>{enhancePresetLabel(settings.promptEnhancePreset)}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                {(Object.keys(ENHANCE_PRESET_LABELS) as PromptEnhancePreset[]).map((preset) => (
+                  <SelectItem hideIndicator key={preset} value={preset}>
+                    {ENHANCE_PRESET_LABELS[preset]}
+                  </SelectItem>
+                ))}
               </SelectPopup>
             </Select>
           }
@@ -1522,6 +1668,8 @@ export function GeneralSettingsPanel() {
                         const isDisabling = !checked;
                         const shouldClearModelSelection =
                           isDisabling && textGenProvider === providerCard.provider;
+                        const shouldClearPromptEnhanceModelSelection =
+                          isDisabling && promptEnhanceProvider === providerCard.provider;
                         updateSettings({
                           providers: {
                             ...settings.providers,
@@ -1534,6 +1682,12 @@ export function GeneralSettingsPanel() {
                             ? {
                                 textGenerationModelSelection:
                                   DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+                              }
+                            : {}),
+                          ...(shouldClearPromptEnhanceModelSelection
+                            ? {
+                                promptEnhanceModelSelection:
+                                  DEFAULT_UNIFIED_SETTINGS.promptEnhanceModelSelection,
                               }
                             : {}),
                         });

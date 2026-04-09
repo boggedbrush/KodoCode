@@ -8,6 +8,7 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
 } from "./model";
 import { ModelSelection } from "./orchestration";
+import { PromptEnhancePreset } from "./enhance";
 
 // ── Client Settings (local-only) ───────────────────────────────
 
@@ -27,6 +28,9 @@ export const ClientSettingsSchema = Schema.Struct({
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  promptEnhancePreset: PromptEnhancePreset.pipe(
+    Schema.withDecodingDefault(() => "balanced" as const satisfies typeof PromptEnhancePreset.Type),
+  ),
   sidebarProjectSortOrder: SidebarProjectSortOrder.pipe(
     Schema.withDecodingDefault(() => DEFAULT_SIDEBAR_PROJECT_SORT_ORDER),
   ),
@@ -94,6 +98,12 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(() => DEFAULT_COMMIT_MESSAGE_STYLE),
   ),
   textGenerationModelSelection: ModelSelection.pipe(
+    Schema.withDecodingDefault(() => ({
+      provider: "codex" as const,
+      model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
+    })),
+  ),
+  promptEnhanceModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(() => ({
       provider: "codex" as const,
       model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
@@ -186,6 +196,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   commitMessageStyle: Schema.optionalKey(CommitMessageStyle),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
+  promptEnhanceModelSelection: Schema.optionalKey(ModelSelectionPatch),
 
   // Kodo: per-mode model selection patches (null clears the override)
   askModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),

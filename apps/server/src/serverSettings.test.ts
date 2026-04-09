@@ -41,6 +41,21 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           },
         },
       );
+
+      assert.deepEqual(
+        decodePatch({
+          promptEnhanceModelSelection: {
+            provider: "claudeAgent",
+            model: "claude-haiku-4-5",
+          },
+        }),
+        {
+          promptEnhanceModelSelection: {
+            provider: "claudeAgent",
+            model: "claude-haiku-4-5",
+          },
+        },
+      );
     }),
   );
 
@@ -114,6 +129,30 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("persists promptEnhanceModelSelection and reads it back", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      const next = yield* serverSettings.updateSettings({
+        promptEnhanceModelSelection: {
+          provider: "claudeAgent",
+          model: "claude-haiku-4-5",
+          options: {
+            fastMode: true,
+          },
+        },
+      });
+
+      assert.deepEqual(next.promptEnhanceModelSelection, {
+        provider: "claudeAgent",
+        model: "claude-haiku-4-5",
+        options: {
+          fastMode: true,
+        },
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("preserves model when switching providers via textGenerationModelSelection", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
@@ -146,6 +185,40 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         model: "gpt-5.4",
         options: {
           reasoningEffort: "high",
+        },
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("preserves model when switching providers via promptEnhanceModelSelection", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      yield* serverSettings.updateSettings({
+        promptEnhanceModelSelection: {
+          provider: "claudeAgent",
+          model: "claude-haiku-4-5",
+          options: {
+            fastMode: true,
+          },
+        },
+      });
+
+      const next = yield* serverSettings.updateSettings({
+        promptEnhanceModelSelection: {
+          provider: "codex",
+          model: "gpt-5.4-mini",
+          options: {
+            reasoningEffort: "low",
+          },
+        },
+      });
+
+      assert.deepEqual(next.promptEnhanceModelSelection, {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        options: {
+          reasoningEffort: "low",
         },
       });
     }).pipe(Effect.provide(makeServerSettingsLayer())),
@@ -454,6 +527,19 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("defaults promptEnhanceModelSelection to the git text generation model", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      const initial = yield* serverSettings.updateSettings({});
+
+      assert.deepEqual(initial.promptEnhanceModelSelection, {
+        provider: "codex",
+        model: DEFAULT_SERVER_SETTINGS.promptEnhanceModelSelection.model,
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("decodes ask/plan/code model selection patches", () =>
     Effect.sync(() => {
       const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
@@ -493,6 +579,22 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       );
 
       assert.deepEqual(decodePatch({ codeModelSelection: null }), { codeModelSelection: null });
+      assert.deepEqual(
+        decodePatch({
+          promptEnhanceModelSelection: {
+            provider: "codex",
+            model: "gpt-5.4-mini",
+            options: { reasoningEffort: "low" },
+          },
+        }),
+        {
+          promptEnhanceModelSelection: {
+            provider: "codex",
+            model: "gpt-5.4-mini",
+            options: { reasoningEffort: "low" },
+          },
+        },
+      );
     }),
   );
 });

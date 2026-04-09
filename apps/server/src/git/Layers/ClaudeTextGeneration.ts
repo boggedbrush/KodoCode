@@ -15,13 +15,18 @@ import { resolveApiModelId } from "@t3tools/shared/model";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 
 import { TextGenerationError } from "@t3tools/contracts";
-import { type TextGenerationShape, TextGeneration } from "../Services/TextGeneration.ts";
+import {
+  type PromptEnhancementGenerationResult,
+  type TextGenerationShape,
+  TextGeneration,
+} from "../Services/TextGeneration.ts";
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,
   buildPrContentPrompt,
   buildThreadTitlePrompt,
 } from "../Prompts.ts";
+import { buildPromptEnhancementPrompt } from "../../promptEnhancement.ts";
 import {
   normalizeCliError,
   sanitizeCommitSubject,
@@ -77,7 +82,8 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
       | "generateCommitMessage"
       | "generatePrContent"
       | "generateBranchName"
-      | "generateThreadTitle";
+      | "generateThreadTitle"
+      | "generatePromptEnhancement";
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
@@ -329,11 +335,43 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
     };
   });
 
+  const generatePromptEnhancement: TextGenerationShape["generatePromptEnhancement"] = Effect.fn(
+    "ClaudeTextGeneration.generatePromptEnhancement",
+  )(function* (input) {
+    if (input.modelSelection.provider !== "claudeAgent") {
+      return yield* new TextGenerationError({
+        operation: "generatePromptEnhancement",
+        detail: "Invalid model selection.",
+      });
+    }
+
+    const workspaceContext = input.workspaceContext?.trim();
+    const { prompt, outputSchema } = buildPromptEnhancementPrompt({
+      cwd: input.cwd,
+      prompt: input.prompt,
+      preset: input.preset,
+      ...(workspaceContext ? { workspaceContext } : {}),
+    });
+
+    const generated = yield* runClaudeJson({
+      operation: "generatePromptEnhancement",
+      cwd: input.cwd,
+      prompt,
+      outputSchemaJson: outputSchema,
+      modelSelection: input.modelSelection,
+    });
+
+    return {
+      prompt: generated.prompt.trim(),
+    } satisfies PromptEnhancementGenerationResult;
+  });
+
   return {
     generateCommitMessage,
     generatePrContent,
     generateBranchName,
     generateThreadTitle,
+    generatePromptEnhancement,
   } satisfies TextGenerationShape;
 });
 

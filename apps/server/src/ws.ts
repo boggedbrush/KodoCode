@@ -47,6 +47,53 @@ import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
 import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptRunner";
+import { TextGeneration } from "./git/Services/TextGeneration";
+
+const ENHANCE_SEARCH_STOP_WORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "with",
+  "that",
+  "this",
+  "from",
+  "into",
+  "about",
+  "have",
+  "what",
+  "when",
+  "where",
+  "your",
+  "please",
+  "should",
+  "would",
+  "could",
+  "make",
+  "need",
+  "add",
+  "update",
+  "fix",
+  "change",
+  "enhance",
+]);
+
+function deriveEnhanceSearchQuery(prompt: string, preset: "minimal" | "balanced" | "vibe") {
+  const tokens = prompt.toLowerCase().match(/[a-z0-9_./-]+/g) ?? [];
+  const filtered = tokens.filter(
+    (token) => token.length > 2 && !ENHANCE_SEARCH_STOP_WORDS.has(token),
+  );
+  const limit = preset === "balanced" ? 4 : 8;
+  const query = filtered.slice(0, limit).join(" ");
+  return query.length > 0 ? query : "src";
+}
+
+function formatEnhanceWorkspaceContext(entries: ReadonlyArray<{ kind: string; path: string }>) {
+  if (entries.length === 0) {
+    return "";
+  }
+
+  return entries.map((entry) => `- [${entry.kind}] ${entry.path}`).join("\n");
+}
 
 const WsRpcLayer = WsRpcGroup.toLayer(
   Effect.gen(function* () {
@@ -67,6 +114,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
     const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
+    const textGeneration = yield* TextGeneration;
     const serverCommandId = (tag: string) =>
       CommandId.makeUnsafe(`server:${tag}:${crypto.randomUUID()}`);
 
@@ -531,6 +579,32 @@ const WsRpcLayer = WsRpcGroup.toLayer(
         observeRpcEffect(WS_METHODS.serverUpdateSettings, serverSettings.updateSettings(patch), {
           "rpc.aggregate": "server",
         }),
+      [WS_METHODS.serverEnhancePrompt]: (input) =>
+        observeRpcEffect(
+          WS_METHODS.serverEnhancePrompt,
+          Effect.gen(function* () {
+            const settings = yield* serverSettings.getSettings;
+            const workspaceContext =
+              input.preset === "minimal"
+                ? undefined
+                : formatEnhanceWorkspaceContext(
+                    (yield* workspaceEntries.search({
+                      cwd: input.cwd,
+                      query: deriveEnhanceSearchQuery(input.prompt, input.preset),
+                      limit: input.preset === "balanced" ? 6 : 12,
+                    })).entries,
+                  );
+
+            return yield* textGeneration.generatePromptEnhancement({
+              cwd: input.cwd,
+              prompt: input.prompt,
+              preset: input.preset,
+              ...(workspaceContext ? { workspaceContext } : {}),
+              modelSelection: settings.promptEnhanceModelSelection,
+            });
+          }).pipe(Effect.catch(() => Effect.succeed({ prompt: input.prompt }))),
+          { "rpc.aggregate": "server" },
+        ),
       [WS_METHODS.projectsSearchEntries]: (input) =>
         observeRpcEffect(
           WS_METHODS.projectsSearchEntries,

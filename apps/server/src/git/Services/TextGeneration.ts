@@ -9,6 +9,7 @@
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
 import type { ChatAttachment, CommitMessageStyle, ModelSelection } from "@t3tools/contracts";
+import type { PromptEnhancePreset } from "@t3tools/contracts";
 
 import type { TextGenerationError } from "@t3tools/contracts";
 
@@ -74,6 +75,18 @@ export interface ThreadTitleGenerationResult {
   title: string;
 }
 
+export interface PromptEnhancementGenerationInput {
+  cwd: string;
+  prompt: string;
+  preset: PromptEnhancePreset;
+  workspaceContext?: string;
+  modelSelection: ModelSelection;
+}
+
+export interface PromptEnhancementGenerationResult {
+  prompt: string;
+}
+
 export interface TextGenerationService {
   generateCommitMessage(
     input: CommitMessageGenerationInput,
@@ -81,6 +94,9 @@ export interface TextGenerationService {
   generatePrContent(input: PrContentGenerationInput): Promise<PrContentGenerationResult>;
   generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
   generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
+  generatePromptEnhancement(
+    input: PromptEnhancementGenerationInput,
+  ): Promise<PromptEnhancementGenerationResult>;
 }
 
 /**
@@ -114,6 +130,13 @@ export interface TextGenerationShape {
   readonly generateThreadTitle: (
     input: ThreadTitleGenerationInput,
   ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
+
+  /**
+   * Rewrite a prompt for better coding-agent execution.
+   */
+  readonly generatePromptEnhancement: (
+    input: PromptEnhancementGenerationInput,
+  ) => Effect.Effect<PromptEnhancementGenerationResult, TextGenerationError>;
 }
 
 /**

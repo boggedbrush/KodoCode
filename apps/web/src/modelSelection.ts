@@ -172,16 +172,17 @@ export function getCustomModelOptionsByProvider(
 export function resolveAppModelSelectionState(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
+  selection: ModelSelection | null | undefined = settings.textGenerationModelSelection,
 ): ModelSelection {
-  const selection = settings.textGenerationModelSelection ?? {
+  const resolvedSelection = selection ?? {
     provider: "codex" as const,
     model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
   };
-  const provider = resolveSelectableProvider(providers, selection.provider);
+  const provider = resolveSelectableProvider(providers, resolvedSelection.provider);
 
   // When the provider changed due to fallback (e.g. selected provider was disabled),
   // don't carry over the old provider's model — use the fallback provider's default.
-  const selectedModel = provider === selection.provider ? selection.model : null;
+  const selectedModel = provider === resolvedSelection.provider ? resolvedSelection.model : null;
   const model = resolveAppModelSelection(provider, settings, providers, selectedModel);
   const { modelOptionsForDispatch } = getComposerProviderState({
     provider,
@@ -189,7 +190,7 @@ export function resolveAppModelSelectionState(
     models: getProviderModels(providers, provider),
     prompt: "",
     modelOptions: {
-      [provider]: provider === selection.provider ? selection.options : undefined,
+      [provider]: provider === resolvedSelection.provider ? resolvedSelection.options : undefined,
     },
   });
 

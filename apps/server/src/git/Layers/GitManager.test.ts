@@ -87,6 +87,13 @@ interface FakeGitTextGeneration {
     message: string;
     modelSelection: ModelSelection;
   }) => Effect.Effect<{ title: string }, TextGenerationError>;
+  generatePromptEnhancement: (input: {
+    cwd: string;
+    prompt: string;
+    preset: "minimal" | "balanced" | "vibe";
+    workspaceContext?: string;
+    modelSelection: ModelSelection;
+  }) => Effect.Effect<{ prompt: string }, TextGenerationError>;
 }
 
 type FakePullRequest = NonNullable<FakeGhScenario["pullRequest"]>;
@@ -277,6 +284,10 @@ function createTextGeneration(overrides: Partial<FakeGitTextGeneration> = {}): T
       Effect.succeed({
         title: "Update workflow",
       }),
+    generatePromptEnhancement: (input) =>
+      Effect.succeed({
+        prompt: input.prompt,
+      }),
     ...overrides,
   };
 
@@ -320,6 +331,17 @@ function createTextGeneration(overrides: Partial<FakeGitTextGeneration> = {}): T
           (cause) =>
             new TextGenerationError({
               operation: "generateThreadTitle",
+              detail: "fake text generation failed",
+              ...(cause !== undefined ? { cause } : {}),
+            }),
+        ),
+      ),
+    generatePromptEnhancement: (input) =>
+      implementation.generatePromptEnhancement(input).pipe(
+        Effect.mapError(
+          (cause) =>
+            new TextGenerationError({
+              operation: "generatePromptEnhancement",
               detail: "fake text generation failed",
               ...(cause !== undefined ? { cause } : {}),
             }),

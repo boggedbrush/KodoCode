@@ -9,6 +9,7 @@ import {
   type ProjectEntry,
   type ProjectId,
   type ProviderApprovalDecision,
+  type PromptEnhancePreset,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ServerProvider,
@@ -27,13 +28,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useLocalStorage } from "../hooks/useLocalStorage";
 import * as Equal from "effect/Equal";
 import { useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
 import { isLinuxPlatform } from "../lib/utils";
-
-const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
   clampCollapsedComposerCursor,
@@ -151,7 +151,6 @@ import {
   type TerminalContextDraft,
   type TerminalContextSelection,
 } from "../lib/terminalContext";
-import { deriveLatestContextWindowSnapshot } from "../lib/contextWindow";
 import {
   resolveComposerFooterContentWidth,
   shouldForceCompactComposerFooterForFit,
@@ -164,8 +163,10 @@ import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { ReviewSetupDialog } from "./chat/ReviewSetupDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import { ChatHeader } from "./chat/ChatHeader";
-import { ContextWindowMeter } from "./chat/ContextWindowMeter";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/ExpandedImagePreview";
+import { EnhanceButton } from "./chat/EnhanceButton";
+import { EnhanceLoadingState } from "./chat/EnhanceLoadingState";
+import { EnhanceUndoChip } from "./chat/EnhanceUndoChip";
 import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
@@ -204,13 +205,14 @@ import {
   threadHasStarted,
   waitForStartedServerThread,
 } from "./ChatView.logic";
-import { useLocalStorage } from "~/hooks/useLocalStorage";
 import {
   useServerAvailableEditors,
   useServerConfig,
   useServerKeybindings,
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
+
+const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -721,6 +723,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     {},
     LastInvokedScriptByProjectSchema,
   );
+  const [enhancementState, setEnhancementState] = useState<{
+    originalPrompt: string;
+    enhancedPrompt: string;
+    preset: PromptEnhancePreset;
+  } | null>(null);
+  const [isEnhancingPrompt, setIsEnhancingPrompt] = useState(false);
   const messagesScrollRef = useRef<HTMLDivElement>(null);
   const [messagesScrollElement, setMessagesScrollElement] = useState<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -885,10 +893,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return threadIds;
     }, [activeLatestTurn?.sourceProposedPlan?.threadId, activeThread?.id]),
   );
-  const activeContextWindow = useMemo(
-    () => deriveLatestContextWindowSnapshot(activeThread?.activities ?? []),
-    [activeThread?.activities],
-  );
   useEffect(() => {
     setMountedTerminalThreadIds((currentThreadIds) => {
       const nextThreadIds = reconcileMountedTerminalThreadIds({
@@ -906,6 +910,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [activeThreadId, existingOpenTerminalThreadIds, terminalState.terminalOpen]);
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = useProjectById(activeThread?.projectId);
+
+  useEffect(() => {
+    setEnhancementState(null);
+    setIsEnhancingPrompt(false);
+  }, [threadId]);
+
+  useEffect(() => {
+    if (prompt.trim().length === 0 && enhancementState !== null) {
+      setEnhancementState(null);
+    }
+  }, [enhancementState, prompt]);
 
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
@@ -1662,6 +1677,94 @@ export default function ChatView({ threadId }: ChatViewProps) {
       focusComposer();
     });
   }, [focusComposer]);
+
+  const onEnhancePrompt = useCallback(
+    async (preset: PromptEnhancePreset) => {
+      const api = readNativeApi();
+      if (!api || !activeThread || !activeProject || isEnhancingPrompt || isSendBusy) {
+        return;
+      }
+      const originalPrompt = promptRef.current;
+      if (originalPrompt.trim().length === 0) {
+        return;
+      }
+
+      setIsEnhancingPrompt(true);
+      try {
+        const result = await api.server.enhancePrompt({
+          cwd: activeProject.cwd,
+          prompt: originalPrompt,
+          preset,
+        });
+
+        if (promptRef.current !== originalPrompt) {
+          return;
+        }
+
+        const enhancedPrompt = result.prompt.trim();
+        if (enhancedPrompt.length === 0) {
+          return;
+        }
+
+        promptRef.current = enhancedPrompt;
+        setPrompt(enhancedPrompt);
+        setEnhancementState({
+          originalPrompt,
+          enhancedPrompt,
+          preset,
+        });
+
+        const nextCursor = collapseExpandedComposerCursor(enhancedPrompt, enhancedPrompt.length);
+        setComposerCursor(nextCursor);
+        setComposerTrigger(
+          detectComposerTrigger(
+            enhancedPrompt,
+            expandCollapsedComposerCursor(enhancedPrompt, nextCursor),
+          ),
+        );
+        scheduleComposerFocus();
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not enhance prompt",
+          description: error instanceof Error ? error.message : "An unknown error occurred.",
+        });
+      } finally {
+        setIsEnhancingPrompt(false);
+      }
+    },
+    [
+      activeProject,
+      activeThread,
+      isEnhancingPrompt,
+      isSendBusy,
+      scheduleComposerFocus,
+      setComposerCursor,
+      setComposerTrigger,
+      setPrompt,
+    ],
+  );
+
+  const onUndoEnhancePrompt = useCallback(() => {
+    if (!enhancementState) {
+      return;
+    }
+
+    const restoredPrompt = enhancementState.originalPrompt;
+    promptRef.current = restoredPrompt;
+    setPrompt(restoredPrompt);
+    setEnhancementState(null);
+
+    const nextCursor = collapseExpandedComposerCursor(restoredPrompt, restoredPrompt.length);
+    setComposerCursor(nextCursor);
+    setComposerTrigger(
+      detectComposerTrigger(
+        restoredPrompt,
+        expandCollapsedComposerCursor(restoredPrompt, nextCursor),
+      ),
+    );
+    scheduleComposerFocus();
+  }, [enhancementState, scheduleComposerFocus, setComposerCursor, setComposerTrigger, setPrompt]);
   const addTerminalContextToDraft = useCallback(
     (selection: TerminalContextSelection) => {
       if (!activeThread) {
@@ -4812,14 +4915,32 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         }
                         className="flex shrink-0 flex-nowrap items-center justify-end gap-2"
                       >
-                        {activeContextWindow ? (
-                          <ContextWindowMeter usage={activeContextWindow} />
-                        ) : null}
                         {isPreparingWorktree ? (
                           <span className="text-muted-foreground/70 text-xs">
                             Preparing worktree...
                           </span>
                         ) : null}
+                        {activePendingProgress || phase === "running" ? null : enhancementState ? (
+                          <EnhanceUndoChip
+                            disabled={isEnhancingPrompt || isSendBusy || isConnecting}
+                            onUndo={onUndoEnhancePrompt}
+                          />
+                        ) : null}
+                        {activePendingProgress || phase === "running" ? null : isEnhancingPrompt ? (
+                          <EnhanceLoadingState />
+                        ) : (
+                          <EnhanceButton
+                            disabled={
+                              !activeThread ||
+                              !activeProject ||
+                              isSendBusy ||
+                              isConnecting ||
+                              prompt.trim().length === 0
+                            }
+                            preset={settings.promptEnhancePreset}
+                            onEnhance={() => void onEnhancePrompt(settings.promptEnhancePreset)}
+                          />
+                        )}
                         <ComposerPrimaryActions
                           compact={isComposerPrimaryActionsCompact}
                           accentColor={modeAccentColor}

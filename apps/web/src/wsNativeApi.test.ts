@@ -76,6 +76,7 @@ const rpcClientMock = {
     upsertKeybinding: vi.fn(),
     getSettings: vi.fn(),
     updateSettings: vi.fn(),
+    enhancePrompt: vi.fn(),
     subscribeConfig: vi.fn(),
     subscribeLifecycle: vi.fn(),
   },
@@ -218,6 +219,26 @@ describe("wsNativeApi", () => {
     expect(rpcClientMock.server.getConfig).toHaveBeenCalledWith();
     expect(rpcClientMock.server.subscribeConfig).not.toHaveBeenCalled();
     expect(rpcClientMock.server.subscribeLifecycle).not.toHaveBeenCalled();
+  });
+
+  it("forwards prompt enhancement requests directly to the RPC client", async () => {
+    rpcClientMock.server.enhancePrompt.mockResolvedValue({ prompt: "enhanced" });
+    const { createWsNativeApi } = await import("./wsNativeApi");
+
+    const api = createWsNativeApi();
+
+    await expect(
+      api.server.enhancePrompt({
+        cwd: "/tmp/workspace",
+        prompt: "fix typo",
+        preset: "minimal",
+      }),
+    ).resolves.toEqual({ prompt: "enhanced" });
+    expect(rpcClientMock.server.enhancePrompt).toHaveBeenCalledWith({
+      cwd: "/tmp/workspace",
+      prompt: "fix typo",
+      preset: "minimal",
+    });
   });
 
   it("forwards terminal and orchestration stream events", async () => {
