@@ -768,11 +768,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     return null;
   }
 
-  return (
-    <pre className="whitespace-pre-wrap wrap-break-word font-mono text-sm leading-relaxed text-foreground">
-      {props.text}
-    </pre>
-  );
+  return <ChatMarkdown text={props.text} cwd={undefined} />;
 });
 
 function workToneIcon(tone: TimelineWorkEntry["tone"]): {
