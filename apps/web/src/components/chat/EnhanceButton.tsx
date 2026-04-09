@@ -15,9 +15,9 @@ function EnhanceGlyph() {
       >
         <defs>
           <linearGradient id="enhance-glyph-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#FDB931" stopOpacity={1} />
-            <stop offset="50%" stopColor="#D4AF37" stopOpacity={1} />
-            <stop offset="100%" stopColor="#B8860B" stopOpacity={1} />
+            <stop offset="0%" stopColor="#C8920A" stopOpacity={1} />
+            <stop offset="50%" stopColor="#A67C10" stopOpacity={1} />
+            <stop offset="100%" stopColor="#7A5C08" stopOpacity={1} />
           </linearGradient>
         </defs>
         <g
@@ -65,8 +65,8 @@ export const EnhanceButton = memo(function EnhanceButton({
       type="button"
       className={cn(
         "group/enhance flex size-9 cursor-pointer items-center justify-center rounded-full text-white transition-colors sm:size-8",
-        "bg-[color:var(--color-accent)] hover:bg-[color:var(--warning)] hover:text-[color:var(--color-neutral-800)]",
-        "dark:hover:text-[color:var(--color-neutral-900)]",
+        "border border-border bg-[color:var(--color-accent)] hover:border-transparent hover:bg-[#C8920A] hover:text-white",
+        "dark:hover:bg-[#D4AF37] dark:hover:text-[color:var(--color-neutral-900)]",
         "disabled:pointer-events-none disabled:opacity-30",
       )}
       onClick={onEnhance}
