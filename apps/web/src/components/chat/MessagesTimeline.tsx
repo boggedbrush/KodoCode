@@ -382,7 +382,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   {userImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
                     <div
                       key={image.id}
-                      className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                      className="only:col-start-2 overflow-hidden rounded-lg border border-border/80 bg-background/70"
                     >
                       {image.previewUrl ? (
                         <button
