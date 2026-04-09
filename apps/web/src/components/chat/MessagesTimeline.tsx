@@ -376,53 +376,53 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           const terminalContexts = displayedUserMessage.contexts;
           const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
           return (
-            <div className="flex justify-end">
-              <div className="group relative max-w-[80%] rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
-                {userImages.length > 0 && (
-                  <div className="mb-2 grid max-w-[420px] grid-cols-2 gap-2">
-                    {userImages.map(
-                      (image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-                        <div
-                          key={image.id}
-                          className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+            <div className="flex flex-col items-end gap-2">
+              {userImages.length > 0 && (
+                <div className="grid max-w-[420px] grid-cols-2 gap-2">
+                  {userImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
+                    <div
+                      key={image.id}
+                      className="overflow-hidden rounded-lg border border-border/80 bg-background/70"
+                    >
+                      {image.previewUrl ? (
+                        <button
+                          type="button"
+                          className="h-full w-full cursor-zoom-in"
+                          aria-label={`Preview ${image.name}`}
+                          onClick={() => {
+                            const preview = buildExpandedImagePreview(userImages, image.id);
+                            if (!preview) return;
+                            onImageExpand(preview);
+                          }}
                         >
-                          {image.previewUrl ? (
-                            <button
-                              type="button"
-                              className="h-full w-full cursor-zoom-in"
-                              aria-label={`Preview ${image.name}`}
-                              onClick={() => {
-                                const preview = buildExpandedImagePreview(userImages, image.id);
-                                if (!preview) return;
-                                onImageExpand(preview);
-                              }}
-                            >
-                              <img
-                                src={image.previewUrl}
-                                alt={image.name}
-                                className="block h-auto max-h-[220px] w-full object-cover"
-                                onLoad={onTimelineImageLoad}
-                                onError={onTimelineImageLoad}
-                              />
-                            </button>
-                          ) : (
-                            <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                              {image.name}
-                            </div>
-                          )}
+                          <img
+                            src={image.previewUrl}
+                            alt={image.name}
+                            className="block h-auto max-h-[220px] w-full object-cover"
+                            onLoad={onTimelineImageLoad}
+                            onError={onTimelineImageLoad}
+                          />
+                        </button>
+                      ) : (
+                        <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
+                          {image.name}
                         </div>
-                      ),
-                    )}
-                  </div>
-                )}
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="group relative max-w-[80%]">
                 {(displayedUserMessage.visibleText.trim().length > 0 ||
                   terminalContexts.length > 0) && (
-                  <UserMessageBody
-                    text={displayedUserMessage.visibleText}
-                    terminalContexts={terminalContexts}
-                  />
+                  <div className="rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+                    <UserMessageBody
+                      text={displayedUserMessage.visibleText}
+                      terminalContexts={terminalContexts}
+                    />
+                  </div>
                 )}
-                <div className="mt-1.5 flex items-center justify-end gap-2">
+                <div className="mt-1 flex items-center justify-end gap-2 px-1">
                   <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
                     {displayedUserMessage.copyText && (
                       <MessageCopyButton text={displayedUserMessage.copyText} />
@@ -440,7 +440,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                       </Button>
                     )}
                   </div>
-                  <p className="text-right text-[10px] text-muted-foreground/30">
+                  <p className="text-right text-[10px] text-muted-foreground/40">
                     {formatTimestamp(row.message.createdAt, timestampFormat)}
                   </p>
                 </div>
