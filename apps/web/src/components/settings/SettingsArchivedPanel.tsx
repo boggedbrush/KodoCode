@@ -10,7 +10,7 @@ import { ProjectFavicon } from "../ProjectFavicon";
 import { Button } from "../ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "../ui/empty";
 import { toastManager } from "../ui/toast";
-import { SettingsPageContainer, SettingsSection } from "./SettingsGeneralPanel";
+import { SettingsPageContainer, SettingsSection } from "./SettingsPanelPrimitives";
 
 export function ArchivedThreadsPanel() {
   const projects = useStore((store) => store.projects);

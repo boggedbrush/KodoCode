@@ -1,5 +1,14 @@
 import type { ComponentType } from "react";
-import { ArchiveIcon, ArrowLeftIcon, Settings2Icon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArrowLeftIcon,
+  CircleDashedIcon,
+  MonitorCogIcon,
+  PaletteIcon,
+  Settings2Icon,
+  SparklesIcon,
+  WrenchIcon,
+} from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 
 import {
@@ -12,7 +21,14 @@ import {
   SidebarSeparator,
 } from "../ui/sidebar";
 
-export type SettingsSectionPath = "/settings/general" | "/settings/archived";
+export type SettingsSectionPath =
+  | "/settings/general"
+  | "/settings/appearance"
+  | "/settings/models"
+  | "/settings/providers"
+  | "/settings/advanced"
+  | "/settings/about"
+  | "/settings/archived";
 
 export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   label: string;
@@ -20,6 +36,11 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   icon: ComponentType<{ className?: string }>;
 }> = [
   { label: "General", to: "/settings/general", icon: Settings2Icon },
+  { label: "Appearance", to: "/settings/appearance", icon: PaletteIcon },
+  { label: "Models", to: "/settings/models", icon: SparklesIcon },
+  { label: "Providers", to: "/settings/providers", icon: CircleDashedIcon },
+  { label: "Advanced", to: "/settings/advanced", icon: WrenchIcon },
+  { label: "About", to: "/settings/about", icon: MonitorCogIcon },
   { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
 ];
 
