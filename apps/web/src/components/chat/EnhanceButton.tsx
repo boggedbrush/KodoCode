@@ -6,10 +6,7 @@ import { cn } from "~/lib/utils";
 
 function EnhanceGlyph() {
   return (
-    <span
-      aria-hidden="true"
-      className="relative grid size-6 shrink-0 place-items-center"
-    >
+    <span aria-hidden="true" className="relative grid size-6 shrink-0 place-items-center">
       <svg
         className="col-start-1 row-start-1 size-full transition-opacity duration-150 group-hover/enhance:opacity-0"
         viewBox="0 0 100 100"

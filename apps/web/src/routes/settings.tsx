@@ -64,7 +64,7 @@ function SettingsContentLayout() {
               shouldOffsetForMacTrafficLights && "pl-[90px]",
             )}
           >
-            <SidebarBrandToggleButton className={cn(shouldOffsetForMacTrafficLights && "ml-16")} />
+            <SidebarBrandToggleButton />
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
               Settings
             </span>
