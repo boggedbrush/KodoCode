@@ -20,6 +20,8 @@ const forcedShutdownTimeoutMs = 1_500;
 const restartDebounceMs = 120;
 const childTreeGracePeriodMs = 1_200;
 const DEVTOOLS_ARG = "--devtools";
+const DEV_RUNNER_PID_ENV = "KODOCODE_DEV_RUNNER_PID";
+const DEV_RUNNER_SHUTDOWN_SIGNAL_ENV = "KODOCODE_DEV_SHUTDOWN_SIGNAL";
 const forwardDevtools = process.argv.includes(DEVTOOLS_ARG);
 
 await waitForResources({
@@ -52,6 +54,23 @@ function cleanupStaleDevApps() {
   }
 
   spawnSync("pkill", ["-f", "--", `--kodo-code-dev-root=${desktopDir}`], { stdio: "ignore" });
+}
+
+function requestRootDevRunnerShutdown() {
+  const runnerPid = Number(process.env[DEV_RUNNER_PID_ENV]);
+  if (!Number.isInteger(runnerPid) || runnerPid <= 0 || runnerPid === process.pid) {
+    return;
+  }
+
+  const signal =
+    process.env[DEV_RUNNER_SHUTDOWN_SIGNAL_ENV] ??
+    (process.platform === "win32" ? "SIGTERM" : "SIGUSR2");
+
+  try {
+    process.kill(runnerPid, signal);
+  } catch {
+    // Best-effort handoff. The parent may already be exiting.
+  }
 }
 
 function startApp() {
@@ -93,9 +112,17 @@ function startApp() {
       currentApp = null;
     }
 
+    const wasExpected = expectedExits.has(app);
+    const exitedCleanly = signal === null && code === 0;
     const exitedAbnormally = signal !== null || code !== 0;
-    if (!shuttingDown && !expectedExits.has(app) && exitedAbnormally) {
+    if (!shuttingDown && !wasExpected && exitedAbnormally) {
       scheduleRestart();
+      return;
+    }
+
+    if (!shuttingDown && !wasExpected && exitedCleanly) {
+      requestRootDevRunnerShutdown();
+      void shutdown(0);
     }
   });
 }

@@ -19,9 +19,57 @@ class CliError extends Data.TaggedError("CliError")<{
   readonly cause?: unknown;
 }> {}
 
+interface PublishPackageJson {
+  readonly name: string;
+  readonly repository: {
+    readonly type: string;
+    readonly url: string;
+    readonly directory: string;
+  };
+  readonly bin: Record<string, string>;
+  readonly type: string;
+  readonly version: string;
+  readonly engines: Record<string, string>;
+  readonly files: readonly string[];
+  readonly dependencies: Record<string, unknown>;
+  readonly overrides: Record<string, unknown>;
+}
+
+export const PUBLISH_BUILD_ASSET_PATHS = ["dist/bin.mjs", "dist/client/index.html"] as const;
+
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),
 );
+
+export const resolvePublishPackageJson = (appVersion: Option.Option<string>) =>
+  Effect.sync(() => {
+    const version = Option.getOrElse(appVersion, () => serverPackageJson.version);
+    const pkg: PublishPackageJson = {
+      name: serverPackageJson.name,
+      repository: serverPackageJson.repository,
+      bin: serverPackageJson.bin,
+      type: serverPackageJson.type,
+      version,
+      engines: serverPackageJson.engines,
+      files: serverPackageJson.files,
+      dependencies: serverPackageJson.dependencies,
+      overrides: rootPackageJson.overrides,
+    };
+
+    return {
+      ...pkg,
+      dependencies: resolveCatalogDependencies(
+        pkg.dependencies,
+        rootPackageJson.workspaces.catalog,
+        "apps/server dependencies",
+      ),
+      overrides: resolveCatalogDependencies(
+        pkg.overrides,
+        rootPackageJson.workspaces.catalog,
+        "root overrides",
+      ),
+    } satisfies PublishPackageJson;
+  });
 
 const runCommand = Effect.fn("runCommand")(function* (command: ChildProcess.Command) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -51,7 +99,7 @@ const applyPublishIconOverrides = Effect.fn("applyPublishIconOverrides")(functio
   for (const override of PUBLISH_ICON_OVERRIDES) {
     const sourcePath = path.join(repoRoot, override.sourceRelativePath);
     const targetPath = path.join(serverDir, override.targetRelativePath);
-    const backupPath = `${targetPath}.publish-bak`;
+    const backupPath = path.join(serverDir, ".publish-icon-backups", override.targetRelativePath);
 
     if (!(yield* fs.exists(sourcePath))) {
       return yield* new CliError({
@@ -64,6 +112,7 @@ const applyPublishIconOverrides = Effect.fn("applyPublishIconOverrides")(functio
       });
     }
 
+    yield* fs.makeDirectory(path.dirname(backupPath), { recursive: true });
     yield* fs.copyFile(targetPath, backupPath);
     yield* fs.copyFile(sourcePath, targetPath);
     backups.push({ targetPath, backupPath });
@@ -177,7 +226,7 @@ const publishCmd = Command.make(
       const backupPath = `${packageJsonPath}.bak`;
 
       // Assert build assets exist
-      for (const relPath of ["dist/index.mjs", "dist/client/index.html"]) {
+      for (const relPath of PUBLISH_BUILD_ASSET_PATHS) {
         const abs = path.join(serverDir, relPath);
         if (!(yield* fs.exists(abs))) {
           return yield* new CliError({
@@ -191,23 +240,7 @@ const publishCmd = Command.make(
         Effect.gen(function* () {
           // Resolve catalog dependencies before any file mutations. If this throws,
           // acquire fails and no release hook runs, so filesystem must still be untouched.
-          const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version);
-          const pkg = {
-            name: serverPackageJson.name,
-            repository: serverPackageJson.repository,
-            bin: serverPackageJson.bin,
-            type: serverPackageJson.type,
-            version,
-            engines: serverPackageJson.engines,
-            files: serverPackageJson.files,
-            dependencies: serverPackageJson.dependencies as Record<string, unknown>,
-          };
-
-          pkg.dependencies = resolveCatalogDependencies(
-            pkg.dependencies,
-            rootPackageJson.workspaces.catalog,
-            "apps/server dependencies",
-          );
+          const pkg = yield* resolvePublishPackageJson(config.appVersion);
 
           const original = yield* fs.readFileString(packageJsonPath);
           yield* fs.writeFileString(backupPath, original);
@@ -254,13 +287,16 @@ const publishCmd = Command.make(
 // root command
 // ---------------------------------------------------------------------------
 
-const cli = Command.make("cli").pipe(
+export const cli = Command.make("cli").pipe(
   Command.withDescription("Kodo server build & publish CLI."),
   Command.withSubcommands([buildCmd, publishCmd]),
 );
 
-Command.run(cli, { version: "0.0.0" }).pipe(
+const runtimeProgram = Command.run(cli, { version: "0.0.0" }).pipe(
   Effect.scoped,
   Effect.provide([Logger.layer([Logger.consolePretty()]), NodeServices.layer]),
-  NodeRuntime.runMain,
 );
+
+if (import.meta.main) {
+  NodeRuntime.runMain(runtimeProgram);
+}

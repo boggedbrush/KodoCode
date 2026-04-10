@@ -6,7 +6,6 @@ import {
   type GitStatusStreamEvent,
   type NativeApi,
   type PromptEnhanceInput,
-  type PromptEnhanceResult,
   ORCHESTRATION_WS_METHODS,
   type ServerSettingsPatch,
   WS_METHODS,

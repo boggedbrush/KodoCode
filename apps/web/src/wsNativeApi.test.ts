@@ -2,6 +2,7 @@ import {
   CommandId,
   DEFAULT_SERVER_SETTINGS,
   type DesktopBridge,
+  EnvironmentId,
   EventId,
   type GitStatusResult,
   ProjectId,
@@ -165,7 +166,21 @@ const defaultProviders: ReadonlyArray<ServerProvider> = [
   },
 ];
 
+const baseEnvironment = {
+  environmentId: EnvironmentId.makeUnsafe("env-local"),
+  label: "Local environment",
+  platform: {
+    os: "darwin" as const,
+    arch: "arm64" as const,
+  },
+  serverVersion: "0.0.0-test",
+  capabilities: {
+    repositoryIdentity: true,
+  },
+};
+
 const baseServerConfig: ServerConfig = {
+  environment: baseEnvironment,
   cwd: "/tmp/workspace",
   keybindingsConfigPath: "/tmp/workspace/.config/keybindings.json",
   keybindings: [],

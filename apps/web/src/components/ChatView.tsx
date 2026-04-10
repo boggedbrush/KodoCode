@@ -218,6 +218,7 @@ const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+const EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID: Record<string, boolean> = {};
 const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
@@ -594,8 +595,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const serverThread = useThreadById(threadId);
   const setStoreThreadError = useStore((store) => store.setError);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
+  const setThreadChangedFilesExpanded = useUiStateStore(
+    (store) => store.setThreadChangedFilesExpanded,
+  );
   const activeThreadLastVisitedAt = useUiStateStore(
     (store) => store.threadLastVisitedAtById[threadId],
+  );
+  const changedFilesExpandedByTurnId = useUiStateStore(
+    (store) =>
+      store.threadChangedFilesExpandedById[threadId] ?? EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID,
   );
   const settings = useSettings();
   const setStickyComposerModelSelection = useComposerDraftStore(
@@ -4425,6 +4433,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [navigate, threadId],
   );
+  const handleSetChangedFilesExpanded = useCallback(
+    (turnId: TurnId, expanded: boolean) => {
+      setThreadChangedFilesExpanded(threadId, turnId, expanded);
+    },
+    [setThreadChangedFilesExpanded, threadId],
+  );
   const onRevertUserMessage = (messageId: MessageId) => {
     const targetTurnCount = revertTurnCountByUserMessageId.get(messageId);
     if (typeof targetTurnCount !== "number") {
@@ -4544,6 +4558,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 nowIso={nowIso}
                 expandedWorkGroups={expandedWorkGroups}
                 onToggleWorkGroup={onToggleWorkGroup}
+                changedFilesExpandedByTurnId={changedFilesExpandedByTurnId}
+                onSetChangedFilesExpanded={handleSetChangedFilesExpanded}
                 onOpenTurnDiff={onOpenTurnDiff}
                 revertTurnCountByUserMessageId={revertTurnCountByUserMessageId}
                 onRevertUserMessage={onRevertUserMessage}

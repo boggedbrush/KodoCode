@@ -1,8 +1,22 @@
+import { EnvironmentId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { assertTrue } from "@effect/vitest/utils";
 import { Effect, Option } from "effect";
 
 import { ServerLifecycleEvents, ServerLifecycleEventsLive } from "./serverLifecycleEvents.ts";
+
+const baseEnvironment = {
+  environmentId: EnvironmentId.makeUnsafe("env-local"),
+  label: "Local environment",
+  platform: {
+    os: "darwin" as const,
+    arch: "arm64" as const,
+  },
+  serverVersion: "0.0.0-test",
+  capabilities: {
+    repositoryIdentity: true,
+  },
+};
 
 it.effect(
   "publishes lifecycle events without subscribers and snapshots the latest welcome/ready",
@@ -15,6 +29,7 @@ it.effect(
           version: 1,
           type: "welcome",
           payload: {
+            environment: baseEnvironment,
             cwd: "/tmp/project",
             projectName: "project",
           },
@@ -29,6 +44,7 @@ it.effect(
           type: "ready",
           payload: {
             at: new Date().toISOString(),
+            environment: baseEnvironment,
           },
         })
         .pipe(Effect.timeoutOption("50 millis"));

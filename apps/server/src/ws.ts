@@ -1,5 +1,6 @@
 import { Cause, Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
 import {
+  type AuthSessionId,
   CommandId,
   EventId,
   type OrchestrationCommand,
@@ -21,9 +22,12 @@ import {
 } from "@t3tools/contracts";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
+import { RpcSerialization } from "effect/unstable/rpc";
+import { Socket } from "effect/unstable/socket";
 
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
+import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore";
 import { GitManager } from "./git/Services/GitManager";
@@ -48,6 +52,8 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
 import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptRunner";
 import { TextGeneration } from "./git/Services/TextGeneration";
+import { ServerEnvironment } from "./environment/Services/ServerEnvironment";
+import { makeRpcWebSocketServer } from "./rpcWebSocketServer";
 
 const ENHANCE_SEARCH_STOP_WORDS = new Set([
   "the",
@@ -95,6 +101,13 @@ function formatEnhanceWorkspaceContext(entries: ReadonlyArray<{ kind: string; pa
   return entries.map((entry) => `- [${entry.kind}] ${entry.path}`).join("\n");
 }
 
+interface LiveRpcSessionClients {
+  readonly clientIdsBySessionId: Map<AuthSessionId, Set<number>>;
+  readonly sessionIdByClientId: Map<number, AuthSessionId>;
+}
+
+const SESSION_REVOKED_CLOSE_EVENT = new Socket.CloseEvent(1008, "Session revoked");
+
 const WsRpcLayer = WsRpcGroup.toLayer(
   Effect.gen(function* () {
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
@@ -110,6 +123,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const config = yield* ServerConfig;
     const lifecycleEvents = yield* ServerLifecycleEvents;
     const serverSettings = yield* ServerSettingsService;
+    const serverEnvironment = yield* ServerEnvironment;
     const startup = yield* ServerRuntimeStartup;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
@@ -377,8 +391,10 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       const keybindingsConfig = yield* keybindings.loadConfigState;
       const providers = yield* providerRegistry.getProviders;
       const settings = yield* serverSettings.getSettings;
+      const environment = yield* serverEnvironment.getDescriptor;
 
       return {
+        environment,
         cwd: config.cwd,
         keybindingsConfigPath: config.keybindingsConfigPath,
         keybindings: keybindingsConfig.keybindings,
@@ -829,31 +845,182 @@ const WsRpcLayer = WsRpcGroup.toLayer(
 
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
-    const rpcWebSocketHttpEffect = yield* RpcServer.toHttpEffectWebsocket(WsRpcGroup, {
+    const sessionCredentials = yield* SessionCredentialService;
+    const liveRpcSessionClientsRef = yield* Ref.make<LiveRpcSessionClients>({
+      clientIdsBySessionId: new Map(),
+      sessionIdByClientId: new Map(),
+    });
+
+    const bindRpcClientToSession = (clientId: number, sessionId: AuthSessionId) =>
+      Ref.update(liveRpcSessionClientsRef, (current) => {
+        const clientIdsBySessionId = new Map(current.clientIdsBySessionId);
+        const sessionIdByClientId = new Map(current.sessionIdByClientId);
+        const clientIds = new Set(clientIdsBySessionId.get(sessionId) ?? []);
+        clientIds.add(clientId);
+        clientIdsBySessionId.set(sessionId, clientIds);
+        sessionIdByClientId.set(clientId, sessionId);
+        return {
+          clientIdsBySessionId,
+          sessionIdByClientId,
+        } satisfies LiveRpcSessionClients;
+      });
+
+    const unbindRpcClient = (clientId: number) =>
+      Ref.update(liveRpcSessionClientsRef, (current) => {
+        const sessionId = current.sessionIdByClientId.get(clientId);
+        if (!sessionId) {
+          return current;
+        }
+
+        const clientIdsBySessionId = new Map(current.clientIdsBySessionId);
+        const sessionIdByClientId = new Map(current.sessionIdByClientId);
+        const nextClientIds = new Set(clientIdsBySessionId.get(sessionId) ?? []);
+        nextClientIds.delete(clientId);
+        if (nextClientIds.size === 0) {
+          clientIdsBySessionId.delete(sessionId);
+        } else {
+          clientIdsBySessionId.set(sessionId, nextClientIds);
+        }
+        sessionIdByClientId.delete(clientId);
+
+        return {
+          clientIdsBySessionId,
+          sessionIdByClientId,
+        } satisfies LiveRpcSessionClients;
+      });
+
+    const takeRpcClientIdsForSession = (sessionId: AuthSessionId) =>
+      Ref.modify(
+        liveRpcSessionClientsRef,
+        (current): readonly [ReadonlyArray<number>, LiveRpcSessionClients] => {
+          const clientIds = current.clientIdsBySessionId.get(sessionId);
+          if (!clientIds || clientIds.size === 0) {
+            return [[], current] as const;
+          }
+
+          const clientIdsBySessionId = new Map(current.clientIdsBySessionId);
+          const sessionIdByClientId = new Map(current.sessionIdByClientId);
+          clientIdsBySessionId.delete(sessionId);
+          for (const clientId of clientIds) {
+            sessionIdByClientId.delete(clientId);
+          }
+
+          return [
+            Array.from(clientIds),
+            {
+              clientIdsBySessionId,
+              sessionIdByClientId,
+            } satisfies LiveRpcSessionClients,
+          ] as const;
+        },
+      );
+
+    const isWebSocketSessionActive = (sessionId: AuthSessionId) =>
+      sessionCredentials.listActive().pipe(
+        Effect.tapError((cause) =>
+          Effect.logError("Failed to re-check websocket session state after upgrade.").pipe(
+            Effect.annotateLogs({
+              sessionId,
+              cause,
+            }),
+          ),
+        ),
+        Effect.result,
+        Effect.map(
+          (result) =>
+            result._tag === "Success" &&
+            result.success.some((session) => session.sessionId === sessionId),
+        ),
+      );
+
+    const rpcWebSocketServer = yield* makeRpcWebSocketServer(WsRpcGroup, {
       spanPrefix: "ws.rpc",
       spanAttributes: {
         "rpc.transport": "websocket",
         "rpc.system": "effect-rpc",
       },
     }).pipe(Effect.provide(Layer.mergeAll(WsRpcLayer, RpcSerialization.layerJson)));
+
+    // Revocation is checked again on reconnect, but websocket RPC authenticates only
+    // during the upgrade. Closing any live socket for a revoked session is what keeps
+    // revocation effective for already-connected clients too.
+    yield* Stream.runForEach(sessionCredentials.streamChanges, (change) => {
+      if (change.type !== "clientRemoved") {
+        return Effect.void;
+      }
+      return takeRpcClientIdsForSession(change.sessionId).pipe(
+        Effect.flatMap((clientIds) =>
+          Effect.forEach(
+            clientIds,
+            (clientId) => rpcWebSocketServer.closeClient(clientId, SESSION_REVOKED_CLOSE_EVENT),
+            {
+              concurrency: "unbounded",
+              discard: true,
+            },
+          ),
+        ),
+      );
+    }).pipe(Effect.forkScoped);
+
     return HttpRouter.add(
       "GET",
       "/ws",
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const config = yield* ServerConfig;
-        if (config.authToken) {
-          const url = HttpServerRequest.toURL(request);
-          if (Option.isNone(url)) {
-            return HttpServerResponse.text("Invalid WebSocket URL", { status: 400 });
-          }
+        const serverAuth = yield* ServerAuth;
+        const url = HttpServerRequest.toURL(request);
+
+        if (config.authToken && Option.isSome(url)) {
           const token = url.value.searchParams.get("token");
-          if (token !== config.authToken) {
-            return HttpServerResponse.text("Unauthorized WebSocket connection", { status: 401 });
+          if (token === config.authToken) {
+            return yield* rpcWebSocketServer.handleRequest();
           }
         }
-        return yield* rpcWebSocketHttpEffect;
-      }),
+
+        const authenticatedTransportRequired = config.authToken
+          ? true
+          : yield* serverAuth.isAuthenticatedTransportRequired();
+
+        if (!authenticatedTransportRequired) {
+          return yield* rpcWebSocketServer.handleRequest();
+        }
+
+        // Keep legacy `?token=` support for desktop flows, but once the server has been
+        // claimed or an explicit auth token exists, websocket RPC must bind to a real
+        // authenticated session so `/api/auth/ws-token` and presence tracking both work.
+        return yield* serverAuth.authenticateWebSocketUpgrade(request).pipe(
+          Effect.flatMap((session) =>
+            rpcWebSocketServer.handleRequest({
+              onClientConnected: (clientId) =>
+                Effect.gen(function* () {
+                  // Register the socket before the active-session check so a revoke that
+                  // races the upgrade can still find and close the connection.
+                  yield* bindRpcClientToSession(clientId, session.sessionId);
+                  const isSessionActive = yield* isWebSocketSessionActive(session.sessionId);
+                  if (!isSessionActive) {
+                    yield* rpcWebSocketServer.closeClient(clientId, SESSION_REVOKED_CLOSE_EVENT);
+                    return;
+                  }
+                  yield* sessionCredentials.markConnected(session.sessionId);
+                }),
+              onClientDisconnected: (clientId) =>
+                Effect.gen(function* () {
+                  yield* unbindRpcClient(clientId);
+                  yield* Effect.orDie(sessionCredentials.markDisconnected(session.sessionId));
+                }),
+            }),
+          ),
+        );
+      }).pipe(
+        Effect.catchTag("AuthError", (error) =>
+          Effect.succeed(
+            HttpServerResponse.text(error.message, {
+              status: error.status ?? 401,
+            }),
+          ),
+        ),
+      ),
     );
   }),
 );

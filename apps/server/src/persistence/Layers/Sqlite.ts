@@ -59,6 +59,15 @@ export const SqlitePersistenceMemory = Layer.provideMerge(
   makeRuntimeSqliteLayer({ filename: ":memory:" }),
 );
 
-export const layerConfig = Layer.unwrap(
-  Effect.map(Effect.service(ServerConfig), ({ dbPath }) => makeSqlitePersistenceLive(dbPath)),
-);
+const layerFromServerConfig = (
+  selectDbPath: (config: { readonly dbPath: string; readonly authDbPath: string }) => string,
+) =>
+  Layer.unwrap(
+    Effect.map(Effect.service(ServerConfig), (config) =>
+      makeSqlitePersistenceLive(selectDbPath(config)),
+    ),
+  );
+
+export const layerConfig = layerFromServerConfig(({ dbPath }) => dbPath);
+
+export const authLayerConfig = layerFromServerConfig(({ authDbPath }) => authDbPath);

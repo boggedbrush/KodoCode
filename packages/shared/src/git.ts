@@ -80,6 +80,46 @@ export function deriveLocalBranchNameFromRemoteRef(branchName: string): string {
   return branchName.slice(firstSeparatorIndex + 1);
 }
 
+/**
+ * Normalize a git remote URL into a stable comparison key.
+ */
+export function normalizeGitRemoteUrl(value: string): string {
+  const normalized = value
+    .trim()
+    .replace(/\/+$/g, "")
+    .replace(/\.git$/i, "");
+
+  if (/^(?:ssh|https?|git):\/\//i.test(normalized)) {
+    try {
+      const url = new URL(normalized);
+      const repositoryPath = url.pathname
+        .split("/")
+        .filter((segment) => segment.length > 0)
+        .join("/");
+      // Some valid remotes live at the host root (`https://git.example.com/repo.git`),
+      // so treat any non-empty path as canonical instead of falling back to the raw
+      // URL string and forcing downstream identity parsing to invent path segments.
+      if (url.hostname && repositoryPath.length > 0) {
+        // Only the host is case-insensitive. Preserving repository path casing avoids
+        // aliasing distinct repos on servers that treat `Team/Repo` and `team/repo`
+        // as different repository paths.
+        return `${url.hostname.toLowerCase()}/${repositoryPath}`;
+      }
+    } catch {
+      return normalized;
+    }
+  }
+
+  // SCP-style remotes are not limited to the `git@` user, especially on
+  // self-hosted deployments where a dedicated deploy account is common.
+  const scpStyleHostAndPath = /^[^@\s]+@([^:/\s]+)[:/]([^/\s]+(?:\/[^/\s]+)*)$/i.exec(normalized);
+  if (scpStyleHostAndPath?.[1] && scpStyleHostAndPath[2]) {
+    return `${scpStyleHostAndPath[1].toLowerCase()}/${scpStyleHostAndPath[2]}`;
+  }
+
+  return normalized;
+}
+
 function deriveLocalBranchNameCandidatesFromRemoteRef(
   branchName: string,
   remoteName?: string,
@@ -133,13 +173,9 @@ function parseGitRemoteHost(remoteUrl: string): string | null {
     return null;
   }
 
-  if (trimmed.startsWith("git@")) {
-    const hostWithPath = trimmed.slice("git@".length);
-    const separatorIndex = hostWithPath.search(/[:/]/);
-    if (separatorIndex <= 0) {
-      return null;
-    }
-    return hostWithPath.slice(0, separatorIndex).toLowerCase();
+  const scpStyleMatch = /^[^@\s]+@([^:/\s]+)[:/]/.exec(trimmed);
+  if (scpStyleMatch?.[1]) {
+    return scpStyleMatch[1].toLowerCase();
   }
 
   try {

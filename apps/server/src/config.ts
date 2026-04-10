@@ -19,6 +19,8 @@ export type RuntimeMode = typeof RuntimeMode.Type;
 export interface ServerDerivedPaths {
   readonly stateDir: string;
   readonly dbPath: string;
+  readonly authStateDir: string;
+  readonly authDbPath: string;
   readonly keybindingsConfigPath: string;
   readonly settingsPath: string;
   readonly worktreesDir: string;
@@ -30,6 +32,8 @@ export interface ServerDerivedPaths {
   readonly providerEventLogPath: string;
   readonly terminalLogsDir: string;
   readonly anonymousIdPath: string;
+  readonly environmentIdPath: string;
+  readonly secretsDir: string;
 }
 
 /**
@@ -59,19 +63,72 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logWebSocketEvents: boolean;
 }
 
+export interface ServerAuthStateScope {
+  readonly mode: RuntimeMode;
+  readonly host: string | undefined;
+}
+
+const LOOPBACK_AUTH_STATE_SCOPE_KEY = "loopback";
+
+const sanitizeAuthStateScopeSegment = (value: string) => {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+  return normalized.replace(/^-+|-+$/g, "") || "default";
+};
+
+function normalizeAuthStateScopeHost(host: string | undefined): string {
+  const normalizedHost = host?.trim().toLowerCase();
+  if (!normalizedHost) {
+    return LOOPBACK_AUTH_STATE_SCOPE_KEY;
+  }
+
+  if (
+    normalizedHost === "localhost" ||
+    normalizedHost === "127.0.0.1" ||
+    normalizedHost === "::1" ||
+    normalizedHost === "[::1]"
+  ) {
+    // These are all equivalent local-only launch modes for the standalone server, so
+    // they need to share one persisted auth identity and cookie namespace.
+    return LOOPBACK_AUTH_STATE_SCOPE_KEY;
+  }
+
+  return normalizedHost;
+}
+
+const deriveAuthStateScopeKey = (scope: ServerAuthStateScope) =>
+  [
+    sanitizeAuthStateScopeSegment(scope.mode),
+    sanitizeAuthStateScopeSegment(normalizeAuthStateScopeHost(scope.host)),
+  ].join("-");
+
 export const deriveServerPaths = Effect.fn(function* (
   baseDir: ServerConfigShape["baseDir"],
   devUrl: ServerConfigShape["devUrl"],
+  authStateScope: ServerAuthStateScope = {
+    mode: "web",
+    host: undefined,
+  },
 ): Effect.fn.Return<ServerDerivedPaths, never, Path.Path> {
   const { join } = yield* Path.Path;
   const stateDir = join(baseDir, devUrl !== undefined ? "dev" : "userdata");
   const dbPath = join(stateDir, "state.sqlite");
+  // Keep the main runtime database stable, but scope auth artifacts to the
+  // stable server identity. The bound port is intentionally excluded here
+  // because desktop/web can rebind to the next free port on restart, and
+  // auth/session history must survive that transport-level move.
+  const authStateDir = join(stateDir, "auth", deriveAuthStateScopeKey(authStateScope));
+  const authDbPath = join(authStateDir, "state.sqlite");
   const attachmentsDir = join(stateDir, "attachments");
   const logsDir = join(stateDir, "logs");
   const providerLogsDir = join(logsDir, "provider");
   return {
     stateDir,
     dbPath,
+    authStateDir,
+    authDbPath,
     keybindingsConfigPath: join(stateDir, "keybindings.json"),
     settingsPath: join(stateDir, "settings.json"),
     worktreesDir: join(baseDir, "worktrees"),
@@ -83,6 +140,8 @@ export const deriveServerPaths = Effect.fn(function* (
     providerEventLogPath: join(providerLogsDir, "events.log"),
     terminalLogsDir: join(logsDir, "terminals"),
     anonymousIdPath: join(stateDir, "anonymous-id"),
+    environmentIdPath: join(authStateDir, "environment-id"),
+    secretsDir: join(authStateDir, "secrets"),
   };
 });
 
@@ -97,10 +156,13 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
       fs.makeDirectory(derivedPaths.providerLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.terminalLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.attachmentsDir, { recursive: true }),
+      fs.makeDirectory(derivedPaths.authStateDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.worktreesDir, { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.keybindingsConfigPath), { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.anonymousIdPath), { recursive: true }),
+      fs.makeDirectory(path.dirname(derivedPaths.environmentIdPath), { recursive: true }),
+      fs.makeDirectory(derivedPaths.secretsDir, { recursive: true }),
     ],
     { concurrency: "unbounded" },
   );
@@ -123,7 +185,10 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
           typeof baseDirOrPrefix === "string"
             ? baseDirOrPrefix
             : yield* fs.makeTempDirectoryScoped({ prefix: baseDirOrPrefix.prefix });
-        const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
+        const derivedPaths = yield* deriveServerPaths(baseDir, devUrl, {
+          mode: "web",
+          host: undefined,
+        });
         yield* ensureServerDirectories(derivedPaths);
 
         return {

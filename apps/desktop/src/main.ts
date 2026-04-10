@@ -16,7 +16,6 @@ import {
   shell,
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
-import * as Effect from "effect/Effect";
 import type {
   DesktopTheme,
   DesktopUpdateActionResult,
@@ -26,9 +25,9 @@ import type {
 import { autoUpdater } from "electron-updater";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
-import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
+import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort";
 import { showDesktopConfirmDialog } from "./confirmDialog";
 import { syncShellEnvironment } from "./syncShellEnvironment";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
@@ -106,6 +105,7 @@ let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
 let backendAuthToken = "";
 let backendWsUrl = "";
+let backendStartPromise: Promise<void> | null = null;
 let restartAttempt = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let isQuitting = false;
@@ -589,12 +589,15 @@ function dispatchMenuAction(action: string): void {
 }
 
 function handleCheckForUpdatesMenuClick(): void {
+  const hasUpdateFeedConfig =
+    readAppUpdateYml() !== null || Boolean(process.env.T3CODE_DESKTOP_MOCK_UPDATES);
   const disabledReason = getAutoUpdateDisabledReason({
     isDevelopment,
     isPackaged: app.isPackaged,
     platform: process.platform,
     appImage: process.env.APPIMAGE,
     disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+    hasUpdateFeedConfig,
   });
   if (disabledReason) {
     console.info("[desktop-updater] Manual update check requested, but updates are disabled.");
@@ -872,6 +875,8 @@ function setUpdateState(patch: Partial<DesktopUpdateState>): void {
 }
 
 function shouldEnableAutoUpdates(): boolean {
+  const hasUpdateFeedConfig =
+    readAppUpdateYml() !== null || Boolean(process.env.T3CODE_DESKTOP_MOCK_UPDATES);
   return (
     getAutoUpdateDisabledReason({
       isDevelopment,
@@ -879,6 +884,7 @@ function shouldEnableAutoUpdates(): boolean {
       platform: process.platform,
       appImage: process.env.APPIMAGE,
       disabledByEnv: process.env.T3CODE_DISABLE_AUTO_UPDATE === "1",
+      hasUpdateFeedConfig,
     }) === null
   );
 }
@@ -962,17 +968,6 @@ async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed
 }
 
 function configureAutoUpdater(): void {
-  const enabled = shouldEnableAutoUpdates();
-  setUpdateState({
-    ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo),
-    enabled,
-    status: enabled ? "idle" : "disabled",
-  });
-  if (!enabled) {
-    return;
-  }
-  updaterConfigured = true;
-
   const githubToken =
     process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
   if (githubToken) {
@@ -996,6 +991,17 @@ function configureAutoUpdater(): void {
       url: `http://localhost:${process.env.T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT ?? 3000}`,
     });
   }
+
+  const enabled = shouldEnableAutoUpdates();
+  setUpdateState({
+    ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo),
+    enabled,
+    status: enabled ? "idle" : "disabled",
+  });
+  if (!enabled) {
+    return;
+  }
+  updaterConfigured = true;
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -1093,97 +1099,124 @@ function scheduleBackendRestart(reason: string): void {
 
   restartTimer = setTimeout(() => {
     restartTimer = null;
-    startBackend();
+    void startBackend();
   }, delayMs);
 }
 
-function startBackend(): void {
-  if (isQuitting || backendProcess) return;
-
-  backendObservabilitySettings = readPersistedBackendObservabilitySettings();
-  const backendEntry = resolveBackendEntry();
-  if (!FS.existsSync(backendEntry)) {
-    scheduleBackendRestart(`missing server entry at ${backendEntry}`);
-    return;
-  }
-
-  const captureBackendLogs = app.isPackaged && backendLogSink !== null;
-  const child = ChildProcess.spawn(process.execPath, [backendEntry, "--bootstrap-fd", "3"], {
-    cwd: resolveBackendCwd(),
-    // In Electron main, process.execPath points to the Electron binary.
-    // Run the child in Node mode so this backend process does not become a GUI app instance.
-    env: {
-      ...backendChildEnv(),
-      ELECTRON_RUN_AS_NODE: "1",
-    },
-    stdio: captureBackendLogs
-      ? ["ignore", "pipe", "pipe", "pipe"]
-      : ["ignore", "inherit", "inherit", "pipe"],
+async function refreshDesktopBackendConnectionEndpoint(): Promise<void> {
+  backendPort = await resolveDesktopBackendPort({
+    host: "127.0.0.1",
+    startPort: DEFAULT_DESKTOP_BACKEND_PORT,
   });
-  const bootstrapStream = child.stdio[3];
-  if (bootstrapStream && "write" in bootstrapStream) {
-    bootstrapStream.write(
-      `${JSON.stringify({
-        mode: "desktop",
-        noBrowser: true,
-        port: backendPort,
-        t3Home: BASE_DIR,
-        authToken: backendAuthToken,
-        ...(backendObservabilitySettings.otlpTracesUrl
-          ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
-          : {}),
-        ...(backendObservabilitySettings.otlpMetricsUrl
-          ? { otlpMetricsUrl: backendObservabilitySettings.otlpMetricsUrl }
-          : {}),
-      })}\n`,
-    );
-    bootstrapStream.end();
-  } else {
-    child.kill("SIGTERM");
-    scheduleBackendRestart("missing desktop bootstrap pipe");
-    return;
-  }
-  backendProcess = child;
-  let backendSessionClosed = false;
-  const closeBackendSession = (details: string) => {
-    if (backendSessionClosed) return;
-    backendSessionClosed = true;
-    writeBackendSessionBoundary("END", details);
-  };
-  writeBackendSessionBoundary(
-    "START",
-    `pid=${child.pid ?? "unknown"} port=${backendPort} cwd=${resolveBackendCwd()}`,
+  const baseUrl = `ws://127.0.0.1:${backendPort}`;
+  backendWsUrl = `${baseUrl}/?token=${encodeURIComponent(backendAuthToken)}`;
+  writeDesktopLogHeader(
+    `resolved backend connection endpoint startPort=${DEFAULT_DESKTOP_BACKEND_PORT} port=${backendPort}`,
   );
-  captureBackendOutput(child);
+}
 
-  child.once("spawn", () => {
-    restartAttempt = 0;
-  });
+async function startBackend(): Promise<void> {
+  if (isQuitting || backendProcess) return;
+  if (backendStartPromise) {
+    await backendStartPromise;
+    return;
+  }
 
-  child.on("error", (error) => {
-    const wasExpected = expectedBackendExitChildren.has(child);
-    if (backendProcess === child) {
-      backendProcess = null;
-    }
-    closeBackendSession(`pid=${child.pid ?? "unknown"} error=${error.message}`);
-    if (wasExpected) {
+  backendStartPromise = (async () => {
+    backendObservabilitySettings = readPersistedBackendObservabilitySettings();
+    const backendEntry = resolveBackendEntry();
+    if (!FS.existsSync(backendEntry)) {
+      scheduleBackendRestart(`missing server entry at ${backendEntry}`);
       return;
     }
-    scheduleBackendRestart(error.message);
+
+    // Re-resolve the backend endpoint immediately before each spawn. A probe-only
+    // port scan from an earlier launch attempt is not a reservation, so reusing it
+    // after a crash can strand the desktop app in a repeated EADDRINUSE restart loop.
+    await refreshDesktopBackendConnectionEndpoint();
+
+    const captureBackendLogs = app.isPackaged && backendLogSink !== null;
+    const child = ChildProcess.spawn(process.execPath, [backendEntry, "--bootstrap-fd", "3"], {
+      cwd: resolveBackendCwd(),
+      // In Electron main, process.execPath points to the Electron binary.
+      // Run the child in Node mode so this backend process does not become a GUI app instance.
+      env: {
+        ...backendChildEnv(),
+        ELECTRON_RUN_AS_NODE: "1",
+      },
+      stdio: captureBackendLogs
+        ? ["ignore", "pipe", "pipe", "pipe"]
+        : ["ignore", "inherit", "inherit", "pipe"],
+    });
+    const bootstrapStream = child.stdio[3];
+    if (bootstrapStream && "write" in bootstrapStream) {
+      bootstrapStream.write(
+        `${JSON.stringify({
+          mode: "desktop",
+          noBrowser: true,
+          port: backendPort,
+          t3Home: BASE_DIR,
+          authToken: backendAuthToken,
+          ...(backendObservabilitySettings.otlpTracesUrl
+            ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
+            : {}),
+          ...(backendObservabilitySettings.otlpMetricsUrl
+            ? { otlpMetricsUrl: backendObservabilitySettings.otlpMetricsUrl }
+            : {}),
+        })}\n`,
+      );
+      bootstrapStream.end();
+    } else {
+      child.kill("SIGTERM");
+      scheduleBackendRestart("missing desktop bootstrap pipe");
+      return;
+    }
+    backendProcess = child;
+    let backendSessionClosed = false;
+    const closeBackendSession = (details: string) => {
+      if (backendSessionClosed) return;
+      backendSessionClosed = true;
+      writeBackendSessionBoundary("END", details);
+    };
+    writeBackendSessionBoundary(
+      "START",
+      `pid=${child.pid ?? "unknown"} port=${backendPort} cwd=${resolveBackendCwd()}`,
+    );
+    captureBackendOutput(child);
+
+    child.once("spawn", () => {
+      restartAttempt = 0;
+    });
+
+    child.on("error", (error) => {
+      const wasExpected = expectedBackendExitChildren.has(child);
+      if (backendProcess === child) {
+        backendProcess = null;
+      }
+      closeBackendSession(`pid=${child.pid ?? "unknown"} error=${error.message}`);
+      if (wasExpected) {
+        return;
+      }
+      scheduleBackendRestart(error.message);
+    });
+
+    child.on("exit", (code, signal) => {
+      const wasExpected = expectedBackendExitChildren.has(child);
+      if (backendProcess === child) {
+        backendProcess = null;
+      }
+      closeBackendSession(
+        `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
+      );
+      if (isQuitting || wasExpected) return;
+      const reason = `code=${code ?? "null"} signal=${signal ?? "null"}`;
+      scheduleBackendRestart(reason);
+    });
+  })().finally(() => {
+    backendStartPromise = null;
   });
 
-  child.on("exit", (code, signal) => {
-    const wasExpected = expectedBackendExitChildren.has(child);
-    if (backendProcess === child) {
-      backendProcess = null;
-    }
-    closeBackendSession(
-      `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
-    );
-    if (isQuitting || wasExpected) return;
-    const reason = `code=${code ?? "null"} signal=${signal ?? "null"}`;
-    scheduleBackendRestart(reason);
-  });
+  await backendStartPromise;
 }
 
 function stopBackend(): void {
@@ -1579,20 +1612,11 @@ configureAppIdentity();
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
-  backendPort = await Effect.service(NetService).pipe(
-    Effect.flatMap((net) => net.reserveLoopbackPort()),
-    Effect.provide(NetService.layer),
-    Effect.runPromise,
-  );
-  writeDesktopLogHeader(`reserved backend port via NetService port=${backendPort}`);
   backendAuthToken = Crypto.randomBytes(24).toString("hex");
-  const baseUrl = `ws://127.0.0.1:${backendPort}`;
-  backendWsUrl = `${baseUrl}/?token=${encodeURIComponent(backendAuthToken)}`;
-  writeDesktopLogHeader(`bootstrap resolved websocket endpoint baseUrl=${baseUrl}`);
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
-  startBackend();
+  await startBackend();
   writeDesktopLogHeader("bootstrap backend start requested");
   mainWindow = createWindow();
   writeDesktopLogHeader("bootstrap main window created");
@@ -1630,7 +1654,9 @@ app
   });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin" && !isQuitting) {
+  // In dev, closing the last window should end the foreground terminal session
+  // instead of leaving a headless macOS app running.
+  if (!isQuitting && (isDevelopment || process.platform !== "darwin")) {
     app.quit();
   }
 });

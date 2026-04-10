@@ -1,4 +1,5 @@
-import { DEFAULT_SERVER_SETTINGS, WS_METHODS } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, EnvironmentId, WS_METHODS } from "@t3tools/contracts";
+import { Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -82,6 +83,18 @@ class MockWebSocket {
 
 const originalWebSocket = globalThis.WebSocket;
 const originalFetch = globalThis.fetch;
+const baseEnvironment = {
+  environmentId: EnvironmentId.makeUnsafe("env-local"),
+  label: "Local environment",
+  platform: {
+    os: "darwin" as const,
+    arch: "arm64" as const,
+  },
+  serverVersion: "0.0.0-test",
+  capabilities: {
+    repositoryIdentity: true,
+  },
+};
 
 function getSocket(): MockWebSocket {
   const socket = sockets.at(-1);
@@ -150,6 +163,39 @@ describe("WsTransport", () => {
     });
 
     expect(getSocket().url).toBe("ws://localhost:3020/ws?token=secret-token");
+    await transport.dispose();
+  });
+
+  it("mints a websocket token through the page origin for cross-origin browser sessions", async () => {
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            token: "issued-session-token",
+            expiresAt: "2026-04-10T12:00:00.000Z",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+    );
+
+    const transport = new WsTransport("ws://127.0.0.1:3773/?client=web");
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith("http://localhost:3020/api/auth/ws-token", {
+        credentials: "include",
+        method: "POST",
+      });
+    });
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    expect(getSocket().url).toBe("ws://127.0.0.1:3773/ws?client=web&wsToken=issued-session-token");
     await transport.dispose();
   });
 
@@ -436,6 +482,7 @@ describe("WsTransport", () => {
       sequence: 1,
       type: "welcome",
       payload: {
+        environment: baseEnvironment,
         cwd: "/tmp/workspace",
         projectName: "workspace",
       },
@@ -489,6 +536,7 @@ describe("WsTransport", () => {
             sequence: 1,
             type: "welcome",
             payload: {
+              environment: baseEnvironment,
               cwd: "/tmp/one",
               projectName: "one",
             },
@@ -532,6 +580,7 @@ describe("WsTransport", () => {
       sequence: 2,
       type: "welcome",
       payload: {
+        environment: baseEnvironment,
         cwd: "/tmp/two",
         projectName: "two",
       },
@@ -598,6 +647,110 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("does not retry stream subscriptions after application-level failures", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let attempts = 0;
+
+    const unsubscribe = transport.subscribe(
+      () =>
+        Stream.suspend(() => {
+          attempts += 1;
+          return Stream.fail(new Error("Git command failed in GitCore.statusDetails"));
+        }),
+      vi.fn(),
+      { retryDelay: 10 },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    getSocket().open();
+
+    await waitFor(() => {
+      expect(attempts).toBe(1);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(attempts).toBe(1);
+    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription failed", {
+      error: "Git command failed in GitCore.statusDetails",
+    });
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      "WebSocket RPC subscription disconnected",
+      expect.anything(),
+    );
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
+  it("keeps retrying stream subscriptions after transport failures", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let attempts = 0;
+
+    const unsubscribe = transport.subscribe(
+      () =>
+        Stream.suspend(() => {
+          attempts += 1;
+          return Stream.fail(new Error("SocketCloseError: WebSocket closed"));
+        }),
+      vi.fn(),
+      { retryDelay: 10 },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    getSocket().open();
+
+    await waitFor(() => {
+      expect(attempts).toBeGreaterThanOrEqual(2);
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription disconnected", {
+      error: "SocketCloseError: WebSocket closed",
+    });
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
+  it("logs a transport disconnect once even when multiple subscriptions fail together", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const unsubscribeA = transport.subscribe(
+      () => Stream.fail(new Error("SocketCloseError: 1006")),
+      vi.fn(),
+      { retryDelay: 10 },
+    );
+    const unsubscribeB = transport.subscribe(
+      () => Stream.fail(new Error("SocketCloseError: 1006")),
+      vi.fn(),
+      { retryDelay: 10 },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    getSocket().open();
+
+    await waitFor(() => {
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    });
+    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription disconnected", {
+      error: "SocketCloseError: 1006",
+    });
+
+    unsubscribeA();
+    unsubscribeB();
+    await transport.dispose();
+  });
   it("streams finite request events without re-subscribing", async () => {
     const transport = new WsTransport("ws://localhost:3020");
     const listener = vi.fn();
@@ -682,26 +835,34 @@ describe("WsTransport", () => {
     const transport = {
       disposed: false,
       session: {
-        clientScope: {} as never,
-        runtime,
+        initializedPromise: Promise.resolve({
+          clientPromise: Promise.resolve({} as never),
+          clientScope: {} as never,
+          runtime,
+        }),
       },
       closeSession: (
         WsTransport.prototype as unknown as {
           closeSession: (session: {
-            clientScope: unknown;
-            runtime: { dispose: () => Promise<void>; runPromise: () => Promise<void> };
+            initializedPromise: Promise<{
+              clientScope: unknown;
+              runtime: { dispose: () => Promise<void>; runPromise: () => Promise<void> };
+            }>;
           }) => Promise<void>;
         }
       ).closeSession,
     } as unknown as WsTransport;
 
-    void WsTransport.prototype.dispose.call(transport);
+    const disposePromise = WsTransport.prototype.dispose.call(transport);
 
-    expect(runtime.runPromise).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(runtime.runPromise).toHaveBeenCalledTimes(1);
+    });
     expect(runtime.dispose).not.toHaveBeenCalled();
     expect((transport as unknown as { disposed: boolean }).disposed).toBe(true);
 
     resolveClose();
+    await disposePromise;
 
     await waitFor(() => {
       expect(runtime.dispose).toHaveBeenCalledTimes(1);

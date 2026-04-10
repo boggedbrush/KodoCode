@@ -5,6 +5,7 @@ import {
   HttpBody,
   HttpClient,
   HttpClientResponse,
+  HttpMiddleware,
   HttpRouter,
   HttpServerResponse,
   HttpServerRequest,
@@ -18,6 +19,7 @@ import {
 } from "./attachmentPaths";
 import { resolveAttachmentPathById } from "./attachmentStore";
 import { ServerConfig } from "./config";
+import { ServerEnvironment } from "./environment/Services/ServerEnvironment";
 import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver";
@@ -26,63 +28,77 @@ const PROJECT_FAVICON_CACHE_CONTROL = "public, max-age=3600";
 const FALLBACK_PROJECT_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 const OTLP_TRACES_PROXY_PATH = "/api/observability/v1/traces";
 
+export const browserApiCorsLayer = HttpRouter.middleware(
+  HttpMiddleware.cors({
+    allowedMethods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["authorization", "b3", "traceparent", "content-type"],
+    maxAge: 600,
+  }),
+).layer;
+
+export const serverEnvironmentRouteLayer = HttpRouter.add(
+  "GET",
+  "/.well-known/t3/environment",
+  Effect.gen(function* () {
+    const descriptor = yield* Effect.service(ServerEnvironment).pipe(
+      Effect.flatMap((serverEnvironment) => serverEnvironment.getDescriptor),
+    );
+    return HttpServerResponse.jsonUnsafe(descriptor, { status: 200 });
+  }),
+);
+
 class DecodeOtlpTraceRecordsError extends Data.TaggedError("DecodeOtlpTraceRecordsError")<{
   readonly cause: unknown;
   readonly bodyJson: OtlpTracer.TraceData;
 }> {}
 
-export const otlpTracesProxyRouteLayer = HttpRouter.add(
-  "POST",
-  OTLP_TRACES_PROXY_PATH,
-  Effect.gen(function* () {
-    const request = yield* HttpServerRequest.HttpServerRequest;
-    const config = yield* ServerConfig;
-    const otlpTracesUrl = config.otlpTracesUrl;
-    const browserTraceCollector = yield* BrowserTraceCollector;
-    const httpClient = yield* HttpClient.HttpClient;
-    const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
+export const otlpTracesProxyRouteLayer = Layer.mergeAll(
+  HttpRouter.add("OPTIONS", OTLP_TRACES_PROXY_PATH, HttpServerResponse.empty({ status: 204 })),
+  HttpRouter.add(
+    "POST",
+    OTLP_TRACES_PROXY_PATH,
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const config = yield* ServerConfig;
+      const otlpTracesUrl = config.otlpTracesUrl;
+      const browserTraceCollector = yield* BrowserTraceCollector;
+      const httpClient = yield* HttpClient.HttpClient;
+      const bodyJson = cast<unknown, OtlpTracer.TraceData>(yield* request.json);
 
-    yield* Effect.try({
-      try: () => decodeOtlpTraceRecords(bodyJson),
-      catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson }),
-    }).pipe(
-      Effect.flatMap((records) => browserTraceCollector.record(records)),
-      Effect.catch((cause) =>
-        Effect.logWarning("Failed to decode browser OTLP traces", {
-          cause,
-          bodyJson,
-        }),
-      ),
-    );
-
-    if (otlpTracesUrl === undefined) {
-      return HttpServerResponse.empty({ status: 204 });
-    }
-
-    return yield* httpClient
-      .post(otlpTracesUrl, {
-        body: HttpBody.jsonUnsafe(bodyJson),
-      })
-      .pipe(
-        Effect.flatMap(HttpClientResponse.filterStatusOk),
-        Effect.as(HttpServerResponse.empty({ status: 204 })),
-        Effect.tapError((cause) =>
-          Effect.logWarning("Failed to export browser OTLP traces", {
+      yield* Effect.try({
+        try: () => decodeOtlpTraceRecords(bodyJson),
+        catch: (cause) => new DecodeOtlpTraceRecordsError({ cause, bodyJson }),
+      }).pipe(
+        Effect.flatMap((records) => browserTraceCollector.record(records)),
+        Effect.catch((cause) =>
+          Effect.logWarning("Failed to decode browser OTLP traces", {
             cause,
-            otlpTracesUrl,
+            bodyJson,
           }),
         ),
-        Effect.catch(() =>
-          Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
-        ),
       );
-  }),
-).pipe(
-  Layer.provide(
-    HttpRouter.cors({
-      allowedMethods: ["POST", "OPTIONS"],
-      allowedHeaders: ["content-type"],
-      maxAge: 600,
+
+      if (otlpTracesUrl === undefined) {
+        return HttpServerResponse.empty({ status: 204 });
+      }
+
+      return yield* httpClient
+        .post(otlpTracesUrl, {
+          body: HttpBody.jsonUnsafe(bodyJson),
+        })
+        .pipe(
+          Effect.flatMap(HttpClientResponse.filterStatusOk),
+          Effect.as(HttpServerResponse.empty({ status: 204 })),
+          Effect.tapError((cause) =>
+            Effect.logWarning("Failed to export browser OTLP traces", {
+              cause,
+              otlpTracesUrl,
+            }),
+          ),
+          Effect.catch(() =>
+            Effect.succeed(HttpServerResponse.text("Trace export failed.", { status: 502 })),
+          ),
+        );
     }),
   ),
 );

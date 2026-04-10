@@ -80,7 +80,7 @@ export class ServerSettingsService extends ServiceMap.Service<
           getSettings: Ref.get(currentSettingsRef),
           updateSettings: (patch) =>
             Ref.get(currentSettingsRef).pipe(
-              Effect.map((currentSettings) => deepMerge(currentSettings, patch)),
+              Effect.map((currentSettings) => mergeServerSettingsPatch(currentSettings, patch)),
               Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
             ),
           streamChanges: Stream.empty,
@@ -92,6 +92,15 @@ export class ServerSettingsService extends ServiceMap.Service<
 const ServerSettingsJson = fromLenientJson(ServerSettings);
 
 const PROVIDER_ORDER: readonly ProviderKind[] = ["codex", "claudeAgent"];
+const MODEL_SELECTION_SETTINGS_KEYS = [
+  "textGenerationModelSelection",
+  "promptEnhanceModelSelection",
+  "askModelSelection",
+  "planModelSelection",
+  "codeModelSelection",
+  "reviewModelSelection",
+] as const;
+type ModelSelectionSettingsKey = (typeof MODEL_SELECTION_SETTINGS_KEYS)[number];
 
 /**
  * Ensure the `textGenerationModelSelection` points to an enabled provider.
@@ -133,14 +142,62 @@ function resolveEnabledModelSelections(settings: ServerSettings): ServerSettings
   return resolvePromptEnhanceProvider(resolveTextGenerationProvider(settings));
 }
 
+function isCompleteModelSelectionPatch(
+  patch: ServerSettingsPatch[ModelSelectionSettingsKey],
+): patch is Exclude<ServerSettings[ModelSelectionSettingsKey], null | undefined> {
+  return (
+    patch !== null &&
+    patch !== undefined &&
+    patch.provider !== undefined &&
+    patch.model !== undefined
+  );
+}
+
+function mergeModelSelectionSetting(
+  current: ServerSettings[ModelSelectionSettingsKey] | undefined,
+  patch: ServerSettingsPatch[ModelSelectionSettingsKey] | undefined,
+): ServerSettings[ModelSelectionSettingsKey] | undefined {
+  if (patch === undefined) {
+    return current;
+  }
+
+  if (patch === null) {
+    return patch;
+  }
+
+  if (current === null || current === undefined) {
+    return isCompleteModelSelectionPatch(patch) ? patch : current;
+  }
+
+  if ("provider" in patch && patch.provider !== undefined && patch.provider !== current.provider) {
+    return isCompleteModelSelectionPatch(patch) ? patch : current;
+  }
+
+  return deepMerge(current, patch) as ServerSettings[ModelSelectionSettingsKey];
+}
+
+function mergeServerSettingsPatch(
+  current: ServerSettings,
+  patch: ServerSettingsPatch,
+): ServerSettings {
+  const next = deepMerge(current, patch);
+  const nextSelections = next as Record<
+    ModelSelectionSettingsKey,
+    ServerSettings[ModelSelectionSettingsKey] | undefined
+  >;
+
+  for (const key of MODEL_SELECTION_SETTINGS_KEYS) {
+    if (!(key in patch)) {
+      continue;
+    }
+    nextSelections[key] = mergeModelSelectionSetting(current[key], patch[key]);
+  }
+
+  return next;
+}
+
 // Values under these keys are compared as a whole — never stripped field-by-field.
-const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
-  "textGenerationModelSelection",
-  "promptEnhanceModelSelection",
-  "askModelSelection",
-  "planModelSelection",
-  "codeModelSelection",
-]);
+const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set(MODEL_SELECTION_SETTINGS_KEYS);
 
 function stripDefaultServerSettings(current: unknown, defaults: unknown): unknown | undefined {
   if (Array.isArray(current) || Array.isArray(defaults)) {
@@ -333,7 +390,9 @@ const makeServerSettings = Effect.gen(function* () {
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* getSettingsFromCache;
-          const next = yield* Schema.decodeEffect(ServerSettings)(deepMerge(current, patch)).pipe(
+          const next = yield* Schema.decodeEffect(ServerSettings)(
+            mergeServerSettingsPatch(current, patch),
+          ).pipe(
             Effect.mapError(
               (cause) =>
                 new ServerSettingsError({

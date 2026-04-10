@@ -4,14 +4,19 @@ import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import { ServerConfig } from "./config";
 import {
   attachmentsRouteLayer,
+  browserApiCorsLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
+  serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
 } from "./http";
 import { fixPath } from "./os-jank";
 import { websocketRpcRouteLayer } from "./ws";
 import { OpenLive } from "./open";
-import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite";
+import {
+  authLayerConfig as AuthSqlitePersistenceLayerLive,
+  layerConfig as SqlitePersistenceLayerLive,
+} from "./persistence/Layers/Sqlite";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService";
 import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger";
@@ -44,11 +49,28 @@ import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor"
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
 import { ServerSettingsLive } from "./serverSettings";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver";
+import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdentityResolver";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner";
 import { ObservabilityLive } from "./observability/Layers/Observability";
+import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment";
+import { resolveServerListenHost } from "./listenHost";
+import {
+  authBearerBootstrapRouteLayer,
+  authBootstrapRouteLayer,
+  authClientsRevokeOthersRouteLayer,
+  authClientsRevokeRouteLayer,
+  authClientsRouteLayer,
+  authPairingLinksRevokeRouteLayer,
+  authPairingLinksRouteLayer,
+  authPairingCredentialRouteLayer,
+  authSessionRouteLayer,
+  authWebSocketTokenRouteLayer,
+} from "./auth/http";
+import { ServerSecretStoreLive } from "./auth/Layers/ServerSecretStore";
+import { ServerAuthLive } from "./auth/Layers/ServerAuth";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -65,13 +87,14 @@ const PtyAdapterLive = Layer.unwrap(
 const HttpServerLive = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig;
+    const listenHost = resolveServerListenHost(config.host);
     if (typeof Bun !== "undefined") {
       const BunHttpServer = yield* Effect.promise(
         () => import("@effect/platform-bun/BunHttpServer"),
       );
       return BunHttpServer.layer({
         port: config.port,
-        ...(config.host ? { hostname: config.host } : {}),
+        hostname: listenHost,
       });
     } else {
       const [NodeHttpServer, NodeHttp] = yield* Effect.all([
@@ -79,7 +102,7 @@ const HttpServerLive = Layer.unwrap(
         Effect.promise(() => import("node:http")),
       ]);
       return NodeHttpServer.layer(NodeHttp.createServer, {
-        host: config.host,
+        host: listenHost,
         port: config.port,
       });
     }
@@ -161,6 +184,11 @@ const ProviderLayerLive = Layer.unwrap(
 );
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
+// Keep auth tables on their own scoped SQLite file so standalone servers that
+// share a base dir do not accidentally share sessions or pairing state.
+const AuthPersistenceLayerLive = Layer.empty.pipe(
+  Layer.provideMerge(AuthSqlitePersistenceLayerLive),
+);
 
 const GitManagerLayerLive = GitManagerLive.pipe(
   Layer.provideMerge(ProjectSetupScriptRunnerLive),
@@ -186,6 +214,11 @@ const WorkspaceLayerLive = Layer.mergeAll(
   ),
 );
 
+const AuthLayerLive = ServerAuthLive.pipe(
+  Layer.provideMerge(AuthPersistenceLayerLive),
+  Layer.provide(ServerSecretStoreLive),
+);
+
 const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   // Core Services
   Layer.provideMerge(CheckpointingLayerLive),
@@ -199,6 +232,9 @@ const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ServerSettingsLive),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLive),
+  Layer.provideMerge(RepositoryIdentityResolverLive),
+  Layer.provideMerge(ServerEnvironmentLive),
+  Layer.provideMerge(AuthLayerLive),
 
   // Misc.
   Layer.provideMerge(AnalyticsServiceLayerLive),
@@ -211,11 +247,28 @@ const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
 );
 
 export const makeRoutesLayer = Layer.mergeAll(
+  // Keep auth routes out of the wildcard browser API CORS policy. Fresh standalone
+  // environments allow one anonymous owner bootstrap, so letting any origin read
+  // those responses would let an arbitrary webpage claim the local server.
+  authBearerBootstrapRouteLayer,
+  authBootstrapRouteLayer,
+  authClientsRevokeOthersRouteLayer,
+  authClientsRevokeRouteLayer,
+  authClientsRouteLayer,
+  authPairingLinksRevokeRouteLayer,
+  authPairingLinksRouteLayer,
+  authPairingCredentialRouteLayer,
+  authSessionRouteLayer,
+  authWebSocketTokenRouteLayer,
   attachmentsRouteLayer,
-  otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
+  serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
   websocketRpcRouteLayer,
+  // Browser-origin OTLP exports are the only cross-origin HTTP API we expect.
+  // File-backed routes like `/api/project-favicon` and `/attachments/*` must stay
+  // same-origin so a random webpage cannot probe local files through the server.
+  otlpTracesProxyRouteLayer.pipe(Layer.provide(browserApiCorsLayer)),
 );
 
 export const makeServerLayer = Layer.unwrap(
@@ -242,6 +295,7 @@ export const makeServerLayer = Layer.unwrap(
     return serverApplicationLayer.pipe(
       Layer.provideMerge(RuntimeServicesLive),
       Layer.provideMerge(HttpServerLive),
+      Layer.provideMerge(ServerEnvironmentLive),
       Layer.provide(ObservabilityLive),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provideMerge(PlatformServicesLive),
