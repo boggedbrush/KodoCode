@@ -48,6 +48,7 @@ import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths";
 import { ProjectSetupScriptRunner } from "./project/Services/ProjectSetupScriptRunner";
 import { TextGeneration } from "./git/Services/TextGeneration";
+import { ServerEnvironment } from "./environment/Services/ServerEnvironment";
 
 const ENHANCE_SEARCH_STOP_WORDS = new Set([
   "the",
@@ -110,6 +111,7 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const config = yield* ServerConfig;
     const lifecycleEvents = yield* ServerLifecycleEvents;
     const serverSettings = yield* ServerSettingsService;
+    const serverEnvironment = yield* ServerEnvironment;
     const startup = yield* ServerRuntimeStartup;
     const workspaceEntries = yield* WorkspaceEntries;
     const workspaceFileSystem = yield* WorkspaceFileSystem;
@@ -377,8 +379,10 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       const keybindingsConfig = yield* keybindings.loadConfigState;
       const providers = yield* providerRegistry.getProviders;
       const settings = yield* serverSettings.getSettings;
+      const environment = yield* serverEnvironment.getDescriptor;
 
       return {
+        environment,
         cwd: config.cwd,
         keybindingsConfigPath: config.keybindingsConfigPath,
         keybindings: keybindingsConfig.keybindings,

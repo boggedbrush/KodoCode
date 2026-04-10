@@ -2,6 +2,7 @@ import "../index.css";
 
 import {
   DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
   ORCHESTRATION_WS_METHODS,
   type MessageId,
   type OrchestrationReadModel,
@@ -47,8 +48,24 @@ const rpcHarness = new BrowserWsRpcHarness();
 
 const wsLink = ws.link(/ws(s)?:\/\/.*/);
 
+function createBaseEnvironment() {
+  return {
+    environmentId: EnvironmentId.makeUnsafe("env-local"),
+    label: "Local environment",
+    platform: {
+      os: "darwin" as const,
+      arch: "arm64" as const,
+    },
+    serverVersion: "0.0.0-test",
+    capabilities: {
+      repositoryIdentity: true,
+    },
+  };
+}
+
 function createBaseServerConfig(): ServerConfig {
   return {
+    environment: createBaseEnvironment(),
     cwd: "/repo/project",
     keybindingsConfigPath: "/repo/project/.t3code-keybindings.json",
     keybindings: [],
@@ -155,6 +172,7 @@ function buildFixture(): TestFixture {
     snapshot: createMinimalSnapshot(),
     serverConfig: createBaseServerConfig(),
     welcome: {
+      environment: createBaseEnvironment(),
       cwd: "/repo/project",
       projectName: "Project",
       bootstrapProjectId: PROJECT_ID,

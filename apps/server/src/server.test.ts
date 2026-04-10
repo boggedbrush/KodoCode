@@ -5,6 +5,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
   DEFAULT_SERVER_SETTINGS,
+  EnvironmentId,
   GitCommandError,
   KeybindingRule,
   MessageId,
@@ -47,10 +48,19 @@ import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
+import { type ServerAuthShape, ServerAuth } from "./auth/Services/ServerAuth.ts";
+import {
+  type SessionCredentialServiceShape,
+  SessionCredentialService,
+} from "./auth/Services/SessionCredentialService.ts";
 import {
   CheckpointDiffQuery,
   type CheckpointDiffQueryShape,
 } from "./checkpointing/Services/CheckpointDiffQuery.ts";
+import {
+  type ServerEnvironmentShape,
+  ServerEnvironment,
+} from "./environment/Services/ServerEnvironment.ts";
 import { GitCore, type GitCoreShape } from "./git/Services/GitCore.ts";
 import { GitManager, type GitManagerShape } from "./git/Services/GitManager.ts";
 import { TextGeneration, type TextGenerationShape } from "./git/Services/TextGeneration.ts";
@@ -79,6 +89,19 @@ import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
 } from "./observability/Services/BrowserTraceCollector.ts";
+
+const baseEnvironment = {
+  environmentId: EnvironmentId.makeUnsafe("env-local"),
+  label: "Local environment",
+  platform: {
+    os: "darwin" as const,
+    arch: "arm64" as const,
+  },
+  serverVersion: "0.0.0-test",
+  capabilities: {
+    repositoryIdentity: true,
+  },
+};
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver.ts";
 import {
   ProjectSetupScriptRunner,
@@ -136,6 +159,13 @@ const makeDefaultOrchestrationReadModel = () => {
     ],
   };
 };
+
+const splitHeaderTokens = (value: string | null) =>
+  (value ?? "")
+    .split(",")
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0)
+    .toSorted();
 
 const workspaceAndProjectServicesLayer = Layer.mergeAll(
   WorkspacePathsLive,
@@ -271,6 +301,9 @@ const buildAppUnderTest = (options?: {
     browserTraceCollector?: Partial<BrowserTraceCollectorShape>;
     serverLifecycleEvents?: Partial<ServerLifecycleEventsShape>;
     serverRuntimeStartup?: Partial<ServerRuntimeStartupShape>;
+    serverEnvironment?: Partial<ServerEnvironmentShape>;
+    serverAuth?: Partial<ServerAuthShape>;
+    sessionCredentialService?: Partial<SessionCredentialServiceShape>;
     textGeneration?: Partial<TextGenerationShape>;
   };
 }) =>
@@ -318,8 +351,61 @@ const buildAppUnderTest = (options?: {
       ...options?.layers?.textGeneration,
     });
     const gitStatusBroadcasterLayer = GitStatusBroadcasterLive.pipe(Layer.provide(gitManagerLayer));
+    const unexpectedMock = <A>(message: string): Effect.Effect<A> => Effect.die(new Error(message));
+    const serverEnvironmentLayer = Layer.mock(ServerEnvironment)({
+      getEnvironmentId: Effect.succeed(baseEnvironment.environmentId),
+      getDescriptor: Effect.succeed(baseEnvironment),
+      ...options?.layers?.serverEnvironment,
+    });
+    const serverAuthLayer = Layer.mock(ServerAuth)({
+      getDescriptor: () =>
+        Effect.succeed({
+          policy: "unsafe-no-auth",
+          bootstrapMethods: [],
+          sessionMethods: ["browser-session-cookie", "bearer-session-token"],
+          sessionCookieName: "kodo_session",
+        }),
+      getSessionState: () =>
+        Effect.succeed({
+          authenticated: false,
+          auth: {
+            policy: "unsafe-no-auth",
+            bootstrapMethods: [],
+            sessionMethods: ["browser-session-cookie", "bearer-session-token"],
+            sessionCookieName: "kodo_session",
+          },
+        }),
+      exchangeBootstrapCredential: () => unexpectedMock("exchangeBootstrapCredential not mocked"),
+      exchangeBootstrapCredentialForBearerSession: () =>
+        unexpectedMock("exchangeBootstrapCredentialForBearerSession not mocked"),
+      issuePairingCredential: () => unexpectedMock("issuePairingCredential not mocked"),
+      listPairingLinks: () => unexpectedMock("listPairingLinks not mocked"),
+      revokePairingLink: () => unexpectedMock("revokePairingLink not mocked"),
+      listClientSessions: () => unexpectedMock("listClientSessions not mocked"),
+      revokeClientSession: () => unexpectedMock("revokeClientSession not mocked"),
+      revokeOtherClientSessions: () => unexpectedMock("revokeOtherClientSessions not mocked"),
+      authenticateHttpRequest: () => unexpectedMock("authenticateHttpRequest not mocked"),
+      authenticateWebSocketUpgrade: () => unexpectedMock("authenticateWebSocketUpgrade not mocked"),
+      issueWebSocketToken: () => unexpectedMock("issueWebSocketToken not mocked"),
+      issueStartupPairingUrl: () => unexpectedMock("issueStartupPairingUrl not mocked"),
+      ...options?.layers?.serverAuth,
+    });
+    const sessionCredentialServiceLayer = Layer.mock(SessionCredentialService)({
+      cookieName: "kodo_session",
+      issue: () => unexpectedMock("session issue not mocked"),
+      verify: () => unexpectedMock("session verify not mocked"),
+      issueWebSocketToken: () => unexpectedMock("session issueWebSocketToken not mocked"),
+      verifyWebSocketToken: () => unexpectedMock("session verifyWebSocketToken not mocked"),
+      listActive: () => unexpectedMock("session listActive not mocked"),
+      streamChanges: Stream.empty,
+      revoke: () => unexpectedMock("session revoke not mocked"),
+      revokeAllExcept: () => unexpectedMock("session revokeAllExcept not mocked"),
+      markConnected: () => Effect.void,
+      markDisconnected: () => Effect.void,
+      ...options?.layers?.sessionCredentialService,
+    });
 
-    const appLayer = HttpRouter.serve(makeRoutesLayer, {
+    const appLayerBase = HttpRouter.serve(makeRoutesLayer, {
       disableListenLog: true,
       disableLogger: true,
     }).pipe(
@@ -426,8 +512,14 @@ const buildAppUnderTest = (options?: {
           ...options?.layers?.serverRuntimeStartup,
         }),
       ),
+    );
+
+    const appLayer = appLayerBase.pipe(
       Layer.provide(textGenerationLayer),
       Layer.provide(workspaceAndProjectServicesLayer),
+      Layer.provide(serverEnvironmentLayer),
+      Layer.provide(serverAuthLayer),
+      Layer.provide(sessionCredentialServiceLayer),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(layerConfig),
     );
@@ -789,8 +881,17 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assert.equal(response.status, 204);
       assert.equal(response.headers.get("access-control-allow-origin"), "*");
-      assert.equal(response.headers.get("access-control-allow-methods"), "POST, OPTIONS");
-      assert.equal(response.headers.get("access-control-allow-headers"), "content-type");
+      assert.deepEqual(splitHeaderTokens(response.headers.get("access-control-allow-methods")), [
+        "GET",
+        "OPTIONS",
+        "POST",
+      ]);
+      assert.deepEqual(splitHeaderTokens(response.headers.get("access-control-allow-headers")), [
+        "authorization",
+        "b3",
+        "content-type",
+        "traceparent",
+      ]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
@@ -1080,6 +1181,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             sequence: 1,
             type: "welcome" as const,
             payload: {
+              environment: baseEnvironment,
               cwd: "/tmp/project",
               projectName: "project",
             },
@@ -1089,7 +1191,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           version: 1 as const,
           sequence: 2,
           type: "ready" as const,
-          payload: { at: new Date().toISOString() },
+          payload: { at: new Date().toISOString(), environment: baseEnvironment },
         });
 
         yield* buildAppUnderTest({

@@ -1,4 +1,4 @@
-import { DEFAULT_SERVER_SETTINGS, WS_METHODS } from "@t3tools/contracts";
+import { DEFAULT_SERVER_SETTINGS, EnvironmentId, WS_METHODS } from "@t3tools/contracts";
 import { Stream } from "effect";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -83,6 +83,18 @@ class MockWebSocket {
 
 const originalWebSocket = globalThis.WebSocket;
 const originalFetch = globalThis.fetch;
+const baseEnvironment = {
+  environmentId: EnvironmentId.makeUnsafe("env-local"),
+  label: "Local environment",
+  platform: {
+    os: "darwin" as const,
+    arch: "arm64" as const,
+  },
+  serverVersion: "0.0.0-test",
+  capabilities: {
+    repositoryIdentity: true,
+  },
+};
 
 function getSocket(): MockWebSocket {
   const socket = sockets.at(-1);
@@ -437,6 +449,7 @@ describe("WsTransport", () => {
       sequence: 1,
       type: "welcome",
       payload: {
+        environment: baseEnvironment,
         cwd: "/tmp/workspace",
         projectName: "workspace",
       },
@@ -490,6 +503,7 @@ describe("WsTransport", () => {
             sequence: 1,
             type: "welcome",
             payload: {
+              environment: baseEnvironment,
               cwd: "/tmp/one",
               projectName: "one",
             },
@@ -533,6 +547,7 @@ describe("WsTransport", () => {
       sequence: 2,
       type: "welcome",
       payload: {
+        environment: baseEnvironment,
         cwd: "/tmp/two",
         projectName: "two",
       },
