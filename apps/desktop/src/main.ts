@@ -105,6 +105,7 @@ let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
 let backendAuthToken = "";
 let backendWsUrl = "";
+let backendStartPromise: Promise<void> | null = null;
 let restartAttempt = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let isQuitting = false;
@@ -1098,97 +1099,124 @@ function scheduleBackendRestart(reason: string): void {
 
   restartTimer = setTimeout(() => {
     restartTimer = null;
-    startBackend();
+    void startBackend();
   }, delayMs);
 }
 
-function startBackend(): void {
-  if (isQuitting || backendProcess) return;
-
-  backendObservabilitySettings = readPersistedBackendObservabilitySettings();
-  const backendEntry = resolveBackendEntry();
-  if (!FS.existsSync(backendEntry)) {
-    scheduleBackendRestart(`missing server entry at ${backendEntry}`);
-    return;
-  }
-
-  const captureBackendLogs = app.isPackaged && backendLogSink !== null;
-  const child = ChildProcess.spawn(process.execPath, [backendEntry, "--bootstrap-fd", "3"], {
-    cwd: resolveBackendCwd(),
-    // In Electron main, process.execPath points to the Electron binary.
-    // Run the child in Node mode so this backend process does not become a GUI app instance.
-    env: {
-      ...backendChildEnv(),
-      ELECTRON_RUN_AS_NODE: "1",
-    },
-    stdio: captureBackendLogs
-      ? ["ignore", "pipe", "pipe", "pipe"]
-      : ["ignore", "inherit", "inherit", "pipe"],
+async function refreshDesktopBackendConnectionEndpoint(): Promise<void> {
+  backendPort = await resolveDesktopBackendPort({
+    host: "127.0.0.1",
+    startPort: DEFAULT_DESKTOP_BACKEND_PORT,
   });
-  const bootstrapStream = child.stdio[3];
-  if (bootstrapStream && "write" in bootstrapStream) {
-    bootstrapStream.write(
-      `${JSON.stringify({
-        mode: "desktop",
-        noBrowser: true,
-        port: backendPort,
-        t3Home: BASE_DIR,
-        authToken: backendAuthToken,
-        ...(backendObservabilitySettings.otlpTracesUrl
-          ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
-          : {}),
-        ...(backendObservabilitySettings.otlpMetricsUrl
-          ? { otlpMetricsUrl: backendObservabilitySettings.otlpMetricsUrl }
-          : {}),
-      })}\n`,
-    );
-    bootstrapStream.end();
-  } else {
-    child.kill("SIGTERM");
-    scheduleBackendRestart("missing desktop bootstrap pipe");
-    return;
-  }
-  backendProcess = child;
-  let backendSessionClosed = false;
-  const closeBackendSession = (details: string) => {
-    if (backendSessionClosed) return;
-    backendSessionClosed = true;
-    writeBackendSessionBoundary("END", details);
-  };
-  writeBackendSessionBoundary(
-    "START",
-    `pid=${child.pid ?? "unknown"} port=${backendPort} cwd=${resolveBackendCwd()}`,
+  const baseUrl = `ws://127.0.0.1:${backendPort}`;
+  backendWsUrl = `${baseUrl}/?token=${encodeURIComponent(backendAuthToken)}`;
+  writeDesktopLogHeader(
+    `resolved backend connection endpoint startPort=${DEFAULT_DESKTOP_BACKEND_PORT} port=${backendPort}`,
   );
-  captureBackendOutput(child);
+}
 
-  child.once("spawn", () => {
-    restartAttempt = 0;
-  });
+async function startBackend(): Promise<void> {
+  if (isQuitting || backendProcess) return;
+  if (backendStartPromise) {
+    await backendStartPromise;
+    return;
+  }
 
-  child.on("error", (error) => {
-    const wasExpected = expectedBackendExitChildren.has(child);
-    if (backendProcess === child) {
-      backendProcess = null;
-    }
-    closeBackendSession(`pid=${child.pid ?? "unknown"} error=${error.message}`);
-    if (wasExpected) {
+  backendStartPromise = (async () => {
+    backendObservabilitySettings = readPersistedBackendObservabilitySettings();
+    const backendEntry = resolveBackendEntry();
+    if (!FS.existsSync(backendEntry)) {
+      scheduleBackendRestart(`missing server entry at ${backendEntry}`);
       return;
     }
-    scheduleBackendRestart(error.message);
+
+    // Re-resolve the backend endpoint immediately before each spawn. A probe-only
+    // port scan from an earlier launch attempt is not a reservation, so reusing it
+    // after a crash can strand the desktop app in a repeated EADDRINUSE restart loop.
+    await refreshDesktopBackendConnectionEndpoint();
+
+    const captureBackendLogs = app.isPackaged && backendLogSink !== null;
+    const child = ChildProcess.spawn(process.execPath, [backendEntry, "--bootstrap-fd", "3"], {
+      cwd: resolveBackendCwd(),
+      // In Electron main, process.execPath points to the Electron binary.
+      // Run the child in Node mode so this backend process does not become a GUI app instance.
+      env: {
+        ...backendChildEnv(),
+        ELECTRON_RUN_AS_NODE: "1",
+      },
+      stdio: captureBackendLogs
+        ? ["ignore", "pipe", "pipe", "pipe"]
+        : ["ignore", "inherit", "inherit", "pipe"],
+    });
+    const bootstrapStream = child.stdio[3];
+    if (bootstrapStream && "write" in bootstrapStream) {
+      bootstrapStream.write(
+        `${JSON.stringify({
+          mode: "desktop",
+          noBrowser: true,
+          port: backendPort,
+          t3Home: BASE_DIR,
+          authToken: backendAuthToken,
+          ...(backendObservabilitySettings.otlpTracesUrl
+            ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
+            : {}),
+          ...(backendObservabilitySettings.otlpMetricsUrl
+            ? { otlpMetricsUrl: backendObservabilitySettings.otlpMetricsUrl }
+            : {}),
+        })}\n`,
+      );
+      bootstrapStream.end();
+    } else {
+      child.kill("SIGTERM");
+      scheduleBackendRestart("missing desktop bootstrap pipe");
+      return;
+    }
+    backendProcess = child;
+    let backendSessionClosed = false;
+    const closeBackendSession = (details: string) => {
+      if (backendSessionClosed) return;
+      backendSessionClosed = true;
+      writeBackendSessionBoundary("END", details);
+    };
+    writeBackendSessionBoundary(
+      "START",
+      `pid=${child.pid ?? "unknown"} port=${backendPort} cwd=${resolveBackendCwd()}`,
+    );
+    captureBackendOutput(child);
+
+    child.once("spawn", () => {
+      restartAttempt = 0;
+    });
+
+    child.on("error", (error) => {
+      const wasExpected = expectedBackendExitChildren.has(child);
+      if (backendProcess === child) {
+        backendProcess = null;
+      }
+      closeBackendSession(`pid=${child.pid ?? "unknown"} error=${error.message}`);
+      if (wasExpected) {
+        return;
+      }
+      scheduleBackendRestart(error.message);
+    });
+
+    child.on("exit", (code, signal) => {
+      const wasExpected = expectedBackendExitChildren.has(child);
+      if (backendProcess === child) {
+        backendProcess = null;
+      }
+      closeBackendSession(
+        `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
+      );
+      if (isQuitting || wasExpected) return;
+      const reason = `code=${code ?? "null"} signal=${signal ?? "null"}`;
+      scheduleBackendRestart(reason);
+    });
+  })().finally(() => {
+    backendStartPromise = null;
   });
 
-  child.on("exit", (code, signal) => {
-    const wasExpected = expectedBackendExitChildren.has(child);
-    if (backendProcess === child) {
-      backendProcess = null;
-    }
-    closeBackendSession(
-      `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
-    );
-    if (isQuitting || wasExpected) return;
-    const reason = `code=${code ?? "null"} signal=${signal ?? "null"}`;
-    scheduleBackendRestart(reason);
-  });
+  await backendStartPromise;
 }
 
 function stopBackend(): void {
@@ -1584,21 +1612,11 @@ configureAppIdentity();
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
-  backendPort = await resolveDesktopBackendPort({
-    host: "127.0.0.1",
-    startPort: DEFAULT_DESKTOP_BACKEND_PORT,
-  });
-  writeDesktopLogHeader(
-    `selected backend port via sequential scan startPort=${DEFAULT_DESKTOP_BACKEND_PORT} port=${backendPort}`,
-  );
   backendAuthToken = Crypto.randomBytes(24).toString("hex");
-  const baseUrl = `ws://127.0.0.1:${backendPort}`;
-  backendWsUrl = `${baseUrl}/?token=${encodeURIComponent(backendAuthToken)}`;
-  writeDesktopLogHeader(`bootstrap resolved websocket endpoint baseUrl=${baseUrl}`);
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
-  startBackend();
+  await startBackend();
   writeDesktopLogHeader("bootstrap backend start requested");
   mainWindow = createWindow();
   writeDesktopLogHeader("bootstrap main window created");

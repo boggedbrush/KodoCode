@@ -1229,6 +1229,45 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("marks auth bootstrap cookies secure for HTTPS-aware requests", () =>
+    Effect.gen(function* () {
+      const expiresAt = DateTime.makeUnsafe("2026-04-10T12:00:00.000Z").pipe(DateTime.toUtc);
+      yield* buildAppUnderTest({
+        layers: {
+          serverAuth: {
+            exchangeBootstrapCredential: () =>
+              Effect.succeed({
+                response: {
+                  authenticated: true,
+                  role: "owner",
+                  sessionMethod: "browser-session-cookie",
+                  expiresAt,
+                },
+                sessionToken: "issued-session-token",
+              }),
+          },
+        },
+      });
+
+      const url = yield* getHttpServerUrl("/api/auth/bootstrap");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "x-forwarded-proto": "https",
+          },
+          body: JSON.stringify({
+            credential: "owner-bootstrap-token",
+          }),
+        }),
+      );
+
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("set-cookie") ?? "", /;\s*Secure\b/i);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("accepts websocket session auth when authToken is configured", () =>
     Effect.gen(function* () {
       const sessionId = AuthSessionId.makeUnsafe("session-owner-1");

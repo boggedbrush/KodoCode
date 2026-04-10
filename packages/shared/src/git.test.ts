@@ -1,7 +1,7 @@
 import type { GitStatusRemoteResult, GitStatusResult } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { applyGitStatusStreamEvent } from "./git";
+import { applyGitStatusStreamEvent, normalizeGitRemoteUrl } from "./git";
 
 describe("applyGitStatusStreamEvent", () => {
   it("treats a remote-only update as a repository when local state is missing", () => {
@@ -63,5 +63,16 @@ describe("applyGitStatusStreamEvent", () => {
       behindCount: 1,
       pr: null,
     });
+  });
+});
+
+describe("normalizeGitRemoteUrl", () => {
+  it("preserves repository path casing for case-sensitive remotes", () => {
+    expect(normalizeGitRemoteUrl("https://git.example.com/Team/Repo.git")).toBe(
+      "git.example.com/Team/Repo",
+    );
+    expect(normalizeGitRemoteUrl("deploy@git.example.com:Team/Repo.git")).toBe(
+      "git.example.com/Team/Repo",
+    );
   });
 });

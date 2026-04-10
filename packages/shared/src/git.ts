@@ -87,8 +87,7 @@ export function normalizeGitRemoteUrl(value: string): string {
   const normalized = value
     .trim()
     .replace(/\/+$/g, "")
-    .replace(/\.git$/i, "")
-    .toLowerCase();
+    .replace(/\.git$/i, "");
 
   if (/^(?:ssh|https?|git):\/\//i.test(normalized)) {
     try {
@@ -101,7 +100,10 @@ export function normalizeGitRemoteUrl(value: string): string {
       // so treat any non-empty path as canonical instead of falling back to the raw
       // URL string and forcing downstream identity parsing to invent path segments.
       if (url.hostname && repositoryPath.length > 0) {
-        return `${url.hostname}/${repositoryPath}`;
+        // Only the host is case-insensitive. Preserving repository path casing avoids
+        // aliasing distinct repos on servers that treat `Team/Repo` and `team/repo`
+        // as different repository paths.
+        return `${url.hostname.toLowerCase()}/${repositoryPath}`;
       }
     } catch {
       return normalized;
@@ -112,7 +114,7 @@ export function normalizeGitRemoteUrl(value: string): string {
   // self-hosted deployments where a dedicated deploy account is common.
   const scpStyleHostAndPath = /^[^@\s]+@([^:/\s]+)[:/]([^/\s]+(?:\/[^/\s]+)*)$/i.exec(normalized);
   if (scpStyleHostAndPath?.[1] && scpStyleHostAndPath[2]) {
-    return `${scpStyleHostAndPath[1]}/${scpStyleHostAndPath[2]}`;
+    return `${scpStyleHostAndPath[1].toLowerCase()}/${scpStyleHostAndPath[2]}`;
   }
 
   return normalized;

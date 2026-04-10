@@ -57,6 +57,26 @@ function hasRequestBody(headers: typeof PairingCredentialRequestHeaders.Type) {
   return typeof headers["transfer-encoding"] === "string";
 }
 
+function firstForwardedValue(value: string | undefined): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.split(",")[0]?.trim().toLowerCase();
+  return normalized && normalized.length > 0 ? normalized : null;
+}
+
+function shouldSetSecureSessionCookie(request: HttpServerRequest.HttpServerRequest): boolean {
+  // Browsers only withhold a session cookie from plain HTTP requests when it is marked
+  // Secure. Honor both direct HTTPS requests and proxy-terminated HTTPS deployments.
+  const forwardedProto = firstForwardedValue(request.headers["x-forwarded-proto"]);
+  if (forwardedProto === "https") {
+    return true;
+  }
+
+  const requestUrl = HttpServerRequest.toURL(request);
+  return requestUrl._tag === "Some" && requestUrl.value.protocol === "https:";
+}
+
 export const authBootstrapRouteLayer = HttpRouter.add(
   "POST",
   "/api/auth/bootstrap",
@@ -85,6 +105,7 @@ export const authBootstrapRouteLayer = HttpRouter.add(
         httpOnly: true,
         path: "/",
         sameSite: "lax",
+        secure: shouldSetSecureSessionCookie(request),
       }),
     );
   }).pipe(Effect.catchTag("AuthError", (error) => respondToAuthError(error))),
