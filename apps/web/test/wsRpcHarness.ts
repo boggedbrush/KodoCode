@@ -113,6 +113,16 @@ export class BrowserWsRpcHarness {
     }
     const messages = this.parser.decode(rawData);
     for (const message of messages) {
+      if (message && typeof message === "object" && "_tag" in message && message._tag === "Ping") {
+        if (!this.client) {
+          continue;
+        }
+        const encoded = this.parser.encode({ _tag: "Pong" });
+        if (typeof encoded === "string") {
+          this.client.send(encoded);
+        }
+        continue;
+      }
       await Effect.runPromise(server.write(0, message as never));
     }
   }
