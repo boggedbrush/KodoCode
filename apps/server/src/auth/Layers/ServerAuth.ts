@@ -151,8 +151,7 @@ export const makeServerAuth = Effect.gen(function* () {
   const authenticateRequest = (request: HttpServerRequest.HttpServerRequest) => {
     const cookieToken = request.cookies[sessions.cookieName];
     const bearerToken = parseBearerToken(request);
-    const credential = cookieToken ?? bearerToken;
-    if (!credential) {
+    if (!cookieToken && !bearerToken) {
       return Effect.fail(
         new AuthError({
           message: "Authentication required.",
@@ -160,7 +159,17 @@ export const makeServerAuth = Effect.gen(function* () {
         }),
       );
     }
-    return authenticateToken(credential);
+
+    if (cookieToken && bearerToken && cookieToken !== bearerToken) {
+      // Browsers can auto-send stale cookies while API clients intentionally provide a
+      // fresh bearer token. Retry bearer auth when cookie auth fails so stale cookies
+      // cannot lock out valid explicit credentials on HTTP or websocket upgrades.
+      return authenticateToken(cookieToken).pipe(
+        Effect.catchTag("AuthError", () => authenticateToken(bearerToken)),
+      );
+    }
+
+    return authenticateToken(cookieToken ?? bearerToken!);
   };
 
   const getSessionState: ServerAuthShape["getSessionState"] = (request) =>

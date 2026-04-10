@@ -7,6 +7,7 @@ import { AuthControlPlane, type AuthControlPlaneShape } from "../Services/AuthCo
 import { BootstrapCredentialService } from "../Services/BootstrapCredentialService.ts";
 import { AuthError } from "../Services/ServerAuth.ts";
 import {
+  SessionCredentialError,
   SessionCredentialService,
   type SessionCredentialServiceShape,
 } from "../Services/SessionCredentialService.ts";
@@ -236,5 +237,56 @@ describe("makeServerAuth", () => {
     await expect(Effect.runPromise(serverAuth.isAuthenticatedTransportRequired())).resolves.toBe(
       true,
     );
+  });
+
+  it("falls back to bearer auth when a stale cookie token fails verification", async () => {
+    const ownerSessionId = AuthSessionId.makeUnsafe("session-owner-1");
+    const ownerExpiresAt = DateTime.makeUnsafe("2026-05-10T10:00:00.000Z").pipe(DateTime.toUtc);
+    const serverAuth = await Effect.runPromise(
+      makeServerAuthUnderTest({
+        sessionCredentialService: {
+          verify: (token) => {
+            if (token === "fresh-bearer-token") {
+              return Effect.succeed({
+                sessionId: ownerSessionId,
+                token,
+                subject: "owner",
+                role: "owner",
+                method: "bearer-session-token",
+                client: {
+                  label: "owner-cli",
+                  deviceType: "desktop",
+                  os: "macOS",
+                },
+                expiresAt: ownerExpiresAt,
+              });
+            }
+
+            return Effect.fail(
+              new SessionCredentialError({
+                message: "Unknown or expired session token.",
+              }),
+            );
+          },
+        },
+      }),
+    );
+
+    const request = {
+      cookies: {
+        [baseDescriptor.sessionCookieName]: "stale-cookie-token",
+      },
+      headers: {
+        authorization: "Bearer fresh-bearer-token",
+      },
+    } as any;
+
+    await expect(Effect.runPromise(serverAuth.authenticateHttpRequest(request))).resolves.toEqual({
+      sessionId: ownerSessionId,
+      subject: "owner",
+      role: "owner",
+      method: "bearer-session-token",
+      expiresAt: ownerExpiresAt,
+    });
   });
 });
