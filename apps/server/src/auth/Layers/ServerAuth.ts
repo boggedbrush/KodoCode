@@ -1,6 +1,7 @@
 import {
   type AuthBearerBootstrapResult,
   type AuthClientSession,
+  type AuthPairingLink,
   type AuthBootstrapResult,
   type AuthPairingCredentialResult,
   type AuthSessionState,
@@ -27,6 +28,12 @@ type BootstrapExchangeResult = {
   readonly response: AuthBootstrapResult;
   readonly sessionToken: string;
 };
+
+interface BootstrapAccessState {
+  readonly activeOwnerPairingLink: AuthPairingLink | null;
+  readonly allowAnonymousOwnerBootstrap: boolean;
+  readonly requireAuthenticatedTransport: boolean;
+}
 
 const AUTHORIZATION_PREFIX = "Bearer ";
 const WEBSOCKET_TOKEN_QUERY_PARAM = "wsToken";
@@ -62,6 +69,49 @@ export const makeServerAuth = Effect.gen(function* () {
   const authControlPlane = yield* AuthControlPlane;
   const sessions = yield* SessionCredentialService;
   const descriptor = yield* policy.getDescriptor();
+
+  const toPairingCredentialResult = (input: {
+    readonly id: string;
+    readonly credential: string;
+    readonly expiresAt: AuthPairingLink["expiresAt"];
+    readonly label?: string;
+  }): AuthPairingCredentialResult =>
+    ({
+      id: input.id,
+      credential: input.credential,
+      ...(input.label ? { label: input.label } : {}),
+      expiresAt: input.expiresAt,
+    }) satisfies AuthPairingCredentialResult;
+
+  const loadBootstrapAccessState = (): Effect.Effect<BootstrapAccessState, AuthError> =>
+    Effect.gen(function* () {
+      const [activeSessions, ownerPairingLinks] = yield* Effect.all([
+        authControlPlane.listSessions(),
+        authControlPlane.listPairingLinks({ role: "owner" }),
+      ]).pipe(
+        Effect.mapError(
+          (cause) =>
+            new AuthError({
+              message: "Failed to inspect bootstrap access state.",
+              cause,
+            }),
+        ),
+      );
+      const activeOwnerPairingLink = ownerPairingLinks[0] ?? null;
+      const allowAnonymousOwnerBootstrap =
+        descriptor.bootstrapMethods.includes("one-time-token") &&
+        !descriptor.bootstrapMethods.includes("desktop-bootstrap") &&
+        activeSessions.length === 0;
+
+      return {
+        activeOwnerPairingLink,
+        allowAnonymousOwnerBootstrap,
+        // Fresh standalone servers need one anonymous HTTP hop to mint the very first
+        // owner credential, but once a pairing link or session exists we must stop
+        // accepting anonymous websocket RPC traffic.
+        requireAuthenticatedTransport: activeSessions.length > 0 || activeOwnerPairingLink !== null,
+      } satisfies BootstrapAccessState;
+    });
 
   const authenticateToken = (token: string): Effect.Effect<AuthenticatedSession, AuthError> =>
     sessions.verify(token).pipe(
@@ -210,15 +260,47 @@ export const makeServerAuth = Effect.gen(function* () {
               cause,
             }),
         ),
-        Effect.map(
-          (issued) =>
-            ({
-              id: issued.id,
-              credential: issued.credential,
-              ...(issued.label ? { label: issued.label } : {}),
-              expiresAt: issued.expiresAt,
-            }) satisfies AuthPairingCredentialResult,
+        Effect.map((issued) =>
+          toPairingCredentialResult({
+            id: issued.id,
+            credential: issued.credential,
+            ...(issued.label ? { label: issued.label } : {}),
+            expiresAt: issued.expiresAt,
+          }),
         ),
+      );
+
+  const issueInitialOwnerPairingCredential: ServerAuthShape["issueInitialOwnerPairingCredential"] =
+    () =>
+      loadBootstrapAccessState().pipe(
+        Effect.flatMap((bootstrapState) => {
+          if (!bootstrapState.allowAnonymousOwnerBootstrap) {
+            return Effect.fail(
+              new AuthError({
+                message:
+                  "Initial owner pairing is only available before a standalone server has been claimed.",
+                status: 403,
+              }),
+            );
+          }
+
+          if (bootstrapState.activeOwnerPairingLink) {
+            return Effect.succeed(
+              toPairingCredentialResult({
+                id: bootstrapState.activeOwnerPairingLink.id,
+                credential: bootstrapState.activeOwnerPairingLink.credential,
+                ...(bootstrapState.activeOwnerPairingLink.label
+                  ? { label: bootstrapState.activeOwnerPairingLink.label }
+                  : {}),
+                expiresAt: bootstrapState.activeOwnerPairingLink.expiresAt,
+              }),
+            );
+          }
+
+          // Reuse the same owner-bootstrap issuer so the first unauthenticated browser can
+          // get a legitimate pairing credential instead of being deadlocked behind owner auth.
+          return issuePairingCredential({ role: "owner" });
+        }),
       );
 
   const listPairingLinks: ServerAuthShape["listPairingLinks"] = () =>
@@ -360,12 +442,19 @@ export const makeServerAuth = Effect.gen(function* () {
       return yield* authenticateRequest(request);
     });
 
+  const isAuthenticatedTransportRequired: ServerAuthShape["isAuthenticatedTransportRequired"] =
+    () =>
+      loadBootstrapAccessState().pipe(
+        Effect.map((bootstrapState) => bootstrapState.requireAuthenticatedTransport),
+      );
+
   return {
     getDescriptor: () => Effect.succeed(descriptor),
     getSessionState,
     exchangeBootstrapCredential,
     exchangeBootstrapCredentialForBearerSession,
     issuePairingCredential,
+    issueInitialOwnerPairingCredential,
     listPairingLinks,
     revokePairingLink,
     listClientSessions,
@@ -373,6 +462,7 @@ export const makeServerAuth = Effect.gen(function* () {
     revokeOtherClientSessions,
     authenticateHttpRequest: authenticateRequest,
     authenticateWebSocketUpgrade,
+    isAuthenticatedTransportRequired,
     issueWebSocketToken,
     issueStartupPairingUrl,
   } satisfies ServerAuthShape;

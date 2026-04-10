@@ -136,7 +136,19 @@ export const authPairingCredentialRouteLayer = HttpRouter.add(
   Effect.gen(function* () {
     const serverAuth = yield* ServerAuth;
     const request = yield* HttpServerRequest.HttpServerRequest;
-    const session = yield* serverAuth.authenticateHttpRequest(request);
+    const session = yield* serverAuth
+      .authenticateHttpRequest(request)
+      .pipe(
+        Effect.catchTag("AuthError", (error) =>
+          error.status === 401 ? Effect.succeed(null) : Effect.fail(error),
+        ),
+      );
+    if (session === null) {
+      // Fresh standalone servers do not have an owner session yet, so this route must
+      // be able to mint the first owner pairing credential without deadlocking on auth.
+      const result = yield* serverAuth.issueInitialOwnerPairingCredential();
+      return HttpServerResponse.jsonUnsafe(result, { status: 200 });
+    }
     if (session.role !== "owner") {
       return yield* new AuthError({
         message: "Only owner sessions can create pairing credentials.",

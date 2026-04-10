@@ -55,6 +55,10 @@ export interface ServerAuthShape {
       readonly role?: SessionRole;
     },
   ) => Effect.Effect<AuthPairingCredentialResult, AuthError>;
+  readonly issueInitialOwnerPairingCredential: () => Effect.Effect<
+    AuthPairingCredentialResult,
+    AuthError
+  >;
   readonly listPairingLinks: () => Effect.Effect<ReadonlyArray<AuthPairingLink>, AuthError>;
   readonly revokePairingLink: (id: string) => Effect.Effect<boolean, AuthError>;
   readonly listClientSessions: (
@@ -73,6 +77,7 @@ export interface ServerAuthShape {
   readonly authenticateWebSocketUpgrade: (
     request: HttpServerRequest.HttpServerRequest,
   ) => Effect.Effect<AuthenticatedSession, AuthError>;
+  readonly isAuthenticatedTransportRequired: () => Effect.Effect<boolean, AuthError>;
   readonly issueWebSocketToken: (
     session: AuthenticatedSession,
   ) => Effect.Effect<AuthWebSocketTokenResult, AuthError>;

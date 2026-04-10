@@ -257,4 +257,10 @@ jobs:
         run: bun run build --filter=@t3tools/web --filter=kodo
 
       - name: Publish CLI package
-        run: node apps/server/scripts/cli.ts publish --tag latest --app-version "${{ needs.preflight.outputs.version }}" --verbose
+        run: |
+          # Pre-releases must not move npm's stable latest dist-tag.
+          npm_tag=latest
+          if [[ "${{ needs.preflight.outputs.is_prerelease }}" == "true" ]]; then
+            npm_tag=next
+          fi
+          node apps/server/scripts/cli.ts publish --tag "$npm_tag" --app-version "${{ needs.preflight.outputs.version }}" --verbose

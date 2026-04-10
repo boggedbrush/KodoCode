@@ -3,6 +3,7 @@ import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
 import {
+  AuthSessionId,
   CommandId,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
@@ -24,6 +25,7 @@ import {
 import { assert, it } from "@effect/vitest";
 import { assertFailure, assertInclude, assertTrue } from "@effect/vitest/utils";
 import {
+  DateTime,
   Deferred,
   Duration,
   Effect,
@@ -48,7 +50,7 @@ import type { ServerConfigShape } from "./config.ts";
 import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
-import { type ServerAuthShape, ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { AuthError, type ServerAuthShape, ServerAuth } from "./auth/Services/ServerAuth.ts";
 import {
   type SessionCredentialServiceShape,
   SessionCredentialService,
@@ -379,6 +381,8 @@ const buildAppUnderTest = (options?: {
       exchangeBootstrapCredentialForBearerSession: () =>
         unexpectedMock("exchangeBootstrapCredentialForBearerSession not mocked"),
       issuePairingCredential: () => unexpectedMock("issuePairingCredential not mocked"),
+      issueInitialOwnerPairingCredential: () =>
+        unexpectedMock("issueInitialOwnerPairingCredential not mocked"),
       listPairingLinks: () => unexpectedMock("listPairingLinks not mocked"),
       revokePairingLink: () => unexpectedMock("revokePairingLink not mocked"),
       listClientSessions: () => unexpectedMock("listClientSessions not mocked"),
@@ -386,6 +390,7 @@ const buildAppUnderTest = (options?: {
       revokeOtherClientSessions: () => unexpectedMock("revokeOtherClientSessions not mocked"),
       authenticateHttpRequest: () => unexpectedMock("authenticateHttpRequest not mocked"),
       authenticateWebSocketUpgrade: () => unexpectedMock("authenticateWebSocketUpgrade not mocked"),
+      isAuthenticatedTransportRequired: () => Effect.succeed(false),
       issueWebSocketToken: () => unexpectedMock("issueWebSocketToken not mocked"),
       issueStartupPairingUrl: () => unexpectedMock("issueStartupPairingUrl not mocked"),
       ...options?.layers?.serverAuth,
@@ -1074,6 +1079,169 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assert.isAtLeast(response.entries.length, 1);
       assert.equal(response.truncated, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("mints the initial owner pairing credential before a server is claimed", () =>
+    Effect.gen(function* () {
+      const expiresAt = DateTime.makeUnsafe("2026-04-10T12:00:00.000Z").pipe(DateTime.toUtc);
+      yield* buildAppUnderTest({
+        layers: {
+          serverAuth: {
+            authenticateHttpRequest: () =>
+              Effect.fail(
+                new AuthError({
+                  message: "Authentication required.",
+                  status: 401,
+                }),
+              ),
+            issueInitialOwnerPairingCredential: () =>
+              Effect.succeed({
+                id: "pairing-owner-1",
+                credential: "owner-bootstrap-token",
+                expiresAt,
+              }),
+          },
+        },
+      });
+
+      const url = yield* getHttpServerUrl("/api/auth/pairing-token");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          method: "POST",
+        }),
+      );
+
+      assert.equal(response.status, 200);
+      const body = yield* Effect.promise(
+        () =>
+          response.json() as Promise<{
+            readonly id: string;
+            readonly credential: string;
+            readonly expiresAt: string;
+          }>,
+      );
+      assert.deepEqual(body, {
+        id: "pairing-owner-1",
+        credential: "owner-bootstrap-token",
+        expiresAt: "2026-04-10T12:00:00.000Z",
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("accepts websocket session auth when authToken is configured", () =>
+    Effect.gen(function* () {
+      const sessionId = AuthSessionId.makeUnsafe("session-owner-1");
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-session-auth-" });
+      yield* fs.writeFileString(
+        path.join(workspaceDir, "needle-file.ts"),
+        "export const needle = 1;",
+      );
+
+      yield* buildAppUnderTest({
+        config: {
+          authToken: "legacy-token",
+        },
+        layers: {
+          serverAuth: {
+            authenticateWebSocketUpgrade: () =>
+              Effect.succeed({
+                sessionId,
+                subject: "owner",
+                method: "browser-session-cookie",
+                role: "owner",
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws?wsToken=issued-session-token");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsSearchEntries]({
+            cwd: workspaceDir,
+            query: "needle",
+            limit: 10,
+          }),
+        ),
+      );
+
+      assert.isAtLeast(response.entries.length, 1);
+      assert.equal(response.truncated, false);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("tracks websocket session presence for the lifetime of the rpc connection", () =>
+    Effect.gen(function* () {
+      const sessionId = AuthSessionId.makeUnsafe("session-client-1");
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-presence-" });
+      yield* fs.writeFileString(
+        path.join(workspaceDir, "needle-file.ts"),
+        "export const needle = 1;",
+      );
+
+      const connectedSessionIds: Array<string> = [];
+      const disconnectedSessionIds: Array<string> = [];
+      let resolveDisconnected: (() => void) | null = null;
+      const disconnected = new Promise<void>((resolve) => {
+        resolveDisconnected = resolve;
+      });
+
+      yield* buildAppUnderTest({
+        layers: {
+          serverAuth: {
+            isAuthenticatedTransportRequired: () => Effect.succeed(true),
+            authenticateWebSocketUpgrade: () =>
+              Effect.succeed({
+                sessionId,
+                subject: "client",
+                method: "browser-session-cookie",
+                role: "client",
+              }),
+          },
+          sessionCredentialService: {
+            markConnected: (sessionId) =>
+              Effect.sync(() => {
+                connectedSessionIds.push(sessionId);
+              }),
+            markDisconnected: (sessionId) =>
+              Effect.sync(() => {
+                disconnectedSessionIds.push(sessionId);
+                resolveDisconnected?.();
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws?wsToken=issued-session-token");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsSearchEntries]({
+            cwd: workspaceDir,
+            query: "needle",
+            limit: 10,
+          }),
+        ),
+      );
+
+      assert.isAtLeast(response.entries.length, 1);
+      assert.deepEqual(connectedSessionIds, ["session-client-1"]);
+      yield* Effect.promise(() =>
+        Promise.race([
+          disconnected,
+          new Promise<never>((_, reject) => {
+            setTimeout(
+              () => reject(new Error("Timed out waiting for websocket disconnect.")),
+              1_000,
+            );
+          }),
+        ]),
+      );
+      assert.deepEqual(disconnectedSessionIds, ["session-client-1"]);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

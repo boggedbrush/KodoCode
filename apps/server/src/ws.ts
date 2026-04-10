@@ -24,6 +24,8 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
+import { ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { SessionCredentialService } from "./auth/Services/SessionCredentialService.ts";
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore";
 import { GitManager } from "./git/Services/GitManager";
@@ -846,18 +848,44 @@ export const websocketRpcRouteLayer = Layer.unwrap(
       Effect.gen(function* () {
         const request = yield* HttpServerRequest.HttpServerRequest;
         const config = yield* ServerConfig;
-        if (config.authToken) {
-          const url = HttpServerRequest.toURL(request);
-          if (Option.isNone(url)) {
-            return HttpServerResponse.text("Invalid WebSocket URL", { status: 400 });
-          }
+        const serverAuth = yield* ServerAuth;
+        const sessionCredentials = yield* SessionCredentialService;
+        const url = HttpServerRequest.toURL(request);
+
+        if (config.authToken && Option.isSome(url)) {
           const token = url.value.searchParams.get("token");
-          if (token !== config.authToken) {
-            return HttpServerResponse.text("Unauthorized WebSocket connection", { status: 401 });
+          if (token === config.authToken) {
+            return yield* rpcWebSocketHttpEffect;
           }
         }
-        return yield* rpcWebSocketHttpEffect;
-      }),
+
+        const authenticatedTransportRequired = config.authToken
+          ? true
+          : yield* serverAuth.isAuthenticatedTransportRequired();
+
+        if (!authenticatedTransportRequired) {
+          return yield* rpcWebSocketHttpEffect;
+        }
+
+        // Keep legacy `?token=` support for desktop flows, but once the server has been
+        // claimed or an explicit auth token exists, websocket RPC must bind to a real
+        // authenticated session so `/api/auth/ws-token` and presence tracking both work.
+        return yield* Effect.acquireUseRelease(
+          serverAuth
+            .authenticateWebSocketUpgrade(request)
+            .pipe(Effect.tap((session) => sessionCredentials.markConnected(session.sessionId))),
+          () => rpcWebSocketHttpEffect,
+          (session) => sessionCredentials.markDisconnected(session.sessionId),
+        );
+      }).pipe(
+        Effect.catchTag("AuthError", (error) =>
+          Effect.succeed(
+            HttpServerResponse.text(error.message, {
+              status: error.status ?? 401,
+            }),
+          ),
+        ),
+      ),
     );
   }),
 );
