@@ -429,6 +429,15 @@ export const makeSessionCredentialService = Effect.gen(function* () {
       );
     }).pipe(Effect.mapError(toSessionCredentialError("Failed to list active sessions.")));
 
+  const hasHistoryForRole: SessionCredentialServiceShape["hasHistoryForRole"] = (role) =>
+    authSessions
+      .hasHistoryForRole({ role })
+      .pipe(
+        Effect.mapError(
+          toSessionCredentialError("Failed to inspect previously-issued session history."),
+        ),
+      );
+
   const revoke: SessionCredentialServiceShape["revoke"] = (sessionId) =>
     Effect.gen(function* () {
       const revokedAt = yield* DateTime.now;
@@ -483,6 +492,7 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     issueWebSocketToken,
     verifyWebSocketToken,
     listActive,
+    hasHistoryForRole,
     get streamChanges() {
       return Stream.fromPubSub(changesPubSub);
     },

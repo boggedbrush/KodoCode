@@ -48,6 +48,11 @@ export const ListActiveAuthSessionsInput = Schema.Struct({
 });
 export type ListActiveAuthSessionsInput = typeof ListActiveAuthSessionsInput.Type;
 
+export const HasAuthSessionHistoryForRoleInput = Schema.Struct({
+  role: Schema.Literals(["owner", "client"]),
+});
+export type HasAuthSessionHistoryForRoleInput = typeof HasAuthSessionHistoryForRoleInput.Type;
+
 export const RevokeAuthSessionInput = Schema.Struct({
   sessionId: AuthSessionId,
   revokedAt: Schema.DateTimeUtcFromString,
@@ -76,6 +81,9 @@ export interface AuthSessionRepositoryShape {
   readonly listActive: (
     input: ListActiveAuthSessionsInput,
   ) => Effect.Effect<ReadonlyArray<AuthSessionRecord>, AuthSessionRepositoryError>;
+  readonly hasHistoryForRole: (
+    input: HasAuthSessionHistoryForRoleInput,
+  ) => Effect.Effect<boolean, AuthSessionRepositoryError>;
   readonly revoke: (
     input: RevokeAuthSessionInput,
   ) => Effect.Effect<boolean, AuthSessionRepositoryError>;

@@ -404,6 +404,7 @@ const buildAppUnderTest = (options?: {
       issueWebSocketToken: () => unexpectedMock("session issueWebSocketToken not mocked"),
       verifyWebSocketToken: () => unexpectedMock("session verifyWebSocketToken not mocked"),
       listActive: () => unexpectedMock("session listActive not mocked"),
+      hasHistoryForRole: () => unexpectedMock("session hasHistoryForRole not mocked"),
       streamChanges: Stream.empty,
       revoke: () => unexpectedMock("session revoke not mocked"),
       revokeAllExcept: () => unexpectedMock("session revokeAllExcept not mocked"),
@@ -1128,6 +1129,44 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         credential: "owner-bootstrap-token",
         expiresAt: "2026-04-10T12:00:00.000Z",
       });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("does not expose auth bootstrap responses through wildcard CORS", () =>
+    Effect.gen(function* () {
+      const expiresAt = DateTime.makeUnsafe("2026-04-10T12:00:00.000Z").pipe(DateTime.toUtc);
+      yield* buildAppUnderTest({
+        layers: {
+          serverAuth: {
+            authenticateHttpRequest: () =>
+              Effect.fail(
+                new AuthError({
+                  message: "Authentication required.",
+                  status: 401,
+                }),
+              ),
+            issueInitialOwnerPairingCredential: () =>
+              Effect.succeed({
+                id: "pairing-owner-1",
+                credential: "owner-bootstrap-token",
+                expiresAt,
+              }),
+          },
+        },
+      });
+
+      const url = yield* getHttpServerUrl("/api/auth/pairing-token");
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          method: "POST",
+          headers: {
+            origin: "http://localhost:5733",
+          },
+        }),
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("access-control-allow-origin"), null);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

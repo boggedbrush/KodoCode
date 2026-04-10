@@ -14,6 +14,7 @@ import {
   type AuthSessionRepositoryShape,
   CreateAuthSessionInput,
   GetAuthSessionByIdInput,
+  HasAuthSessionHistoryForRoleInput,
   ListActiveAuthSessionsInput,
   RevokeAuthSessionInput,
   RevokeOtherAuthSessionsInput,
@@ -168,6 +169,18 @@ const makeAuthSessionRepository = Effect.gen(function* () {
       `,
   });
 
+  const hasSessionHistoryForRoleRow = SqlSchema.findAll({
+    Request: HasAuthSessionHistoryForRoleInput,
+    Result: Schema.Struct({ sessionId: AuthSessionId }),
+    execute: ({ role }) =>
+      sql`
+        SELECT session_id AS "sessionId"
+        FROM auth_sessions
+        WHERE role = ${role}
+        LIMIT 1
+      `,
+  });
+
   const revokeSessionRows = SqlSchema.findAll({
     Request: RevokeAuthSessionInput,
     Result: Schema.Struct({ sessionId: AuthSessionId }),
@@ -263,10 +276,22 @@ const makeAuthSessionRepository = Effect.gen(function* () {
       ),
     );
 
+  const hasHistoryForRole: AuthSessionRepositoryShape["hasHistoryForRole"] = (input) =>
+    hasSessionHistoryForRoleRow(input).pipe(
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "AuthSessionRepository.hasHistoryForRole:query",
+          "AuthSessionRepository.hasHistoryForRole:decodeRows",
+        ),
+      ),
+      Effect.map((rows) => rows.length > 0),
+    );
+
   return {
     create,
     getById,
     listActive,
+    hasHistoryForRole,
     revoke,
     revokeAllExcept,
     setLastConnectedAt,

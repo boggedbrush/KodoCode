@@ -8,6 +8,7 @@ import pkg from "./package.json" with { type: "json" };
 const port = Number(process.env.PORT ?? 5733);
 const host = process.env.HOST?.trim() || "localhost";
 const configuredWsUrl = process.env.VITE_WS_URL?.trim();
+const configuredHmrHost = process.env.T3CODE_WEB_HMR_HOST?.trim();
 const sourcemapEnv = process.env.T3CODE_WEB_SOURCEMAP?.trim().toLowerCase();
 
 const buildSourcemap =
@@ -39,6 +40,12 @@ function resolveDevProxyTarget(wsUrl: string | undefined): string | undefined {
 }
 
 const devProxyTarget = resolveDevProxyTarget(configuredWsUrl);
+
+function isWildcardHost(value: string): boolean {
+  return value === "0.0.0.0" || value === "::" || value === "[::]";
+}
+
+const hmrHost = configuredHmrHost || (isWildcardHost(host) ? undefined : host);
 
 export default defineConfig({
   plugins: [
@@ -92,7 +99,10 @@ export default defineConfig({
       // inside Electron's BrowserWindow. Vite 8 uses console.debug for
       // connection logs — enable "Verbose" in DevTools to see them.
       protocol: "ws",
-      host,
+      // Wildcard bind addresses like 0.0.0.0 / :: are only for the listening socket.
+      // Browsers cannot connect back to them, so when we bind broadly we let the HMR
+      // client use the page's own hostname unless an explicit public host is provided.
+      ...(hmrHost ? { host: hmrHost } : {}),
     },
   },
   build: {

@@ -237,6 +237,9 @@ const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
 );
 
 export const makeRoutesLayer = Layer.mergeAll(
+  // Keep auth routes out of the wildcard browser API CORS policy. Fresh standalone
+  // environments allow one anonymous owner bootstrap, so letting any origin read
+  // those responses would let an arbitrary webpage claim the local server.
   authBearerBootstrapRouteLayer,
   authBootstrapRouteLayer,
   authClientsRevokeOthersRouteLayer,
@@ -247,13 +250,15 @@ export const makeRoutesLayer = Layer.mergeAll(
   authPairingCredentialRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
-  attachmentsRouteLayer,
-  otlpTracesProxyRouteLayer,
-  projectFaviconRouteLayer,
-  serverEnvironmentRouteLayer,
-  staticAndDevRouteLayer,
-  websocketRpcRouteLayer,
-).pipe(Layer.provide(browserApiCorsLayer));
+  Layer.mergeAll(
+    attachmentsRouteLayer,
+    otlpTracesProxyRouteLayer,
+    projectFaviconRouteLayer,
+    serverEnvironmentRouteLayer,
+    staticAndDevRouteLayer,
+    websocketRpcRouteLayer,
+  ).pipe(Layer.provide(browserApiCorsLayer)),
+);
 
 export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {

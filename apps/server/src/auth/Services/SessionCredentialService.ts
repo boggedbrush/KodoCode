@@ -72,6 +72,7 @@ export interface SessionCredentialServiceShape {
     ReadonlyArray<AuthClientSession>,
     SessionCredentialError
   >;
+  readonly hasHistoryForRole: (role: SessionRole) => Effect.Effect<boolean, SessionCredentialError>;
   readonly streamChanges: Stream.Stream<SessionCredentialChange>;
   readonly revoke: (sessionId: AuthSessionId) => Effect.Effect<boolean, SessionCredentialError>;
   readonly revokeAllExcept: (

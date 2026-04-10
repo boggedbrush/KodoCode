@@ -85,9 +85,10 @@ export const makeServerAuth = Effect.gen(function* () {
 
   const loadBootstrapAccessState = (): Effect.Effect<BootstrapAccessState, AuthError> =>
     Effect.gen(function* () {
-      const [activeSessions, ownerPairingLinks] = yield* Effect.all([
+      const [activeSessions, ownerPairingLinks, hasIssuedOwnerSession] = yield* Effect.all([
         authControlPlane.listSessions(),
         authControlPlane.listPairingLinks({ role: "owner" }),
+        sessions.hasHistoryForRole("owner"),
       ]).pipe(
         Effect.mapError(
           (cause) =>
@@ -101,15 +102,17 @@ export const makeServerAuth = Effect.gen(function* () {
       const allowAnonymousOwnerBootstrap =
         descriptor.bootstrapMethods.includes("one-time-token") &&
         !descriptor.bootstrapMethods.includes("desktop-bootstrap") &&
-        activeSessions.length === 0;
+        !hasIssuedOwnerSession;
 
       return {
         activeOwnerPairingLink,
         allowAnonymousOwnerBootstrap,
-        // Fresh standalone servers need one anonymous HTTP hop to mint the very first
-        // owner credential, but once a pairing link or session exists we must stop
-        // accepting anonymous websocket RPC traffic.
-        requireAuthenticatedTransport: activeSessions.length > 0 || activeOwnerPairingLink !== null,
+        // Once an owner session has ever been issued, the server is claimed and must
+        // stay behind authenticated transport even if that original session later
+        // expires. Falling back to anonymous RPC after expiry would silently reopen
+        // the server to local cross-process access.
+        requireAuthenticatedTransport:
+          hasIssuedOwnerSession || activeSessions.length > 0 || activeOwnerPairingLink !== null,
       } satisfies BootstrapAccessState;
     });
 
