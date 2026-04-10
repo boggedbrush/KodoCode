@@ -97,7 +97,10 @@ export function normalizeGitRemoteUrl(value: string): string {
         .split("/")
         .filter((segment) => segment.length > 0)
         .join("/");
-      if (url.hostname && repositoryPath.includes("/")) {
+      // Some valid remotes live at the host root (`https://git.example.com/repo.git`),
+      // so treat any non-empty path as canonical instead of falling back to the raw
+      // URL string and forcing downstream identity parsing to invent path segments.
+      if (url.hostname && repositoryPath.length > 0) {
         return `${url.hostname}/${repositoryPath}`;
       }
     } catch {
@@ -105,7 +108,9 @@ export function normalizeGitRemoteUrl(value: string): string {
     }
   }
 
-  const scpStyleHostAndPath = /^git@([^:/\s]+)[:/]([^/\s]+(?:\/[^/\s]+)+)$/i.exec(normalized);
+  // SCP-style remotes are not limited to the `git@` user, especially on
+  // self-hosted deployments where a dedicated deploy account is common.
+  const scpStyleHostAndPath = /^[^@\s]+@([^:/\s]+)[:/]([^/\s]+(?:\/[^/\s]+)*)$/i.exec(normalized);
   if (scpStyleHostAndPath?.[1] && scpStyleHostAndPath[2]) {
     return `${scpStyleHostAndPath[1]}/${scpStyleHostAndPath[2]}`;
   }
@@ -166,13 +171,9 @@ function parseGitRemoteHost(remoteUrl: string): string | null {
     return null;
   }
 
-  if (trimmed.startsWith("git@")) {
-    const hostWithPath = trimmed.slice("git@".length);
-    const separatorIndex = hostWithPath.search(/[:/]/);
-    if (separatorIndex <= 0) {
-      return null;
-    }
-    return hostWithPath.slice(0, separatorIndex).toLowerCase();
+  const scpStyleMatch = /^[^@\s]+@([^:/\s]+)[:/]/.exec(trimmed);
+  if (scpStyleMatch?.[1]) {
+    return scpStyleMatch[1].toLowerCase();
   }
 
   try {

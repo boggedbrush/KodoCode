@@ -111,6 +111,48 @@ it.layer(NodeServices.layer)("RepositoryIdentityResolverLive", (it) => {
     }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
   );
 
+  it.effect("supports host-root URL remotes without inventing an owner segment", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-host-root-url-test-",
+      });
+
+      yield* git(cwd, ["init"]);
+      yield* git(cwd, ["remote", "add", "origin", "https://git.example.com/t3code.git"]);
+
+      const resolver = yield* RepositoryIdentityResolver;
+      const identity = yield* resolver.resolve(cwd);
+
+      expect(identity).not.toBeNull();
+      expect(identity?.canonicalKey).toBe("git.example.com/t3code");
+      expect(identity?.displayName).toBe("t3code");
+      expect(identity?.owner).toBeUndefined();
+      expect(identity?.name).toBe("t3code");
+    }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
+  );
+
+  it.effect("supports scp remotes that use non-git usernames", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const cwd = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-repository-identity-scp-user-test-",
+      });
+
+      yield* git(cwd, ["init"]);
+      yield* git(cwd, ["remote", "add", "origin", "deploy@git.example.com:platform/t3code.git"]);
+
+      const resolver = yield* RepositoryIdentityResolver;
+      const identity = yield* resolver.resolve(cwd);
+
+      expect(identity).not.toBeNull();
+      expect(identity?.canonicalKey).toBe("git.example.com/platform/t3code");
+      expect(identity?.displayName).toBe("platform/t3code");
+      expect(identity?.owner).toBe("platform");
+      expect(identity?.name).toBe("t3code");
+    }).pipe(Effect.provide(RepositoryIdentityResolverLive)),
+  );
+
   it.effect(
     "refreshes cached null identities after the negative TTL when a remote is configured later",
     () =>

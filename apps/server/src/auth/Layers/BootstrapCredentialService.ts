@@ -30,6 +30,7 @@ type ConsumeResult =
     };
 
 const DEFAULT_ONE_TIME_TOKEN_TTL_MINUTES = Duration.minutes(5);
+const CONFIGURED_AUTH_TOKEN_BOOTSTRAP_TTL = Duration.days(36_500);
 const PAIRING_TOKEN_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const PAIRING_TOKEN_LENGTH = 12;
 
@@ -83,10 +84,14 @@ export const makeBootstrapCredentialService = Effect.gen(function* () {
       method: "desktop-bootstrap",
       role: "owner",
       subject: "desktop-bootstrap",
+      // A configured auth token is an operator-managed shared secret, not a
+      // one-time pairing link. Keep it reusable for the effective lifetime of
+      // the process so additional browsers and cookie recovery can bootstrap
+      // fresh sessions without waiting for a server restart.
       expiresAt: DateTime.add(now, {
-        milliseconds: Duration.toMillis(DEFAULT_ONE_TIME_TOKEN_TTL_MINUTES),
+        milliseconds: Duration.toMillis(CONFIGURED_AUTH_TOKEN_BOOTSTRAP_TTL),
       }),
-      remainingUses: 1,
+      remainingUses: "unbounded",
     });
   }
 

@@ -47,7 +47,9 @@ function buildRepositoryIdentity(input: {
   const hostingProvider = detectGitHostingProviderFromRemoteUrl(input.remoteUrl);
   const repositoryPath = canonicalKey.split("/").slice(1).join("/");
   const repositoryPathSegments = repositoryPath.split("/").filter((segment) => segment.length > 0);
-  const [owner] = repositoryPathSegments;
+  // Host-root remotes like `https://git.example.com/repo.git` only have a repo
+  // name, so avoid inventing an owner when the canonical path has one segment.
+  const owner = repositoryPathSegments.length > 1 ? repositoryPathSegments[0] : undefined;
   const repositoryName = repositoryPathSegments.at(-1);
 
   return {
