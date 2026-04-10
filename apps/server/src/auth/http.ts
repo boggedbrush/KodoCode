@@ -144,8 +144,9 @@ export const authPairingCredentialRouteLayer = HttpRouter.add(
         ),
       );
     if (session === null) {
-      // Fresh standalone servers do not have an owner session yet, so this route must
-      // be able to mint the first owner pairing credential without deadlocking on auth.
+      // Standalone installs need a recovery path here both before the first claim and
+      // after the last owner session disappears, otherwise a lost cookie can lock the
+      // server out of owner pairing permanently.
       const result = yield* serverAuth.issueInitialOwnerPairingCredential();
       return HttpServerResponse.jsonUnsafe(result, { status: 200 });
     }

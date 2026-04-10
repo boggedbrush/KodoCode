@@ -33,6 +33,7 @@ import {
   Layer,
   ManagedRuntime,
   Path,
+  PubSub,
   Stream,
 } from "effect";
 import {
@@ -53,6 +54,7 @@ import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import { AuthError, type ServerAuthShape, ServerAuth } from "./auth/Services/ServerAuth.ts";
 import { deriveSessionCookieName } from "./auth/utils.ts";
 import {
+  type SessionCredentialChange,
   type SessionCredentialServiceShape,
   SessionCredentialService,
 } from "./auth/Services/SessionCredentialService.ts";
@@ -570,6 +572,25 @@ const getWsServerUrl = (pathname = "") =>
     const address = server.address as HttpServer.TcpAddress;
     return `ws://127.0.0.1:${address.port}${pathname}`;
   });
+
+const makeActiveClientSession = (
+  sessionId: AuthSessionId,
+  role: "owner" | "client" = "client",
+) => ({
+  sessionId,
+  subject: role,
+  role,
+  method: "browser-session-cookie" as const,
+  client: {
+    deviceType: "desktop" as const,
+    label: `${role}-browser`,
+  },
+  issuedAt: DateTime.makeUnsafe("2026-04-10T10:00:00.000Z").pipe(DateTime.toUtc),
+  expiresAt: DateTime.makeUnsafe("2026-05-10T10:00:00.000Z").pipe(DateTime.toUtc),
+  lastConnectedAt: null,
+  connected: true,
+  current: false,
+});
 
 it.layer(NodeServices.layer)("server router seam", (it) => {
   it.effect("serves static index content for GET / when staticDir is configured", () =>
@@ -1233,6 +1254,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 role: "owner",
               }),
           },
+          sessionCredentialService: {
+            listActive: () => Effect.succeed([makeActiveClientSession(sessionId, "owner")]),
+          },
         },
       });
 
@@ -1283,6 +1307,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               }),
           },
           sessionCredentialService: {
+            listActive: () => Effect.succeed([makeActiveClientSession(sessionId)]),
             markConnected: (sessionId) =>
               Effect.sync(() => {
                 connectedSessionIds.push(sessionId);
@@ -1321,6 +1346,96 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         ]),
       );
       assert.deepEqual(disconnectedSessionIds, ["session-client-1"]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("closes live websocket rpc clients when their session is revoked", () =>
+    Effect.gen(function* () {
+      const sessionId = AuthSessionId.makeUnsafe("session-client-revoked");
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-revoked-" });
+      yield* fs.writeFileString(
+        path.join(workspaceDir, "needle-file.ts"),
+        "export const needle = 1;",
+      );
+
+      const changes = yield* PubSub.unbounded<SessionCredentialChange>();
+      let resolveDisconnected: (() => void) | null = null;
+      const disconnected = new Promise<void>((resolve) => {
+        resolveDisconnected = resolve;
+      });
+
+      yield* buildAppUnderTest({
+        layers: {
+          serverAuth: {
+            isAuthenticatedTransportRequired: () => Effect.succeed(true),
+            authenticateWebSocketUpgrade: () =>
+              Effect.succeed({
+                sessionId,
+                subject: "client",
+                method: "browser-session-cookie",
+                role: "client",
+              }),
+          },
+          sessionCredentialService: {
+            listActive: () => Effect.succeed([makeActiveClientSession(sessionId)]),
+            streamChanges: Stream.fromPubSub(changes),
+            markDisconnected: () =>
+              Effect.sync(() => {
+                resolveDisconnected?.();
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws?wsToken=issued-session-token");
+      const secondCallResult = yield* Effect.scoped(
+        makeWsRpcClient.pipe(
+          Effect.provide(wsRpcProtocolLayer(wsUrl)),
+          Effect.flatMap((client) =>
+            Effect.gen(function* () {
+              const firstResponse = yield* client[WS_METHODS.projectsSearchEntries]({
+                cwd: workspaceDir,
+                query: "needle",
+                limit: 10,
+              });
+              assert.isAtLeast(firstResponse.entries.length, 1);
+
+              yield* PubSub.publish(changes, {
+                type: "clientRemoved",
+                sessionId,
+              });
+              yield* Effect.promise(() =>
+                Promise.race([
+                  disconnected,
+                  new Promise<never>((_, reject) => {
+                    setTimeout(
+                      () =>
+                        reject(
+                          new Error("Timed out waiting for websocket disconnect after revocation."),
+                        ),
+                      1_000,
+                    );
+                  }),
+                ]),
+              );
+
+              return yield* client[WS_METHODS.projectsSearchEntries]({
+                cwd: workspaceDir,
+                query: "needle",
+                limit: 10,
+              }).pipe(Effect.result);
+            }),
+          ),
+        ),
+      );
+
+      assertTrue(secondCallResult._tag === "Failure");
+      assertTrue(
+        String(secondCallResult.failure).includes("SocketCloseError") ||
+          String(secondCallResult.failure).includes("Session revoked"),
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

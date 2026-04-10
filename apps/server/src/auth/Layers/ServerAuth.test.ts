@@ -1,5 +1,5 @@
-import type { ServerAuthDescriptor } from "@t3tools/contracts";
-import { Effect, Layer, Stream } from "effect";
+import { AuthSessionId, type ServerAuthDescriptor } from "@t3tools/contracts";
+import { DateTime, Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { AuthControlPlane, type AuthControlPlaneShape } from "../Services/AuthControlPlane.ts";
@@ -69,9 +69,62 @@ function makeServerAuthUnderTest(options?: {
 }
 
 describe("makeServerAuth", () => {
-  it("does not reissue anonymous owner bootstrap after the server has been claimed", async () => {
+  it("reissues anonymous owner bootstrap after the last owner session is gone", async () => {
+    const issuedPairingLink = {
+      id: "pairing-owner-2",
+      credential: "owner-recovery-token",
+      role: "owner" as const,
+      subject: "owner-bootstrap",
+      createdAt: DateTime.makeUnsafe("2026-04-10T11:55:00.000Z").pipe(DateTime.toUtc),
+      expiresAt: DateTime.makeUnsafe("2026-04-10T12:00:00.000Z").pipe(DateTime.toUtc),
+    } as const;
+    const issuedCredential = {
+      id: issuedPairingLink.id,
+      credential: issuedPairingLink.credential,
+      expiresAt: issuedPairingLink.expiresAt,
+    } as const;
     const serverAuth = await Effect.runPromise(
       makeServerAuthUnderTest({
+        authControlPlane: {
+          createPairingLink: () => Effect.succeed(issuedPairingLink),
+        },
+        sessionCredentialService: {
+          hasHistoryForRole: () => Effect.succeed(true),
+        },
+      }),
+    );
+
+    await expect(
+      Effect.runPromise(serverAuth.issueInitialOwnerPairingCredential()),
+    ).resolves.toEqual(issuedCredential);
+  });
+
+  it("keeps anonymous owner bootstrap blocked while an owner session is active", async () => {
+    const serverAuth = await Effect.runPromise(
+      makeServerAuthUnderTest({
+        authControlPlane: {
+          listSessions: () =>
+            Effect.succeed([
+              {
+                sessionId: AuthSessionId.makeUnsafe("session-owner-1"),
+                subject: "owner",
+                role: "owner",
+                method: "browser-session-cookie",
+                client: {
+                  label: "Owner Browser",
+                  deviceType: "desktop",
+                  os: "macOS",
+                },
+                issuedAt: DateTime.makeUnsafe("2026-04-10T10:00:00.000Z").pipe(DateTime.toUtc),
+                expiresAt: DateTime.makeUnsafe("2026-05-10T10:00:00.000Z").pipe(DateTime.toUtc),
+                lastConnectedAt: DateTime.makeUnsafe("2026-04-10T10:00:00.000Z").pipe(
+                  DateTime.toUtc,
+                ),
+                connected: true,
+                current: false,
+              },
+            ]),
+        },
         sessionCredentialService: {
           hasHistoryForRole: () => Effect.succeed(true),
         },

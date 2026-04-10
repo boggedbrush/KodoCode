@@ -99,10 +99,14 @@ export const makeServerAuth = Effect.gen(function* () {
         ),
       );
       const activeOwnerPairingLink = ownerPairingLinks[0] ?? null;
+      const hasActiveOwnerSession = activeSessions.some((session) => session.role === "owner");
       const allowAnonymousOwnerBootstrap =
         descriptor.bootstrapMethods.includes("one-time-token") &&
         !descriptor.bootstrapMethods.includes("desktop-bootstrap") &&
-        !hasIssuedOwnerSession;
+        // Anonymous owner bootstrap is the only recovery path when a standalone install
+        // loses its last owner cookie. Keep the narrow pairing endpoint available once
+        // no owner session is active, but still keep RPC transport itself authenticated.
+        !hasActiveOwnerSession;
 
       return {
         activeOwnerPairingLink,
@@ -280,8 +284,7 @@ export const makeServerAuth = Effect.gen(function* () {
           if (!bootstrapState.allowAnonymousOwnerBootstrap) {
             return Effect.fail(
               new AuthError({
-                message:
-                  "Initial owner pairing is only available before a standalone server has been claimed.",
+                message: "Initial owner pairing is only available when no owner session is active.",
                 status: 403,
               }),
             );
