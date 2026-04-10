@@ -79,6 +79,8 @@ interface MessagesTimelineProps {
   nowIso: string;
   expandedWorkGroups: Record<string, boolean>;
   onToggleWorkGroup: (groupId: string) => void;
+  changedFilesExpandedByTurnId: Record<string, boolean>;
+  onSetChangedFilesExpanded: (turnId: TurnId, expanded: boolean) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
@@ -118,6 +120,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   nowIso,
   expandedWorkGroups,
   onToggleWorkGroup,
+  changedFilesExpandedByTurnId,
+  onSetChangedFilesExpanded,
   onOpenTurnDiff,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
@@ -308,15 +312,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
-  const [allDirectoriesExpandedByTurnId, setAllDirectoriesExpandedByTurnId] = useState<
-    Record<string, boolean>
-  >({});
-  const onToggleAllDirectories = useCallback((turnId: TurnId) => {
-    setAllDirectoriesExpandedByTurnId((current) => ({
-      ...current,
-      [turnId]: !(current[turnId] ?? true),
-    }));
-  }, []);
 
   const renderRowContent = (row: TimelineRow) => (
     <div
@@ -493,7 +488,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                   const summaryStat = summarizeTurnDiffStats(checkpointFiles);
                   const changedFileCountLabel = String(checkpointFiles.length);
                   const allDirectoriesExpanded =
-                    allDirectoriesExpandedByTurnId[turnSummary.turnId] ?? true;
+                    changedFilesExpandedByTurnId[turnSummary.turnId] ?? true;
                   return (
                     <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
                       <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -515,7 +510,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                             size="xs"
                             variant="outline"
                             data-scroll-anchor-ignore
-                            onClick={() => onToggleAllDirectories(turnSummary.turnId)}
+                            onClick={() =>
+                              onSetChangedFilesExpanded(turnSummary.turnId, !allDirectoriesExpanded)
+                            }
                           >
                             {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
                           </Button>
