@@ -2,8 +2,9 @@ import type { ServerAuthDescriptor } from "@t3tools/contracts";
 import { Effect, Layer } from "effect";
 
 import { ServerConfig } from "../../config.ts";
+import { ServerEnvironment } from "../../environment/Services/ServerEnvironment.ts";
 import { ServerAuthPolicy, type ServerAuthPolicyShape } from "../Services/ServerAuthPolicy.ts";
-import { SESSION_COOKIE_NAME } from "../utils.ts";
+import { deriveSessionCookieName } from "../utils.ts";
 
 const isWildcardHost = (host: string | undefined): boolean =>
   host === "0.0.0.0" || host === "::" || host === "[::]";
@@ -24,6 +25,8 @@ const isLoopbackHost = (host: string | undefined): boolean => {
 
 export const makeServerAuthPolicy = Effect.gen(function* () {
   const config = yield* ServerConfig;
+  const serverEnvironment = yield* ServerEnvironment;
+  const environmentId = yield* serverEnvironment.getEnvironmentId;
   const isRemoteReachable = isWildcardHost(config.host) || !isLoopbackHost(config.host);
 
   const policy =
@@ -46,7 +49,7 @@ export const makeServerAuthPolicy = Effect.gen(function* () {
     policy,
     bootstrapMethods,
     sessionMethods: ["browser-session-cookie", "bearer-session-token"],
-    sessionCookieName: SESSION_COOKIE_NAME,
+    sessionCookieName: deriveSessionCookieName(environmentId),
   };
 
   return {

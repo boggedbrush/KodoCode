@@ -51,6 +51,7 @@ import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import { AuthError, type ServerAuthShape, ServerAuth } from "./auth/Services/ServerAuth.ts";
+import { deriveSessionCookieName } from "./auth/utils.ts";
 import {
   type SessionCredentialServiceShape,
   SessionCredentialService,
@@ -115,6 +116,7 @@ import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 
 const defaultProjectId = ProjectId.makeUnsafe("project-default");
 const defaultThreadId = ThreadId.makeUnsafe("thread-default");
+const testSessionCookieName = deriveSessionCookieName(baseEnvironment.environmentId);
 const defaultModelSelection = {
   provider: "codex",
   model: "gpt-5-codex",
@@ -365,7 +367,7 @@ const buildAppUnderTest = (options?: {
           policy: "unsafe-no-auth",
           bootstrapMethods: [],
           sessionMethods: ["browser-session-cookie", "bearer-session-token"],
-          sessionCookieName: "kodo_session",
+          sessionCookieName: testSessionCookieName,
         }),
       getSessionState: () =>
         Effect.succeed({
@@ -374,7 +376,7 @@ const buildAppUnderTest = (options?: {
             policy: "unsafe-no-auth",
             bootstrapMethods: [],
             sessionMethods: ["browser-session-cookie", "bearer-session-token"],
-            sessionCookieName: "kodo_session",
+            sessionCookieName: testSessionCookieName,
           },
         }),
       exchangeBootstrapCredential: () => unexpectedMock("exchangeBootstrapCredential not mocked"),
@@ -396,7 +398,7 @@ const buildAppUnderTest = (options?: {
       ...options?.layers?.serverAuth,
     });
     const sessionCredentialServiceLayer = Layer.mock(SessionCredentialService)({
-      cookieName: "kodo_session",
+      cookieName: testSessionCookieName,
       issue: () => unexpectedMock("session issue not mocked"),
       verify: () => unexpectedMock("session verify not mocked"),
       issueWebSocketToken: () => unexpectedMock("session issueWebSocketToken not mocked"),

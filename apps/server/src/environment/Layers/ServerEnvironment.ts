@@ -1,5 +1,6 @@
 import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import { Effect, FileSystem, Layer, Path, Random } from "effect";
+import * as PlatformError from "effect/PlatformError";
 
 import { ServerConfig } from "../../config.ts";
 import { ServerEnvironment, type ServerEnvironmentShape } from "../Services/ServerEnvironment.ts";
@@ -33,6 +34,8 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
+  const isAlreadyExistsError = (cause: unknown): cause is PlatformError.PlatformError =>
+    cause instanceof PlatformError.PlatformError && cause.reason._tag === "AlreadyExists";
 
   const readPersistedEnvironmentId = Effect.gen(function* () {
     const exists = yield* fileSystem
@@ -50,7 +53,16 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
   });
 
   const persistEnvironmentId = (value: string) =>
-    fileSystem.writeFileString(serverConfig.environmentIdPath, `${value}\n`);
+    Effect.scoped(
+      Effect.gen(function* () {
+        const file = yield* fileSystem.open(serverConfig.environmentIdPath, {
+          flag: "wx",
+          mode: 0o600,
+        });
+        yield* file.writeAll(Buffer.from(`${value}\n`, "utf8"));
+        yield* file.sync;
+      }),
+    );
 
   const environmentIdRaw = yield* Effect.gen(function* () {
     const persisted = yield* readPersistedEnvironmentId;
@@ -59,8 +71,22 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
     }
 
     const generated = yield* Random.nextUUIDv4;
-    yield* persistEnvironmentId(generated);
-    return generated;
+    const persistedOrGenerated = yield* persistEnvironmentId(generated).pipe(
+      // Multiple runtime sublayers can ask for the environment descriptor during startup.
+      // Using an exclusive create keeps all of them pinned to one persisted id instead of
+      // racing to create different cookie names or environment descriptors on first boot.
+      Effect.as(generated),
+      Effect.catch((cause) =>
+        isAlreadyExistsError(cause)
+          ? readPersistedEnvironmentId.pipe(
+              Effect.flatMap((concurrentValue) =>
+                concurrentValue !== null ? Effect.succeed(concurrentValue) : Effect.fail(cause),
+              ),
+            )
+          : Effect.fail(cause),
+      ),
+    );
+    return persistedOrGenerated;
   });
 
   const environmentId = EnvironmentId.makeUnsafe(environmentIdRaw);

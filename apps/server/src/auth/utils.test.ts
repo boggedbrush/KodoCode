@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { deriveAuthClientMetadata } from "./utils";
+import { deriveAuthClientMetadata, deriveSessionCookieName } from "./utils";
+
+describe("deriveSessionCookieName", () => {
+  it("returns a stable, environment-scoped cookie name", () => {
+    expect(deriveSessionCookieName("env-local")).toBe(deriveSessionCookieName("env-local"));
+    expect(deriveSessionCookieName("env-local")).not.toBe(deriveSessionCookieName("env-remote"));
+    expect(deriveSessionCookieName("env-local")).toMatch(/^kodo_session_[a-f0-9]{12}$/);
+  });
+});
 
 describe("deriveAuthClientMetadata", () => {
   it("labels Electron user agents as Electron instead of Chrome", () => {

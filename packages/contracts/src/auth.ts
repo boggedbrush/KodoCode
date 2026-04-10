@@ -86,7 +86,9 @@ export type AuthSessionRole = typeof AuthSessionRole.Type;
  * - `sessionMethods`: authenticated request/session methods the server supports
  *   once pairing is complete
  * - `sessionCookieName`: cookie name clients should expect when
- *   `browser-session-cookie` is in use
+ *   `browser-session-cookie` is in use. This is environment-scoped rather than
+ *   globally fixed because browser cookies are not port-scoped, so two local
+ *   Kodo servers on the same host must not share one cookie name.
  *
  * This descriptor is intentionally capability-oriented. It lets clients choose
  * the right UX without embedding server-specific auth logic or assuming a

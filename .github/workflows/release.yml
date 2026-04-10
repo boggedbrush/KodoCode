@@ -225,6 +225,75 @@ jobs:
           path: release-publish/*
           if-no-files-found: error
 
+  publish_desktop:
+    name: Publish Desktop Release
+    needs: [preflight, build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.preflight.outputs.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Download desktop artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: desktop-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Merge macOS update manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Each matrix job uploads its own artifact bundle, so the final release job must
+          # reassemble the shared asset directory and merge the per-arch mac updater manifests
+          # before anything is published to GitHub Releases.
+          if [[ -f release-assets/latest-mac.yml && -f release-assets/latest-mac-x64.yml ]]; then
+            node scripts/merge-mac-update-manifests.ts \
+              release-assets/latest-mac.yml \
+              release-assets/latest-mac-x64.yml
+          fi
+
+      - name: Verify release asset bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(
+            release-assets/*.dmg
+            release-assets/*.zip
+            release-assets/*.AppImage
+            release-assets/*.exe
+            release-assets/*.blockmap
+            release-assets/latest*.yml
+          )
+
+          if [[ ${#assets[@]} -eq 0 ]]; then
+            echo "No desktop release assets were assembled for publication." >&2
+            exit 1
+          fi
+
+          printf '%s\n' "${assets[@]}"
+
+      - name: Publish desktop assets to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.preflight.outputs.tag }}
+          target_commitish: ${{ needs.preflight.outputs.ref }}
+          prerelease: ${{ needs.preflight.outputs.is_prerelease == 'true' }}
+          make_latest: ${{ needs.preflight.outputs.make_latest }}
+          generate_release_notes: true
+          files: |
+            release-assets/*
+
   publish_cli:
     name: Publish CLI to npm
     needs: [preflight, build]
@@ -257,10 +326,24 @@ jobs:
         run: bun run build --filter=@t3tools/web --filter=kodo
 
       - name: Publish CLI package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+            echo "NPM_TOKEN secret is required to publish the CLI package." >&2
+            exit 1
+          fi
+
           # Pre-releases must not move npm's stable latest dist-tag.
+          # We also pass --provenance so npm can attach the GitHub OIDC attestation for
+          # this workflow run; without auth plus provenance the release job either fails
+          # with ENEEDAUTH or publishes without the expected supply-chain metadata.
           npm_tag=latest
           if [[ "${{ needs.preflight.outputs.is_prerelease }}" == "true" ]]; then
             npm_tag=next
           fi
-          node apps/server/scripts/cli.ts publish --tag "$npm_tag" --app-version "${{ needs.preflight.outputs.version }}" --verbose
+          node apps/server/scripts/cli.ts publish \
+            --tag "$npm_tag" \
+            --app-version "${{ needs.preflight.outputs.version }}" \
+            --provenance \
+            --verbose

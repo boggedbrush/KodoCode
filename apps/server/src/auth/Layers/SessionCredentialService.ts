@@ -2,10 +2,10 @@ import { AuthSessionId, type AuthClientMetadata, type AuthClientSession } from "
 import { Clock, DateTime, Duration, Effect, Layer, PubSub, Ref, Schema, Stream } from "effect";
 import { Option } from "effect";
 
+import { ServerEnvironment } from "../../environment/Services/ServerEnvironment.ts";
 import { AuthSessionRepositoryLive } from "../../persistence/Layers/AuthSessions.ts";
 import { AuthSessionRepository } from "../../persistence/Services/AuthSessions.ts";
 import { ServerSecretStore } from "../Services/ServerSecretStore.ts";
-import { SESSION_COOKIE_NAME } from "../utils.ts";
 import {
   SessionCredentialError,
   SessionCredentialService,
@@ -17,6 +17,7 @@ import {
 import {
   base64UrlDecodeUtf8,
   base64UrlEncode,
+  deriveSessionCookieName,
   signPayload,
   timingSafeEqualBase64Url,
 } from "../utils.ts";
@@ -79,8 +80,11 @@ function toAuthClientSession(input: Omit<AuthClientSession, "current">): AuthCli
 
 export const makeSessionCredentialService = Effect.gen(function* () {
   const secretStore = yield* ServerSecretStore;
+  const serverEnvironment = yield* ServerEnvironment;
   const authSessions = yield* AuthSessionRepository;
   const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
+  const environmentId = yield* serverEnvironment.getEnvironmentId;
+  const sessionCookieName = deriveSessionCookieName(environmentId);
   const connectedSessionsRef = yield* Ref.make(new Map<string, number>());
   const changesPubSub = yield* PubSub.unbounded<SessionCredentialChange>();
 
@@ -471,7 +475,9 @@ export const makeSessionCredentialService = Effect.gen(function* () {
     }).pipe(Effect.mapError(toSessionCredentialError("Failed to revoke other sessions.")));
 
   return {
-    cookieName: SESSION_COOKIE_NAME,
+    // Keep the effective cookie name aligned with the server-advertised auth descriptor so
+    // browser clients can discover the right cookie to expect for this specific environment.
+    cookieName: sessionCookieName,
     issue,
     verify,
     issueWebSocketToken,

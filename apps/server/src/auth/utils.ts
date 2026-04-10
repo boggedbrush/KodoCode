@@ -2,7 +2,17 @@ import type { AuthClientMetadata, AuthClientMetadataDeviceType } from "@t3tools/
 import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 import * as Crypto from "node:crypto";
 
-export const SESSION_COOKIE_NAME = "kodo_session";
+const SESSION_COOKIE_NAME_PREFIX = "kodo_session";
+
+export function deriveSessionCookieName(environmentId: string): string {
+  // Browsers scope cookies by scheme + host + path, not by TCP port. Two local Kodo
+  // servers on the same host therefore share one cookie jar, so a fixed cookie name
+  // causes whichever server paired last to overwrite the earlier session. Hashing the
+  // stable environment id keeps the cookie name deterministic for one environment while
+  // preventing different localhost servers from clobbering each other.
+  const suffix = Crypto.createHash("sha256").update(environmentId).digest("hex").slice(0, 12);
+  return `${SESSION_COOKIE_NAME_PREFIX}_${suffix}`;
+}
 
 export function base64UrlEncode(input: string | Uint8Array): string {
   const buffer = typeof input === "string" ? Buffer.from(input, "utf8") : Buffer.from(input);
