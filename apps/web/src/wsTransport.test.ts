@@ -166,6 +166,39 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("mints a websocket token through the page origin for cross-origin browser sessions", async () => {
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            token: "issued-session-token",
+            expiresAt: "2026-04-10T12:00:00.000Z",
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+            status: 200,
+          },
+        ),
+    );
+
+    const transport = new WsTransport("ws://127.0.0.1:3773/?client=web");
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith("http://localhost:3020/api/auth/ws-token", {
+        credentials: "include",
+        method: "POST",
+      });
+    });
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    expect(getSocket().url).toBe("ws://127.0.0.1:3773/ws?client=web&wsToken=issued-session-token");
+    await transport.dispose();
+  });
+
   it("uses wss when falling back to an https page origin", async () => {
     Object.assign(window.location, {
       origin: "https://app.example.com",
@@ -802,26 +835,34 @@ describe("WsTransport", () => {
     const transport = {
       disposed: false,
       session: {
-        clientScope: {} as never,
-        runtime,
+        initializedPromise: Promise.resolve({
+          clientPromise: Promise.resolve({} as never),
+          clientScope: {} as never,
+          runtime,
+        }),
       },
       closeSession: (
         WsTransport.prototype as unknown as {
           closeSession: (session: {
-            clientScope: unknown;
-            runtime: { dispose: () => Promise<void>; runPromise: () => Promise<void> };
+            initializedPromise: Promise<{
+              clientScope: unknown;
+              runtime: { dispose: () => Promise<void>; runPromise: () => Promise<void> };
+            }>;
           }) => Promise<void>;
         }
       ).closeSession,
     } as unknown as WsTransport;
 
-    void WsTransport.prototype.dispose.call(transport);
+    const disposePromise = WsTransport.prototype.dispose.call(transport);
 
-    expect(runtime.runPromise).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(runtime.runPromise).toHaveBeenCalledTimes(1);
+    });
     expect(runtime.dispose).not.toHaveBeenCalled();
     expect((transport as unknown as { disposed: boolean }).disposed).toBe(true);
 
     resolveClose();
+    await disposePromise;
 
     await waitFor(() => {
       expect(runtime.dispose).toHaveBeenCalledTimes(1);

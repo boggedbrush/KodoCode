@@ -5,25 +5,28 @@ import { Effect } from "effect";
 import { deriveServerPaths } from "./config.ts";
 
 it.layer(NodeServices.layer)("deriveServerPaths", (it) => {
-  it.effect("scopes auth storage to each standalone server identity", () =>
+  it.effect("keeps auth storage stable across port changes while still separating hosts", () =>
     Effect.gen(function* () {
       const first = yield* deriveServerPaths("/tmp/t3-config-auth-scope", undefined, {
         mode: "web",
         host: "127.0.0.1",
-        port: 3773,
       });
       const second = yield* deriveServerPaths("/tmp/t3-config-auth-scope", undefined, {
         mode: "web",
         host: "127.0.0.1",
-        port: 3774,
+      });
+      const differentHost = yield* deriveServerPaths("/tmp/t3-config-auth-scope", undefined, {
+        mode: "web",
+        host: "0.0.0.0",
       });
 
       expect(first.stateDir).toBe(second.stateDir);
       expect(first.dbPath).toBe(second.dbPath);
-      expect(first.authStateDir).not.toBe(second.authStateDir);
-      expect(first.authDbPath).not.toBe(second.authDbPath);
-      expect(first.environmentIdPath).not.toBe(second.environmentIdPath);
-      expect(first.secretsDir).not.toBe(second.secretsDir);
+      expect(first.authStateDir).toBe(second.authStateDir);
+      expect(first.authDbPath).toBe(second.authDbPath);
+      expect(first.environmentIdPath).toBe(second.environmentIdPath);
+      expect(first.secretsDir).toBe(second.secretsDir);
+      expect(first.authStateDir).not.toBe(differentHost.authStateDir);
     }),
   );
 });

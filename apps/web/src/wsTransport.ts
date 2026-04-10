@@ -1,3 +1,4 @@
+import { type AuthWebSocketTokenResult } from "@t3tools/contracts";
 import {
   Cause,
   Duration,
@@ -11,6 +12,7 @@ import {
 } from "effect";
 import { RpcClient } from "effect/unstable/rpc";
 
+import { resolveAuthHttpOrigin, resolveServerUrl, toHttpOrigin } from "./lib/utils";
 import { ClientTracingLive, configureClientTracing } from "./observability/clientTracing";
 import {
   createWsRpcProtocolLayer,
@@ -32,16 +34,85 @@ const DEFAULT_SUBSCRIPTION_RETRY_DELAY_MS = Duration.millis(250);
 const NOOP: () => void = () => undefined;
 
 interface TransportSession {
+  readonly initializedPromise: Promise<ResolvedTransportSession>;
+}
+
+interface ResolvedTransportSession {
   readonly clientPromise: Promise<WsRpcProtocolClient>;
   readonly clientScope: Scope.Closeable;
   readonly runtime: ManagedRuntime.ManagedRuntime<RpcClient.Protocol, never>;
 }
+
+const LEGACY_TOKEN_QUERY_PARAM = "token";
+const WEBSOCKET_TOKEN_QUERY_PARAM = "wsToken";
 
 function formatErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
   }
   return String(error);
+}
+
+function shouldBootstrapWebSocketToken(socketUrl: string): boolean {
+  const parsedUrl = new URL(socketUrl);
+  if (
+    parsedUrl.searchParams.has(LEGACY_TOKEN_QUERY_PARAM) ||
+    parsedUrl.searchParams.has(WEBSOCKET_TOKEN_QUERY_PARAM)
+  ) {
+    return false;
+  }
+
+  const authOrigin = resolveAuthHttpOrigin();
+  return authOrigin.length > 0 && authOrigin !== toHttpOrigin(socketUrl);
+}
+
+async function issueWebSocketToken(): Promise<string | null> {
+  const authOrigin = resolveAuthHttpOrigin();
+  if (authOrigin.length === 0) {
+    return null;
+  }
+
+  try {
+    const response = await fetch(`${authOrigin}/api/auth/ws-token`, {
+      credentials: "include",
+      method: "POST",
+    });
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as Partial<AuthWebSocketTokenResult>;
+    return typeof payload.token === "string" && payload.token.trim().length > 0
+      ? payload.token
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveTransportUrl(url?: string): Promise<string> {
+  const resolvedUrl = resolveServerUrl({
+    url,
+    protocol: window.location.protocol === "https:" ? "wss" : "ws",
+    pathname: "/ws",
+  });
+
+  if (!shouldBootstrapWebSocketToken(resolvedUrl)) {
+    return resolvedUrl;
+  }
+
+  // When the page is fronted by a dev proxy, the authenticated browser cookie
+  // lives on the page origin while the websocket still connects to the backend
+  // origin. Mint a short-lived ws token through the page origin and carry it on
+  // the direct websocket URL so claimed sessions can reconnect successfully.
+  const token = await issueWebSocketToken();
+  if (token === null) {
+    return resolvedUrl;
+  }
+
+  const parsedUrl = new URL(resolvedUrl);
+  parsedUrl.searchParams.set(WEBSOCKET_TOKEN_QUERY_PARAM, token);
+  return parsedUrl.toString();
 }
 
 export class WsTransport {
@@ -67,7 +138,7 @@ export class WsTransport {
     }
 
     await this.tracingReady;
-    const session = this.session;
+    const session = await this.session.initializedPromise;
     const client = await session.clientPromise;
     return await session.runtime.runPromise(Effect.suspend(() => execute(client)));
   }
@@ -81,7 +152,7 @@ export class WsTransport {
     }
 
     await this.tracingReady;
-    const session = this.session;
+    const session = await this.session.initializedPromise;
     const client = await session.clientPromise;
     await session.runtime.runPromise(
       Stream.runForEach(connect(client), (value) =>
@@ -127,7 +198,7 @@ export class WsTransport {
             }
           }
 
-          const session = this.session;
+          const session = await this.session.initializedPromise;
           const runningStream = this.runStreamOnSession(
             session,
             connect,
@@ -200,25 +271,39 @@ export class WsTransport {
   }
 
   private closeSession(session: TransportSession) {
-    return session.runtime.runPromise(Scope.close(session.clientScope, Exit.void)).finally(() => {
-      session.runtime.dispose();
-    });
+    return session.initializedPromise
+      .catch(() => null)
+      .then((initialized) => {
+        if (initialized === null) {
+          return undefined;
+        }
+
+        return initialized.runtime
+          .runPromise(Scope.close(initialized.clientScope, Exit.void))
+          .finally(() => {
+            initialized.runtime.dispose();
+          });
+      });
   }
 
   private createSession(): TransportSession {
-    const runtime = ManagedRuntime.make(
-      Layer.mergeAll(createWsRpcProtocolLayer(this.url), ClientTracingLive),
-    );
-    const clientScope = runtime.runSync(Scope.make());
     return {
-      runtime,
-      clientScope,
-      clientPromise: runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient)),
+      initializedPromise: resolveTransportUrl(this.url).then((resolvedUrl) => {
+        const runtime = ManagedRuntime.make(
+          Layer.mergeAll(createWsRpcProtocolLayer(resolvedUrl), ClientTracingLive),
+        );
+        const clientScope = runtime.runSync(Scope.make());
+        return {
+          runtime,
+          clientScope,
+          clientPromise: runtime.runPromise(Scope.provide(clientScope)(makeWsRpcProtocolClient)),
+        };
+      }),
     };
   }
 
   private runStreamOnSession<TValue>(
-    session: TransportSession,
+    session: ResolvedTransportSession,
     connect: (client: WsRpcProtocolClient) => Stream.Stream<TValue, Error, never>,
     listener: (value: TValue) => void,
     isActive: () => boolean,

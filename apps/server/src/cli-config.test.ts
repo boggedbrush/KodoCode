@@ -36,7 +36,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:5173"), {
         mode: "desktop",
         host: "0.0.0.0",
-        port: 4001,
       });
       const resolved = yield* resolveServerConfig(
         {
@@ -103,7 +102,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:4173"), {
         mode: "web",
         host: "127.0.0.1",
-        port: 8788,
       });
       const resolved = yield* resolveServerConfig(
         {
@@ -183,7 +181,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:5173"), {
         mode: "desktop",
         host: "127.0.0.2",
-        port: 4888,
       });
 
       const resolved = yield* resolveServerConfig(
@@ -306,7 +303,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:4173"), {
         mode: "web",
         host: "127.0.0.1",
-        port: 8788,
       });
 
       const resolved = yield* resolveServerConfig(
@@ -371,7 +367,6 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       const derivedPaths = yield* deriveServerPaths(baseDir, undefined, {
         mode: "desktop",
         host: "127.0.0.1",
-        port: 4888,
       });
       yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
       yield* fs.writeFileString(

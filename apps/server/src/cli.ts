@@ -242,7 +242,6 @@ export const resolveServerConfig = (
     const derivedPaths = yield* deriveServerPaths(baseDir, devUrl, {
       mode,
       host,
-      port,
     });
     yield* ensureServerDirectories(derivedPaths);
     const persistedObservabilitySettings = yield* loadPersistedObservabilitySettings(

@@ -66,7 +66,6 @@ export interface ServerConfigShape extends ServerDerivedPaths {
 export interface ServerAuthStateScope {
   readonly mode: RuntimeMode;
   readonly host: string | undefined;
-  readonly port: number;
 }
 
 const sanitizeAuthStateScopeSegment = (value: string) => {
@@ -81,7 +80,6 @@ const deriveAuthStateScopeKey = (scope: ServerAuthStateScope) =>
   [
     sanitizeAuthStateScopeSegment(scope.mode),
     sanitizeAuthStateScopeSegment(scope.host ?? "auto"),
-    sanitizeAuthStateScopeSegment(String(scope.port)),
   ].join("-");
 
 export const deriveServerPaths = Effect.fn(function* (
@@ -90,15 +88,15 @@ export const deriveServerPaths = Effect.fn(function* (
   authStateScope: ServerAuthStateScope = {
     mode: "web",
     host: undefined,
-    port: DEFAULT_PORT,
   },
 ): Effect.fn.Return<ServerDerivedPaths, never, Path.Path> {
   const { join } = yield* Path.Path;
   const stateDir = join(baseDir, devUrl !== undefined ? "dev" : "userdata");
   const dbPath = join(stateDir, "state.sqlite");
   // Keep the main runtime database stable, but scope auth artifacts to the
-  // standalone server identity so two local servers do not share sessions,
-  // signing keys, or cookie names just because they use the same base dir.
+  // stable server identity. The bound port is intentionally excluded here
+  // because desktop/web can rebind to the next free port on restart, and
+  // auth/session history must survive that transport-level move.
   const authStateDir = join(stateDir, "auth", deriveAuthStateScopeKey(authStateScope));
   const authDbPath = join(authStateDir, "state.sqlite");
   const attachmentsDir = join(stateDir, "attachments");
@@ -168,7 +166,6 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
         const derivedPaths = yield* deriveServerPaths(baseDir, devUrl, {
           mode: "web",
           host: undefined,
-          port: 0,
         });
         yield* ensureServerDirectories(derivedPaths);
 

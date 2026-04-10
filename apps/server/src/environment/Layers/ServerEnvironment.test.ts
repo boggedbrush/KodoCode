@@ -14,7 +14,6 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
   const derivedPaths = yield* deriveServerPaths(baseDir, undefined, {
     mode: "web",
     host: undefined,
-    port: 0,
   });
 
   return {
@@ -123,6 +122,34 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(yield* fileSystem.readFileString(environmentIdPath)).toBe(
         "persisted-environment-id\n",
       );
+    }),
+  );
+
+  it.effect("repairs empty persisted environment id files before generating a replacement", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-server-environment-empty-file-test-",
+      });
+      const serverConfig = yield* makeServerConfig(baseDir);
+      yield* fileSystem.makeDirectory(nodePath.dirname(serverConfig.environmentIdPath), {
+        recursive: true,
+      });
+      yield* fileSystem.writeFileString(serverConfig.environmentIdPath, "");
+
+      const first = yield* Effect.gen(function* () {
+        const serverEnvironment = yield* ServerEnvironment;
+        return yield* serverEnvironment.getDescriptor;
+      }).pipe(Effect.provide(makeServerEnvironmentLayer(baseDir)));
+      const second = yield* Effect.gen(function* () {
+        const serverEnvironment = yield* ServerEnvironment;
+        return yield* serverEnvironment.getDescriptor;
+      }).pipe(Effect.provide(makeServerEnvironmentLayer(baseDir)));
+
+      const persisted = (yield* fileSystem.readFileString(serverConfig.environmentIdPath)).trim();
+      expect(persisted.length).toBeGreaterThan(0);
+      expect(first.environmentId).toBe(persisted);
+      expect(second.environmentId).toBe(first.environmentId);
     }),
   );
 });

@@ -4,6 +4,7 @@ import { Effect, FileSystem, Layer, Path } from "effect";
 import * as PlatformError from "effect/PlatformError";
 
 import { ServerConfig } from "../../config.ts";
+import { createFileOnce } from "../../createOnceFile.ts";
 import {
   SecretStoreError,
   ServerSecretStore,
@@ -106,16 +107,12 @@ export const makeServerSecretStore = Effect.gen(function* () {
 
   const create: ServerSecretStoreShape["set"] = (name, value) => {
     const secretPath = resolveSecretPath(name);
-    return withTempSecretFile(secretPath, value, (tempPath) =>
-      Effect.gen(function* () {
-        // Write into a temp inode first, then hard-link it into place. That keeps
-        // the final secret path free of partially-written bytes if startup dies
-        // mid-write, while `link()` still gives us create-once semantics when
-        // multiple runtime layers race to initialize the same secret.
-        yield* fileSystem.link(tempPath, secretPath);
-        yield* cleanupTempSecretFile(tempPath);
-      }),
-    ).pipe(Effect.mapError(toSecretStoreError(name, "persist")));
+    return createFileOnce({
+      fileSystem,
+      path: secretPath,
+      value,
+      mode: 0o600,
+    }).pipe(Effect.mapError(toSecretStoreError(name, "persist")));
   };
 
   const clearInvalidRandomSecret = (name: string, expectedBytes: number, actualBytes: number) =>

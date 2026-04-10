@@ -46,6 +46,49 @@ const firstNonEmptyString = (...values: unknown[]): string => {
   throw new Error("No non-empty string provided");
 };
 
+export const toHttpOrigin = (rawUrl: string): string => {
+  const parsedUrl = new URL(rawUrl);
+  if (parsedUrl.protocol === "wss:") {
+    parsedUrl.protocol = "https:";
+  } else if (parsedUrl.protocol === "ws:") {
+    parsedUrl.protocol = "http:";
+  }
+  parsedUrl.pathname = "/";
+  parsedUrl.search = "";
+  parsedUrl.hash = "";
+  return parsedUrl.origin;
+};
+
+export const resolveBackendHttpOrigin = (): string => {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  try {
+    return toHttpOrigin(
+      firstNonEmptyString(
+        window.desktopBridge?.getWsUrl(),
+        import.meta.env.VITE_WS_URL,
+        window.location.origin,
+      ),
+    );
+  } catch {
+    return window.location.origin;
+  }
+};
+
+export const resolveAuthHttpOrigin = (): string => {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  if (window.location.protocol === "http:" || window.location.protocol === "https:") {
+    return window.location.origin;
+  }
+
+  return resolveBackendHttpOrigin();
+};
+
 export const resolveServerUrl = (options?: {
   url?: string | undefined;
   protocol?: "http" | "https" | "ws" | "wss" | undefined;

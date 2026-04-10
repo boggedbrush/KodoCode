@@ -3,6 +3,7 @@ import { Effect, FileSystem, Layer, Path, Random } from "effect";
 import * as PlatformError from "effect/PlatformError";
 
 import { ServerConfig } from "../../config.ts";
+import { createFileOnce } from "../../createOnceFile.ts";
 import { ServerEnvironment, type ServerEnvironmentShape } from "../Services/ServerEnvironment.ts";
 import { version } from "../../../package.json" with { type: "json" };
 
@@ -42,50 +43,79 @@ export const makeServerEnvironment = Effect.fn("makeServerEnvironment")(function
       .exists(serverConfig.environmentIdPath)
       .pipe(Effect.orElseSucceed(() => false));
     if (!exists) {
-      return null;
+      return {
+        exists: false,
+        value: null,
+      } as const;
     }
 
     const raw = yield* fileSystem
       .readFileString(serverConfig.environmentIdPath)
       .pipe(Effect.map((value) => value.trim()));
 
-    return raw.length > 0 ? raw : null;
+    return {
+      exists: true,
+      value: raw.length > 0 ? raw : null,
+    } as const;
   });
 
   const persistEnvironmentId = (value: string) =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const file = yield* fileSystem.open(serverConfig.environmentIdPath, {
-          flag: "wx",
-          mode: 0o600,
-        });
-        yield* file.writeAll(Buffer.from(`${value}\n`, "utf8"));
-        yield* file.sync;
-      }),
-    );
+    createFileOnce({
+      fileSystem,
+      path: serverConfig.environmentIdPath,
+      value: Buffer.from(`${value}\n`, "utf8"),
+      mode: 0o600,
+    });
 
-  const environmentIdRaw = yield* Effect.gen(function* () {
-    const persisted = yield* readPersistedEnvironmentId;
-    if (persisted) {
-      return persisted;
-    }
+  const clearInvalidPersistedEnvironmentId = fileSystem
+    .remove(serverConfig.environmentIdPath, { force: true })
+    .pipe(Effect.as(null));
 
-    const generated = yield* Random.nextUUIDv4;
-    const persistedOrGenerated = yield* persistEnvironmentId(generated).pipe(
+  const getValidPersistedEnvironmentId = readPersistedEnvironmentId.pipe(
+    Effect.flatMap((persisted) => {
+      if (persisted.value !== null) {
+        return Effect.succeed(persisted.value);
+      }
+      if (!persisted.exists) {
+        return Effect.succeed(null);
+      }
+
+      // Older startup code could leave the final path behind as an empty file if
+      // the process died after create-but-before-write. Discard it so the new
+      // temp-file + link path can regenerate a stable replacement.
+      return clearInvalidPersistedEnvironmentId;
+    }),
+  );
+
+  const createOrReuseEnvironmentId = (
+    value: string,
+  ): Effect.Effect<string, PlatformError.PlatformError> =>
+    persistEnvironmentId(value).pipe(
       // Multiple runtime sublayers can ask for the environment descriptor during startup.
-      // Using an exclusive create keeps all of them pinned to one persisted id instead of
-      // racing to create different cookie names or environment descriptors on first boot.
-      Effect.as(generated),
+      // Reusing the same create-once file keeps all of them pinned to one persisted id
+      // instead of racing to create different cookie names or environment descriptors.
+      Effect.as(value),
       Effect.catch((cause) =>
         isAlreadyExistsError(cause)
-          ? readPersistedEnvironmentId.pipe(
+          ? getValidPersistedEnvironmentId.pipe(
               Effect.flatMap((concurrentValue) =>
-                concurrentValue !== null ? Effect.succeed(concurrentValue) : Effect.fail(cause),
+                concurrentValue !== null
+                  ? Effect.succeed(concurrentValue)
+                  : createOrReuseEnvironmentId(value),
               ),
             )
           : Effect.fail(cause),
       ),
     );
+
+  const environmentIdRaw = yield* Effect.gen(function* () {
+    const persisted = yield* getValidPersistedEnvironmentId;
+    if (persisted) {
+      return persisted;
+    }
+
+    const generated = yield* Random.nextUUIDv4;
+    const persistedOrGenerated = yield* createOrReuseEnvironmentId(generated);
     return persistedOrGenerated;
   });
 

@@ -322,7 +322,6 @@ const buildAppUnderTest = (options?: {
     const derivedPaths = yield* deriveServerPaths(baseDir, devUrl, {
       mode,
       host,
-      port,
     });
     const config: ServerConfigShape = {
       logLevel: "Info",
