@@ -117,7 +117,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     return (
       <button
         type="button"
-        className="flex size-8 cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
+        className="flex size-8 origin-top cursor-pointer items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
         onClick={onInterrupt}
         aria-label="Stop generation"
       >
@@ -192,7 +192,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
     <button
       type="submit"
       className={cn(
-        "flex h-9 enabled:cursor-pointer items-center justify-center rounded-full text-white transition-all duration-150 hover:scale-105 disabled:pointer-events-none disabled:opacity-30 disabled:hover:scale-100 sm:h-8",
+        "flex h-9 origin-top enabled:cursor-pointer items-center justify-center rounded-full text-white transition-all duration-150 hover:scale-105 disabled:pointer-events-none disabled:opacity-30 disabled:hover:scale-100 sm:h-8",
         interactionMode === "review" ? "px-4" : "w-9 sm:w-8",
       )}
       style={{ backgroundColor: accentColor }}

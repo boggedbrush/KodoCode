@@ -20,10 +20,9 @@ export const EnhanceButton = memo(function EnhanceButton({
     <button
       type="button"
       className={cn(
-        "group/enhance flex size-9 cursor-pointer items-center justify-center rounded-full text-white transition-colors sm:size-8",
-        "border border-border bg-[color:var(--color-accent)] hover:border-transparent hover:bg-[#C8920A] hover:text-white",
-        "dark:hover:bg-[#D4AF37] dark:hover:text-[color:var(--color-neutral-900)]",
-        "disabled:pointer-events-none disabled:opacity-30",
+        "group/enhance flex size-9 origin-top items-center justify-center rounded-full border border-transparent bg-[#C8920A] text-white transition-all duration-150 enabled:cursor-pointer hover:scale-105 sm:size-8",
+        "dark:bg-[#D4AF37] dark:text-[color:var(--color-neutral-900)]",
+        "disabled:pointer-events-none disabled:opacity-30 disabled:hover:scale-100",
       )}
       onClick={onEnhance}
       disabled={disabled}
