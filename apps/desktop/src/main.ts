@@ -1636,7 +1636,9 @@ app
   });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin" && !isQuitting) {
+  // In dev, closing the last window should end the foreground terminal session
+  // instead of leaving a headless macOS app running.
+  if (!isQuitting && (isDevelopment || process.platform !== "darwin")) {
     app.quit();
   }
 });

@@ -6,6 +6,7 @@ import { Effect } from "effect";
 
 import {
   createDevRunnerEnv,
+  DESKTOP_DEV_SHUTDOWN_SIGNAL,
   findFirstAvailableOffset,
   isInheritedDesktopDevUrl,
   resolveModePortOffsets,
@@ -184,6 +185,8 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           host: "127.0.0.1",
           port: 4222,
           devUrl: undefined,
+          desktopDevRunnerPid: 4242,
+          desktopDevShutdownSignal: DESKTOP_DEV_SHUTDOWN_SIGNAL,
         });
 
         assert.equal(env.T3CODE_HOME, resolve("/tmp/my-t3"));
@@ -196,6 +199,8 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.T3CODE_NO_BROWSER, undefined);
         assert.equal(env.T3CODE_HOST, undefined);
         assert.equal(env.VITE_WS_URL, undefined);
+        assert.equal(env.KODOCODE_DEV_RUNNER_PID, "4242");
+        assert.equal(env.KODOCODE_DEV_SHUTDOWN_SIGNAL, DESKTOP_DEV_SHUTDOWN_SIGNAL);
       }),
     );
   });
