@@ -316,7 +316,14 @@ const buildAppUnderTest = (options?: {
     const tempBaseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-test-" });
     const baseDir = options?.config?.baseDir ?? tempBaseDir;
     const devUrl = options?.config?.devUrl;
-    const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
+    const mode = options?.config?.mode ?? "web";
+    const port = options?.config?.port ?? 0;
+    const host = options?.config?.host ?? "127.0.0.1";
+    const derivedPaths = yield* deriveServerPaths(baseDir, devUrl, {
+      mode,
+      host,
+      port,
+    });
     const config: ServerConfigShape = {
       logLevel: "Info",
       traceMinLevel: "Info",
@@ -328,9 +335,9 @@ const buildAppUnderTest = (options?: {
       otlpMetricsUrl: undefined,
       otlpExportIntervalMs: 10_000,
       otlpServiceName: "kodo-server",
-      mode: "web",
-      port: 0,
-      host: "127.0.0.1",
+      mode,
+      port,
+      host,
       cwd: process.cwd(),
       baseDir,
       ...derivedPaths,
@@ -638,6 +645,38 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
 
       assert.equal(response.status, 200);
       assert.include(yield* response.text, 'data-fallback="project-favicon"');
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("does not expose project favicon responses through wildcard CORS", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const projectDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-router-project-favicon-cors-",
+      });
+      yield* fileSystem.writeFileString(
+        path.join(projectDir, "favicon.svg"),
+        "<svg>router-project-favicon</svg>",
+      );
+
+      yield* buildAppUnderTest({
+        config: { devUrl: new URL("http://127.0.0.1:5173") },
+      });
+
+      const url = yield* getHttpServerUrl(
+        `/api/project-favicon?cwd=${encodeURIComponent(projectDir)}`,
+      );
+      const response = yield* Effect.promise(() =>
+        fetch(url, {
+          headers: {
+            origin: "http://localhost:5733",
+          },
+        }),
+      );
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("access-control-allow-origin"), null);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

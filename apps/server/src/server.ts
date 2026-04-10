@@ -13,7 +13,10 @@ import {
 import { fixPath } from "./os-jank";
 import { websocketRpcRouteLayer } from "./ws";
 import { OpenLive } from "./open";
-import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite";
+import {
+  authLayerConfig as AuthSqlitePersistenceLayerLive,
+  layerConfig as SqlitePersistenceLayerLive,
+} from "./persistence/Layers/Sqlite";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService";
 import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger";
@@ -179,6 +182,11 @@ const ProviderLayerLive = Layer.unwrap(
 );
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
+// Keep auth tables on their own scoped SQLite file so standalone servers that
+// share a base dir do not accidentally share sessions or pairing state.
+const AuthPersistenceLayerLive = Layer.empty.pipe(
+  Layer.provideMerge(AuthSqlitePersistenceLayerLive),
+);
 
 const GitManagerLayerLive = GitManagerLive.pipe(
   Layer.provideMerge(ProjectSetupScriptRunnerLive),
@@ -205,7 +213,7 @@ const WorkspaceLayerLive = Layer.mergeAll(
 );
 
 const AuthLayerLive = ServerAuthLive.pipe(
-  Layer.provideMerge(PersistenceLayerLive),
+  Layer.provideMerge(AuthPersistenceLayerLive),
   Layer.provide(ServerSecretStoreLive),
 );
 
@@ -250,14 +258,15 @@ export const makeRoutesLayer = Layer.mergeAll(
   authPairingCredentialRouteLayer,
   authSessionRouteLayer,
   authWebSocketTokenRouteLayer,
-  Layer.mergeAll(
-    attachmentsRouteLayer,
-    otlpTracesProxyRouteLayer,
-    projectFaviconRouteLayer,
-    serverEnvironmentRouteLayer,
-    staticAndDevRouteLayer,
-    websocketRpcRouteLayer,
-  ).pipe(Layer.provide(browserApiCorsLayer)),
+  attachmentsRouteLayer,
+  projectFaviconRouteLayer,
+  serverEnvironmentRouteLayer,
+  staticAndDevRouteLayer,
+  websocketRpcRouteLayer,
+  // Browser-origin OTLP exports are the only cross-origin HTTP API we expect.
+  // File-backed routes like `/api/project-favicon` and `/attachments/*` must stay
+  // same-origin so a random webpage cannot probe local files through the server.
+  otlpTracesProxyRouteLayer.pipe(Layer.provide(browserApiCorsLayer)),
 );
 
 export const makeServerLayer = Layer.unwrap(

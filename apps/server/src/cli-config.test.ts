@@ -33,7 +33,11 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
       const baseDir = join(os.tmpdir(), "t3-cli-config-env-base");
-      const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:5173"));
+      const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:5173"), {
+        mode: "desktop",
+        host: "0.0.0.0",
+        port: 4001,
+      });
       const resolved = yield* resolveServerConfig(
         {
           mode: Option.none(),
@@ -96,7 +100,11 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
     Effect.gen(function* () {
       const { join } = yield* Path.Path;
       const baseDir = join(os.tmpdir(), "t3-cli-config-flags-base");
-      const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:4173"));
+      const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:4173"), {
+        mode: "web",
+        host: "127.0.0.1",
+        port: 8788,
+      });
       const resolved = yield* resolveServerConfig(
         {
           mode: Option.some("web"),
@@ -172,7 +180,11 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         otlpTracesUrl: "http://localhost:4318/v1/traces",
         otlpMetricsUrl: "http://localhost:4318/v1/metrics",
       });
-      const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:5173"));
+      const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:5173"), {
+        mode: "desktop",
+        host: "127.0.0.2",
+        port: 4888,
+      });
 
       const resolved = yield* resolveServerConfig(
         {
@@ -260,10 +272,12 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       for (const directory of [
         customCwd,
         resolved.stateDir,
+        resolved.authStateDir,
         resolved.logsDir,
         resolved.providerLogsDir,
         resolved.terminalLogsDir,
         resolved.attachmentsDir,
+        resolved.secretsDir,
         resolved.worktreesDir,
         path.dirname(resolved.serverLogPath),
         path.dirname(resolved.serverTracePath),
@@ -289,7 +303,11 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         autoBootstrapProjectFromCwd: false,
         logWebSocketEvents: false,
       });
-      const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:4173"));
+      const derivedPaths = yield* deriveServerPaths(baseDir, new URL("http://127.0.0.1:4173"), {
+        mode: "web",
+        host: "127.0.0.1",
+        port: 8788,
+      });
 
       const resolved = yield* resolveServerConfig(
         {
@@ -350,7 +368,11 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-settings-" });
-      const derivedPaths = yield* deriveServerPaths(baseDir, undefined);
+      const derivedPaths = yield* deriveServerPaths(baseDir, undefined, {
+        mode: "desktop",
+        host: "127.0.0.1",
+        port: 4888,
+      });
       yield* fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true });
       yield* fs.writeFileString(
         derivedPaths.settingsPath,

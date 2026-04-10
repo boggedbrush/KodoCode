@@ -19,6 +19,8 @@ export type RuntimeMode = typeof RuntimeMode.Type;
 export interface ServerDerivedPaths {
   readonly stateDir: string;
   readonly dbPath: string;
+  readonly authStateDir: string;
+  readonly authDbPath: string;
   readonly keybindingsConfigPath: string;
   readonly settingsPath: string;
   readonly worktreesDir: string;
@@ -61,19 +63,52 @@ export interface ServerConfigShape extends ServerDerivedPaths {
   readonly logWebSocketEvents: boolean;
 }
 
+export interface ServerAuthStateScope {
+  readonly mode: RuntimeMode;
+  readonly host: string | undefined;
+  readonly port: number;
+}
+
+const sanitizeAuthStateScopeSegment = (value: string) => {
+  const normalized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-");
+  return normalized.replace(/^-+|-+$/g, "") || "default";
+};
+
+const deriveAuthStateScopeKey = (scope: ServerAuthStateScope) =>
+  [
+    sanitizeAuthStateScopeSegment(scope.mode),
+    sanitizeAuthStateScopeSegment(scope.host ?? "auto"),
+    sanitizeAuthStateScopeSegment(String(scope.port)),
+  ].join("-");
+
 export const deriveServerPaths = Effect.fn(function* (
   baseDir: ServerConfigShape["baseDir"],
   devUrl: ServerConfigShape["devUrl"],
+  authStateScope: ServerAuthStateScope = {
+    mode: "web",
+    host: undefined,
+    port: DEFAULT_PORT,
+  },
 ): Effect.fn.Return<ServerDerivedPaths, never, Path.Path> {
   const { join } = yield* Path.Path;
   const stateDir = join(baseDir, devUrl !== undefined ? "dev" : "userdata");
   const dbPath = join(stateDir, "state.sqlite");
+  // Keep the main runtime database stable, but scope auth artifacts to the
+  // standalone server identity so two local servers do not share sessions,
+  // signing keys, or cookie names just because they use the same base dir.
+  const authStateDir = join(stateDir, "auth", deriveAuthStateScopeKey(authStateScope));
+  const authDbPath = join(authStateDir, "state.sqlite");
   const attachmentsDir = join(stateDir, "attachments");
   const logsDir = join(stateDir, "logs");
   const providerLogsDir = join(logsDir, "provider");
   return {
     stateDir,
     dbPath,
+    authStateDir,
+    authDbPath,
     keybindingsConfigPath: join(stateDir, "keybindings.json"),
     settingsPath: join(stateDir, "settings.json"),
     worktreesDir: join(baseDir, "worktrees"),
@@ -85,8 +120,8 @@ export const deriveServerPaths = Effect.fn(function* (
     providerEventLogPath: join(providerLogsDir, "events.log"),
     terminalLogsDir: join(logsDir, "terminals"),
     anonymousIdPath: join(stateDir, "anonymous-id"),
-    environmentIdPath: join(stateDir, "environment-id"),
-    secretsDir: join(stateDir, "secrets"),
+    environmentIdPath: join(authStateDir, "environment-id"),
+    secretsDir: join(authStateDir, "secrets"),
   };
 });
 
@@ -101,6 +136,7 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
       fs.makeDirectory(derivedPaths.providerLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.terminalLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.attachmentsDir, { recursive: true }),
+      fs.makeDirectory(derivedPaths.authStateDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.worktreesDir, { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.keybindingsConfigPath), { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true }),
@@ -129,7 +165,11 @@ export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigS
           typeof baseDirOrPrefix === "string"
             ? baseDirOrPrefix
             : yield* fs.makeTempDirectoryScoped({ prefix: baseDirOrPrefix.prefix });
-        const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
+        const derivedPaths = yield* deriveServerPaths(baseDir, devUrl, {
+          mode: "web",
+          host: undefined,
+          port: 0,
+        });
         yield* ensureServerDirectories(derivedPaths);
 
         return {

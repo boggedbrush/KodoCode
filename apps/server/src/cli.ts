@@ -231,7 +231,19 @@ export const resolveServerConfig = (
     const rawCwd = Option.getOrElse(flags.cwd, () => process.cwd());
     const cwd = path.resolve(yield* expandHomePath(rawCwd.trim()));
     yield* fs.makeDirectory(cwd, { recursive: true });
-    const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
+    const host = Option.getOrElse(
+      resolveOptionPrecedence(
+        flags.host,
+        Option.fromUndefinedOr(env.host),
+        Option.flatMap(bootstrapEnvelope, (bootstrap) => Option.fromUndefinedOr(bootstrap.host)),
+      ),
+      () => (mode === "desktop" ? "127.0.0.1" : undefined),
+    );
+    const derivedPaths = yield* deriveServerPaths(baseDir, devUrl, {
+      mode,
+      host,
+      port,
+    });
     yield* ensureServerDirectories(derivedPaths);
     const persistedObservabilitySettings = yield* loadPersistedObservabilitySettings(
       derivedPaths.settingsPath,
@@ -284,14 +296,6 @@ export const resolveServerConfig = (
       ),
     );
     const staticDir = devUrl ? undefined : yield* resolveStaticDir();
-    const host = Option.getOrElse(
-      resolveOptionPrecedence(
-        flags.host,
-        Option.fromUndefinedOr(env.host),
-        Option.flatMap(bootstrapEnvelope, (bootstrap) => Option.fromUndefinedOr(bootstrap.host)),
-      ),
-      () => (mode === "desktop" ? "127.0.0.1" : undefined),
-    );
     const logLevel = Option.getOrElse(cliLogLevel, () => env.logLevel);
 
     const config: ServerConfigShape = {

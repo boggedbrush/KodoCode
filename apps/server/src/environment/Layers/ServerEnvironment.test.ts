@@ -11,7 +11,11 @@ const makeServerEnvironmentLayer = (baseDir: string) =>
   ServerEnvironmentLive.pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)));
 
 const makeServerConfig = Effect.fn(function* (baseDir: string) {
-  const derivedPaths = yield* deriveServerPaths(baseDir, undefined);
+  const derivedPaths = yield* deriveServerPaths(baseDir, undefined, {
+    mode: "web",
+    host: undefined,
+    port: 0,
+  });
 
   return {
     ...derivedPaths,
