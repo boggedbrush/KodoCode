@@ -10,6 +10,7 @@ import {
 import { DateTime, Effect, Layer, Option } from "effect";
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
 
+import { ServerConfig } from "../../config.ts";
 import { AuthControlPlane } from "../Services/AuthControlPlane.ts";
 import { ServerAuthPolicyLive } from "./ServerAuthPolicy.ts";
 import { BootstrapCredentialService } from "../Services/BootstrapCredentialService.ts";
@@ -64,6 +65,7 @@ function parseBearerToken(request: HttpServerRequest.HttpServerRequest): string 
 }
 
 export const makeServerAuth = Effect.gen(function* () {
+  const config = yield* ServerConfig;
   const policy = yield* ServerAuthPolicy;
   const bootstrapCredentials = yield* BootstrapCredentialService;
   const authControlPlane = yield* AuthControlPlane;
@@ -100,7 +102,14 @@ export const makeServerAuth = Effect.gen(function* () {
       );
       const activeOwnerPairingLink = ownerPairingLinks[0] ?? null;
       const hasActiveOwnerSession = activeSessions.some((session) => session.role === "owner");
+      const hasStaticAuthToken =
+        typeof config.authToken === "string" && config.authToken.trim().length > 0;
       const allowAnonymousOwnerBootstrap =
+        // The unauthenticated owner-recovery path is only safe for the trusted standalone
+        // loopback browser flow. Remote-reachable binds or explicit auth tokens already
+        // establish a stronger trust boundary and must not become anonymously claimable.
+        descriptor.policy === "loopback-browser" &&
+        !hasStaticAuthToken &&
         descriptor.bootstrapMethods.includes("one-time-token") &&
         !descriptor.bootstrapMethods.includes("desktop-bootstrap") &&
         // Anonymous owner bootstrap is the only recovery path when a standalone install

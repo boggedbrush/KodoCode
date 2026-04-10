@@ -1007,9 +1007,7 @@ export const websocketRpcRouteLayer = Layer.unwrap(
               onClientDisconnected: (clientId) =>
                 Effect.gen(function* () {
                   yield* unbindRpcClient(clientId);
-                  yield* Effect.orDie(
-                    sessionCredentials.markDisconnected(session.sessionId),
-                  );
+                  yield* Effect.orDie(sessionCredentials.markDisconnected(session.sessionId));
                 }),
             }),
           ),

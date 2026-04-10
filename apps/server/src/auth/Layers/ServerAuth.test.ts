@@ -2,6 +2,7 @@ import { AuthSessionId, type ServerAuthDescriptor } from "@t3tools/contracts";
 import { DateTime, Effect, Layer, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
+import { ServerConfig, type ServerConfigShape } from "../../config.ts";
 import { AuthControlPlane, type AuthControlPlaneShape } from "../Services/AuthControlPlane.ts";
 import { BootstrapCredentialService } from "../Services/BootstrapCredentialService.ts";
 import { AuthError } from "../Services/ServerAuth.ts";
@@ -19,14 +20,60 @@ const baseDescriptor: ServerAuthDescriptor = {
   sessionCookieName: "kodo_session_test",
 };
 
+const baseServerConfig = {
+  stateDir: "/tmp/kodo-test/userdata",
+  dbPath: "/tmp/kodo-test/userdata/state.sqlite",
+  authStateDir: "/tmp/kodo-test/userdata/auth/web-loopback",
+  authDbPath: "/tmp/kodo-test/userdata/auth/web-loopback/state.sqlite",
+  keybindingsConfigPath: "/tmp/kodo-test/userdata/keybindings.json",
+  settingsPath: "/tmp/kodo-test/userdata/settings.json",
+  worktreesDir: "/tmp/kodo-test/worktrees",
+  attachmentsDir: "/tmp/kodo-test/userdata/attachments",
+  logsDir: "/tmp/kodo-test/userdata/logs",
+  serverLogPath: "/tmp/kodo-test/userdata/logs/server.log",
+  serverTracePath: "/tmp/kodo-test/userdata/logs/server.trace.ndjson",
+  providerLogsDir: "/tmp/kodo-test/userdata/logs/provider",
+  providerEventLogPath: "/tmp/kodo-test/userdata/logs/provider/events.log",
+  terminalLogsDir: "/tmp/kodo-test/userdata/logs/terminals",
+  anonymousIdPath: "/tmp/kodo-test/userdata/anonymous-id",
+  environmentIdPath: "/tmp/kodo-test/userdata/auth/web-loopback/environment-id",
+  secretsDir: "/tmp/kodo-test/userdata/auth/web-loopback/secrets",
+  logLevel: "Error",
+  traceMinLevel: "Info",
+  traceTimingEnabled: true,
+  traceBatchWindowMs: 200,
+  traceMaxBytes: 10 * 1024 * 1024,
+  traceMaxFiles: 10,
+  otlpTracesUrl: undefined,
+  otlpMetricsUrl: undefined,
+  otlpExportIntervalMs: 10_000,
+  otlpServiceName: "kodo-server",
+  mode: "web",
+  port: 3773,
+  host: undefined,
+  cwd: "/repo/project",
+  baseDir: "/tmp/kodo-test",
+  staticDir: undefined,
+  devUrl: undefined,
+  noBrowser: false,
+  authToken: undefined,
+  autoBootstrapProjectFromCwd: false,
+  logWebSocketEvents: false,
+} satisfies ServerConfigShape;
+
 const unexpectedMock = <A>(message: string): Effect.Effect<A> => Effect.die(new Error(message));
 
 function makeServerAuthUnderTest(options?: {
   readonly authControlPlane?: Partial<AuthControlPlaneShape>;
   readonly sessionCredentialService?: Partial<SessionCredentialServiceShape>;
   readonly serverAuthPolicy?: Partial<ServerAuthPolicyShape>;
+  readonly serverConfig?: Partial<ServerConfigShape>;
 }) {
   const testLayer = Layer.mergeAll(
+    Layer.succeed(ServerConfig, {
+      ...baseServerConfig,
+      ...options?.serverConfig,
+    }),
     Layer.mock(ServerAuthPolicy)({
       getDescriptor: () => Effect.succeed(baseDescriptor),
       ...options?.serverAuthPolicy,
@@ -127,6 +174,44 @@ describe("makeServerAuth", () => {
         },
         sessionCredentialService: {
           hasHistoryForRole: () => Effect.succeed(true),
+        },
+      }),
+    );
+
+    await expect(
+      Effect.runPromise(serverAuth.issueInitialOwnerPairingCredential()),
+    ).rejects.toMatchObject({
+      _tag: "AuthError",
+      status: 403,
+    } satisfies Partial<AuthError>);
+  });
+
+  it("keeps anonymous owner bootstrap blocked for remote-reachable policies", async () => {
+    const serverAuth = await Effect.runPromise(
+      makeServerAuthUnderTest({
+        serverAuthPolicy: {
+          getDescriptor: () =>
+            Effect.succeed({
+              ...baseDescriptor,
+              policy: "remote-reachable",
+            }),
+        },
+      }),
+    );
+
+    await expect(
+      Effect.runPromise(serverAuth.issueInitialOwnerPairingCredential()),
+    ).rejects.toMatchObject({
+      _tag: "AuthError",
+      status: 403,
+    } satisfies Partial<AuthError>);
+  });
+
+  it("keeps anonymous owner bootstrap blocked when a static auth token is configured", async () => {
+    const serverAuth = await Effect.runPromise(
+      makeServerAuthUnderTest({
+        serverConfig: {
+          authToken: "shared-secret-token",
         },
       }),
     );

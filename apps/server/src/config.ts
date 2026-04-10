@@ -68,6 +68,8 @@ export interface ServerAuthStateScope {
   readonly host: string | undefined;
 }
 
+const LOOPBACK_AUTH_STATE_SCOPE_KEY = "loopback";
+
 const sanitizeAuthStateScopeSegment = (value: string) => {
   const normalized = value
     .trim()
@@ -76,10 +78,30 @@ const sanitizeAuthStateScopeSegment = (value: string) => {
   return normalized.replace(/^-+|-+$/g, "") || "default";
 };
 
+function normalizeAuthStateScopeHost(host: string | undefined): string {
+  const normalizedHost = host?.trim().toLowerCase();
+  if (!normalizedHost) {
+    return LOOPBACK_AUTH_STATE_SCOPE_KEY;
+  }
+
+  if (
+    normalizedHost === "localhost" ||
+    normalizedHost === "127.0.0.1" ||
+    normalizedHost === "::1" ||
+    normalizedHost === "[::1]"
+  ) {
+    // These are all equivalent local-only launch modes for the standalone server, so
+    // they need to share one persisted auth identity and cookie namespace.
+    return LOOPBACK_AUTH_STATE_SCOPE_KEY;
+  }
+
+  return normalizedHost;
+}
+
 const deriveAuthStateScopeKey = (scope: ServerAuthStateScope) =>
   [
     sanitizeAuthStateScopeSegment(scope.mode),
-    sanitizeAuthStateScopeSegment(scope.host ?? "auto"),
+    sanitizeAuthStateScopeSegment(normalizeAuthStateScopeHost(scope.host)),
   ].join("-");
 
 export const deriveServerPaths = Effect.fn(function* (
