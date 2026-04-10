@@ -56,6 +56,7 @@ import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths";
 import { ProjectSetupScriptRunnerLive } from "./project/Layers/ProjectSetupScriptRunner";
 import { ObservabilityLive } from "./observability/Layers/Observability";
 import { ServerEnvironmentLive } from "./environment/Layers/ServerEnvironment";
+import { resolveServerListenHost } from "./listenHost";
 import {
   authBearerBootstrapRouteLayer,
   authBootstrapRouteLayer,
@@ -86,13 +87,14 @@ const PtyAdapterLive = Layer.unwrap(
 const HttpServerLive = Layer.unwrap(
   Effect.gen(function* () {
     const config = yield* ServerConfig;
+    const listenHost = resolveServerListenHost(config.host);
     if (typeof Bun !== "undefined") {
       const BunHttpServer = yield* Effect.promise(
         () => import("@effect/platform-bun/BunHttpServer"),
       );
       return BunHttpServer.layer({
         port: config.port,
-        ...(config.host ? { hostname: config.host } : {}),
+        hostname: listenHost,
       });
     } else {
       const [NodeHttpServer, NodeHttp] = yield* Effect.all([
@@ -100,7 +102,7 @@ const HttpServerLive = Layer.unwrap(
         Effect.promise(() => import("node:http")),
       ]);
       return NodeHttpServer.layer(NodeHttp.createServer, {
-        host: config.host,
+        host: listenHost,
         port: config.port,
       });
     }
