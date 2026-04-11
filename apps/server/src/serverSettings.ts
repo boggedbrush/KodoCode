@@ -190,6 +190,23 @@ function makeClaudePreset(
   };
 }
 
+function areModelSelectionsEquivalent(left: ModelSelection, right: ModelSelection): boolean {
+  return (
+    left.provider === right.provider &&
+    left.model === right.model &&
+    JSON.stringify(left.options ?? null) === JSON.stringify(right.options ?? null)
+  );
+}
+
+function arePresetSelectionsEquivalent(
+  left: ModelSelectionPreset,
+  right: ModelSelectionPreset,
+): boolean {
+  return PRESET_SELECTION_SETTINGS_KEYS.every((key) =>
+    areModelSelectionsEquivalent(left[key], right[key]),
+  );
+}
+
 function toClaudePresetSelection(selection: {
   model: string;
   thinking?: boolean;
@@ -233,13 +250,13 @@ const BUILT_IN_MODEL_SELECTION_PRESETS: {
       review: { model: "gpt-5.3-codex", effort: "medium" },
     }),
     makeCodexPreset("starter-codex-pro-5x", "Pro (5X)", {
-      ask: { model: "gpt-5.4", effort: "low" },
+      ask: { model: "gpt-5.3-codex-spark", effort: "low" },
       plan: { model: "gpt-5.4", effort: "high" },
-      code: { model: "gpt-5.3-codex", effort: "medium" },
+      code: { model: "gpt-5.3-codex-spark", effort: "medium" },
       review: { model: "gpt-5.3-codex", effort: "high" },
     }),
     makeCodexPreset("starter-codex-pro-20x", "Pro (20X)", {
-      ask: { model: "gpt-5.4", effort: "medium" },
+      ask: { model: "gpt-5.3-codex-spark", effort: "low" },
       plan: { model: "gpt-5.4", effort: "high" },
       code: { model: "gpt-5.3-codex", effort: "high" },
       review: { model: "gpt-5.3-codex", effort: "xhigh" },
@@ -296,6 +313,31 @@ const LEGACY_BUILT_IN_PRESET_NAMES_BY_ID: {
     "starter-claude-max-5x": "max 5x",
     "starter-claude-max-20x": "max 20x",
   },
+};
+
+const LEGACY_BUILT_IN_PRESETS_BY_ID: {
+  readonly codex: Readonly<Record<string, ReadonlyArray<ModelSelectionPreset>>>;
+  readonly claudeAgent: Readonly<Record<string, ReadonlyArray<ModelSelectionPreset>>>;
+} = {
+  codex: {
+    "starter-codex-pro-5x": [
+      makeCodexPreset("starter-codex-pro-5x", "Pro (5X)", {
+        ask: { model: "gpt-5.4", effort: "low" },
+        plan: { model: "gpt-5.4", effort: "high" },
+        code: { model: "gpt-5.3-codex", effort: "medium" },
+        review: { model: "gpt-5.3-codex", effort: "high" },
+      }),
+    ],
+    "starter-codex-pro-20x": [
+      makeCodexPreset("starter-codex-pro-20x", "Pro (20X)", {
+        ask: { model: "gpt-5.4", effort: "medium" },
+        plan: { model: "gpt-5.4", effort: "high" },
+        code: { model: "gpt-5.3-codex", effort: "high" },
+        review: { model: "gpt-5.3-codex", effort: "xhigh" },
+      }),
+    ],
+  },
+  claudeAgent: {},
 };
 
 /**
@@ -425,6 +467,24 @@ function migrateLegacyBuiltInPresets(settings: ServerSettings): ServerSettings {
       const current = nextPresets[provider][id];
       const canonical = canonicalById.get(id);
       if (!current || !canonical || current.name !== legacyName) {
+        continue;
+      }
+
+      nextPresets[provider][id] = canonical as ProviderPresetMap[string];
+      changed = true;
+    }
+
+    for (const [id, legacyVariants] of Object.entries(LEGACY_BUILT_IN_PRESETS_BY_ID[provider])) {
+      const current = nextPresets[provider][id];
+      const canonical = canonicalById.get(id);
+      if (!current || !canonical) {
+        continue;
+      }
+
+      const isLegacyVariant = legacyVariants.some((legacy) =>
+        arePresetSelectionsEquivalent(current as ModelSelectionPreset, legacy),
+      );
+      if (!isLegacyVariant) {
         continue;
       }
 
