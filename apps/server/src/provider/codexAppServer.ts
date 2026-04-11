@@ -98,6 +98,19 @@ export async function probeCodexAccount(input: {
       child.stdin.write(`${JSON.stringify(message)}\n`);
     };
 
+    let accountReadResult: unknown;
+    let accountReadSettled = false;
+    let modelListResult: unknown;
+    let modelListSettled = false;
+
+    const maybeFinish = () => {
+      if (!accountReadSettled || !modelListSettled) {
+        return;
+      }
+
+      finish(() => resolve(readCodexAccountSnapshot(accountReadResult, modelListResult)));
+    };
+
     output.on("line", (line) => {
       let parsed: unknown;
       try {
@@ -121,6 +134,7 @@ export async function probeCodexAccount(input: {
 
         writeMessage({ method: "initialized" });
         writeMessage({ id: 2, method: "account/read", params: {} });
+        writeMessage({ id: 3, method: "model/list", params: {} });
         return;
       }
 
@@ -131,7 +145,18 @@ export async function probeCodexAccount(input: {
           return;
         }
 
-        finish(() => resolve(readCodexAccountSnapshot(response.result)));
+        accountReadResult = response.result;
+        accountReadSettled = true;
+        maybeFinish();
+        return;
+      }
+
+      if (response.id === 3) {
+        if (!readErrorMessage(response)) {
+          modelListResult = response.result;
+        }
+        modelListSettled = true;
+        maybeFinish();
       }
     });
 

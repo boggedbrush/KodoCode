@@ -32,7 +32,35 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-export function readCodexAccountSnapshot(response: unknown): CodexAccountSnapshot {
+function responseIncludesModelSlug(
+  value: unknown,
+  slug: string,
+  visited = new Set<unknown>(),
+): boolean {
+  if (typeof value === "string") {
+    return value.trim() === slug;
+  }
+
+  if (value === null || value === undefined || typeof value !== "object") {
+    return false;
+  }
+
+  if (visited.has(value)) {
+    return false;
+  }
+  visited.add(value);
+
+  if (Array.isArray(value)) {
+    return value.some((entry) => responseIncludesModelSlug(entry, slug, visited));
+  }
+
+  return Object.values(value).some((entry) => responseIncludesModelSlug(entry, slug, visited));
+}
+
+export function readCodexAccountSnapshot(
+  response: unknown,
+  modelListResponse?: unknown,
+): CodexAccountSnapshot {
   const record = asObject(response);
   const account = asObject(record?.account) ?? record;
   const accountType = asString(account?.type);
@@ -47,10 +75,13 @@ export function readCodexAccountSnapshot(response: unknown): CodexAccountSnapsho
 
   if (accountType === "chatgpt") {
     const planType = (account?.planType as CodexPlanType | null) ?? "unknown";
+    const sparkEnabled =
+      CODEX_SPARK_ENABLED_PLAN_TYPES.has(planType) ||
+      responseIncludesModelSlug(modelListResponse, CODEX_SPARK_MODEL);
     return {
       type: "chatgpt",
       planType,
-      sparkEnabled: CODEX_SPARK_ENABLED_PLAN_TYPES.has(planType),
+      sparkEnabled,
     };
   }
 

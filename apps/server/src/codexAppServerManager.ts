@@ -532,8 +532,9 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       await this.sendRequest(context, "initialize", buildCodexInitializeParams());
 
       this.writeMessage(context, { method: "initialized" });
+      let modelListResponse: unknown;
       try {
-        const modelListResponse = await this.sendRequest(context, "model/list", {});
+        modelListResponse = await this.sendRequest(context, "model/list", {});
         console.log("codex model/list response", modelListResponse);
       } catch (error) {
         console.log("codex model/list failed", error);
@@ -541,7 +542,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       try {
         const accountReadResponse = await this.sendRequest(context, "account/read", {});
         console.log("codex account/read response", accountReadResponse);
-        context.account = readCodexAccountSnapshot(accountReadResponse);
+        context.account = readCodexAccountSnapshot(accountReadResponse, modelListResponse);
         console.log("codex subscription status", {
           type: context.account.type,
           planType: context.account.planType,
