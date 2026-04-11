@@ -190,23 +190,6 @@ function makeClaudePreset(
   };
 }
 
-function areModelSelectionsEquivalent(left: ModelSelection, right: ModelSelection): boolean {
-  return (
-    left.provider === right.provider &&
-    left.model === right.model &&
-    JSON.stringify(left.options ?? null) === JSON.stringify(right.options ?? null)
-  );
-}
-
-function arePresetSelectionsEquivalent(
-  left: ModelSelectionPreset,
-  right: ModelSelectionPreset,
-): boolean {
-  return PRESET_SELECTION_SETTINGS_KEYS.every((key) =>
-    areModelSelectionsEquivalent(left[key], right[key]),
-  );
-}
-
 function toClaudePresetSelection(selection: {
   model: string;
   thinking?: boolean;
@@ -288,56 +271,6 @@ const BUILT_IN_MODEL_SELECTION_PRESETS: {
       review: { model: "claude-opus-4-6", effort: "high" },
     }),
   ],
-};
-
-const LEGACY_BUILT_IN_PRESET_IDS: {
-  readonly codex: ReadonlyArray<string>;
-  readonly claudeAgent: ReadonlyArray<string>;
-} = {
-  codex: ["starter-codex-pro-100", "starter-codex-pro-200"],
-  claudeAgent: [],
-};
-
-const LEGACY_BUILT_IN_PRESET_NAMES_BY_ID: {
-  readonly codex: Readonly<Record<string, string>>;
-  readonly claudeAgent: Readonly<Record<string, string>>;
-} = {
-  codex: {
-    "starter-codex-free": "free",
-    "starter-codex-go": "go",
-    "starter-codex-plus": "plus",
-  },
-  claudeAgent: {
-    "starter-claude-free": "free",
-    "starter-claude-pro": "pro",
-    "starter-claude-max-5x": "max 5x",
-    "starter-claude-max-20x": "max 20x",
-  },
-};
-
-const LEGACY_BUILT_IN_PRESETS_BY_ID: {
-  readonly codex: Readonly<Record<string, ReadonlyArray<ModelSelectionPreset>>>;
-  readonly claudeAgent: Readonly<Record<string, ReadonlyArray<ModelSelectionPreset>>>;
-} = {
-  codex: {
-    "starter-codex-pro-5x": [
-      makeCodexPreset("starter-codex-pro-5x", "Pro (5X)", {
-        ask: { model: "gpt-5.4", effort: "low" },
-        plan: { model: "gpt-5.4", effort: "high" },
-        code: { model: "gpt-5.3-codex", effort: "medium" },
-        review: { model: "gpt-5.3-codex", effort: "high" },
-      }),
-    ],
-    "starter-codex-pro-20x": [
-      makeCodexPreset("starter-codex-pro-20x", "Pro (20X)", {
-        ask: { model: "gpt-5.4", effort: "medium" },
-        plan: { model: "gpt-5.4", effort: "high" },
-        code: { model: "gpt-5.3-codex", effort: "high" },
-        review: { model: "gpt-5.3-codex", effort: "xhigh" },
-      }),
-    ],
-  },
-  claudeAgent: {},
 };
 
 /**
@@ -443,64 +376,6 @@ function seedBuiltInPresets(settings: ServerSettings): ServerSettings {
     : settings;
 }
 
-function migrateLegacyBuiltInPresets(settings: ServerSettings): ServerSettings {
-  let changed = false;
-  const nextPresets = {
-    ...settings.modelSelectionPresets,
-    codex: { ...settings.modelSelectionPresets.codex },
-    claudeAgent: { ...settings.modelSelectionPresets.claudeAgent },
-  };
-
-  for (const provider of PROVIDER_ORDER) {
-    for (const legacyId of LEGACY_BUILT_IN_PRESET_IDS[provider]) {
-      if (nextPresets[provider][legacyId]) {
-        delete nextPresets[provider][legacyId];
-        changed = true;
-      }
-    }
-
-    const canonicalById = new Map(
-      BUILT_IN_MODEL_SELECTION_PRESETS[provider].map((preset) => [preset.id, preset] as const),
-    );
-
-    for (const [id, legacyName] of Object.entries(LEGACY_BUILT_IN_PRESET_NAMES_BY_ID[provider])) {
-      const current = nextPresets[provider][id];
-      const canonical = canonicalById.get(id);
-      if (!current || !canonical || current.name !== legacyName) {
-        continue;
-      }
-
-      nextPresets[provider][id] = canonical as ProviderPresetMap[string];
-      changed = true;
-    }
-
-    for (const [id, legacyVariants] of Object.entries(LEGACY_BUILT_IN_PRESETS_BY_ID[provider])) {
-      const current = nextPresets[provider][id];
-      const canonical = canonicalById.get(id);
-      if (!current || !canonical) {
-        continue;
-      }
-
-      const isLegacyVariant = legacyVariants.some((legacy) =>
-        arePresetSelectionsEquivalent(current as ModelSelectionPreset, legacy),
-      );
-      if (!isLegacyVariant) {
-        continue;
-      }
-
-      nextPresets[provider][id] = canonical as ProviderPresetMap[string];
-      changed = true;
-    }
-  }
-
-  return changed
-    ? {
-        ...settings,
-        modelSelectionPresets: nextPresets,
-      }
-    : settings;
-}
-
 function seedDefaultPresetFromBaseSelections(settings: ServerSettings): ServerSettings {
   const nextPresets = {
     ...settings.modelSelectionPresets,
@@ -566,7 +441,7 @@ function normalizeActivePresetPointers(settings: ServerSettings): ServerSettings
 
 function normalizePresetState(settings: ServerSettings): ServerSettings {
   return normalizeActivePresetPointers(
-    seedDefaultPresetFromBaseSelections(migrateLegacyBuiltInPresets(seedBuiltInPresets(settings))),
+    seedDefaultPresetFromBaseSelections(seedBuiltInPresets(settings)),
   );
 }
 

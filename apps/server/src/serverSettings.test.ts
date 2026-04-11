@@ -515,16 +515,16 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  it.effect("migrates legacy built-in preset entries to the current starter set", () =>
+  it.effect("preserves legacy starter preset entries while still seeding missing built-ins", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
       const next = yield* serverSettings.getSettings;
 
-      assert.equal(next.modelSelectionPresets.codex["starter-codex-pro-100"], undefined);
-      assert.equal(next.modelSelectionPresets.codex["starter-codex-pro-200"], undefined);
-      assert.equal(next.modelSelectionPresets.codex["starter-codex-free"]?.name, "Free");
-      assert.equal(next.modelSelectionPresets.codex["starter-codex-go"]?.name, "Go");
-      assert.equal(next.modelSelectionPresets.codex["starter-codex-plus"]?.name, "Plus");
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-pro-100"]?.name, "pro 100");
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-pro-200"]?.name, "pro 200");
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-free"]?.name, "free");
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-go"]?.name, "go");
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-plus"]?.name, "plus");
       assert.deepEqual(
         next.modelSelectionPresets.codex["starter-codex-pro-5x"]?.askModelSelection,
         {
@@ -555,15 +555,12 @@ it.layer(NodeServices.layer)("server settings", (it) => {
           },
         },
       );
-      assert.equal(next.modelSelectionPresets.claudeAgent["starter-claude-free"]?.name, "Free");
-      assert.equal(next.modelSelectionPresets.claudeAgent["starter-claude-pro"]?.name, "Pro");
-      assert.equal(
-        next.modelSelectionPresets.claudeAgent["starter-claude-max-5x"]?.name,
-        "Max (5X)",
-      );
+      assert.equal(next.modelSelectionPresets.claudeAgent["starter-claude-free"]?.name, "free");
+      assert.equal(next.modelSelectionPresets.claudeAgent["starter-claude-pro"]?.name, "pro");
+      assert.equal(next.modelSelectionPresets.claudeAgent["starter-claude-max-5x"]?.name, "max 5x");
       assert.equal(
         next.modelSelectionPresets.claudeAgent["starter-claude-max-20x"]?.name,
-        "Max (20X)",
+        "max 20x",
       );
     }).pipe(
       Effect.provide(
