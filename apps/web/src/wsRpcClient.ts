@@ -92,6 +92,8 @@ export interface WsRpcClient {
   readonly server: {
     readonly getConfig: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetConfig>;
     readonly refreshProviders: RpcUnaryNoArgMethod<typeof WS_METHODS.serverRefreshProviders>;
+    readonly getUsageStatus: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetUsageStatus>;
+    readonly refreshUsageStatus: RpcUnaryNoArgMethod<typeof WS_METHODS.serverRefreshUsageStatus>;
     readonly upsertKeybinding: RpcUnaryMethod<typeof WS_METHODS.serverUpsertKeybinding>;
     readonly getSettings: RpcUnaryNoArgMethod<typeof WS_METHODS.serverGetSettings>;
     readonly updateSettings: (
@@ -100,6 +102,7 @@ export interface WsRpcClient {
     readonly enhancePrompt: RpcUnaryMethod<typeof WS_METHODS.serverEnhancePrompt>;
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
+    readonly subscribeUsageStatus: RpcStreamMethod<typeof WS_METHODS.subscribeServerUsageStatus>;
   };
   readonly orchestration: {
     readonly getSnapshot: RpcUnaryNoArgMethod<typeof ORCHESTRATION_WS_METHODS.getSnapshot>;
@@ -210,6 +213,10 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
       getConfig: () => transport.request((client) => client[WS_METHODS.serverGetConfig]({})),
       refreshProviders: () =>
         transport.request((client) => client[WS_METHODS.serverRefreshProviders]({})),
+      getUsageStatus: () =>
+        transport.request((client) => client[WS_METHODS.serverGetUsageStatus]({})),
+      refreshUsageStatus: () =>
+        transport.request((client) => client[WS_METHODS.serverRefreshUsageStatus]({})),
       upsertKeybinding: (input) =>
         transport.request((client) => client[WS_METHODS.serverUpsertKeybinding](input)),
       getSettings: () => transport.request((client) => client[WS_METHODS.serverGetSettings]({})),
@@ -226,6 +233,12 @@ export function createWsRpcClient(transport = new WsTransport()): WsRpcClient {
       subscribeLifecycle: (listener, options) =>
         transport.subscribe(
           (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
+          listener,
+          options,
+        ),
+      subscribeUsageStatus: (listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeServerUsageStatus]({}),
           listener,
           options,
         ),

@@ -47,6 +47,7 @@ import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRun
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry";
+import { ProviderUsageRegistryLive } from "./provider/Layers/ProviderUsageRegistry";
 import { ServerSettingsLive } from "./serverSettings";
 import { ProjectFaviconResolverLive } from "./project/Layers/ProjectFaviconResolver";
 import { RepositoryIdentityResolverLive } from "./project/Layers/RepositoryIdentityResolver";
@@ -224,11 +225,12 @@ const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
-  Layer.provideMerge(ProviderLayerLive),
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
+  Layer.provideMerge(ProviderUsageRegistryLive),
+  Layer.provideMerge(ProviderLayerLive),
   Layer.provideMerge(ServerSettingsLive),
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLive),

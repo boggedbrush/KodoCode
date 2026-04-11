@@ -51,6 +51,10 @@
     "./projectScripts": {
       "types": "./src/projectScripts.ts",
       "import": "./src/projectScripts.ts"
+    },
+    "./provider-usage": {
+      "types": "./src/provider-usage/metadata.ts",
+      "import": "./src/provider-usage/metadata.ts"
     }
   },
   "scripts": {

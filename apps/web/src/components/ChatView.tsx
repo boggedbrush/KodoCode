@@ -187,6 +187,7 @@ import {
   renderProviderTraitsPicker,
 } from "./chat/composerProviderRegistry";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
+import { ProviderUsageNotice } from "./chat/ProviderUsageNotice";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
@@ -214,6 +215,7 @@ import {
   useServerConfig,
   useServerKeybindings,
 } from "~/rpc/serverState";
+import { useProviderUsage } from "~/rpc/providerUsageState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 
 const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
@@ -1624,6 +1626,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => providerStatuses.find((status) => status.provider === selectedProvider) ?? null,
     [selectedProvider, providerStatuses],
   );
+  const activeProviderUsage = useProviderUsage(selectedProvider);
   const activeProjectCwd = activeProject?.cwd ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
@@ -4604,6 +4607,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       {/* Error banner */}
       <ProviderStatusBanner status={activeProviderStatus} />
+      <ProviderUsageNotice usage={activeProviderUsage} />
       <ThreadErrorBanner
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}

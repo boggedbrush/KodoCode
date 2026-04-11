@@ -43,6 +43,10 @@ import {
   observeRpcStreamEffect,
 } from "./observability/RpcInstrumentation";
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
+import {
+  ProviderUsageRegistry,
+  type ProviderUsageRegistryShape,
+} from "./provider/Services/ProviderUsageRegistry";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
 import { ServerSettingsService } from "./serverSettings";
@@ -120,6 +124,15 @@ const WsRpcLayer = WsRpcGroup.toLayer(
     const gitStatusBroadcaster = yield* GitStatusBroadcaster;
     const terminalManager = yield* TerminalManager;
     const providerRegistry = yield* ProviderRegistry;
+    const providerUsageRegistryOption = yield* Effect.serviceOption(ProviderUsageRegistry);
+    const providerUsageRegistry: ProviderUsageRegistryShape = Option.getOrElse(
+      providerUsageRegistryOption,
+      () => ({
+        getUsages: Effect.succeed([]),
+        refresh: () => Effect.succeed([]),
+        streamChanges: Stream.empty,
+      }),
+    );
     const config = yield* ServerConfig;
     const lifecycleEvents = yield* ServerLifecycleEvents;
     const serverSettings = yield* ServerSettingsService;
@@ -578,6 +591,16 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           providerRegistry.refresh().pipe(Effect.map((providers) => ({ providers }))),
           { "rpc.aggregate": "server" },
         ),
+      [WS_METHODS.serverGetUsageStatus]: (_input) =>
+        observeRpcEffect(WS_METHODS.serverGetUsageStatus, providerUsageRegistry.getUsages, {
+          "rpc.aggregate": "server",
+        }),
+      [WS_METHODS.serverRefreshUsageStatus]: (_input) =>
+        observeRpcEffect(
+          WS_METHODS.serverRefreshUsageStatus,
+          providerUsageRegistry.refresh().pipe(Effect.map((usages) => ({ usages }))),
+          { "rpc.aggregate": "server" },
+        ),
       [WS_METHODS.serverUpsertKeybinding]: (rule) =>
         observeRpcEffect(
           WS_METHODS.serverUpsertKeybinding,
@@ -836,6 +859,28 @@ const WsRpcLayer = WsRpcGroup.toLayer(
               Stream.filter((event) => event.sequence > snapshot.sequence),
             );
             return Stream.concat(Stream.fromIterable(snapshotEvents), liveEvents);
+          }),
+          { "rpc.aggregate": "server" },
+        ),
+      [WS_METHODS.subscribeServerUsageStatus]: (_input) =>
+        observeRpcStreamEffect(
+          WS_METHODS.subscribeServerUsageStatus,
+          Effect.gen(function* () {
+            const currentUsages = yield* providerUsageRegistry.getUsages;
+            return Stream.concat(
+              Stream.make({
+                version: 1 as const,
+                type: "snapshot" as const,
+                usages: currentUsages,
+              }),
+              providerUsageRegistry.streamChanges.pipe(
+                Stream.map((usages) => ({
+                  version: 1 as const,
+                  type: "updated" as const,
+                  payload: { usages },
+                })),
+              ),
+            );
           }),
           { "rpc.aggregate": "server" },
         ),

@@ -11,6 +11,7 @@ import {
   KeybindingRule,
   MessageId,
   OpenError,
+  type ServerProviderUsage,
   TerminalNotRunningError,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -86,6 +87,10 @@ import {
   ProviderRegistry,
   type ProviderRegistryShape,
 } from "./provider/Services/ProviderRegistry.ts";
+import {
+  ProviderUsageRegistry,
+  type ProviderUsageRegistryShape,
+} from "./provider/Services/ProviderUsageRegistry.ts";
 import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
@@ -165,6 +170,27 @@ const makeDefaultOrchestrationReadModel = () => {
     ],
   };
 };
+
+const makeUsageSnapshot = (
+  provider: "codex" | "claudeAgent",
+  status: ServerProviderUsage["status"],
+): ServerProviderUsage => ({
+  provider,
+  status,
+  source: "poll",
+  checkedAt: "2026-01-01T00:00:00.000Z",
+  stale: false,
+  summary: status === "ready" ? "Plan available" : null,
+  detail: null,
+  resetAt: null,
+  identity: {
+    planName: null,
+    loginMethod: null,
+    email: null,
+    org: null,
+  },
+  windows: [],
+});
 
 const splitHeaderTokens = (value: string | null) =>
   (value ?? "")
@@ -295,6 +321,7 @@ const buildAppUnderTest = (options?: {
   layers?: {
     keybindings?: Partial<KeybindingsShape>;
     providerRegistry?: Partial<ProviderRegistryShape>;
+    providerUsageRegistry?: Partial<ProviderUsageRegistryShape>;
     serverSettings?: Partial<ServerSettingsShape>;
     open?: Partial<OpenShape>;
     gitCore?: Partial<GitCoreShape>;
@@ -437,6 +464,14 @@ const buildAppUnderTest = (options?: {
           refresh: () => Effect.succeed([]),
           streamChanges: Stream.empty,
           ...options?.layers?.providerRegistry,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(ProviderUsageRegistry)({
+          getUsages: Effect.succeed([]),
+          refresh: () => Effect.succeed([]),
+          streamChanges: Stream.empty,
+          ...options?.layers?.providerUsageRegistry,
         }),
       ),
       Layer.provide(
@@ -1568,6 +1603,85 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         version: 1,
         type: "providerStatuses",
         payload: { providers },
+      });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc usage unary methods", () =>
+    Effect.gen(function* () {
+      const snapshots = [
+        makeUsageSnapshot("codex", "ready"),
+        makeUsageSnapshot("claudeAgent", "unknown"),
+      ];
+      const refreshed = [
+        makeUsageSnapshot("codex", "limited"),
+        makeUsageSnapshot("claudeAgent", "unknown"),
+      ];
+
+      yield* buildAppUnderTest({
+        layers: {
+          providerUsageRegistry: {
+            getUsages: Effect.succeed(snapshots),
+            refresh: () => Effect.succeed(refreshed),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const [getResult, refreshResult] = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all(
+            [
+              client[WS_METHODS.serverGetUsageStatus]({}),
+              client[WS_METHODS.serverRefreshUsageStatus]({}),
+            ],
+            { concurrency: "unbounded" },
+          ),
+        ),
+      );
+
+      assert.deepEqual(getResult, snapshots);
+      assert.deepEqual(refreshResult, { usages: refreshed });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc subscribeServerUsageStatus streams snapshot then update", () =>
+    Effect.gen(function* () {
+      const snapshot = [
+        makeUsageSnapshot("codex", "ready"),
+        makeUsageSnapshot("claudeAgent", "unknown"),
+      ];
+      const updated = [
+        makeUsageSnapshot("codex", "exhausted"),
+        makeUsageSnapshot("claudeAgent", "unknown"),
+      ];
+
+      yield* buildAppUnderTest({
+        layers: {
+          providerUsageRegistry: {
+            getUsages: Effect.succeed(snapshot),
+            streamChanges: Stream.succeed(updated),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const events = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.subscribeServerUsageStatus]({}).pipe(Stream.take(2), Stream.runCollect),
+        ),
+      );
+
+      const [first, second] = Array.from(events);
+      assert.deepEqual(first, {
+        version: 1,
+        type: "snapshot",
+        usages: snapshot,
+      });
+      assert.deepEqual(second, {
+        version: 1,
+        type: "updated",
+        payload: { usages: updated },
       });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

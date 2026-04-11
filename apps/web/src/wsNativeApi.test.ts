@@ -74,12 +74,15 @@ const rpcClientMock = {
   server: {
     getConfig: vi.fn(),
     refreshProviders: vi.fn(),
+    getUsageStatus: vi.fn(),
+    refreshUsageStatus: vi.fn(),
     upsertKeybinding: vi.fn(),
     getSettings: vi.fn(),
     updateSettings: vi.fn(),
     enhancePrompt: vi.fn(),
     subscribeConfig: vi.fn(),
     subscribeLifecycle: vi.fn(),
+    subscribeUsageStatus: vi.fn(),
   },
   orchestration: {
     getSnapshot: vi.fn(),

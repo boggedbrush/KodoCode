@@ -15,11 +15,13 @@ import {
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@t3tools/contracts/settings";
 import { normalizeModelSlug, resolveUtilityModelSelectionDefault } from "@t3tools/shared/model";
+import { PROVIDER_USAGE_METADATA } from "@t3tools/shared/provider-usage";
 import { Equal } from "effect";
 
 import { cn } from "../../lib/utils";
 import { MAX_CUSTOM_MODEL_LENGTH, resolveAppModelSelectionState } from "../../modelSelection";
 import { ensureNativeApi } from "../../nativeApi";
+import { useProviderUsages } from "../../rpc/providerUsageState";
 import { useServerProviders } from "../../rpc/serverState";
 import { Button } from "../ui/button";
 import { Collapsible, CollapsibleContent } from "../ui/collapsible";
@@ -105,6 +107,59 @@ function getProviderVersionLabel(version: string | null | undefined) {
   return version.startsWith("v") ? version : `v${version}`;
 }
 
+function getUsageStatusLabel(status: "ready" | "limited" | "exhausted" | "unknown" | "error") {
+  switch (status) {
+    case "ready":
+      return "Usage healthy";
+    case "limited":
+      return "Usage limited";
+    case "exhausted":
+      return "Usage exhausted";
+    case "error":
+      return "Usage check failed";
+    case "unknown":
+    default:
+      return "Usage unknown";
+  }
+}
+
+function normalizeUsageText(value: string): string {
+  return value.trim().replaceAll(/\s+/g, " ").toLowerCase();
+}
+
+function shouldHideUsageSummary(input: {
+  readonly summary: string | null;
+  readonly planName: string | null;
+  readonly loginMethod: string | null;
+}): boolean {
+  if (!input.summary) {
+    return false;
+  }
+
+  const normalizedSummary = normalizeUsageText(input.summary);
+  if (input.planName) {
+    const normalizedPlan = normalizeUsageText(input.planName);
+    if (
+      normalizedSummary === `plan: ${normalizedPlan}` ||
+      normalizedSummary === `plan ${normalizedPlan}`
+    ) {
+      return true;
+    }
+  }
+
+  if (input.loginMethod) {
+    const normalizedLoginMethod = normalizeUsageText(input.loginMethod);
+    if (
+      normalizedSummary === `login: ${normalizedLoginMethod}` ||
+      normalizedSummary === `login ${normalizedLoginMethod}`
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }) {
   const lastCheckedRelative = lastCheckedAt ? formatRelativeTime(lastCheckedAt) : null;
 
@@ -158,6 +213,7 @@ export function SettingsProvidersSection({
   const refreshingRef = useRef(false);
   const modelListRefs = useRef<Partial<Record<ProviderKind, HTMLDivElement | null>>>({});
   const serverProviders = useServerProviders();
+  const providerUsages = useProviderUsages();
 
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenProvider = textGenerationModelSelection.provider;
@@ -179,8 +235,10 @@ export function SettingsProvidersSection({
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     setIsRefreshingProviders(true);
-    void ensureNativeApi()
-      .server.refreshProviders()
+    void Promise.all([
+      ensureNativeApi().server.refreshProviders(),
+      ensureNativeApi().server.refreshUsageStatus(),
+    ])
       .catch((error: unknown) => {
         console.warn("Failed to refresh providers", error);
       })
@@ -286,6 +344,8 @@ export function SettingsProvidersSection({
       (candidate) => candidate.provider === providerSettings.provider,
     );
     const providerConfig = settings.providers[providerSettings.provider];
+    const providerUsage =
+      providerUsages.find((usage) => usage.provider === providerSettings.provider) ?? null;
     const defaultProviderConfig = DEFAULT_UNIFIED_SETTINGS.providers[providerSettings.provider];
     const statusKey = liveProvider?.status ?? (providerConfig.enabled ? "warning" : "disabled");
     const summary = getProviderSummary(liveProvider);
@@ -313,6 +373,8 @@ export function SettingsProvidersSection({
       statusStyle: PROVIDER_STATUS_STYLES[statusKey],
       summary,
       versionLabel: getProviderVersionLabel(liveProvider?.version),
+      providerUsage,
+      providerUsageMetadata: PROVIDER_USAGE_METADATA[providerSettings.provider],
     };
   });
 
@@ -339,7 +401,7 @@ export function SettingsProvidersSection({
                   className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
                   disabled={isRefreshingProviders}
                   onClick={() => void refreshProviders()}
-                  aria-label="Refresh provider status"
+                  aria-label="Refresh provider status and usage"
                 >
                   {isRefreshingProviders ? (
                     <LoaderIcon className="size-3 animate-spin" />
@@ -349,7 +411,7 @@ export function SettingsProvidersSection({
                 </Button>
               }
             />
-            <TooltipPopup side="top">Refresh provider status</TooltipPopup>
+            <TooltipPopup side="top">Refresh provider status and usage</TooltipPopup>
           </Tooltip>
         </div>
       }
@@ -359,6 +421,16 @@ export function SettingsProvidersSection({
         const customModelError = customModelErrorByProvider[providerCard.provider] ?? null;
         const providerDisplayName =
           PROVIDER_DISPLAY_NAMES[providerCard.provider] ?? providerCard.title;
+        const usageSummary =
+          providerCard.providerUsage &&
+          !shouldHideUsageSummary({
+            summary: providerCard.providerUsage.summary,
+            planName: providerCard.providerUsage.identity.planName,
+            loginMethod: providerCard.providerUsage.identity.loginMethod,
+          })
+            ? providerCard.providerUsage.summary
+            : null;
+        const usageDetail = providerCard.providerUsage?.detail ?? null;
 
         return (
           <div key={providerCard.provider} className="border-t border-border first:border-t-0">
@@ -400,6 +472,88 @@ export function SettingsProvidersSection({
                     {providerCard.summary.headline}
                     {providerCard.summary.detail ? ` - ${providerCard.summary.detail}` : null}
                   </p>
+                  {providerCard.providerUsage ? (
+                    <div className="rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-[11px] text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="font-medium text-foreground/90">
+                          {getUsageStatusLabel(providerCard.providerUsage.status)}
+                        </span>
+                        {providerCard.providerUsage.stale ? (
+                          <span className="rounded bg-warning/20 px-1.5 py-0.5 text-warning">
+                            Stale
+                          </span>
+                        ) : null}
+                        {providerCard.providerUsage.identity.planName ? (
+                          <span>Plan: {providerCard.providerUsage.identity.planName}</span>
+                        ) : null}
+                        {providerCard.providerUsage.identity.loginMethod ? (
+                          <span>Login: {providerCard.providerUsage.identity.loginMethod}</span>
+                        ) : null}
+                      </div>
+                      {usageSummary || usageDetail ? (
+                        <p className="mt-1 text-muted-foreground">
+                          {usageSummary ?? usageDetail}
+                          {usageSummary && usageDetail ? ` - ${usageDetail}` : null}
+                        </p>
+                      ) : null}
+                      {providerCard.providerUsage.windows.length > 0 ? (
+                        <div className="mt-1.5 space-y-1">
+                          {providerCard.providerUsage.windows.map((window) => (
+                            <div key={window.key} className="flex flex-wrap items-center gap-x-2">
+                              <span className="font-medium text-foreground/90">{window.label}</span>
+                              {window.usedText ? <span>Used: {window.usedText}</span> : null}
+                              {window.limitText ? <span>Limit: {window.limitText}</span> : null}
+                              {window.remainingText ? (
+                                <span>Remaining: {window.remainingText}</span>
+                              ) : null}
+                              {window.percentUsed !== null ? (
+                                <span>{Math.round(window.percentUsed)}%</span>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-x-2">
+                        {providerCard.providerUsage.resetAt ? (
+                          <span>
+                            Resets:{" "}
+                            {formatRelativeTime(providerCard.providerUsage.resetAt)?.value ??
+                              providerCard.providerUsage.resetAt}
+                          </span>
+                        ) : null}
+                        {providerCard.providerUsageMetadata.usageUrl ? (
+                          <a
+                            href={providerCard.providerUsageMetadata.usageUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:underline"
+                          >
+                            Usage
+                          </a>
+                        ) : null}
+                        {providerCard.providerUsageMetadata.dashboardUrl ? (
+                          <a
+                            href={providerCard.providerUsageMetadata.dashboardUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:underline"
+                          >
+                            {providerCard.providerUsageMetadata.dashboardLabel ?? "Dashboard"}
+                          </a>
+                        ) : null}
+                        {providerCard.providerUsageMetadata.statusPageUrl ? (
+                          <a
+                            href={providerCard.providerUsageMetadata.statusPageUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:underline"
+                          >
+                            Status
+                          </a>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
                   <Button

@@ -29,6 +29,11 @@ import type {
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingResult,
 } from "./server";
+import type {
+  ServerProviderUsageUpdatedPayload,
+  ServerProviderUsages,
+  ServerUsageStreamEvent,
+} from "./providerUsage";
 import type { PromptEnhanceInput, PromptEnhanceResult } from "./enhance";
 import type {
   TerminalClearInput,
@@ -187,10 +192,18 @@ export interface NativeApi {
   server: {
     getConfig: () => Promise<ServerConfig>;
     refreshProviders: () => Promise<ServerProviderUpdatedPayload>;
+    getUsageStatus: () => Promise<ServerProviderUsages>;
+    refreshUsageStatus: () => Promise<ServerProviderUsageUpdatedPayload>;
     upsertKeybinding: (input: ServerUpsertKeybindingInput) => Promise<ServerUpsertKeybindingResult>;
     getSettings: () => Promise<ServerSettings>;
     updateSettings: (patch: ServerSettingsPatch) => Promise<ServerSettings>;
     enhancePrompt: (input: PromptEnhanceInput) => Promise<PromptEnhanceResult>;
+    subscribeUsageStatus: (
+      callback: (event: ServerUsageStreamEvent) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
   };
   orchestration: {
     getSnapshot: () => Promise<OrchestrationReadModel>;

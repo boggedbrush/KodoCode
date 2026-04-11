@@ -72,6 +72,11 @@ import {
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server";
+import {
+  ServerProviderUsageUpdatedPayload,
+  ServerProviderUsages,
+  ServerUsageStreamEvent,
+} from "./providerUsage";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings";
 
 export const WS_METHODS = {
@@ -109,6 +114,8 @@ export const WS_METHODS = {
   // Server meta
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
+  serverGetUsageStatus: "server.getUsageStatus",
+  serverRefreshUsageStatus: "server.refreshUsageStatus",
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
@@ -120,6 +127,7 @@ export const WS_METHODS = {
   subscribeTerminalEvents: "subscribeTerminalEvents",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
+  subscribeServerUsageStatus: "subscribeServerUsageStatus",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -137,6 +145,16 @@ export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
 export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
   payload: Schema.Struct({}),
   success: ServerProviderUpdatedPayload,
+});
+
+export const WsServerGetUsageStatusRpc = Rpc.make(WS_METHODS.serverGetUsageStatus, {
+  payload: Schema.Struct({}),
+  success: ServerProviderUsages,
+});
+
+export const WsServerRefreshUsageStatusRpc = Rpc.make(WS_METHODS.serverRefreshUsageStatus, {
+  payload: Schema.Struct({}),
+  success: ServerProviderUsageUpdatedPayload,
 });
 
 export const WsServerGetSettingsRpc = Rpc.make(WS_METHODS.serverGetSettings, {
@@ -341,9 +359,17 @@ export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServer
   stream: true,
 });
 
+export const WsSubscribeServerUsageStatusRpc = Rpc.make(WS_METHODS.subscribeServerUsageStatus, {
+  payload: Schema.Struct({}),
+  success: ServerUsageStreamEvent,
+  stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
+  WsServerGetUsageStatusRpc,
+  WsServerRefreshUsageStatusRpc,
   WsServerUpsertKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
@@ -373,6 +399,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeTerminalEventsRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
+  WsSubscribeServerUsageStatusRpc,
   WsOrchestrationGetSnapshotRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,

@@ -38,6 +38,7 @@ import {
   useServerProviders,
   useServerWelcomeSubscription,
 } from "../rpc/serverState";
+import { startProviderUsageSync } from "../rpc/providerUsageState";
 import {
   clearPromotedDraftThread,
   clearPromotedDraftThreads,
@@ -87,6 +88,7 @@ function RootRouteView() {
       <ToastProvider>
         <AnchoredToastProvider>
           <ServerStateBootstrap />
+          <ProviderUsageStateBootstrap />
           <UtilityModelDefaultBootstrap />
           <GlobalAppShortcuts />
           <EventRouter />
@@ -218,6 +220,12 @@ const MAX_NO_PROGRESS_REPLAY_RETRIES = 3;
 
 function ServerStateBootstrap() {
   useEffect(() => startServerStateSync(getWsRpcClient().server), []);
+
+  return null;
+}
+
+function ProviderUsageStateBootstrap() {
+  useEffect(() => startProviderUsageSync(getWsRpcClient().server), []);
 
   return null;
 }

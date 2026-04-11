@@ -4,6 +4,7 @@ import { resetGitStatusStateForTests } from "./lib/gitStatusState";
 import { showContextMenuFallback } from "./contextMenuFallback";
 import { __resetWsRpcAtomClientForTests } from "./rpc/client";
 import { resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
+import { resetProviderUsageStateForTests } from "./rpc/providerUsageState";
 import { resetServerStateForTests } from "./rpc/serverState";
 import { resetWsConnectionStateForTests } from "./rpc/wsConnectionState";
 import { __resetWsRpcClientForTests, getWsRpcClient } from "./wsRpcClient";
@@ -15,6 +16,7 @@ export async function __resetWsNativeApiForTests() {
   await __resetWsRpcAtomClientForTests();
   await __resetWsRpcClientForTests();
   resetGitStatusStateForTests();
+  resetProviderUsageStateForTests();
   resetRequestLatencyStateForTests();
   resetServerStateForTests();
   resetWsConnectionStateForTests();
@@ -94,10 +96,13 @@ export function createWsNativeApi(): NativeApi {
     server: {
       getConfig: rpcClient.server.getConfig,
       refreshProviders: rpcClient.server.refreshProviders,
+      getUsageStatus: rpcClient.server.getUsageStatus,
+      refreshUsageStatus: rpcClient.server.refreshUsageStatus,
       upsertKeybinding: rpcClient.server.upsertKeybinding,
       getSettings: rpcClient.server.getSettings,
       updateSettings: rpcClient.server.updateSettings,
       enhancePrompt: rpcClient.server.enhancePrompt,
+      subscribeUsageStatus: rpcClient.server.subscribeUsageStatus,
     },
     orchestration: {
       getSnapshot: rpcClient.orchestration.getSnapshot,
