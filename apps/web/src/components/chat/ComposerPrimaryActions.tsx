@@ -158,7 +158,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           style={{ backgroundColor: KODO_PURPLE, borderColor: KODO_PURPLE }}
           disabled={isSendBusy || isConnecting}
         >
-          {isConnecting || isSendBusy ? "Sending..." : "Implement"}
+          {isConnecting || isSendBusy ? "Sending..." : "Code"}
         </Button>
         <Menu>
           <MenuTrigger
@@ -180,7 +180,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
               disabled={isSendBusy || isConnecting}
               onClick={() => void onImplementPlanInNewThread()}
             >
-              Implement in a new thread
+              Code in a new thread
             </MenuItem>
           </MenuPopup>
         </Menu>

@@ -3283,7 +3283,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       const initialModelPickerOffset =
         initialModelPicker.getBoundingClientRect().left - footer.getBoundingClientRect().left;
 
-      await waitForButtonByText("Implement");
+      await waitForButtonByText("Code");
       await waitForElement(
         () =>
           document.querySelector<HTMLButtonElement>('button[aria-label="Implementation actions"]'),
@@ -3296,7 +3296,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       });
       await expectComposerActionsContained();
 
-      const implementButton = await waitForButtonByText("Implement");
+      const implementButton = await waitForButtonByText("Code");
       const implementActionsButton = await waitForElement(
         () =>
           document.querySelector<HTMLButtonElement>('button[aria-label="Implementation actions"]'),
