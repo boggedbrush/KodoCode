@@ -23,7 +23,8 @@ import type { SettingsUpdatePatch } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { ClaudeAI, OpenAI } from "../Icons";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import { Select, SelectItem, SelectPopup, SelectTrigger } from "../ui/select";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import {
   ModelSelectionControl,
   SettingResetButton,
@@ -31,6 +32,7 @@ import {
   SettingsSection,
 } from "./SettingsPanelPrimitives";
 import { SettingsModelPresetEditor } from "./SettingsModelPresetEditor";
+import { MoreHorizontalIcon } from "lucide-react";
 
 type SettingsUpdater = (patch: SettingsUpdatePatch) => void;
 
@@ -120,6 +122,160 @@ function ProviderPresetLabel({ provider }: { provider: ProviderKind }) {
       />
       <span>{PROVIDER_DISPLAY_NAMES[provider]}</span>
     </span>
+  );
+}
+
+function WorkflowPresetSelectorLabel({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5">
+      <span className="shrink-0 text-muted-foreground/82">{label}</span>
+      <span className="min-w-0 truncate text-foreground">{value}</span>
+    </span>
+  );
+}
+
+function WorkflowPresetControlRow({
+  presetProvider,
+  activePreset,
+  effectivePresetId,
+  visibleProviderPresets,
+  setPresetProvider,
+  applyWorkflowPresetContextChange,
+  setPresetEditorState,
+  removeActivePreset,
+}: {
+  presetProvider: ProviderKind;
+  activePreset: UnifiedSettings["modelSelectionPresets"][ProviderKind][string] | null;
+  effectivePresetId: string | null;
+  visibleProviderPresets: ReadonlyArray<
+    UnifiedSettings["modelSelectionPresets"][ProviderKind][string]
+  >;
+  setPresetProvider: (provider: ProviderKind) => void;
+  applyWorkflowPresetContextChange: (patch: SettingsUpdatePatch) => void;
+  setPresetEditorState: (state: PresetEditorState) => void;
+  removeActivePreset: () => Promise<void>;
+}) {
+  return (
+    <div className="flex w-full flex-wrap items-center justify-end gap-1.5">
+      <>
+        <Select
+          value={presetProvider}
+          onValueChange={(value) => setPresetProvider(value as ProviderKind)}
+        >
+          <SelectTrigger className="w-full min-w-0 sm:w-40" aria-label="Preset provider family">
+            <ProviderPresetLabel provider={presetProvider} />
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            {PRESET_PROVIDER_ORDER.map((provider) => (
+              <SelectItem hideIndicator key={provider} value={provider}>
+                <ProviderPresetLabel provider={provider} />
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+
+        <Select
+          value={effectivePresetId ?? DEFAULT_PRESET_VALUE}
+          onValueChange={(value) =>
+            applyWorkflowPresetContextChange({
+              modelSelectionPresetOps: [
+                {
+                  op: "select",
+                  provider: presetProvider,
+                  presetId: value === DEFAULT_PRESET_VALUE ? null : value,
+                },
+              ],
+            })
+          }
+        >
+          <SelectTrigger className="w-full min-w-0 sm:w-36" aria-label="Model preset">
+            <WorkflowPresetSelectorLabel
+              label="Preset:"
+              value={getPresetSelectLabel(activePreset)}
+            />
+          </SelectTrigger>
+          <SelectPopup align="end" alignItemWithTrigger={false}>
+            <SelectItem hideIndicator value={DEFAULT_PRESET_VALUE}>
+              Default
+            </SelectItem>
+            {visibleProviderPresets.map((preset) => (
+              <SelectItem hideIndicator key={preset.id} value={preset.id}>
+                {preset.name}
+              </SelectItem>
+            ))}
+          </SelectPopup>
+        </Select>
+      </>
+
+      <>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            setPresetEditorState({
+              kind: "create",
+              initialValue: `${PROVIDER_DISPLAY_NAMES[presetProvider]} preset`,
+            })
+          }
+        >
+          + New
+        </Button>
+
+        <Menu>
+          <MenuTrigger
+            render={
+              <Button
+                aria-label="Preset actions"
+                size="icon-xs"
+                variant="outline"
+                disabled={!activePreset}
+              />
+            }
+          >
+            <MoreHorizontalIcon aria-hidden="true" className="size-4" />
+          </MenuTrigger>
+          <MenuPopup align="end">
+            <MenuItem
+              disabled={!activePreset}
+              onClick={() =>
+                setPresetEditorState(
+                  activePreset
+                    ? {
+                        kind: "rename",
+                        initialValue: activePreset.name,
+                      }
+                    : null,
+                )
+              }
+            >
+              Rename
+            </MenuItem>
+            <MenuItem
+              disabled={!activePreset}
+              onClick={() =>
+                setPresetEditorState(
+                  activePreset
+                    ? {
+                        kind: "duplicate",
+                        initialValue: `${activePreset.name} copy`,
+                      }
+                    : null,
+                )
+              }
+            >
+              Duplicate
+            </MenuItem>
+            <MenuItem
+              disabled={!activePreset}
+              variant="destructive"
+              onClick={() => void removeActivePreset()}
+            >
+              Delete
+            </MenuItem>
+          </MenuPopup>
+        </Menu>
+      </>
+    </div>
   );
 }
 
@@ -308,7 +464,6 @@ export function SettingsModelsSection({
 
   const providerPresets = settings.modelSelectionPresets[presetProvider];
   const activePresetId = settings.activeModelSelectionPresetByProvider[presetProvider];
-  const activePresetForAnyProvider = getActiveModelSelectionPreset(settings, presetProvider);
   const visibleProviderPresets = getVisibleProviderPresets(providerPresets);
   const effectivePresetId = getNonDefaultActivePresetId(activePresetId);
   const activePreset =
@@ -498,133 +653,47 @@ export function SettingsModelsSection({
 
   return (
     <SettingsSection title="Models">
-      <SettingsRow
-        title="Workflow presets"
-        description="Save provider-specific model bundles for Ask, Plan, Code, and Review. Default uses the current model and effort settings when no preset is active."
-        status={
-          activePresetForAnyProvider
-            ? `Active preset: ${activePresetForAnyProvider.name} (${PROVIDER_DISPLAY_NAMES[activePresetForAnyProvider.provider]})`
-            : "Using default configuration"
-        }
-        resetAction={
-          isWorkflowPresetDirty && workflowPresetUndoState ? (
-            <SettingResetButton
-              label="workflow preset"
-              tooltipText="Undo preset changes"
-              onClick={() => {
-                updateSettings(getWorkflowPresetUndoPatch(settings, workflowPresetUndoState));
-                setWorkflowPresetUndoByProvider((current) => ({
-                  ...current,
-                  [presetProvider]: undefined,
-                }));
-              }}
-            />
-          ) : null
-        }
-        control={
-          <div className="flex flex-wrap items-center justify-end gap-1.5">
-            <Select
-              value={presetProvider}
-              onValueChange={(value) => setPresetProvider(value as ProviderKind)}
-            >
-              <SelectTrigger className="w-full sm:w-40" aria-label="Preset provider family">
-                <ProviderPresetLabel provider={presetProvider} />
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                {PRESET_PROVIDER_ORDER.map((provider) => (
-                  <SelectItem hideIndicator key={provider} value={provider}>
-                    <ProviderPresetLabel provider={provider} />
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-
-            <Select
-              value={effectivePresetId ?? DEFAULT_PRESET_VALUE}
-              onValueChange={(value) =>
-                applyWorkflowPresetContextChange({
-                  modelSelectionPresetOps: [
-                    {
-                      op: "select",
-                      provider: presetProvider,
-                      presetId: value === DEFAULT_PRESET_VALUE ? null : value,
-                    },
-                  ],
-                })
-              }
-            >
-              <SelectTrigger className="w-full sm:w-52" aria-label="Model preset">
-                <SelectValue>{getPresetSelectLabel(activePreset)}</SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value={DEFAULT_PRESET_VALUE}>
-                  Default
-                </SelectItem>
-                {visibleProviderPresets.map((preset) => (
-                  <SelectItem hideIndicator key={preset.id} value={preset.id}>
-                    {preset.name}
-                  </SelectItem>
-                ))}
-              </SelectPopup>
-            </Select>
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                setPresetEditorState({
-                  kind: "create",
-                  initialValue: `${PROVIDER_DISPLAY_NAMES[presetProvider]} preset`,
-                })
-              }
-            >
-              Create
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!activePreset}
-              onClick={() =>
-                setPresetEditorState(
-                  activePreset
-                    ? {
-                        kind: "rename",
-                        initialValue: activePreset.name,
-                      }
-                    : null,
-                )
-              }
-            >
-              Rename
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!activePreset}
-              onClick={() =>
-                setPresetEditorState(
-                  activePreset
-                    ? {
-                        kind: "duplicate",
-                        initialValue: `${activePreset.name} copy`,
-                      }
-                    : null,
-                )
-              }
-            >
-              Duplicate
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!activePreset}
-              onClick={() => void removeActivePreset()}
-            >
-              Delete
-            </Button>
+      <div className="border-t border-border px-4 py-4 first:border-t-0 sm:px-5">
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,18rem)_minmax(0,1fr)] xl:items-center xl:gap-6">
+          <div className="min-w-0 space-y-1">
+            <div className="flex min-h-5 items-center gap-1.5">
+              <h3 className="text-sm font-medium text-foreground">Workflow presets</h3>
+              <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+                {isWorkflowPresetDirty && workflowPresetUndoState ? (
+                  <SettingResetButton
+                    label="workflow preset"
+                    tooltipText="Undo preset changes"
+                    onClick={() => {
+                      updateSettings(getWorkflowPresetUndoPatch(settings, workflowPresetUndoState));
+                      setWorkflowPresetUndoByProvider((current) => ({
+                        ...current,
+                        [presetProvider]: undefined,
+                      }));
+                    }}
+                  />
+                ) : null}
+              </span>
+            </div>
+            <p className="max-w-prose text-xs leading-5 text-muted-foreground">
+              Save provider-specific model bundles for Ask, Plan, Code, and Review. Default uses the
+              current model and effort settings when no preset is active.
+            </p>
           </div>
-        }
-      />
+
+          <div className="min-w-0">
+            <WorkflowPresetControlRow
+              presetProvider={presetProvider}
+              activePreset={activePreset}
+              effectivePresetId={effectivePresetId}
+              visibleProviderPresets={visibleProviderPresets}
+              setPresetProvider={setPresetProvider}
+              applyWorkflowPresetContextChange={applyWorkflowPresetContextChange}
+              setPresetEditorState={setPresetEditorState}
+              removeActivePreset={removeActivePreset}
+            />
+          </div>
+        </div>
+      </div>
 
       {MODE_CONFIGS.map((modeConfig) => {
         const selectedSelection = getModeModelSelectionSource(
