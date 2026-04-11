@@ -105,7 +105,7 @@ export const ProviderUsageNotice = memo(function ProviderUsageNotice({
   ];
 
   return (
-    <div className="pointer-events-none fixed right-4 top-[calc(var(--desktop-window-safe-inset)+52px+6.5rem)] z-40 w-[min(22.5rem,calc(100vw-2rem))] sm:right-8 sm:w-[min(22.5rem,calc(100vw-4rem))]">
+    <div className="pointer-events-none fixed right-4 top-[calc(var(--desktop-window-safe-inset)+52px+8.75rem)] z-40 w-[min(22.5rem,calc(100vw-2rem))] sm:right-8 sm:w-[min(22.5rem,calc(100vw-4rem))]">
       <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-foreground/90">{providerLabel} usage</span>
