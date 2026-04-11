@@ -180,6 +180,52 @@ describe("SettingsModelsSection", () => {
     expect(markup).toContain("Codex");
   });
 
+  it("shows reset actions for stale built-in starter preset mode values", () => {
+    const markup = renderToStaticMarkup(
+      <SettingsModelsSection
+        settings={makeSettings({
+          modelSelectionPresets: {
+            codex: {
+              "starter-codex-pro-5x": {
+                id: "starter-codex-pro-5x",
+                provider: "codex",
+                name: "Pro (5X)",
+                askModelSelection: {
+                  provider: "codex",
+                  model: "gpt-5.3-codex-spark",
+                  options: { reasoningEffort: "low" },
+                },
+                planModelSelection: {
+                  provider: "codex",
+                  model: "gpt-5.4",
+                  options: { reasoningEffort: "high" },
+                },
+                codeModelSelection: {
+                  provider: "codex",
+                  model: "gpt-5.3-codex-spark",
+                  options: { reasoningEffort: "high" },
+                },
+                reviewModelSelection: {
+                  provider: "codex",
+                  model: "gpt-5.3-codex",
+                  options: { reasoningEffort: "high" },
+                },
+              },
+            },
+            claudeAgent: {},
+          },
+          activeModelSelectionPresetByProvider: {
+            codex: "starter-codex-pro-5x",
+            claudeAgent: null,
+          },
+        })}
+        updateSettings={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Reset to current starter preset value");
+  });
+
   it("tracks workflow preset undo against the current preset instead of default", () => {
     const before = makeSettings({
       modelSelectionPresets: {

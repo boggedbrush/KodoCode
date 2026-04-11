@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   DEFAULT_MODEL_SELECTION_PRESET_ID,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
@@ -54,6 +54,8 @@ type ModeConfig = {
   mode: ProviderInteractionMode;
   title: string;
 };
+type ModeSelectionKey = ModeConfig["key"];
+type WorkflowPresetModeSelections = Record<ModeSelectionKey, ModelSelection>;
 
 const DEFAULT_PRESET_VALUE = "__default__";
 const MODE_CONFIGS: ReadonlyArray<ModeConfig> = [
@@ -87,6 +89,212 @@ const PRESET_PROVIDER_ICON = {
   codex: OpenAI,
   claudeAgent: ClaudeAI,
 } as const;
+const BUILT_IN_PRESET_MODE_SELECTIONS: Readonly<
+  Record<ProviderKind, Readonly<Record<string, WorkflowPresetModeSelections>>>
+> = {
+  codex: {
+    "starter-codex-free": {
+      askModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        options: { reasoningEffort: "low" },
+      },
+      planModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        options: { reasoningEffort: "medium" },
+      },
+      codeModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        options: { reasoningEffort: "low" },
+      },
+      reviewModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+        options: { reasoningEffort: "low" },
+      },
+    },
+    "starter-codex-go": {
+      askModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        options: { reasoningEffort: "low" },
+      },
+      planModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        options: { reasoningEffort: "medium" },
+      },
+      codeModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        options: { reasoningEffort: "medium" },
+      },
+      reviewModelSelection: {
+        provider: "codex",
+        model: "gpt-5.3-codex",
+        options: { reasoningEffort: "medium" },
+      },
+    },
+    "starter-codex-plus": {
+      askModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        options: { reasoningEffort: "low" },
+      },
+      planModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+        options: { reasoningEffort: "medium" },
+      },
+      codeModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        options: { reasoningEffort: "medium" },
+      },
+      reviewModelSelection: {
+        provider: "codex",
+        model: "gpt-5.3-codex",
+        options: { reasoningEffort: "medium" },
+      },
+    },
+    "starter-codex-pro-5x": {
+      askModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+        options: { reasoningEffort: "low" },
+      },
+      planModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+        options: { reasoningEffort: "high" },
+      },
+      codeModelSelection: {
+        provider: "codex",
+        model: "gpt-5.3-codex",
+        options: { reasoningEffort: "high" },
+      },
+      reviewModelSelection: {
+        provider: "codex",
+        model: "gpt-5.3-codex",
+        options: { reasoningEffort: "high" },
+      },
+    },
+    "starter-codex-pro-20x": {
+      askModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+        options: { reasoningEffort: "medium" },
+      },
+      planModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+        options: { reasoningEffort: "high" },
+      },
+      codeModelSelection: {
+        provider: "codex",
+        model: "gpt-5.3-codex",
+        options: { reasoningEffort: "high" },
+      },
+      reviewModelSelection: {
+        provider: "codex",
+        model: "gpt-5.3-codex",
+        options: { reasoningEffort: "xhigh" },
+      },
+    },
+  },
+  claudeAgent: {
+    "starter-claude-free": {
+      askModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-haiku-4-5",
+        options: { thinking: false },
+      },
+      planModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-haiku-4-5",
+        options: { thinking: true },
+      },
+      codeModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-haiku-4-5",
+        options: { thinking: false },
+      },
+      reviewModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-haiku-4-5",
+        options: { thinking: true },
+      },
+    },
+    "starter-claude-pro": {
+      askModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-haiku-4-5",
+        options: { thinking: false },
+      },
+      planModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        options: { effort: "low" },
+      },
+      codeModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        options: { effort: "low" },
+      },
+      reviewModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        options: { effort: "medium" },
+      },
+    },
+    "starter-claude-max-5x": {
+      askModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        options: { effort: "low" },
+      },
+      planModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        options: { effort: "medium" },
+      },
+      codeModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        options: { effort: "low" },
+      },
+      reviewModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        options: { effort: "high" },
+      },
+    },
+    "starter-claude-max-20x": {
+      askModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        options: { effort: "low" },
+      },
+      planModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        options: { effort: "high" },
+      },
+      codeModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-sonnet-4-6",
+        options: { effort: "medium" },
+      },
+      reviewModelSelection: {
+        provider: "claudeAgent",
+        model: "claude-opus-4-6",
+        options: { effort: "high" },
+      },
+    },
+  },
+};
 
 function getPresetSelectLabel(
   activePreset: UnifiedSettings["modelSelectionPresets"][ProviderKind][string] | null,
@@ -328,6 +536,23 @@ function areModelSelectionsEqual(a: ModelSelection | null, b: ModelSelection | n
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function getBuiltInPresetModeSelection(
+  provider: ProviderKind,
+  presetId: string | null,
+  modeKey: ModeSelectionKey,
+): ModelSelection | null {
+  if (!presetId) {
+    return null;
+  }
+
+  const modeSelections = BUILT_IN_PRESET_MODE_SELECTIONS[provider][presetId];
+  if (!modeSelections) {
+    return null;
+  }
+
+  return modeSelections[modeKey];
+}
+
 function getProviderBaseSelections(
   settings: UnifiedSettings,
   provider: ProviderKind,
@@ -363,7 +588,7 @@ export function getWorkflowPresetUndoState(
             codeModelSelection: activePreset.codeModelSelection,
             reviewModelSelection: activePreset.reviewModelSelection,
           }
-        : getProviderBaseSelections(settings, provider),
+        : (getProviderBaseSelections(settings, provider) as WorkflowPresetModeSelections),
   };
 }
 
@@ -436,6 +661,24 @@ export function getWorkflowPresetUndoPatch(
   }
 
   return patch as SettingsUpdatePatch;
+}
+
+function getModeWorkflowUndoSelection(
+  settings: UnifiedSettings,
+  presetProvider: ProviderKind,
+  modeKey: ModeSelectionKey,
+  undoState: WorkflowPresetUndoState | null | undefined,
+): ModelSelection | null {
+  if (!undoState) {
+    return null;
+  }
+
+  const currentState = getWorkflowPresetUndoState(settings, presetProvider);
+  if (currentState.activePresetId !== undoState.activePresetId) {
+    return null;
+  }
+
+  return undoState.modeSelections[modeKey];
 }
 
 export function SettingsModelsSection({
@@ -704,8 +947,23 @@ export function SettingsModelsSection({
           settings,
           presetProvider,
         );
+        const selectedProviderSelection = getSelectionForProvider(
+          selectedSelection,
+          presetProvider,
+        );
         const baseSelection = getBaseModeModelSelection(modeConfig.mode, settings);
         const providerBaseSelection = getSelectionForProvider(baseSelection, presetProvider);
+        const builtInPresetSelection = getBuiltInPresetModeSelection(
+          presetProvider,
+          activePreset?.id ?? null,
+          modeConfig.key,
+        );
+        const workflowUndoSelection = getModeWorkflowUndoSelection(
+          settings,
+          presetProvider,
+          modeConfig.key,
+          workflowPresetUndoState,
+        );
         const provider = activePreset?.provider ?? selectedSelection?.provider ?? presetProvider;
         const model = selectedSelection?.model ?? "";
         const modelOptions = selectedSelection?.options;
@@ -718,6 +976,76 @@ export function SettingsModelsSection({
         const models =
           serverProviders.find((candidate) => candidate.provider === provider)?.models ?? [];
         const isBaseSelectionDirty = providerBaseSelection !== null;
+        const isModeUndoDirty =
+          workflowUndoSelection !== null &&
+          !areModelSelectionsEqual(selectedProviderSelection, workflowUndoSelection);
+        const isBuiltInPresetSelectionDirty =
+          activePreset !== null &&
+          builtInPresetSelection !== null &&
+          !areModelSelectionsEqual(selectedProviderSelection, builtInPresetSelection);
+
+        let resetAction: ReactNode = null;
+        if (isModeUndoDirty && workflowUndoSelection !== null) {
+          resetAction = (
+            <SettingResetButton
+              label={modeConfig.title.toLowerCase()}
+              tooltipText="Undo model changes"
+              onClick={() => {
+                if (activePreset) {
+                  updateSettings({
+                    modelSelectionPresetOps: [
+                      {
+                        op: "update",
+                        provider: presetProvider,
+                        presetId: activePreset.id,
+                        patch: {
+                          [modeConfig.key]: workflowUndoSelection,
+                        },
+                      },
+                    ],
+                  });
+                  return;
+                }
+
+                updateSettings({
+                  [modeConfig.key]: workflowUndoSelection,
+                });
+              }}
+            />
+          );
+        } else if (
+          isBuiltInPresetSelectionDirty &&
+          builtInPresetSelection !== null &&
+          activePreset
+        ) {
+          resetAction = (
+            <SettingResetButton
+              label={modeConfig.title.toLowerCase()}
+              tooltipText="Reset to current starter preset value"
+              onClick={() =>
+                updateSettings({
+                  modelSelectionPresetOps: [
+                    {
+                      op: "update",
+                      provider: presetProvider,
+                      presetId: activePreset.id,
+                      patch: {
+                        [modeConfig.key]: builtInPresetSelection,
+                      },
+                    },
+                  ],
+                })
+              }
+            />
+          );
+        } else if (!activePreset && isBaseSelectionDirty) {
+          resetAction = (
+            <SettingResetButton
+              label={modeConfig.title.toLowerCase()}
+              onClick={() => updateSettings({ [modeConfig.key]: null })}
+            />
+          );
+        }
 
         return (
           <SettingsRow
@@ -728,14 +1056,7 @@ export function SettingsModelsSection({
                 ? `${modeConfig.description} Changes update the active preset.`
                 : `${modeConfig.description} Leave unset to use the default model.`
             }
-            resetAction={
-              !activePreset && isBaseSelectionDirty ? (
-                <SettingResetButton
-                  label={modeConfig.title.toLowerCase()}
-                  onClick={() => updateSettings({ [modeConfig.key]: null })}
-                />
-              ) : null
-            }
+            resetAction={resetAction}
             control={
               <ModelSelectionControl
                 provider={provider}

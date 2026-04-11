@@ -459,7 +459,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.codex["starter-codex-pro-5x"]?.askModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.3-codex-spark",
+          model: "gpt-5.4",
           options: {
             reasoningEffort: "low",
           },
@@ -469,9 +469,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.codex["starter-codex-pro-5x"]?.codeModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.3-codex-spark",
+          model: "gpt-5.3-codex",
           options: {
-            reasoningEffort: "medium",
+            reasoningEffort: "high",
           },
         },
       );
@@ -479,9 +479,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.codex["starter-codex-pro-20x"]?.askModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.3-codex-spark",
+          model: "gpt-5.4",
           options: {
-            reasoningEffort: "low",
+            reasoningEffort: "medium",
           },
         },
       );
@@ -529,7 +529,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.codex["starter-codex-pro-5x"]?.askModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.3-codex-spark",
+          model: "gpt-5.4",
           options: {
             reasoningEffort: "low",
           },
@@ -539,9 +539,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.codex["starter-codex-pro-5x"]?.codeModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.3-codex-spark",
+          model: "gpt-5.3-codex",
           options: {
-            reasoningEffort: "medium",
+            reasoningEffort: "high",
           },
         },
       );
@@ -549,9 +549,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.codex["starter-codex-pro-20x"]?.askModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.3-codex-spark",
+          model: "gpt-5.4",
           options: {
-            reasoningEffort: "low",
+            reasoningEffort: "medium",
           },
         },
       );
@@ -619,7 +619,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
                   provider: "codex",
                   model: "gpt-5.3-codex",
                   options: {
-                    reasoningEffort: "medium",
+                    reasoningEffort: "high",
                   },
                 },
                 reviewModelSelection: {

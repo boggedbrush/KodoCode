@@ -250,13 +250,13 @@ const BUILT_IN_MODEL_SELECTION_PRESETS: {
       review: { model: "gpt-5.3-codex", effort: "medium" },
     }),
     makeCodexPreset("starter-codex-pro-5x", "Pro (5X)", {
-      ask: { model: "gpt-5.3-codex-spark", effort: "low" },
+      ask: { model: "gpt-5.4", effort: "low" },
       plan: { model: "gpt-5.4", effort: "high" },
-      code: { model: "gpt-5.3-codex-spark", effort: "medium" },
+      code: { model: "gpt-5.3-codex", effort: "high" },
       review: { model: "gpt-5.3-codex", effort: "high" },
     }),
     makeCodexPreset("starter-codex-pro-20x", "Pro (20X)", {
-      ask: { model: "gpt-5.3-codex-spark", effort: "low" },
+      ask: { model: "gpt-5.4", effort: "medium" },
       plan: { model: "gpt-5.4", effort: "high" },
       code: { model: "gpt-5.3-codex", effort: "high" },
       review: { model: "gpt-5.3-codex", effort: "xhigh" },
