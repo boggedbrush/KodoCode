@@ -214,63 +214,88 @@ const BUILT_IN_MODEL_SELECTION_PRESETS: {
   readonly claudeAgent: ReadonlyArray<Extract<ModelSelectionPreset, { provider: "claudeAgent" }>>;
 } = {
   codex: [
-    makeCodexPreset("starter-codex-free", "free", {
+    makeCodexPreset("starter-codex-free", "Free", {
       ask: { model: "gpt-5.4-mini", effort: "low" },
       plan: { model: "gpt-5.4-mini", effort: "medium" },
       code: { model: "gpt-5.4-mini", effort: "low" },
       review: { model: "gpt-5.4", effort: "low" },
     }),
-    makeCodexPreset("starter-codex-go", "go", {
+    makeCodexPreset("starter-codex-go", "Go", {
       ask: { model: "gpt-5.4-mini", effort: "low" },
       plan: { model: "gpt-5.4-mini", effort: "medium" },
-      code: { model: "gpt-5.4-mini", effort: "low" },
-      review: { model: "gpt-5.4", effort: "medium" },
+      code: { model: "gpt-5.4-mini", effort: "medium" },
+      review: { model: "gpt-5.3-codex", effort: "medium" },
     }),
-    makeCodexPreset("starter-codex-plus", "plus", {
+    makeCodexPreset("starter-codex-plus", "Plus", {
       ask: { model: "gpt-5.4-mini", effort: "low" },
       plan: { model: "gpt-5.4", effort: "medium" },
       code: { model: "gpt-5.4-mini", effort: "medium" },
       review: { model: "gpt-5.3-codex", effort: "medium" },
     }),
-    makeCodexPreset("starter-codex-pro-100", "pro 100", {
-      ask: { model: "gpt-5.4-mini", effort: "low" },
+    makeCodexPreset("starter-codex-pro-5x", "Pro (5X)", {
+      ask: { model: "gpt-5.4", effort: "low" },
       plan: { model: "gpt-5.4", effort: "high" },
-      code: { model: "gpt-5.4-mini", effort: "medium" },
+      code: { model: "gpt-5.3-codex", effort: "medium" },
       review: { model: "gpt-5.3-codex", effort: "high" },
     }),
-    makeCodexPreset("starter-codex-pro-200", "pro 200", {
-      ask: { model: "gpt-5.4-mini", effort: "low" },
-      plan: { model: "gpt-5.3-codex", effort: "high" },
-      code: { model: "gpt-5.4-mini", effort: "medium" },
+    makeCodexPreset("starter-codex-pro-20x", "Pro (20X)", {
+      ask: { model: "gpt-5.4", effort: "medium" },
+      plan: { model: "gpt-5.4", effort: "high" },
+      code: { model: "gpt-5.3-codex", effort: "high" },
       review: { model: "gpt-5.3-codex", effort: "xhigh" },
     }),
   ],
   claudeAgent: [
-    makeClaudePreset("starter-claude-free", "free", {
+    makeClaudePreset("starter-claude-free", "Free", {
       ask: { model: "claude-haiku-4-5", thinking: false },
       plan: { model: "claude-haiku-4-5", thinking: true },
       code: { model: "claude-haiku-4-5", thinking: false },
       review: { model: "claude-haiku-4-5", thinking: true },
     }),
-    makeClaudePreset("starter-claude-pro", "pro", {
+    makeClaudePreset("starter-claude-pro", "Pro", {
       ask: { model: "claude-haiku-4-5", thinking: false },
       plan: { model: "claude-sonnet-4-6", effort: "low" },
       code: { model: "claude-sonnet-4-6", effort: "low" },
       review: { model: "claude-sonnet-4-6", effort: "medium" },
     }),
-    makeClaudePreset("starter-claude-max-5x", "max 5x", {
-      ask: { model: "claude-haiku-4-5", thinking: false },
-      plan: { model: "claude-sonnet-4-6", effort: "low" },
+    makeClaudePreset("starter-claude-max-5x", "Max (5X)", {
+      ask: { model: "claude-sonnet-4-6", effort: "low" },
+      plan: { model: "claude-sonnet-4-6", effort: "medium" },
       code: { model: "claude-sonnet-4-6", effort: "low" },
       review: { model: "claude-sonnet-4-6", effort: "high" },
     }),
-    makeClaudePreset("starter-claude-max-20x", "max 20x", {
-      ask: { model: "claude-haiku-4-5", thinking: false },
-      plan: { model: "claude-sonnet-4-6", effort: "medium" },
-      code: { model: "claude-sonnet-4-6", effort: "low" },
+    makeClaudePreset("starter-claude-max-20x", "Max (20X)", {
+      ask: { model: "claude-sonnet-4-6", effort: "low" },
+      plan: { model: "claude-sonnet-4-6", effort: "high" },
+      code: { model: "claude-sonnet-4-6", effort: "medium" },
       review: { model: "claude-opus-4-6", effort: "high" },
     }),
   ],
+};
+
+const LEGACY_BUILT_IN_PRESET_IDS: {
+  readonly codex: ReadonlyArray<string>;
+  readonly claudeAgent: ReadonlyArray<string>;
+} = {
+  codex: ["starter-codex-pro-100", "starter-codex-pro-200"],
+  claudeAgent: [],
+};
+
+const LEGACY_BUILT_IN_PRESET_NAMES_BY_ID: {
+  readonly codex: Readonly<Record<string, string>>;
+  readonly claudeAgent: Readonly<Record<string, string>>;
+} = {
+  codex: {
+    "starter-codex-free": "free",
+    "starter-codex-go": "go",
+    "starter-codex-plus": "plus",
+  },
+  claudeAgent: {
+    "starter-claude-free": "free",
+    "starter-claude-pro": "pro",
+    "starter-claude-max-5x": "max 5x",
+    "starter-claude-max-20x": "max 20x",
+  },
 };
 
 /**
@@ -376,6 +401,46 @@ function seedBuiltInPresets(settings: ServerSettings): ServerSettings {
     : settings;
 }
 
+function migrateLegacyBuiltInPresets(settings: ServerSettings): ServerSettings {
+  let changed = false;
+  const nextPresets = {
+    ...settings.modelSelectionPresets,
+    codex: { ...settings.modelSelectionPresets.codex },
+    claudeAgent: { ...settings.modelSelectionPresets.claudeAgent },
+  };
+
+  for (const provider of PROVIDER_ORDER) {
+    for (const legacyId of LEGACY_BUILT_IN_PRESET_IDS[provider]) {
+      if (nextPresets[provider][legacyId]) {
+        delete nextPresets[provider][legacyId];
+        changed = true;
+      }
+    }
+
+    const canonicalById = new Map(
+      BUILT_IN_MODEL_SELECTION_PRESETS[provider].map((preset) => [preset.id, preset] as const),
+    );
+
+    for (const [id, legacyName] of Object.entries(LEGACY_BUILT_IN_PRESET_NAMES_BY_ID[provider])) {
+      const current = nextPresets[provider][id];
+      const canonical = canonicalById.get(id);
+      if (!current || !canonical || current.name !== legacyName) {
+        continue;
+      }
+
+      nextPresets[provider][id] = canonical as ProviderPresetMap[string];
+      changed = true;
+    }
+  }
+
+  return changed
+    ? {
+        ...settings,
+        modelSelectionPresets: nextPresets,
+      }
+    : settings;
+}
+
 function seedDefaultPresetFromBaseSelections(settings: ServerSettings): ServerSettings {
   const nextPresets = {
     ...settings.modelSelectionPresets,
@@ -441,7 +506,7 @@ function normalizeActivePresetPointers(settings: ServerSettings): ServerSettings
 
 function normalizePresetState(settings: ServerSettings): ServerSettings {
   return normalizeActivePresetPointers(
-    seedDefaultPresetFromBaseSelections(seedBuiltInPresets(settings)),
+    seedDefaultPresetFromBaseSelections(migrateLegacyBuiltInPresets(seedBuiltInPresets(settings))),
   );
 }
 

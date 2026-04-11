@@ -454,9 +454,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       const next = yield* serverSettings.getSettings;
 
       assert.equal(next.modelSelectionPresets.codex[DEFAULT_MODEL_SELECTION_PRESET_ID], undefined);
-      assert.equal(next.modelSelectionPresets.codex["starter-codex-free"]?.name, "free");
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-free"]?.name, "Free");
       assert.deepEqual(
-        next.modelSelectionPresets.codex["starter-codex-pro-200"]?.reviewModelSelection,
+        next.modelSelectionPresets.codex["starter-codex-pro-20x"]?.reviewModelSelection,
         {
           provider: "codex",
           model: "gpt-5.3-codex",
@@ -469,7 +469,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.claudeAgent[DEFAULT_MODEL_SELECTION_PRESET_ID],
         undefined,
       );
-      assert.equal(next.modelSelectionPresets.claudeAgent["starter-claude-free"]?.name, "free");
+      assert.equal(next.modelSelectionPresets.claudeAgent["starter-claude-free"]?.name, "Free");
       assert.deepEqual(
         next.modelSelectionPresets.claudeAgent["starter-claude-max-20x"]?.reviewModelSelection,
         {
@@ -483,6 +483,105 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.equal(next.activeModelSelectionPresetByProvider.codex, null);
       assert.equal(next.activeModelSelectionPresetByProvider.claudeAgent, null);
     }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("migrates legacy built-in preset entries to the current starter set", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const next = yield* serverSettings.getSettings;
+
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-pro-100"], undefined);
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-pro-200"], undefined);
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-free"]?.name, "Free");
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-go"]?.name, "Go");
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-plus"]?.name, "Plus");
+      assert.equal(next.modelSelectionPresets.claudeAgent["starter-claude-free"]?.name, "Free");
+      assert.equal(next.modelSelectionPresets.claudeAgent["starter-claude-pro"]?.name, "Pro");
+      assert.equal(
+        next.modelSelectionPresets.claudeAgent["starter-claude-max-5x"]?.name,
+        "Max (5X)",
+      );
+      assert.equal(
+        next.modelSelectionPresets.claudeAgent["starter-claude-max-20x"]?.name,
+        "Max (20X)",
+      );
+    }).pipe(
+      Effect.provide(
+        ServerSettingsService.layerTest({
+          modelSelectionPresets: {
+            codex: {
+              "starter-codex-free": {
+                id: "starter-codex-free",
+                provider: "codex",
+                name: "free",
+                askModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+                planModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+                codeModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+                reviewModelSelection: { provider: "codex", model: "gpt-5.4" },
+              },
+              "starter-codex-go": {
+                id: "starter-codex-go",
+                provider: "codex",
+                name: "go",
+                askModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+                planModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+                codeModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+                reviewModelSelection: { provider: "codex", model: "gpt-5.4" },
+              },
+              "starter-codex-plus": {
+                id: "starter-codex-plus",
+                provider: "codex",
+                name: "plus",
+                askModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+                planModelSelection: { provider: "codex", model: "gpt-5.4" },
+                codeModelSelection: { provider: "codex", model: "gpt-5.4-mini" },
+                reviewModelSelection: { provider: "codex", model: "gpt-5.3-codex" },
+              },
+              "starter-codex-pro-100": makeCodexPreset("starter-codex-pro-100", "pro 100"),
+              "starter-codex-pro-200": makeCodexPreset("starter-codex-pro-200", "pro 200"),
+            },
+            claudeAgent: {
+              "starter-claude-free": {
+                id: "starter-claude-free",
+                provider: "claudeAgent",
+                name: "free",
+                askModelSelection: { provider: "claudeAgent", model: "claude-haiku-4-5" },
+                planModelSelection: { provider: "claudeAgent", model: "claude-haiku-4-5" },
+                codeModelSelection: { provider: "claudeAgent", model: "claude-haiku-4-5" },
+                reviewModelSelection: { provider: "claudeAgent", model: "claude-haiku-4-5" },
+              },
+              "starter-claude-pro": {
+                id: "starter-claude-pro",
+                provider: "claudeAgent",
+                name: "pro",
+                askModelSelection: { provider: "claudeAgent", model: "claude-haiku-4-5" },
+                planModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+                codeModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+                reviewModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+              },
+              "starter-claude-max-5x": {
+                id: "starter-claude-max-5x",
+                provider: "claudeAgent",
+                name: "max 5x",
+                askModelSelection: { provider: "claudeAgent", model: "claude-haiku-4-5" },
+                planModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+                codeModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+                reviewModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+              },
+              "starter-claude-max-20x": {
+                id: "starter-claude-max-20x",
+                provider: "claudeAgent",
+                name: "max 20x",
+                askModelSelection: { provider: "claudeAgent", model: "claude-haiku-4-5" },
+                planModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+                codeModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+                reviewModelSelection: { provider: "claudeAgent", model: "claude-opus-4-6" },
+              },
+            },
+          },
+        }),
+      ),
+    ),
   );
 
   it.effect("renames and deletes a preset", () =>
@@ -623,7 +722,7 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.claudeAgent[DEFAULT_MODEL_SELECTION_PRESET_ID],
         undefined,
       );
-      assert.equal(next.modelSelectionPresets.codex["starter-codex-free"]?.name, "free");
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-free"]?.name, "Free");
     }).pipe(
       Effect.provide(
         ServerSettingsService.layerTest({

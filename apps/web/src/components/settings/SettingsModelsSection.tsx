@@ -188,7 +188,10 @@ function WorkflowPresetControlRow({
             })
           }
         >
-          <SelectTrigger className="w-full min-w-0 sm:w-36" aria-label="Model preset">
+          <SelectTrigger
+            className="w-full min-w-0 sm:w-auto sm:min-w-[12.5rem]"
+            aria-label="Model preset"
+          >
             <WorkflowPresetSelectorLabel
               label="Preset:"
               value={getPresetSelectLabel(activePreset)}
