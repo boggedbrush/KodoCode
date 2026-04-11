@@ -167,7 +167,11 @@ import { buildExpandedImagePreview, ExpandedImagePreview } from "./chat/Expanded
 import { EnhanceButton } from "./chat/EnhanceButton";
 import { EnhanceLoadingState } from "./chat/EnhanceLoadingState";
 import { EnhanceUndoChip } from "./chat/EnhanceUndoChip";
-import { AVAILABLE_PROVIDER_OPTIONS, ProviderModelPicker } from "./chat/ProviderModelPicker";
+import {
+  AVAILABLE_PROVIDER_OPTIONS,
+  COMPOSER_AUTO_MODEL_VALUE,
+  ProviderModelPicker,
+} from "./chat/ProviderModelPicker";
 import { ComposerCommandItem, ComposerCommandMenu } from "./chat/ComposerCommandMenu";
 import { ComposerPendingApprovalActions } from "./chat/ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./chat/CompactComposerControlsMenu";
@@ -1079,8 +1083,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
   // settings is driving the current selection (as opposed to an explicit per-conversation pick).
   const isModelFromModeSettings = useMemo(() => {
     const modeSelection = resolveModeModelSelection(interactionMode, settings, providerStatuses);
-    return modeSelection !== null && selectedModel === modeSelection.model;
-  }, [interactionMode, settings, providerStatuses, selectedModel]);
+    const selectedProviderOptions = composerModelOptions?.[selectedProvider];
+    return (
+      modeSelection !== null &&
+      modeSelection.provider === selectedProvider &&
+      selectedModel === modeSelection.model &&
+      Equal.equals(selectedProviderOptions, modeSelection.options)
+    );
+  }, [
+    composerModelOptions,
+    interactionMode,
+    providerStatuses,
+    selectedModel,
+    selectedProvider,
+    settings,
+  ]);
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
@@ -1471,8 +1488,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () =>
       AVAILABLE_PROVIDER_OPTIONS.filter(
         (option) => lockedProvider === null || option.value === lockedProvider,
-      ).flatMap((option) =>
-        modelOptionsByProvider[option.value].map(({ slug, name }) => ({
+      ).flatMap((option) => {
+        const providerModels = modelOptionsByProvider[option.value].map(({ slug, name }) => ({
           provider: option.value,
           providerLabel: option.label,
           slug,
@@ -1480,8 +1497,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
           searchSlug: slug.toLowerCase(),
           searchName: name.toLowerCase(),
           searchProvider: option.label.toLowerCase(),
-        })),
-      ),
+        }));
+        providerModels.unshift({
+          provider: option.value,
+          providerLabel: option.label,
+          slug: COMPOSER_AUTO_MODEL_VALUE,
+          name: "Auto",
+          searchSlug: COMPOSER_AUTO_MODEL_VALUE,
+          searchName: "auto",
+          searchProvider: option.label.toLowerCase(),
+        });
+        return providerModels;
+      }),
     [lockedProvider, modelOptionsByProvider],
   );
   const workspaceEntriesQuery = useQuery(
@@ -4100,6 +4127,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
         scheduleComposerFocus();
         return;
       }
+      if (model.trim().toLowerCase() === COMPOSER_AUTO_MODEL_VALUE) {
+        const modeSelection = resolveModeModelSelection(
+          interactionMode,
+          settings,
+          providerStatuses,
+        );
+        const autoProvider = resolveSelectableProvider(providerStatuses, provider);
+        const autoSelection: ModelSelection = modeSelection
+          ? modeSelection
+          : {
+              provider: autoProvider,
+              model: resolveAppModelSelection(autoProvider, settings, providerStatuses, null),
+            };
+        setComposerDraftModelSelection(activeThread.id, autoSelection);
+        setStickyComposerModelSelection(autoSelection);
+        scheduleComposerFocus();
+        return;
+      }
       const resolvedProvider = resolveSelectableProvider(providerStatuses, provider);
       const resolvedModel = resolveAppModelSelection(
         resolvedProvider,
@@ -4117,6 +4162,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [
       activeThread,
+      interactionMode,
       lockedProvider,
       scheduleComposerFocus,
       setComposerDraftModelSelection,
@@ -4149,6 +4195,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     modelOptions: composerModelOptions?.[selectedProvider],
     prompt,
     onPromptChange: setPromptFromTraits,
+    showAsAuto: isModelFromModeSettings,
   });
   const providerTraitsPicker = renderProviderTraitsPicker({
     provider: selectedProvider,

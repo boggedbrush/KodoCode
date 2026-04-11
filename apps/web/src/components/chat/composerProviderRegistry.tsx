@@ -39,6 +39,7 @@ type ProviderRegistryEntry = {
     modelOptions: ProviderModelOptions[ProviderKind] | undefined;
     prompt: string;
     onPromptChange: (prompt: string) => void;
+    showAsAuto?: boolean;
   }) => ReactNode;
   renderTraitsPicker: (input: {
     threadId: ThreadId;
@@ -101,6 +102,7 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
       modelOptions,
       prompt,
       onPromptChange,
+      showAsAuto,
     }) => (
       <TraitsMenuContent
         provider="codex"
@@ -110,6 +112,7 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
         modelOptions={modelOptions}
         prompt={prompt}
         onPromptChange={onPromptChange}
+        {...(showAsAuto !== undefined ? { showAsAuto } : {})}
       />
     ),
     renderTraitsPicker: ({
@@ -142,6 +145,7 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
       modelOptions,
       prompt,
       onPromptChange,
+      showAsAuto,
     }) => (
       <TraitsMenuContent
         provider="claudeAgent"
@@ -151,6 +155,7 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
         modelOptions={modelOptions}
         prompt={prompt}
         onPromptChange={onPromptChange}
+        {...(showAsAuto !== undefined ? { showAsAuto } : {})}
       />
     ),
     renderTraitsPicker: ({
@@ -188,6 +193,7 @@ export function renderProviderTraitsMenuContent(input: {
   modelOptions: ProviderModelOptions[ProviderKind] | undefined;
   prompt: string;
   onPromptChange: (prompt: string) => void;
+  showAsAuto?: boolean;
 }): ReactNode {
   return composerProviderRegistry[input.provider].renderTraitsMenuContent({
     threadId: input.threadId,
@@ -196,6 +202,7 @@ export function renderProviderTraitsMenuContent(input: {
     modelOptions: input.modelOptions,
     prompt: input.prompt,
     onPromptChange: input.onPromptChange,
+    ...(input.showAsAuto !== undefined ? { showAsAuto: input.showAsAuto } : {}),
   });
 }
 

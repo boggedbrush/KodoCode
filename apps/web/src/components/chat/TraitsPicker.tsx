@@ -33,6 +33,7 @@ import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
 
 type ProviderOptions = ProviderModelOptions[ProviderKind];
+const COMPOSER_AUTO_EFFORT_VALUE = "auto";
 type TraitsPersistence =
   | {
       threadId: ThreadId;
@@ -149,6 +150,7 @@ export interface TraitsMenuContentProps {
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
   triggerClassName?: string;
   fallbackModel?: string;
+  showAsAuto?: boolean;
 }
 
 export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
@@ -160,6 +162,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   modelOptions,
   allowPromptInjectedEffort = true,
   fallbackModel,
+  showAsAuto,
   ...persistence
 }: TraitsMenuContentProps & TraitsPersistence) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
@@ -197,6 +200,15 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   const handleEffortChange = useCallback(
     (value: string) => {
       if (!value) return;
+      const effortKey = provider === "codex" ? "reasoningEffort" : "effort";
+      if (value === COMPOSER_AUTO_EFFORT_VALUE) {
+        if (ultrathinkInBodyText) return;
+        if (ultrathinkPromptControlled) {
+          onPromptChange(prompt.replace(/^Ultrathink:\s*/i, ""));
+        }
+        updateModelOptions(buildNextOptions(provider, modelOptions, { [effortKey]: undefined }));
+        return;
+      }
       const nextOption = effortLevels.find((option) => option.value === value);
       if (!nextOption) return;
       if (caps.promptInjectedEffortLevels.includes(nextOption.value)) {
@@ -212,7 +224,6 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
         const stripped = prompt.replace(/^Ultrathink:\s*/i, "");
         onPromptChange(stripped);
       }
-      const effortKey = provider === "codex" ? "reasoningEffort" : "effort";
       updateModelOptions(
         buildNextOptions(provider, modelOptions, { [effortKey]: nextOption.value }),
       );
@@ -246,9 +257,18 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
               </div>
             ) : null}
             <MenuRadioGroup
-              value={ultrathinkPromptControlled ? "ultrathink" : effort}
+              value={
+                ultrathinkPromptControlled
+                  ? "ultrathink"
+                  : showAsAuto
+                    ? COMPOSER_AUTO_EFFORT_VALUE
+                    : effort
+              }
               onValueChange={handleEffortChange}
             >
+              <MenuRadioItem value={COMPOSER_AUTO_EFFORT_VALUE} disabled={ultrathinkInBodyText}>
+                Auto
+              </MenuRadioItem>
               {effortLevels.map((option) => (
                 <MenuRadioItem
                   key={option.value}
@@ -425,6 +445,7 @@ export const TraitsPicker = memo(function TraitsPicker({
           onPromptChange={onPromptChange}
           modelOptions={modelOptions}
           allowPromptInjectedEffort={allowPromptInjectedEffort}
+          {...(showAsAuto !== undefined ? { showAsAuto } : {})}
           {...(fallbackModel !== undefined && { fallbackModel })}
           {...persistence}
         />

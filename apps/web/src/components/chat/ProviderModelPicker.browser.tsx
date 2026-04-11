@@ -3,7 +3,7 @@ import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
-import { ProviderModelPicker } from "./ProviderModelPicker";
+import { COMPOSER_AUTO_MODEL_VALUE, ProviderModelPicker } from "./ProviderModelPicker";
 import { getCustomModelOptionsByProvider } from "../../modelSelection";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 
@@ -129,6 +129,7 @@ async function mountPicker(props: {
   lockedProvider: ProviderKind | null;
   providers?: ReadonlyArray<ServerProvider>;
   triggerVariant?: "ghost" | "outline";
+  showAsAuto?: boolean;
 }) {
   const host = document.createElement("div");
   document.body.append(host);
@@ -147,6 +148,7 @@ async function mountPicker(props: {
       lockedProvider={props.lockedProvider}
       providers={providers}
       modelOptionsByProvider={modelOptionsByProvider}
+      {...(props.showAsAuto !== undefined ? { showAsAuto: props.showAsAuto } : {})}
       triggerVariant={props.triggerVariant}
       onProviderModelChange={onProviderModelChange}
     />,
@@ -249,6 +251,31 @@ describe("ProviderModelPicker", () => {
         expect(text).toContain("Claude Haiku 4.5");
         expect(text).not.toContain("Codex");
       });
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows and dispatches Auto when selected", async () => {
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: "claudeAgent",
+      showAsAuto: true,
+    });
+
+    try {
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Auto");
+      });
+
+      await page.getByRole("menuitemradio", { name: "Auto" }).click();
+      expect(mounted.onProviderModelChange).toHaveBeenCalledWith(
+        "claudeAgent",
+        COMPOSER_AUTO_MODEL_VALUE,
+      );
     } finally {
       await mounted.cleanup();
     }

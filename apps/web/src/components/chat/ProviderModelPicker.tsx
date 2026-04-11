@@ -37,6 +37,7 @@ const PROVIDER_ICON_BY_PROVIDER: Record<ProviderPickerKind, Icon> = {
 };
 
 export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
+export const COMPOSER_AUTO_MODEL_VALUE = "auto";
 const UNAVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter((option) => !option.available);
 const COMING_SOON_PROVIDER_OPTIONS = [
   { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },
@@ -76,6 +77,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const handleModelChange = (provider: ProviderKind, value: string) => {
     if (props.disabled) return;
     if (!value) return;
+    if (value === COMPOSER_AUTO_MODEL_VALUE) {
+      props.onProviderModelChange(provider, COMPOSER_AUTO_MODEL_VALUE);
+      setIsMenuOpen(false);
+      return;
+    }
     const resolvedModel = resolveSelectableModel(
       provider,
       value,
@@ -135,19 +141,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <MenuPopup align="start">
         {props.lockedProvider !== null ? (
           <MenuGroup>
-            <MenuItem
-              onClick={() => {
-                props.onProviderModelChange(props.lockedProvider!, "");
-                setIsMenuOpen(false);
-              }}
-            >
-              <span className="text-muted-foreground/70">Current Model</span>
-            </MenuItem>
-            <MenuDivider />
             <MenuRadioGroup
-              value={props.model}
+              value={props.showAsAuto ? COMPOSER_AUTO_MODEL_VALUE : props.model}
               onValueChange={(value) => handleModelChange(props.lockedProvider!, value)}
             >
+              <MenuRadioItem value={COMPOSER_AUTO_MODEL_VALUE}>Auto</MenuRadioItem>
               {props.modelOptionsByProvider[props.lockedProvider].map((modelOption) => (
                 <MenuRadioItem
                   key={`${props.lockedProvider}:${modelOption.slug}`}
@@ -203,9 +201,16 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                   <MenuSubPopup className="[--available-height:min(24rem,70vh)]" sideOffset={4}>
                     <MenuGroup>
                       <MenuRadioGroup
-                        value={props.provider === option.value ? props.model : ""}
+                        value={
+                          props.provider === option.value
+                            ? props.showAsAuto
+                              ? COMPOSER_AUTO_MODEL_VALUE
+                              : props.model
+                            : ""
+                        }
                         onValueChange={(value) => handleModelChange(option.value, value)}
                       >
+                        <MenuRadioItem value={COMPOSER_AUTO_MODEL_VALUE}>Auto</MenuRadioItem>
                         {props.modelOptionsByProvider[option.value].map((modelOption) => (
                           <MenuRadioItem
                             key={`${option.value}:${modelOption.slug}`}
