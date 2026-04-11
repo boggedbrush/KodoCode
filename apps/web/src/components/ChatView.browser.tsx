@@ -3326,6 +3326,90 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("uses the code/default model selection when coding from a completed plan", async () => {
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createSnapshotWithPlanFollowUpPrompt(),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          providers: [
+            {
+              provider: "codex",
+              enabled: true,
+              installed: true,
+              version: "0.116.0",
+              status: "ready",
+              auth: { status: "authenticated" },
+              checkedAt: NOW_ISO,
+              models: [
+                createCodexModel("gpt-5.3-codex", "GPT-5.3 Codex"),
+                createCodexModel("gpt-5.4", "GPT-5.4"),
+              ],
+            },
+          ],
+          settings: {
+            ...nextFixture.serverConfig.settings,
+            planModelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
+            codeModelSelection: {
+              provider: "codex",
+              model: "gpt-5.4",
+            },
+          },
+        };
+      },
+      resolveRpc: (body) => {
+        if (body._tag === ORCHESTRATION_WS_METHODS.dispatchCommand) {
+          return {
+            sequence: fixture.snapshot.snapshotSequence + 1,
+          };
+        }
+        return undefined;
+      },
+    });
+
+    try {
+      const codeButton = await waitForButtonByText("Code");
+      codeButton.click();
+
+      await vi.waitFor(
+        () => {
+          const dispatchRequest = wsRequests.find(
+            (request) =>
+              request._tag === ORCHESTRATION_WS_METHODS.dispatchCommand &&
+              request.type === "thread.turn.start",
+          ) as
+            | {
+                _tag: string;
+                type?: string;
+                interactionMode?: string;
+                modelSelection?: {
+                  provider?: string;
+                  model?: string;
+                };
+              }
+            | undefined;
+
+          expect(dispatchRequest).toMatchObject({
+            _tag: ORCHESTRATION_WS_METHODS.dispatchCommand,
+            type: "thread.turn.start",
+            interactionMode: "default",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5.4",
+            },
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("keeps the slash-command menu visible above the composer", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

@@ -3719,11 +3719,28 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const threadIdForSend = activeThread.id;
       const messageIdForSend = newMessageId();
       const messageCreatedAt = new Date().toISOString();
+      const nextModelSelection =
+        nextInteractionMode === "default"
+          ? (resolveModeModelSelection("default", settings, providerStatuses) ??
+            selectedModelSelection)
+          : selectedModelSelection;
+      const nextProvider = nextModelSelection.provider;
+      const nextModel = nextModelSelection.model;
+      const nextProviderModels = getProviderModels(providerStatuses, nextProvider);
+      const nextProviderState = getComposerProviderState({
+        provider: nextProvider,
+        model: nextModel,
+        models: nextProviderModels,
+        prompt: trimmed,
+        modelOptions: {
+          [nextProvider]: nextModelSelection.options,
+        },
+      });
       const outgoingMessageText = formatOutgoingPrompt({
-        provider: selectedProvider,
-        model: selectedModel,
-        models: selectedProviderModels,
-        effort: selectedPromptEffort,
+        provider: nextProvider,
+        model: nextModel,
+        models: nextProviderModels,
+        effort: nextProviderState.promptEffort,
         text: trimmed,
       });
 
@@ -3747,7 +3764,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         await persistThreadSettingsForNextTurn({
           threadId: threadIdForSend,
           createdAt: messageCreatedAt,
-          modelSelection: selectedModelSelection,
+          modelSelection: nextModelSelection,
           runtimeMode,
           interactionMode: nextInteractionMode,
         });
@@ -3766,7 +3783,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             text: outgoingMessageText,
             attachments: [],
           },
-          modelSelection: selectedModelSelection,
+          modelSelection: nextModelSelection,
           titleSeed: activeThread.title,
           runtimeMode,
           interactionMode: nextInteractionMode,
@@ -3811,13 +3828,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       persistThreadSettingsForNextTurn,
       resetLocalDispatch,
       runtimeMode,
-      selectedPromptEffort,
       selectedModelSelection,
-      selectedProvider,
-      selectedProviderModels,
       setComposerDraftInteractionMode,
       setThreadError,
-      selectedModel,
+      settings,
+      providerStatuses,
     ],
   );
 
