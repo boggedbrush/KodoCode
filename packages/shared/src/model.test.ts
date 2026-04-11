@@ -20,6 +20,7 @@ import {
   resolveApiModelId,
   resolveContextWindow,
   resolveEffort,
+  resolveModelSelectionDefault,
   resolveModelSlug,
   resolveModelSlugForProvider,
   resolveSelectableModel,
@@ -93,6 +94,11 @@ describe("normalizeModelSlug", () => {
   it("maps known aliases to canonical slugs", () => {
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-4-6");
+  });
+
+  it("normalizes auto model selection case-insensitively", () => {
+    expect(normalizeModelSlug("Auto")).toBe("auto");
+    expect(normalizeModelSlug("AUTO")).toBe("auto");
   });
 
   it("returns null for empty or missing values", () => {
@@ -281,6 +287,25 @@ describe("resolveContextWindow", () => {
 });
 
 describe("resolveApiModelId", () => {
+  it("resolves claude auto to the provider default model", () => {
+    expect(
+      resolveModelSelectionDefault({
+        provider: "claudeAgent",
+        model: "AUTO",
+      }).model,
+    ).toBe(DEFAULT_MODEL_BY_PROVIDER.claudeAgent);
+  });
+
+  it("maps claude auto with 1m context window to default model plus suffix", () => {
+    expect(
+      resolveApiModelId({
+        provider: "claudeAgent",
+        model: "Auto",
+        options: { contextWindow: "1m" },
+      }),
+    ).toBe(`${DEFAULT_MODEL_BY_PROVIDER.claudeAgent}[1m]`);
+  });
+
   it("appends [1m] suffix for 1m context window", () => {
     expect(
       resolveApiModelId({

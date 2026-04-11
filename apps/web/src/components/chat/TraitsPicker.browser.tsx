@@ -250,6 +250,19 @@ describe("TraitsPicker (Claude)", () => {
     });
   });
 
+  it("shows Auto when no explicit Claude effort is set", async () => {
+    await using _ = await mountClaudePicker();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent ?? "").toContain("Auto");
+    });
+    await page.getByRole("button", { name: /auto/i }).click();
+
+    await vi.waitFor(() => {
+      expect(page.getByRole("menuitemradio", { name: "Auto" })).toBeChecked();
+    });
+  });
+
   it("hides fast mode controls for non-Opus models", async () => {
     await using _ = await mountClaudePicker({ model: "claude-sonnet-4-6" });
 
@@ -451,13 +464,26 @@ describe("TraitsPicker (Codex)", () => {
     });
   });
 
+  it("shows Auto when no explicit Codex effort is set", async () => {
+    await using _ = await mountCodexPicker({});
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent ?? "").toContain("Auto");
+    });
+    await page.getByRole("button", { name: /auto/i }).click();
+
+    await vi.waitFor(() => {
+      expect(page.getByRole("menuitemradio", { name: "Auto" })).toBeChecked();
+    });
+  });
+
   it("shows Fast in the trigger label when fast mode is active", async () => {
     await using _ = await mountCodexPicker({
       options: { fastMode: true },
     });
 
     await vi.waitFor(() => {
-      expect(document.body.textContent ?? "").toContain("High · Fast");
+      expect(document.body.textContent ?? "").toContain("Auto · Fast");
     });
   });
 

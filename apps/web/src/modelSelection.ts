@@ -153,12 +153,24 @@ export function resolveAppModelSelection(
   );
 }
 
+function isAutoModelSelectionValue(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.trim().toLowerCase() === "auto";
+}
+
 export function resolveProviderScopedModelSelectionState(
   provider: ProviderKind,
   rawSelection: Omit<ModelSelection, "provider"> & { provider?: ProviderKind },
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
 ): ModelSelection {
+  if (isAutoModelSelectionValue(rawSelection.model)) {
+    return {
+      provider,
+      model: "auto",
+      ...(rawSelection.options ? { options: rawSelection.options } : {}),
+    };
+  }
+
   const model =
     resolveSelectableModel(
       provider,
@@ -327,6 +339,14 @@ export function resolveModeModelSelection(
   const provider = resolveSelectableProvider(providers, modeSelection.provider);
 
   // If the configured provider became unavailable, fall back gracefully
+  if (isAutoModelSelectionValue(modeSelection.model)) {
+    return {
+      provider,
+      model: "auto",
+      ...(modeSelection.options ? { options: modeSelection.options } : {}),
+    };
+  }
+
   const selectedModel = provider === modeSelection.provider ? modeSelection.model : null;
   const model = resolveAppModelSelection(provider, settings, providers, selectedModel);
   const { modelOptionsForDispatch } = getComposerProviderState({
@@ -357,6 +377,13 @@ export function resolveModeModelSelectionState(
   providers: ReadonlyArray<ServerProvider>,
 ): ModelSelection {
   const provider = resolveSelectableProvider(providers, rawSelection.provider);
+  if (isAutoModelSelectionValue(rawSelection.model)) {
+    return {
+      provider,
+      model: "auto",
+      ...(rawSelection.options ? { options: rawSelection.options } : {}),
+    };
+  }
   const selectedModel = provider === rawSelection.provider ? rawSelection.model : null;
   const model = resolveAppModelSelection(provider, settings, providers, selectedModel);
   const { modelOptionsForDispatch } = getComposerProviderState({

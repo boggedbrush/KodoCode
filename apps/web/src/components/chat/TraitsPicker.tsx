@@ -127,6 +127,7 @@ function getSelectedTraits(
 
   return {
     caps,
+    rawEffort,
     effort,
     effortLevels,
     thinkingEnabled,
@@ -178,6 +179,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   );
   const {
     caps,
+    rawEffort,
     effort,
     effortLevels,
     thinkingEnabled,
@@ -196,6 +198,8 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     allowPromptInjectedEffort,
   );
   const defaultEffort = getDefaultEffort(caps);
+  const showAutoEffort =
+    rawEffort === null && !ultrathinkPromptControlled && effortLevels.length > 0;
 
   const handleEffortChange = useCallback(
     (value: string) => {
@@ -260,7 +264,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
               value={
                 ultrathinkPromptControlled
                   ? "ultrathink"
-                  : showAsAuto
+                  : showAutoEffort || showAsAuto
                     ? COMPOSER_AUTO_EFFORT_VALUE
                     : effort
               }
@@ -365,6 +369,7 @@ export const TraitsPicker = memo(function TraitsPicker({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const {
     caps,
+    rawEffort,
     effort,
     effortLevels,
     thinkingEnabled,
@@ -374,6 +379,8 @@ export const TraitsPicker = memo(function TraitsPicker({
     defaultContextWindow,
     ultrathinkPromptControlled,
   } = getSelectedTraits(provider, models, model, prompt, modelOptions, allowPromptInjectedEffort);
+  const showAutoEffort =
+    rawEffort === null && !ultrathinkPromptControlled && effortLevels.length > 0;
 
   const effortLabel = effort
     ? (effortLevels.find((l) => l.value === effort)?.label ?? effort)
@@ -382,24 +389,23 @@ export const TraitsPicker = memo(function TraitsPicker({
     contextWindowOptions.length > 1 && contextWindow !== defaultContextWindow
       ? (contextWindowOptions.find((o) => o.value === contextWindow)?.label ?? null)
       : null;
-  const hasTraitsLabel =
-    ultrathinkPromptControlled || effortLabel || thinkingEnabled !== null || fastModeEnabled;
-  const triggerLabel =
-    showAsAuto && hasTraitsLabel
+  const primaryTraitLabel = ultrathinkPromptControlled
+    ? "Ultrathink"
+    : showAsAuto || showAutoEffort
       ? "Auto"
-      : [
-          ultrathinkPromptControlled
-            ? "Ultrathink"
-            : effortLabel
-              ? effortLabel
-              : thinkingEnabled === null
-                ? null
-                : `Thinking ${thinkingEnabled ? "On" : "Off"}`,
-          ...(caps.supportsFastMode && fastModeEnabled ? ["Fast"] : []),
-          ...(contextWindowLabel ? [contextWindowLabel] : []),
-        ]
-          .filter(Boolean)
-          .join(" · ") || "Current Effort";
+      : effortLabel
+        ? effortLabel
+        : thinkingEnabled === null
+          ? null
+          : `Thinking ${thinkingEnabled ? "On" : "Off"}`;
+  const triggerLabel =
+    [
+      primaryTraitLabel,
+      ...(caps.supportsFastMode && fastModeEnabled ? ["Fast"] : []),
+      ...(contextWindowLabel ? [contextWindowLabel] : []),
+    ]
+      .filter(Boolean)
+      .join(" · ") || "Current Effort";
 
   const isCodexStyle = provider === "codex";
 

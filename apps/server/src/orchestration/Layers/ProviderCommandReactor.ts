@@ -12,6 +12,7 @@ import {
   type RuntimeMode,
   type TurnId,
 } from "@t3tools/contracts";
+import { resolveModelSelectionDefault } from "@t3tools/shared/model";
 import { Cache, Cause, Duration, Effect, Equal, Layer, Option, Schema, Stream } from "effect";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
@@ -76,6 +77,13 @@ const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 const WORKTREE_BRANCH_PREFIX = "t3code";
 const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
 const DEFAULT_THREAD_TITLE = "New thread";
+
+function resolveModelSelection(selection: ModelSelection | undefined): ModelSelection | undefined {
+  if (selection === undefined) {
+    return undefined;
+  }
+  return resolveModelSelectionDefault(selection);
+}
 
 function canReplaceThreadTitle(currentTitle: string, titleSeed?: string): boolean {
   const trimmedCurrentTitle = currentTitle.trim();
@@ -238,7 +246,11 @@ const make = Effect.gen(function* () {
     )
       ? thread.session.providerName
       : undefined;
-    const requestedModelSelection = options?.modelSelection;
+    const requestedModelSelection = resolveModelSelection(options?.modelSelection);
+    const resolvedThreadModelSelection = resolveModelSelection(thread.modelSelection);
+    if (resolvedThreadModelSelection === undefined) {
+      return yield* Effect.die(new Error(`Thread '${threadId}' has no model selection.`));
+    }
     const threadProvider: ProviderKind = currentProvider ?? thread.modelSelection.provider;
     if (
       requestedModelSelection !== undefined &&
@@ -251,7 +263,7 @@ const make = Effect.gen(function* () {
       });
     }
     const preferredProvider: ProviderKind = currentProvider ?? threadProvider;
-    const desiredModelSelection = requestedModelSelection ?? thread.modelSelection;
+    const desiredModelSelection = requestedModelSelection ?? resolvedThreadModelSelection;
     const effectiveCwd = resolveThreadWorkspaceCwd({
       thread,
       projects: readModel.projects,
@@ -376,8 +388,12 @@ const make = Effect.gen(function* () {
       input.createdAt,
       input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {},
     );
+    const resolvedModelSelection = resolveModelSelection(input.modelSelection);
+    const threadModelSelection =
+      resolveModelSelection(threadModelSelections.get(input.threadId)) ??
+      resolveModelSelection(thread.modelSelection);
     if (input.modelSelection !== undefined) {
-      threadModelSelections.set(input.threadId, input.modelSelection);
+      threadModelSelections.set(input.threadId, resolvedModelSelection ?? input.modelSelection);
     }
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
     const normalizedAttachments = input.attachments ?? [];
@@ -390,8 +406,12 @@ const make = Effect.gen(function* () {
       activeSession === undefined
         ? "in-session"
         : (yield* providerService.getCapabilities(activeSession.provider)).sessionModelSwitch;
-    const requestedModelSelection =
-      input.modelSelection ?? threadModelSelections.get(input.threadId) ?? thread.modelSelection;
+    const requestedModelSelection = resolveModelSelection(
+      input.modelSelection ?? threadModelSelection ?? thread.modelSelection,
+    );
+    if (requestedModelSelection === undefined) {
+      return;
+    }
     const modelForTurn =
       sessionModelSwitch === "unsupported"
         ? activeSession?.model !== undefined
@@ -400,7 +420,7 @@ const make = Effect.gen(function* () {
               model: activeSession.model,
             }
           : requestedModelSelection
-        : input.modelSelection;
+        : requestedModelSelection;
 
     yield* providerService.sendTurn({
       threadId: input.threadId,

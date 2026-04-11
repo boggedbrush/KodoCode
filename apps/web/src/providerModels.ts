@@ -53,7 +53,19 @@ export function getProviderModelCapabilities(
   provider: ProviderKind,
 ): ModelCapabilities {
   const slug = normalizeModelSlug(model, provider);
-  return models.find((candidate) => candidate.slug === slug)?.capabilities ?? EMPTY_CAPABILITIES;
+  const directMatch = models.find((candidate) => candidate.slug === slug)?.capabilities;
+  if (directMatch) {
+    return directMatch;
+  }
+  if (slug === "auto") {
+    // `auto` is a canonical UI choice, but capabilities still need a concrete model.
+    return (
+      models.find((candidate) => !candidate.isCustom)?.capabilities ??
+      models[0]?.capabilities ??
+      EMPTY_CAPABILITIES
+    );
+  }
+  return EMPTY_CAPABILITIES;
 }
 
 export function getDefaultServerModel(

@@ -98,6 +98,105 @@ describe("orchestration projector", () => {
     ]);
   });
 
+  it("preserves claude auto model selection on thread creation", async () => {
+    const now = new Date().toISOString();
+    const model = createEmptyReadModel(now);
+
+    const next = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: now,
+          commandId: "cmd-thread-create-auto",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: {
+              provider: "claudeAgent",
+              model: "Auto",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      ),
+    );
+
+    expect(next.threads[0]?.modelSelection).toEqual({
+      provider: "claudeAgent",
+      model: "Auto",
+    });
+  });
+
+  it("preserves claude auto model selection on thread meta updates", async () => {
+    const createdAt = "2026-02-23T08:00:00.000Z";
+    const updatedAt = "2026-02-23T08:00:05.000Z";
+    const model = createEmptyReadModel(createdAt);
+
+    const afterCreate = await Effect.runPromise(
+      projectEvent(
+        model,
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: createdAt,
+          commandId: "cmd-create",
+          payload: {
+            threadId: "thread-1",
+            projectId: "project-1",
+            title: "demo",
+            modelSelection: {
+              provider: "claudeAgent",
+              model: "claude-sonnet-4-6",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      ),
+    );
+
+    const afterUpdate = await Effect.runPromise(
+      projectEvent(
+        afterCreate,
+        makeEvent({
+          sequence: 2,
+          type: "thread.meta-updated",
+          aggregateKind: "thread",
+          aggregateId: "thread-1",
+          occurredAt: updatedAt,
+          commandId: "cmd-meta-auto",
+          payload: {
+            threadId: "thread-1",
+            modelSelection: {
+              provider: "claudeAgent",
+              model: "Auto",
+            },
+            updatedAt,
+          },
+        }),
+      ),
+    );
+
+    expect(afterUpdate.threads[0]?.modelSelection).toEqual({
+      provider: "claudeAgent",
+      model: "Auto",
+    });
+  });
+
   it("fails when event payload cannot be decoded by runtime schema", async () => {
     const now = new Date().toISOString();
     const model = createEmptyReadModel(now);

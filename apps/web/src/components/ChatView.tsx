@@ -237,6 +237,24 @@ const threadPlanCatalogCache = new LRUCache<{
   entry: ThreadPlanCatalogEntry;
 }>(MAX_THREAD_PLAN_CATALOG_CACHE_ENTRIES, MAX_THREAD_PLAN_CATALOG_CACHE_MEMORY_BYTES);
 
+function normalizeModelForDispatch(model: string): string {
+  return model.trim().toLowerCase() === COMPOSER_AUTO_MODEL_VALUE
+    ? COMPOSER_AUTO_MODEL_VALUE
+    : model;
+}
+
+function normalizeModelSelectionForDispatch(modelSelection: ModelSelection): ModelSelection {
+  const normalizedModel = normalizeModelForDispatch(modelSelection.model);
+  if (normalizedModel === modelSelection.model) {
+    return modelSelection;
+  }
+
+  return {
+    ...modelSelection,
+    model: normalizedModel,
+  };
+}
+
 function estimateThreadPlanCatalogEntrySize(thread: Thread): number {
   return Math.max(
     64,
@@ -1083,6 +1101,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => resolveModeModelSelection(interactionMode, settings, providerStatuses),
     [interactionMode, providerStatuses, settings],
   );
+  const isExplicitAutoModelSelection =
+    selectedModel.trim().toLowerCase() === COMPOSER_AUTO_MODEL_VALUE;
   // Keep model "Auto" tied to provider/model defaults from mode settings.
   const isModelFromModeSettings =
     modeModelSelection !== null &&
@@ -2262,19 +2282,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (!api) {
         return;
       }
+      const normalizedModelSelection = input.modelSelection
+        ? normalizeModelSelectionForDispatch(input.modelSelection)
+        : undefined;
 
       if (
-        input.modelSelection !== undefined &&
-        (input.modelSelection.model !== serverThread.modelSelection.model ||
-          input.modelSelection.provider !== serverThread.modelSelection.provider ||
-          JSON.stringify(input.modelSelection.options ?? null) !==
+        normalizedModelSelection !== undefined &&
+        (normalizedModelSelection.model !== serverThread.modelSelection.model ||
+          normalizedModelSelection.provider !== serverThread.modelSelection.provider ||
+          JSON.stringify(normalizedModelSelection.options ?? null) !==
             JSON.stringify(serverThread.modelSelection.options ?? null))
       ) {
         await api.orchestration.dispatchCommand({
           type: "thread.meta.update",
           commandId: newCommandId(),
           threadId: input.threadId,
-          modelSelection: input.modelSelection,
+          modelSelection: normalizedModelSelection,
         });
       }
 
@@ -3280,12 +3303,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
       }
       const title = truncate(titleSeed);
+      const normalizedSelectedModelSelection =
+        normalizeModelSelectionForDispatch(selectedModelSelection);
       const threadCreateModelSelection: ModelSelection = {
         provider: selectedProvider,
-        model:
+        model: normalizeModelForDispatch(
           selectedModel ||
-          activeProject.defaultModelSelection?.model ||
-          DEFAULT_MODEL_BY_PROVIDER.codex,
+            activeProject.defaultModelSelection?.model ||
+            DEFAULT_MODEL_BY_PROVIDER.codex,
+        ),
         ...(selectedModelSelection.options ? { options: selectedModelSelection.options } : {}),
       };
 
@@ -3303,7 +3329,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         await persistThreadSettingsForNextTurn({
           threadId: threadIdForSend,
           createdAt: messageCreatedAt,
-          ...(selectedModel ? { modelSelection: selectedModelSelection } : {}),
+          ...(selectedModel ? { modelSelection: normalizedSelectedModelSelection } : {}),
           runtimeMode,
           interactionMode,
         });
@@ -3350,7 +3376,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           text: outgoingMessageText,
           attachments: turnAttachments,
         },
-        modelSelection: selectedModelSelection,
+        modelSelection: normalizedSelectedModelSelection,
         titleSeed: title,
         runtimeMode,
         interactionMode,
@@ -3420,12 +3446,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
     const title = truncate("Review");
+    const normalizedSelectedModelSelection =
+      normalizeModelSelectionForDispatch(selectedModelSelection);
     const threadCreateModelSelection: ModelSelection = {
       provider: selectedProvider,
-      model:
+      model: normalizeModelForDispatch(
         selectedModel ||
-        activeProject?.defaultModelSelection?.model ||
-        DEFAULT_MODEL_BY_PROVIDER.codex,
+          activeProject?.defaultModelSelection?.model ||
+          DEFAULT_MODEL_BY_PROVIDER.codex,
+      ),
       ...(selectedModelSelection.options ? { options: selectedModelSelection.options } : {}),
     };
 
@@ -3458,7 +3487,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         await persistThreadSettingsForNextTurn({
           threadId: threadIdForSend,
           createdAt: messageCreatedAt,
-          ...(selectedModel ? { modelSelection: selectedModelSelection } : {}),
+          ...(selectedModel ? { modelSelection: normalizedSelectedModelSelection } : {}),
           runtimeMode,
           interactionMode: "review",
         });
@@ -3490,7 +3519,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           text: outgoingReviewPrompt,
           attachments: [],
         },
-        modelSelection: selectedModelSelection,
+        modelSelection: normalizedSelectedModelSelection,
         titleSeed: title,
         runtimeMode,
         interactionMode: "review",
@@ -3748,6 +3777,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           ? (resolveModeModelSelection("default", settings, providerStatuses) ??
             selectedModelSelection)
           : selectedModelSelection;
+      const normalizedNextModelSelection = normalizeModelSelectionForDispatch(nextModelSelection);
       const nextProvider = nextModelSelection.provider;
       const nextModel = nextModelSelection.model;
       const nextProviderModels = getProviderModels(providerStatuses, nextProvider);
@@ -3788,7 +3818,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         await persistThreadSettingsForNextTurn({
           threadId: threadIdForSend,
           createdAt: messageCreatedAt,
-          modelSelection: nextModelSelection,
+          modelSelection: normalizedNextModelSelection,
           runtimeMode,
           interactionMode: nextInteractionMode,
         });
@@ -3807,7 +3837,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             text: outgoingMessageText,
             attachments: [],
           },
-          modelSelection: nextModelSelection,
+          modelSelection: normalizedNextModelSelection,
           titleSeed: activeThread.title,
           runtimeMode,
           interactionMode: nextInteractionMode,
@@ -3887,7 +3917,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
       text: implementationPrompt,
     });
     const nextThreadTitle = truncate(buildPlanImplementationThreadTitle(planMarkdown));
-    const nextThreadModelSelection: ModelSelection = selectedModelSelection;
+    const nextThreadModelSelection: ModelSelection =
+      normalizeModelSelectionForDispatch(selectedModelSelection);
 
     sendInFlightRef.current = true;
     beginLocalDispatch({ preparingWorktree: false });
@@ -3921,7 +3952,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             text: outgoingImplementationPrompt,
             attachments: [],
           },
-          modelSelection: selectedModelSelection,
+          modelSelection: nextThreadModelSelection,
           titleSeed: nextThreadTitle,
           runtimeMode,
           interactionMode: "default",
@@ -4030,7 +4061,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         text: implementationPrompt,
       });
       const nextThreadTitle = truncate(`Review fixes: ${activeThread.title}`);
-      const nextThreadModelSelection: ModelSelection = selectedModelSelection;
+      const nextThreadModelSelection: ModelSelection =
+        normalizeModelSelectionForDispatch(selectedModelSelection);
 
       sendInFlightRef.current = true;
       beginLocalDispatch({ preparingWorktree: false });
@@ -4064,7 +4096,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
               text: outgoingImplementationPrompt,
               attachments: [],
             },
-            modelSelection: selectedModelSelection,
+            modelSelection: nextThreadModelSelection,
             titleSeed: nextThreadTitle,
             runtimeMode,
             interactionMode: "default",
@@ -4125,18 +4157,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
       if (model.trim().toLowerCase() === COMPOSER_AUTO_MODEL_VALUE) {
-        const modeSelection = resolveModeModelSelection(
-          interactionMode,
-          settings,
-          providerStatuses,
-        );
         const autoProvider = resolveSelectableProvider(providerStatuses, provider);
-        const autoSelection: ModelSelection = modeSelection
-          ? modeSelection
-          : {
-              provider: autoProvider,
-              model: resolveAppModelSelection(autoProvider, settings, providerStatuses, null),
-            };
+        const autoSelection: ModelSelection = {
+          // Keep `auto` canonical in draft state so dispatch/persistence can preserve it.
+          provider: autoProvider,
+          model: COMPOSER_AUTO_MODEL_VALUE,
+        };
         setComposerDraftModelSelection(activeThread.id, autoSelection);
         setStickyComposerModelSelection(autoSelection);
         scheduleComposerFocus();
@@ -4872,7 +4898,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           lockedProvider={lockedProvider}
                           providers={providerStatuses}
                           modelOptionsByProvider={modelOptionsByProvider}
-                          showAsAuto={isModelFromModeSettings}
+                          showAsAuto={isExplicitAutoModelSelection || isModelFromModeSettings}
                           {...(composerProviderState.modelPickerIconClassName
                             ? {
                                 activeProviderIconClassName:

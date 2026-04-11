@@ -191,10 +191,16 @@ export function normalizeModelSlug(
     return null;
   }
 
+  const normalized = trimmed.toLowerCase();
   const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, string>;
-  const aliased = Object.prototype.hasOwnProperty.call(aliases, trimmed)
-    ? aliases[trimmed]
+  const aliased = Object.prototype.hasOwnProperty.call(aliases, normalized)
+    ? aliases[normalized]
     : undefined;
+
+  if (!aliased && normalized === "auto") {
+    return "auto";
+  }
+
   return typeof aliased === "string" ? aliased : trimmed;
 }
 
@@ -253,6 +259,19 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
   return trimmed || null;
 }
 
+export function resolveModelSelectionDefault(modelSelection: ModelSelection): ModelSelection {
+  if (
+    modelSelection.provider === "claudeAgent" &&
+    modelSelection.model.trim().toLowerCase() === "auto"
+  ) {
+    return {
+      ...modelSelection,
+      model: DEFAULT_MODEL_BY_PROVIDER.claudeAgent,
+    };
+  }
+  return modelSelection;
+}
+
 /**
  * Resolve the actual API model identifier from a model selection.
  *
@@ -265,17 +284,19 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
  * to the effective value, not stripped to `undefined` for defaults.
  */
 export function resolveApiModelId(modelSelection: ModelSelection): string {
-  switch (modelSelection.provider) {
+  const normalizedModelSelection = resolveModelSelectionDefault(modelSelection);
+
+  switch (normalizedModelSelection.provider) {
     case "claudeAgent": {
-      switch (modelSelection.options?.contextWindow) {
+      switch (normalizedModelSelection.options?.contextWindow) {
         case "1m":
-          return `${modelSelection.model}[1m]`;
+          return `${normalizedModelSelection.model}[1m]`;
         default:
-          return modelSelection.model;
+          return normalizedModelSelection.model;
       }
     }
     default: {
-      return modelSelection.model;
+      return normalizedModelSelection.model;
     }
   }
 }

@@ -3,8 +3,10 @@ import {
   ProjectId,
   ThreadId,
   type ModelSelection,
+  type ServerProvider,
   type ProviderModelOptions,
 } from "@t3tools/contracts";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -12,6 +14,7 @@ import {
   clearPromotedDraftThread,
   clearPromotedDraftThreads,
   type ComposerImageAttachment,
+  deriveEffectiveComposerModelState,
   useComposerDraftStore,
 } from "./composerDraftStore";
 import { removeLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
@@ -89,6 +92,26 @@ function modelSelection(
     model,
     ...(options ? { options } : {}),
   } as ModelSelection;
+}
+
+function makeProvider(provider: "codex" | "claudeAgent"): ServerProvider {
+  return {
+    provider,
+    enabled: true,
+    installed: true,
+    version: "1.0.0",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-01-01T00:00:00.000Z",
+    models: [
+      {
+        slug: provider === "codex" ? "gpt-5.4" : "claude-opus-4-6",
+        name: provider === "codex" ? "GPT-5.4" : "Claude Opus 4.6",
+        isCustom: false,
+        capabilities: null,
+      },
+    ],
+  };
 }
 
 function providerModelOptions(options: ProviderModelOptions): ProviderModelOptions {
@@ -916,6 +939,24 @@ describe("composerDraftStore modelSelection", () => {
     expect(useComposerDraftStore.getState().stickyModelSelectionByProvider.claudeAgent).toEqual(
       modelSelection("claudeAgent", "claude-opus-4-6", { effort: "max" }),
     );
+  });
+
+  it("preserves Auto for effective composer model selection on the draft", () => {
+    const result = deriveEffectiveComposerModelState({
+      draft: {
+        modelSelectionByProvider: {
+          codex: modelSelection("codex", "auto"),
+        },
+        activeProvider: "codex",
+      },
+      providers: [makeProvider("codex"), makeProvider("claudeAgent")],
+      selectedProvider: "codex",
+      threadModelSelection: null,
+      projectModelSelection: null,
+      settings: DEFAULT_UNIFIED_SETTINGS,
+    });
+
+    expect(result.selectedModel).toBe("auto");
   });
 });
 

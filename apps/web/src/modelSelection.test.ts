@@ -10,6 +10,7 @@ import {
   getModeModelSelectionSource,
   resolveModeModelSelection,
   resolveModeModelSelectionState,
+  resolveProviderScopedModelSelectionState,
 } from "./modelSelection";
 
 // ── Test helpers ──────────────────────────────────────────────────
@@ -158,6 +159,33 @@ describe("resolveModeModelSelection", () => {
     expect(result).not.toBeNull();
     expect(result!.provider).toBe("codex");
     expect(result!.model).toBe("gpt-5.4");
+  });
+
+  it("preserves auto mode model selection for code mode when configured", () => {
+    const codeModelSelection: ModelSelection = {
+      provider: "codex",
+      model: "auto",
+    };
+    const settings = makeSettings({ codeModelSelection });
+    const result = resolveModeModelSelection("code", settings, makeProviders());
+
+    expect(result).not.toBeNull();
+    expect(result!.provider).toBe("codex");
+    expect(result!.model).toBe("auto");
+  });
+
+  it("preserves auto mode model selection regardless of case", () => {
+    const codeModelSelection: ModelSelection = {
+      provider: "codex",
+      model: "Auto",
+      options: { reasoningEffort: "medium" },
+    };
+    const settings = makeSettings({ codeModelSelection });
+    const result = resolveModeModelSelection("code", settings, makeProviders());
+
+    expect(result).not.toBeNull();
+    expect(result!.provider).toBe("codex");
+    expect(result!.model).toBe("auto");
   });
 
   it("falls back gracefully when the configured provider is disabled", () => {
@@ -313,6 +341,70 @@ describe("resolveModeModelSelectionState", () => {
     expect(result.provider).toBe("codex");
     // Should still have a valid model (custom model will be added to options)
     expect(result.model).toBeTruthy();
+  });
+
+  it("preserves auto model selection and provider for mode-level settings persistence", () => {
+    const raw: ModelSelection = {
+      provider: "codex",
+      model: "auto",
+      options: { reasoningEffort: "high" },
+    };
+    const result = resolveModeModelSelectionState(raw, makeSettings(), makeProviders());
+
+    expect(result.provider).toBe("codex");
+    expect(result.model).toBe("auto");
+    expect(result.options).toEqual({ reasoningEffort: "high" });
+  });
+
+  it("normalizes case-insensitive auto model selection for mode-level settings persistence", () => {
+    const raw: ModelSelection = {
+      provider: "codex",
+      model: "Auto",
+      options: { reasoningEffort: "medium" },
+    };
+    const result = resolveModeModelSelectionState(raw, makeSettings(), makeProviders());
+
+    expect(result.provider).toBe("codex");
+    expect(result.model).toBe("auto");
+    expect(result.options).toEqual({ reasoningEffort: "medium" });
+  });
+});
+
+describe("resolveProviderScopedModelSelectionState", () => {
+  it("preserves auto model selection while scoping by provider", () => {
+    const raw: ModelSelection = {
+      provider: "codex",
+      model: "auto",
+      options: { fastMode: true },
+    };
+    const result = resolveProviderScopedModelSelectionState(
+      "claudeAgent",
+      raw,
+      makeSettings(),
+      makeProviders(),
+    );
+
+    expect(result.provider).toBe("claudeAgent");
+    expect(result.model).toBe("auto");
+    expect(result.options).toEqual({ fastMode: true });
+  });
+
+  it("normalizes case-insensitive auto model selection while scoping by provider", () => {
+    const raw: ModelSelection = {
+      provider: "codex",
+      model: "Auto",
+      options: { fastMode: true },
+    };
+    const result = resolveProviderScopedModelSelectionState(
+      "claudeAgent",
+      raw,
+      makeSettings(),
+      makeProviders(),
+    );
+
+    expect(result.provider).toBe("claudeAgent");
+    expect(result.model).toBe("auto");
+    expect(result.options).toEqual({ fastMode: true });
   });
 });
 

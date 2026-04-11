@@ -1,10 +1,12 @@
 import {
+  type ClaudeModelOptions,
+  type CodexModelOptions,
   type ProviderKind,
   type ProviderModelOptions,
   type ServerProviderModel,
   type ThreadId,
 } from "@t3tools/contracts";
-import { isClaudeUltrathinkPrompt, resolveEffort } from "@t3tools/shared/model";
+import { isClaudeUltrathinkPrompt, resolveEffort, trimOrNull } from "@t3tools/shared/model";
 import type { ReactNode } from "react";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
@@ -52,6 +54,16 @@ type ProviderRegistryEntry = {
   }) => ReactNode;
 };
 
+function getRawProviderEffort(
+  provider: ProviderKind,
+  providerOptions: ProviderModelOptions[ProviderKind] | null | undefined,
+): string | null {
+  if (provider === "codex") {
+    return trimOrNull((providerOptions as CodexModelOptions | undefined)?.reasoningEffort);
+  }
+  return trimOrNull((providerOptions as ClaudeModelOptions | undefined)?.effort);
+}
+
 function getProviderStateFromCapabilities(
   input: ComposerProviderStateInput,
 ): ComposerProviderState {
@@ -60,13 +72,7 @@ function getProviderStateFromCapabilities(
   const providerOptions = modelOptions?.[provider];
 
   // Resolve effort
-  const rawEffort = providerOptions
-    ? "effort" in providerOptions
-      ? providerOptions.effort
-      : "reasoningEffort" in providerOptions
-        ? providerOptions.reasoningEffort
-        : null
-    : null;
+  const rawEffort = getRawProviderEffort(provider, providerOptions);
 
   const promptEffort = resolveEffort(caps, rawEffort) ?? null;
 
@@ -75,6 +81,21 @@ function getProviderStateFromCapabilities(
     provider === "codex"
       ? normalizeCodexModelOptionsWithCapabilities(caps, providerOptions)
       : normalizeClaudeModelOptionsWithCapabilities(caps, providerOptions);
+  const modelOptionsForDispatch = normalizedOptions
+    ? (() => {
+        const nextOptions = { ...normalizedOptions } as Record<string, unknown>;
+        if (rawEffort === null) {
+          if (provider === "codex") {
+            delete nextOptions.reasoningEffort;
+          } else {
+            delete nextOptions.effort;
+          }
+        }
+        return Object.keys(nextOptions).length > 0
+          ? (nextOptions as ProviderModelOptions[ProviderKind])
+          : undefined;
+      })()
+    : undefined;
 
   // Ultrathink styling (driven by capabilities data, not provider identity)
   const ultrathinkActive =
@@ -83,7 +104,8 @@ function getProviderStateFromCapabilities(
   return {
     provider,
     promptEffort,
-    modelOptionsForDispatch: normalizedOptions,
+    // Preserve "Auto" effort by omitting the provider-specific effort key when unset.
+    modelOptionsForDispatch,
     ...(ultrathinkActive ? { composerFrameClassName: "ultrathink-frame" } : {}),
     ...(ultrathinkActive
       ? { composerSurfaceClassName: "shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset]" }

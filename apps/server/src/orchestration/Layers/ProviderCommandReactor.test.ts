@@ -6,6 +6,7 @@ import type { ModelSelection, ProviderRuntimeEvent, ProviderSession } from "@t3t
 import {
   ApprovalRequestId,
   CommandId,
+  DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
   MessageId,
@@ -106,7 +107,7 @@ describe("ProviderCommandReactor", () => {
     const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
     let nextSessionIndex = 1;
     const runtimeSessions: Array<ProviderSession> = [];
-    const modelSelection = input?.threadModelSelection ?? {
+    const initialModelSelection = input?.threadModelSelection ?? {
       provider: "codex",
       model: "gpt-5-codex",
     };
@@ -123,8 +124,18 @@ describe("ProviderCommandReactor", () => {
         typeof input.threadId === "string"
           ? ThreadId.makeUnsafe(input.threadId)
           : ThreadId.makeUnsafe(`thread-${sessionIndex}`);
+      const requestedModelSelection =
+        typeof input === "object" &&
+        input !== null &&
+        "modelSelection" in input &&
+        typeof input.modelSelection === "object" &&
+        input.modelSelection !== null &&
+        "provider" in input.modelSelection &&
+        "model" in input.modelSelection
+          ? (input.modelSelection as ModelSelection)
+          : initialModelSelection;
       const session: ProviderSession = {
-        provider: modelSelection.provider,
+        provider: requestedModelSelection.provider,
         status: "ready" as const,
         runtimeMode:
           typeof input === "object" &&
@@ -133,7 +144,9 @@ describe("ProviderCommandReactor", () => {
           (input.runtimeMode === "approval-required" || input.runtimeMode === "full-access")
             ? input.runtimeMode
             : "full-access",
-        ...(modelSelection.model !== undefined ? { model: modelSelection.model } : {}),
+        ...(requestedModelSelection.model !== undefined
+          ? { model: requestedModelSelection.model }
+          : {}),
         threadId,
         resumeCursor: resumeCursor ?? { opaque: `resume-${sessionIndex}` },
         createdAt: now,
@@ -249,7 +262,7 @@ describe("ProviderCommandReactor", () => {
         projectId: asProjectId("project-1"),
         title: "Provider Project",
         workspaceRoot: "/tmp/provider-project",
-        defaultModelSelection: modelSelection,
+        defaultModelSelection: initialModelSelection,
         createdAt: now,
       }),
     );
@@ -260,7 +273,7 @@ describe("ProviderCommandReactor", () => {
         threadId: ThreadId.makeUnsafe("thread-1"),
         projectId: asProjectId("project-1"),
         title: "Thread",
-        modelSelection: modelSelection,
+        modelSelection: initialModelSelection,
         interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
         runtimeMode: "approval-required",
         branch: null,
@@ -620,6 +633,45 @@ describe("ProviderCommandReactor", () => {
         options: {
           effort: "max",
         },
+      },
+    });
+  });
+
+  it("resolves claude Auto model selection on first turn for new threads", async () => {
+    const harness = await createHarness({
+      threadModelSelection: { provider: "claudeAgent", model: "Auto" },
+    });
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-claude-auto"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-claude-auto"),
+          role: "user",
+          text: "hello with auto",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      modelSelection: {
+        provider: "claudeAgent",
+        model: DEFAULT_MODEL_BY_PROVIDER.claudeAgent,
+      },
+    });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      modelSelection: {
+        provider: "claudeAgent",
+        model: DEFAULT_MODEL_BY_PROVIDER.claudeAgent,
       },
     });
   });

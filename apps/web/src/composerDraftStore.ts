@@ -37,6 +37,7 @@ const DraftThreadEnvModeSchema = Schema.Literals(["local", "worktree"]);
 export type DraftThreadEnvMode = typeof DraftThreadEnvModeSchema.Type;
 
 const COMPOSER_PERSIST_DEBOUNCE_MS = 300;
+const COMPOSER_AUTO_MODEL_VALUE = "auto";
 
 const composerDebouncedStorage = createDebouncedStorage(
   typeof localStorage !== "undefined" ? localStorage : createMemoryStorage(),
@@ -519,6 +520,13 @@ function normalizeModelSelection(
   if (typeof rawModel !== "string") {
     return null;
   }
+  if (rawModel.trim().toLowerCase() === COMPOSER_AUTO_MODEL_VALUE) {
+    return {
+      provider,
+      model: COMPOSER_AUTO_MODEL_VALUE,
+      ...(candidate?.options ? { options: candidate.options } : {}),
+    };
+  }
   const model = normalizeModelSlug(rawModel, provider);
   if (!model) {
     return null;
@@ -626,20 +634,36 @@ export function deriveEffectiveComposerModelState(input: {
   projectModelSelection: ModelSelection | null | undefined;
   settings: UnifiedSettings;
 }): EffectiveComposerModelState {
+  const normalizeComposerModelForProvider = (
+    candidate: string | null | undefined,
+  ): string | null => {
+    const trimmed = candidate?.trim();
+    if (!trimmed) {
+      return null;
+    }
+    if (trimmed.toLowerCase() === COMPOSER_AUTO_MODEL_VALUE) {
+      return COMPOSER_AUTO_MODEL_VALUE;
+    }
+    return normalizeModelSlug(trimmed, input.selectedProvider) ?? trimmed;
+  };
+
   const baseModel =
-    normalizeModelSlug(
+    normalizeComposerModelForProvider(
       input.threadModelSelection?.model ?? input.projectModelSelection?.model,
-      input.selectedProvider,
     ) ?? getDefaultServerModel(input.providers, input.selectedProvider);
   const activeSelection = input.draft?.modelSelectionByProvider?.[input.selectedProvider];
-  const selectedModel = activeSelection?.model
-    ? resolveAppModelSelection(
-        input.selectedProvider,
-        input.settings,
-        input.providers,
-        activeSelection.model,
-      )
-    : baseModel;
+  const selectedModel =
+    normalizeComposerModelForProvider(activeSelection?.model)?.toLowerCase() ===
+    COMPOSER_AUTO_MODEL_VALUE
+      ? COMPOSER_AUTO_MODEL_VALUE
+      : activeSelection?.model
+        ? resolveAppModelSelection(
+            input.selectedProvider,
+            input.settings,
+            input.providers,
+            activeSelection.model,
+          )
+        : baseModel;
   const modelOptions =
     modelSelectionByProviderToOptions(input.draft?.modelSelectionByProvider) ??
     providerModelOptionsFromSelection(input.threadModelSelection) ??

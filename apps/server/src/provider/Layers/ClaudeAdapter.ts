@@ -29,6 +29,7 @@ import {
   type ProviderRuntimeTurnStatus,
   type ProviderSendTurnInput,
   type ProviderSession,
+  type ModelSelection,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
   type RuntimeContentStreamKind,
@@ -43,6 +44,7 @@ import {
 import {
   applyClaudePromptEffortPrefix,
   resolveApiModelId,
+  resolveModelSelectionDefault,
   resolveEffort,
   trimOrNull,
 } from "@t3tools/shared/model";
@@ -2681,16 +2683,25 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ),
       );
       const claudeBinaryPath = claudeSettings.binaryPath;
-      const modelSelection =
-        input.modelSelection?.provider === "claudeAgent" ? input.modelSelection : undefined;
-      const caps = getClaudeModelCapabilities(modelSelection?.model);
-      const apiModelId = modelSelection ? resolveApiModelId(modelSelection) : undefined;
-      const effort = (resolveEffort(caps, modelSelection?.options?.effort) ??
+      const resolvedClaudeModelSelection =
+        input.modelSelection?.provider === "claudeAgent"
+          ? (resolveModelSelectionDefault(input.modelSelection) as Extract<
+              ModelSelection,
+              { provider: "claudeAgent" }
+            >)
+          : undefined;
+      const caps = getClaudeModelCapabilities(resolvedClaudeModelSelection?.model);
+      const apiModelId = resolvedClaudeModelSelection
+        ? resolveApiModelId(resolvedClaudeModelSelection)
+        : undefined;
+      const effort = (resolveEffort(caps, resolvedClaudeModelSelection?.options?.effort) ??
         null) as ClaudeCodeEffort | null;
-      const fastMode = modelSelection?.options?.fastMode === true && caps.supportsFastMode;
+      const fastMode =
+        resolvedClaudeModelSelection?.options?.fastMode === true && caps.supportsFastMode;
       const thinking =
-        typeof modelSelection?.options?.thinking === "boolean" && caps.supportsThinkingToggle
-          ? modelSelection.options.thinking
+        typeof resolvedClaudeModelSelection?.options?.thinking === "boolean" &&
+        caps.supportsThinkingToggle
+          ? resolvedClaudeModelSelection.options.thinking
           : undefined;
       const effectiveEffort = getEffectiveClaudeCodeEffort(effort);
       const permissionMode = input.runtimeMode === "full-access" ? "bypassPermissions" : undefined;
@@ -2739,7 +2750,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         status: "ready",
         runtimeMode: input.runtimeMode,
         ...(input.cwd ? { cwd: input.cwd } : {}),
-        ...(modelSelection?.model ? { model: modelSelection.model } : {}),
+        ...(resolvedClaudeModelSelection?.model
+          ? { model: resolvedClaudeModelSelection.model }
+          : {}),
         ...(threadId ? { threadId } : {}),
         resumeCursor: {
           ...(threadId ? { threadId } : {}),
@@ -2848,6 +2861,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     const context = yield* requireSession(input.threadId);
     const modelSelection =
       input.modelSelection?.provider === "claudeAgent" ? input.modelSelection : undefined;
+    const resolvedModelSelection = modelSelection
+      ? resolveModelSelectionDefault(modelSelection)
+      : undefined;
 
     if (context.turnState) {
       // Auto-close a stale synthetic turn (from background agent responses
@@ -2855,8 +2871,8 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       yield* completeTurn(context, "completed");
     }
 
-    if (modelSelection?.model) {
-      const apiModelId = resolveApiModelId(modelSelection);
+    if (resolvedModelSelection?.model) {
+      const apiModelId = resolveApiModelId(resolvedModelSelection);
       if (context.currentApiModelId !== apiModelId) {
         yield* Effect.tryPromise({
           try: () => context.query.setModel(apiModelId),
@@ -2866,7 +2882,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
       context.session = {
         ...context.session,
-        model: modelSelection.model,
+        model: resolvedModelSelection.model,
       };
     }
 
@@ -2919,7 +2935,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       createdAt: turnStartedStamp.createdAt,
       threadId: context.session.threadId,
       turnId,
-      payload: modelSelection?.model ? { model: modelSelection.model } : {},
+      payload: resolvedModelSelection?.model ? { model: resolvedModelSelection.model } : {},
       providerRefs: {},
     });
 

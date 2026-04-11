@@ -11,7 +11,6 @@ import { Effect, Layer, Option, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { ClaudeModelSelection } from "@t3tools/contracts";
-import { resolveApiModelId } from "@t3tools/shared/model";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 
 import { TextGenerationError } from "@t3tools/contracts";
@@ -34,7 +33,11 @@ import {
   sanitizeThreadTitle,
   toJsonSchemaObject,
 } from "../Utils.ts";
-import { normalizeClaudeModelOptionsWithCapabilities } from "@t3tools/shared/model";
+import {
+  normalizeClaudeModelOptionsWithCapabilities,
+  resolveApiModelId,
+  resolveModelSelectionDefault,
+} from "@t3tools/shared/model";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { getClaudeModelCapabilities } from "../../provider/Layers/ClaudeProvider.ts";
 
@@ -90,9 +93,10 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
     modelSelection: ClaudeModelSelection;
   }): Effect.fn.Return<S["Type"], TextGenerationError, S["DecodingServices"]> {
     const jsonSchemaStr = JSON.stringify(toJsonSchemaObject(outputSchemaJson));
+    const resolvedModelSelection = resolveModelSelectionDefault(modelSelection);
     const normalizedOptions = normalizeClaudeModelOptionsWithCapabilities(
-      getClaudeModelCapabilities(modelSelection.model),
-      modelSelection.options,
+      getClaudeModelCapabilities(resolvedModelSelection.model),
+      resolvedModelSelection.options,
     );
     const settings = {
       ...(typeof normalizedOptions?.thinking === "boolean"
@@ -116,7 +120,7 @@ const makeClaudeTextGeneration = Effect.gen(function* () {
           "--json-schema",
           jsonSchemaStr,
           "--model",
-          resolveApiModelId(modelSelection),
+          resolveApiModelId(resolvedModelSelection),
           ...(normalizedOptions?.effort ? ["--effort", normalizedOptions.effort] : []),
           ...(Object.keys(settings).length > 0 ? ["--settings", JSON.stringify(settings)] : []),
           "--dangerously-skip-permissions",
