@@ -183,6 +183,49 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("replaces model-selection options when resetting to the same model", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      yield* serverSettings.updateSettings({
+        textGenerationModelSelection: {
+          provider: "codex",
+          model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
+          options: {
+            reasoningEffort: "low",
+          },
+        },
+        promptEnhanceModelSelection: {
+          provider: "codex",
+          model: DEFAULT_SERVER_SETTINGS.promptEnhanceModelSelection.model,
+          options: {
+            reasoningEffort: "low",
+          },
+        },
+      });
+
+      const next = yield* serverSettings.updateSettings({
+        textGenerationModelSelection: {
+          provider: "codex",
+          model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
+        },
+        promptEnhanceModelSelection: {
+          provider: "codex",
+          model: DEFAULT_SERVER_SETTINGS.promptEnhanceModelSelection.model,
+        },
+      });
+
+      assert.deepEqual(next.textGenerationModelSelection, {
+        provider: "codex",
+        model: DEFAULT_SERVER_SETTINGS.textGenerationModelSelection.model,
+      });
+      assert.deepEqual(next.promptEnhanceModelSelection, {
+        provider: "codex",
+        model: DEFAULT_SERVER_SETTINGS.promptEnhanceModelSelection.model,
+      });
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
   it.effect("persists promptEnhanceModelSelection and reads it back", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;

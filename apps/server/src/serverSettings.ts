@@ -458,10 +458,10 @@ function isCompleteModelSelectionPatch(
   );
 }
 
-function mergeModelSelectionSetting(
-  current: ServerSettings[ModelSelectionSettingsKey] | undefined,
-  patch: ServerSettingsPatch[ModelSelectionSettingsKey] | undefined,
-): ServerSettings[ModelSelectionSettingsKey] | undefined {
+function mergeModelSelectionPatch<T extends ModelSelection>(
+  current: T | null | undefined,
+  patch: DeepPartial<T> | null | undefined,
+): T | null | undefined {
   if (patch === undefined) {
     return current;
   }
@@ -471,33 +471,51 @@ function mergeModelSelectionSetting(
   }
 
   if (current === null || current === undefined) {
-    return isCompleteModelSelectionPatch(patch) ? patch : current;
+    if (patch.provider === undefined || patch.model === undefined) {
+      return current;
+    }
+
+    return {
+      provider: patch.provider,
+      model: patch.model,
+      ...(patch.options !== undefined ? { options: patch.options } : {}),
+    } as T;
   }
 
-  if ("provider" in patch && patch.provider !== undefined && patch.provider !== current.provider) {
-    return isCompleteModelSelectionPatch(patch) ? patch : current;
+  if (patch.provider !== undefined && patch.provider !== current.provider) {
+    if (patch.model === undefined) {
+      return current;
+    }
+
+    return {
+      provider: patch.provider,
+      model: patch.model,
+      ...(patch.options !== undefined ? { options: patch.options } : {}),
+    } as T;
   }
 
-  return deepMerge(current, patch) as ServerSettings[ModelSelectionSettingsKey];
+  if (patch.model !== undefined && patch.options === undefined) {
+    return {
+      provider: patch.provider ?? current.provider,
+      model: patch.model,
+    } as T;
+  }
+
+  return deepMerge(current, patch) as T;
+}
+
+function mergeModelSelectionSetting(
+  current: ServerSettings[ModelSelectionSettingsKey] | undefined,
+  patch: ServerSettingsPatch[ModelSelectionSettingsKey] | undefined,
+): ServerSettings[ModelSelectionSettingsKey] | undefined {
+  return mergeModelSelectionPatch(current, patch);
 }
 
 function mergePresetSelectionPatch<T extends ModelSelectionPreset>(
   current: T[PresetSelectionSettingsKey],
-  patch: Partial<T[PresetSelectionSettingsKey]> | undefined,
+  patch: DeepPartial<T[PresetSelectionSettingsKey]> | undefined,
 ): T[PresetSelectionSettingsKey] {
-  if (patch === undefined) {
-    return current;
-  }
-
-  if ("provider" in patch && patch.provider !== undefined && patch.provider !== current.provider) {
-    return current;
-  }
-
-  if ("model" in patch && patch.model !== undefined) {
-    return deepMerge(current, patch as DeepPartial<T[PresetSelectionSettingsKey]>);
-  }
-
-  return current;
+  return mergeModelSelectionPatch(current, patch) as T[PresetSelectionSettingsKey];
 }
 
 function applyPresetOperation(
