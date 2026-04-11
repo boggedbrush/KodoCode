@@ -1,5 +1,6 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   type ClaudeCodeEffort,
   type ClaudeModelOptions,
@@ -7,11 +8,67 @@ import {
   type ModelCapabilities,
   type ModelSelection,
   type ProviderKind,
+  type ServerProvider,
 } from "@t3tools/contracts";
 
 export interface SelectableModelOption {
   slug: string;
   name: string;
+}
+
+export const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
+
+function hasServerModel(
+  providers: ReadonlyArray<ServerProvider>,
+  provider: ProviderKind,
+  slug: string,
+): boolean {
+  return (
+    providers
+      .find((candidate) => candidate.provider === provider)
+      ?.models.some((model) => model.slug === slug) ?? false
+  );
+}
+
+function isEmptyCodexModelOptions(options: CodexModelOptions | undefined): boolean {
+  return options?.reasoningEffort === undefined && options?.fastMode === undefined;
+}
+
+export function getDefaultUtilityModelSelection(
+  providers: ReadonlyArray<ServerProvider>,
+): ModelSelection {
+  if (hasServerModel(providers, "codex", CODEX_SPARK_MODEL)) {
+    return {
+      provider: "codex",
+      model: CODEX_SPARK_MODEL,
+      options: { reasoningEffort: "low" },
+    };
+  }
+
+  return {
+    provider: "codex",
+    model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
+  };
+}
+
+export function resolveUtilityModelSelectionDefault(
+  selection: ModelSelection | null | undefined,
+  providers: ReadonlyArray<ServerProvider>,
+): ModelSelection {
+  const fallback = getDefaultUtilityModelSelection(providers);
+  if (!selection) {
+    return fallback;
+  }
+
+  if (
+    selection.provider === "codex" &&
+    selection.model === DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex &&
+    isEmptyCodexModelOptions(selection.options)
+  ) {
+    return fallback;
+  }
+
+  return selection;
 }
 
 // ── Effort helpers ────────────────────────────────────────────────────

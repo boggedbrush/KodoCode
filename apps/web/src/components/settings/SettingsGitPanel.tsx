@@ -1,9 +1,7 @@
 import { Equal } from "effect";
-import {
-  type UnifiedSettings,
-  DEFAULT_COMMIT_MESSAGE_STYLE,
-  DEFAULT_UNIFIED_SETTINGS,
-} from "@t3tools/contracts/settings";
+import { type UnifiedSettings, DEFAULT_COMMIT_MESSAGE_STYLE } from "@t3tools/contracts/settings";
+import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import { resolveUtilityModelSelectionDefault } from "@t3tools/shared/model";
 
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import { useServerProviders } from "../../rpc/serverState";
@@ -30,6 +28,10 @@ function SettingsGitSection({
   updateSettings: SettingsUpdater;
 }) {
   const serverProviders = useServerProviders();
+  const defaultTextGenerationModelSelection = resolveUtilityModelSelectionDefault(
+    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+    serverProviders,
+  );
 
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenProvider = textGenerationModelSelection.provider;
@@ -42,8 +44,8 @@ function SettingsGitSection({
     textGenModel,
   );
   const isGitWritingModelDirty = !Equal.equals(
-    settings.textGenerationModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
+    resolveUtilityModelSelectionDefault(settings.textGenerationModelSelection, serverProviders),
+    defaultTextGenerationModelSelection,
   );
 
   return (
@@ -57,8 +59,7 @@ function SettingsGitSection({
               label="text generation model"
               onClick={() =>
                 updateSettings({
-                  textGenerationModelSelection:
-                    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+                  textGenerationModelSelection: defaultTextGenerationModelSelection,
                 })
               }
             />

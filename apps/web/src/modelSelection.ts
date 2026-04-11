@@ -1,13 +1,16 @@
 import {
   DEFAULT_MODEL_SELECTION_PRESET_ID,
-  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   type ModelSelection,
   type ModelSelectionPreset,
   type ProviderInteractionMode,
   type ProviderKind,
   type ServerProvider,
 } from "@t3tools/contracts";
-import { normalizeModelSlug, resolveSelectableModel } from "@t3tools/shared/model";
+import {
+  normalizeModelSlug,
+  resolveSelectableModel,
+  resolveUtilityModelSelectionDefault,
+} from "@t3tools/shared/model";
 import { getComposerProviderState } from "./components/chat/composerProviderRegistry";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
 import {
@@ -206,10 +209,7 @@ export function resolveAppModelSelectionState(
   providers: ReadonlyArray<ServerProvider>,
   selection: ModelSelection | null | undefined = settings.textGenerationModelSelection,
 ): ModelSelection {
-  const resolvedSelection = selection ?? {
-    provider: "codex" as const,
-    model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
-  };
+  const resolvedSelection = resolveUtilityModelSelectionDefault(selection, providers);
   const provider = resolveSelectableProvider(providers, resolvedSelection.provider);
 
   // When the provider changed due to fallback (e.g. selected provider was disabled),

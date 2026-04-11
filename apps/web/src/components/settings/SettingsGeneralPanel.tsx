@@ -1,9 +1,11 @@
 import { useMemo } from "react";
 import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@t3tools/contracts/settings";
 import { Equal } from "effect";
+import { resolveUtilityModelSelectionDefault } from "@t3tools/shared/model";
 
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
+import { useServerProviders } from "../../rpc/serverState";
 import { ensureNativeApi, readNativeApi } from "../../nativeApi";
 import {
   SettingResetButton,
@@ -21,14 +23,23 @@ export function useSettingsRestore(onRestored?: () => void) {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
   const { resetSettings } = useUpdateSettings();
+  const serverProviders = useServerProviders();
+  const defaultTextGenerationModelSelection = resolveUtilityModelSelectionDefault(
+    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+    serverProviders,
+  );
+  const defaultPromptEnhanceModelSelection = resolveUtilityModelSelectionDefault(
+    DEFAULT_UNIFIED_SETTINGS.promptEnhanceModelSelection,
+    serverProviders,
+  );
 
   const isGitWritingModelDirty = !Equal.equals(
-    settings.textGenerationModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
+    resolveUtilityModelSelectionDefault(settings.textGenerationModelSelection, serverProviders),
+    defaultTextGenerationModelSelection,
   );
   const isPromptEnhanceModelDirty = !Equal.equals(
-    settings.promptEnhanceModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.promptEnhanceModelSelection ?? null,
+    resolveUtilityModelSelectionDefault(settings.promptEnhanceModelSelection, serverProviders),
+    defaultPromptEnhanceModelSelection,
   );
   const areProviderSettingsDirty = PROVIDER_SETTINGS.some((providerSettings) => {
     const currentSettings = settings.providers[providerSettings.provider];

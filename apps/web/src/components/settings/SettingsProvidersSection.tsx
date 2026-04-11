@@ -14,7 +14,7 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@t3tools/contracts/settings";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+import { normalizeModelSlug, resolveUtilityModelSelectionDefault } from "@t3tools/shared/model";
 import { Equal } from "effect";
 
 import { cn } from "../../lib/utils";
@@ -161,6 +161,14 @@ export function SettingsProvidersSection({
 
   const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
   const textGenProvider = textGenerationModelSelection.provider;
+  const defaultTextGenerationModelSelection = resolveUtilityModelSelectionDefault(
+    DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+    serverProviders,
+  );
+  const defaultPromptEnhanceModelSelection = resolveUtilityModelSelectionDefault(
+    DEFAULT_UNIFIED_SETTINGS.promptEnhanceModelSelection,
+    serverProviders,
+  );
   const promptEnhanceProvider = resolveAppModelSelectionState(
     settings,
     serverProviders,
@@ -431,14 +439,12 @@ export function SettingsProvidersSection({
                         },
                         ...(shouldClearModelSelection
                           ? {
-                              textGenerationModelSelection:
-                                DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
+                              textGenerationModelSelection: defaultTextGenerationModelSelection,
                             }
                           : {}),
                         ...(shouldClearPromptEnhanceModelSelection
                           ? {
-                              promptEnhanceModelSelection:
-                                DEFAULT_UNIFIED_SETTINGS.promptEnhanceModelSelection,
+                              promptEnhanceModelSelection: defaultPromptEnhanceModelSelection,
                             }
                           : {}),
                       });

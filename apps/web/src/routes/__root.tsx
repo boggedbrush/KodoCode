@@ -13,6 +13,8 @@ import {
 import { useEffect, useEffectEvent, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
+import { Equal } from "effect";
+import { resolveUtilityModelSelectionDefault } from "@t3tools/shared/model";
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
@@ -33,6 +35,7 @@ import {
   startServerStateSync,
   useServerConfig,
   useServerConfigUpdatedSubscription,
+  useServerProviders,
   useServerWelcomeSubscription,
 } from "../rpc/serverState";
 import {
@@ -44,6 +47,7 @@ import { useStore } from "../store";
 import { useUiStateStore } from "../uiStateStore";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { migrateLocalSettingsToServer } from "../hooks/useSettings";
+import { useSettings, useUpdateSettings } from "../hooks/useSettings";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
@@ -83,6 +87,7 @@ function RootRouteView() {
       <ToastProvider>
         <AnchoredToastProvider>
           <ServerStateBootstrap />
+          <UtilityModelDefaultBootstrap />
           <GlobalAppShortcuts />
           <EventRouter />
           <WebSocketConnectionCoordinator />
@@ -213,6 +218,46 @@ const MAX_NO_PROGRESS_REPLAY_RETRIES = 3;
 
 function ServerStateBootstrap() {
   useEffect(() => startServerStateSync(getWsRpcClient().server), []);
+
+  return null;
+}
+
+function UtilityModelDefaultBootstrap() {
+  const settings = useSettings();
+  const { updateSettings } = useUpdateSettings();
+  const providers = useServerProviders();
+
+  useEffect(() => {
+    const textGenerationModelSelection = resolveUtilityModelSelectionDefault(
+      settings.textGenerationModelSelection,
+      providers,
+    );
+    const promptEnhanceModelSelection = resolveUtilityModelSelectionDefault(
+      settings.promptEnhanceModelSelection,
+      providers,
+    );
+
+    if (
+      Equal.equals(textGenerationModelSelection, settings.textGenerationModelSelection) &&
+      Equal.equals(promptEnhanceModelSelection, settings.promptEnhanceModelSelection)
+    ) {
+      return;
+    }
+
+    updateSettings({
+      ...(Equal.equals(textGenerationModelSelection, settings.textGenerationModelSelection)
+        ? {}
+        : { textGenerationModelSelection }),
+      ...(Equal.equals(promptEnhanceModelSelection, settings.promptEnhanceModelSelection)
+        ? {}
+        : { promptEnhanceModelSelection }),
+    });
+  }, [
+    providers,
+    settings.promptEnhanceModelSelection,
+    settings.textGenerationModelSelection,
+    updateSettings,
+  ]);
 
   return null;
 }

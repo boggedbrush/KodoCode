@@ -1,6 +1,7 @@
 import { Equal } from "effect";
 import { type ModelSelection, type PromptEnhancePreset } from "@t3tools/contracts";
 import { type UnifiedSettings, DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import { resolveUtilityModelSelectionDefault } from "@t3tools/shared/model";
 
 import { enhancePresetLabel, ENHANCE_PRESET_LABELS } from "../../enhancePreset";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
@@ -28,6 +29,10 @@ function SettingsEnhanceSection({
   updateSettings: SettingsUpdater;
 }) {
   const serverProviders = useServerProviders();
+  const defaultPromptEnhanceModelSelection = resolveUtilityModelSelectionDefault(
+    DEFAULT_UNIFIED_SETTINGS.promptEnhanceModelSelection,
+    serverProviders,
+  );
 
   const promptEnhanceModelSelection = resolveAppModelSelectionState(
     settings,
@@ -44,8 +49,8 @@ function SettingsEnhanceSection({
     promptEnhanceModel,
   );
   const isPromptEnhanceModelDirty = !Equal.equals(
-    settings.promptEnhanceModelSelection ?? null,
-    DEFAULT_UNIFIED_SETTINGS.promptEnhanceModelSelection ?? null,
+    resolveUtilityModelSelectionDefault(settings.promptEnhanceModelSelection, serverProviders),
+    defaultPromptEnhanceModelSelection,
   );
 
   return (
@@ -59,7 +64,7 @@ function SettingsEnhanceSection({
               label="enhance prompt generation model"
               onClick={() =>
                 updateSettings({
-                  promptEnhanceModelSelection: DEFAULT_UNIFIED_SETTINGS.promptEnhanceModelSelection,
+                  promptEnhanceModelSelection: defaultPromptEnhanceModelSelection,
                 })
               }
             />

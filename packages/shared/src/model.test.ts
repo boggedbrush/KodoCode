@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MODEL_BY_PROVIDER, type ModelCapabilities } from "@t3tools/contracts";
+import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  type ModelCapabilities,
+  type ServerProvider,
+} from "@t3tools/contracts";
 
 import {
   applyClaudePromptEffortPrefix,
+  CODEX_SPARK_MODEL,
   getDefaultContextWindow,
+  getDefaultUtilityModelSelection,
   getDefaultEffort,
   hasContextWindowOption,
   hasEffortLevel,
@@ -17,6 +23,7 @@ import {
   resolveModelSlug,
   resolveModelSlugForProvider,
   resolveSelectableModel,
+  resolveUtilityModelSelectionDefault,
   trimOrNull,
 } from "./model";
 
@@ -45,6 +52,42 @@ const claudeCaps: ModelCapabilities = {
   ],
   promptInjectedEffortLevels: ["ultrathink"],
 };
+
+const providersWithSpark: ReadonlyArray<ServerProvider> = [
+  {
+    provider: "codex",
+    enabled: true,
+    status: "ready",
+    installed: true,
+    version: "0.0.0",
+    checkedAt: "2026-04-10T00:00:00.000Z",
+    models: [
+      { slug: "gpt-5.4-mini", name: "GPT-5.4 Mini", isCustom: false, capabilities: codexCaps },
+      {
+        slug: CODEX_SPARK_MODEL,
+        name: "GPT-5.3 Codex Spark",
+        isCustom: false,
+        capabilities: codexCaps,
+      },
+    ],
+    auth: { status: "authenticated" },
+  },
+];
+
+const providersWithoutSpark: ReadonlyArray<ServerProvider> = [
+  {
+    provider: "codex",
+    enabled: true,
+    status: "ready",
+    installed: true,
+    version: "0.0.0",
+    checkedAt: "2026-04-10T00:00:00.000Z",
+    models: [
+      { slug: "gpt-5.4-mini", name: "GPT-5.4 Mini", isCustom: false, capabilities: codexCaps },
+    ],
+    auth: { status: "authenticated" },
+  },
+];
 
 describe("normalizeModelSlug", () => {
   it("maps known aliases to canonical slugs", () => {
@@ -83,6 +126,49 @@ describe("resolveSelectableModel", () => {
     expect(resolveSelectableModel("codex", "gpt-5.3-codex", options)).toBe("gpt-5.3-codex");
     expect(resolveSelectableModel("codex", "gpt-5.3 codex", options)).toBe("gpt-5.3-codex");
     expect(resolveSelectableModel("claudeAgent", "sonnet", options)).toBe("claude-sonnet-4-6");
+  });
+});
+
+describe("utility model defaults", () => {
+  it("prefers spark at low effort when spark is available", () => {
+    expect(getDefaultUtilityModelSelection(providersWithSpark)).toEqual({
+      provider: "codex",
+      model: CODEX_SPARK_MODEL,
+      options: { reasoningEffort: "low" },
+    });
+  });
+
+  it("keeps the legacy codex mini default when spark is unavailable", () => {
+    expect(getDefaultUtilityModelSelection(providersWithoutSpark)).toEqual({
+      provider: "codex",
+      model: "gpt-5.4-mini",
+    });
+  });
+
+  it("upgrades untouched legacy defaults to spark when available", () => {
+    expect(
+      resolveUtilityModelSelectionDefault(
+        { provider: "codex", model: "gpt-5.4-mini" },
+        providersWithSpark,
+      ),
+    ).toEqual({
+      provider: "codex",
+      model: CODEX_SPARK_MODEL,
+      options: { reasoningEffort: "low" },
+    });
+  });
+
+  it("preserves explicit selections", () => {
+    expect(
+      resolveUtilityModelSelectionDefault(
+        { provider: "codex", model: "gpt-5.4-mini", options: { reasoningEffort: "high" } },
+        providersWithSpark,
+      ),
+    ).toEqual({
+      provider: "codex",
+      model: "gpt-5.4-mini",
+      options: { reasoningEffort: "high" },
+    });
   });
 });
 
