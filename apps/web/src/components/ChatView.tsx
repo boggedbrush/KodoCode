@@ -719,6 +719,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     useState<Record<string, number>>({});
   const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
   const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  const [providerUsagePanelOpen, setProviderUsagePanelOpen] = useState(false);
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
@@ -947,6 +948,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   useEffect(() => {
     setEnhancementState(null);
     setIsEnhancingPrompt(false);
+  }, [threadId]);
+
+  useEffect(() => {
+    setProviderUsagePanelOpen(false);
   }, [threadId]);
 
   useEffect(() => {
@@ -1593,7 +1598,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           type: "slash-command",
           command: "usage",
           label: "/usage",
-          description: "Open provider usage in settings",
+          description: "Toggle active provider usage panel",
         },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
@@ -2208,12 +2213,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const handleStandaloneSlashCommand = useCallback(
     (command: ComposerStandaloneSlashCommand) => {
       if (command === "usage") {
-        void navigate({ to: "/settings/providers" });
+        setProviderUsagePanelOpen((open) => !open);
         return;
       }
       void handleInteractionModeChange(command);
     },
-    [handleInteractionModeChange, navigate],
+    [handleInteractionModeChange],
   );
 
   useEffect(() => {
@@ -4630,7 +4635,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       {/* Error banner */}
       <ProviderStatusBanner status={activeProviderStatus} />
-      <ProviderUsageNotice usage={activeProviderUsage} />
+      <ProviderUsageNotice
+        provider={selectedProvider}
+        usage={activeProviderUsage}
+        visible={providerUsagePanelOpen}
+        onDismiss={() => setProviderUsagePanelOpen(false)}
+      />
       <ThreadErrorBanner
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}

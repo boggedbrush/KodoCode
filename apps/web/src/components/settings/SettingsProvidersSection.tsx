@@ -12,7 +12,6 @@ import {
   type ProviderKind,
   type ServerProvider,
   type ServerProviderModel,
-  type ServerProviderUsageWindow,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@t3tools/contracts/settings";
 import { normalizeModelSlug, resolveUtilityModelSelectionDefault } from "@t3tools/shared/model";
@@ -22,6 +21,11 @@ import { Equal } from "effect";
 import { cn } from "../../lib/utils";
 import { MAX_CUSTOM_MODEL_LENGTH, resolveAppModelSelectionState } from "../../modelSelection";
 import { ensureNativeApi } from "../../nativeApi";
+import {
+  clampUsagePercentUsed,
+  selectPrimaryUsageWindows,
+  toRemainingUsagePercent,
+} from "../../providerUsageDisplay";
 import { useProviderUsages } from "../../rpc/providerUsageState";
 import { useServerProviders } from "../../rpc/serverState";
 import { Button } from "../ui/button";
@@ -159,82 +163,6 @@ function shouldHideUsageSummary(input: {
   }
 
   return false;
-}
-
-function clampPercent(percentUsed: number | null): number | null {
-  if (percentUsed === null || Number.isNaN(percentUsed)) {
-    return null;
-  }
-  return Math.max(0, Math.min(100, percentUsed));
-}
-
-function toRemainingPercent(percentUsed: number | null): number | null {
-  if (percentUsed === null) {
-    return null;
-  }
-  return Math.max(0, Math.min(100, 100 - percentUsed));
-}
-
-function normalizeUsageWindowToken(value: string): string {
-  return value.trim().replaceAll(/\s+/g, " ").toLowerCase();
-}
-
-function isWeeklyWindow(window: ServerProviderUsageWindow): boolean {
-  const token = normalizeUsageWindowToken(`${window.key} ${window.label}`);
-  return (
-    token.includes("weekly") ||
-    token.includes("week") ||
-    token.includes("7d") ||
-    token.includes("7-day")
-  );
-}
-
-function isSessionWindow(window: ServerProviderUsageWindow): boolean {
-  const token = normalizeUsageWindowToken(`${window.key} ${window.label}`);
-  return (
-    token.includes("session") ||
-    token.includes("5h") ||
-    token.includes("5-hour") ||
-    token.includes("hour")
-  );
-}
-
-function takePreferredWindow(input: {
-  readonly windows: ReadonlyArray<ServerProviderUsageWindow>;
-  readonly usedKeys: Set<string>;
-  readonly preferredLabel: string;
-  readonly matcher: (window: ServerProviderUsageWindow) => boolean;
-}): ServerProviderUsageWindow | null {
-  const preferredLabel = normalizeUsageWindowToken(input.preferredLabel);
-  const byLabel = input.windows.find((window) => {
-    if (input.usedKeys.has(window.key)) {
-      return false;
-    }
-    return normalizeUsageWindowToken(window.label) === preferredLabel;
-  });
-  if (byLabel) {
-    input.usedKeys.add(byLabel.key);
-    return byLabel;
-  }
-
-  const byMatcher = input.windows.find((window) => {
-    if (input.usedKeys.has(window.key)) {
-      return false;
-    }
-    return input.matcher(window);
-  });
-  if (byMatcher) {
-    input.usedKeys.add(byMatcher.key);
-    return byMatcher;
-  }
-
-  const firstUnclaimed = input.windows.find((window) => !input.usedKeys.has(window.key));
-  if (firstUnclaimed) {
-    input.usedKeys.add(firstUnclaimed.key);
-    return firstUnclaimed;
-  }
-
-  return null;
 }
 
 function usageBarToneClass(percentRemaining: number | null): string {
@@ -562,18 +490,10 @@ export function SettingsProvidersSection({
             : null;
         const usageDetail = providerCard.providerUsage?.detail ?? null;
         const usageWindows = providerCard.providerUsage?.windows ?? [];
-        const claimedWindowKeys = new Set<string>();
-        const sessionWindow = takePreferredWindow({
+        const { sessionWindow, weeklyWindow } = selectPrimaryUsageWindows({
           windows: usageWindows,
-          usedKeys: claimedWindowKeys,
-          preferredLabel: providerCard.providerUsageMetadata.sessionLabel,
-          matcher: isSessionWindow,
-        });
-        const weeklyWindow = takePreferredWindow({
-          windows: usageWindows,
-          usedKeys: claimedWindowKeys,
-          preferredLabel: providerCard.providerUsageMetadata.weeklyLabel,
-          matcher: isWeeklyWindow,
+          sessionLabel: providerCard.providerUsageMetadata.sessionLabel,
+          weeklyLabel: providerCard.providerUsageMetadata.weeklyLabel,
         });
         const usageBarRows = [
           {
@@ -654,8 +574,10 @@ export function SettingsProvidersSection({
                       ) : null}
                       <div className="mt-1 grid gap-1 md:grid-cols-2">
                         {usageBarRows.map((row) => {
-                          const percentUsed = clampPercent(row.window?.percentUsed ?? null);
-                          const percentRemaining = toRemainingPercent(percentUsed);
+                          const percentUsed = clampUsagePercentUsed(
+                            row.window?.percentUsed ?? null,
+                          );
+                          const percentRemaining = toRemainingUsagePercent(percentUsed);
                           const hasRemaining = percentRemaining !== null;
                           return (
                             <div
