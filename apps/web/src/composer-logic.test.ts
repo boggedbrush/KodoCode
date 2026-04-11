@@ -236,12 +236,20 @@ describe("isCollapsedCursorAdjacentToInlineToken", () => {
 });
 
 describe("parseStandaloneComposerSlashCommand", () => {
+  it("parses standalone /ask command", () => {
+    expect(parseStandaloneComposerSlashCommand("/ask")).toBe("ask");
+  });
+
   it("parses standalone /plan command", () => {
     expect(parseStandaloneComposerSlashCommand(" /plan ")).toBe("plan");
   });
 
-  it("parses standalone /default command", () => {
-    expect(parseStandaloneComposerSlashCommand("/default")).toBe("default");
+  it("parses standalone /code command", () => {
+    expect(parseStandaloneComposerSlashCommand("/code")).toBe("code");
+  });
+
+  it("parses standalone /usage command", () => {
+    expect(parseStandaloneComposerSlashCommand("/usage")).toBe("usage");
   });
 
   it("ignores slash commands with extra message text", () => {

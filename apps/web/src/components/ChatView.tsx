@@ -37,6 +37,7 @@ import { isLinuxPlatform } from "../lib/utils";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
   clampCollapsedComposerCursor,
+  type ComposerStandaloneSlashCommand,
   type ComposerTrigger,
   collapseExpandedComposerCursor,
   detectComposerTrigger,
@@ -1560,11 +1561,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
           description: "Switch response model for this thread",
         },
         {
+          id: "slash:ask",
+          type: "slash-command",
+          command: "ask",
+          label: "/ask",
+          description: "Switch this thread into ask mode",
+        },
+        {
           id: "slash:plan",
           type: "slash-command",
           command: "plan",
           label: "/plan",
           description: "Switch this thread into plan mode",
+        },
+        {
+          id: "slash:code",
+          type: "slash-command",
+          command: "code",
+          label: "/code",
+          description: "Switch this thread into code mode",
         },
         {
           id: "slash:review",
@@ -1574,11 +1589,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
           description: "Switch this thread into review mode",
         },
         {
-          id: "slash:default",
+          id: "slash:usage",
           type: "slash-command",
-          command: "default",
-          label: "/default",
-          description: "Switch this thread back to normal build mode",
+          command: "usage",
+          label: "/usage",
+          description: "Open provider usage in settings",
         },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
@@ -2189,6 +2204,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
       settings,
       threadId,
     ],
+  );
+  const handleStandaloneSlashCommand = useCallback(
+    (command: ComposerStandaloneSlashCommand) => {
+      if (command === "usage") {
+        void navigate({ to: "/settings/providers" });
+        return;
+      }
+      void handleInteractionModeChange(command);
+    },
+    [handleInteractionModeChange, navigate],
   );
 
   useEffect(() => {
@@ -3136,6 +3161,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
     e?.preventDefault();
     const api = readNativeApi();
     if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
+    const standaloneSlashCommand =
+      composerImages.length === 0 && composerTerminalContexts.length === 0
+        ? parseStandaloneComposerSlashCommand(promptRef.current.trim())
+        : null;
+    if (standaloneSlashCommand) {
+      handleStandaloneSlashCommand(standaloneSlashCommand);
+      promptRef.current = "";
+      clearComposerDraftContent(activeThread.id);
+      setComposerHighlightedItemId(null);
+      setComposerCursor(0);
+      setComposerTrigger(null);
+      return;
+    }
     if (interactionMode === "review") {
       setIsReviewSetupDialogOpen(true);
       return;
@@ -3169,19 +3207,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         text: followUp.text,
         interactionMode: followUp.interactionMode,
       });
-      return;
-    }
-    const standaloneSlashCommand =
-      composerImages.length === 0 && sendableComposerTerminalContexts.length === 0
-        ? parseStandaloneComposerSlashCommand(trimmed)
-        : null;
-    if (standaloneSlashCommand) {
-      handleInteractionModeChange(standaloneSlashCommand);
-      promptRef.current = "";
-      clearComposerDraftContent(activeThread.id);
-      setComposerHighlightedItemId(null);
-      setComposerCursor(0);
-      setComposerTrigger(null);
       return;
     }
     if (!hasSendableContent) {
@@ -4364,9 +4389,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           return;
         }
-        void handleInteractionModeChange(
-          item.command === "plan" ? "plan" : item.command === "review" ? "review" : "default",
-        );
+        handleStandaloneSlashCommand(item.command);
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
@@ -4385,7 +4408,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [
       applyPromptReplacement,
-      handleInteractionModeChange,
+      handleStandaloneSlashCommand,
       onProviderModelSelect,
       resolveActiveComposerTrigger,
     ],

@@ -2,7 +2,8 @@ import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 export type ComposerTriggerKind = "path" | "slash-command" | "slash-model";
-export type ComposerSlashCommand = "model" | "plan" | "review" | "default";
+export type ComposerSlashCommand = "model" | "ask" | "plan" | "code" | "review" | "usage";
+export type ComposerStandaloneSlashCommand = Exclude<ComposerSlashCommand, "model">;
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -11,7 +12,14 @@ export interface ComposerTrigger {
   rangeEnd: number;
 }
 
-const SLASH_COMMANDS: readonly ComposerSlashCommand[] = ["model", "plan", "review", "default"];
+const SLASH_COMMANDS: readonly ComposerSlashCommand[] = [
+  "model",
+  "ask",
+  "plan",
+  "code",
+  "review",
+  "usage",
+];
 const isInlineTokenSegment = (
   segment: { type: "text"; text: string } | { type: "mention" } | { type: "terminal-context" },
 ): boolean => segment.type !== "text";
@@ -239,15 +247,17 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
-  const match = /^\/(plan|review|default)\s*$/i.exec(text.trim());
+): ComposerStandaloneSlashCommand | null {
+  const match = /^\/(ask|plan|code|review|usage)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
   }
   const command = match[1]?.toLowerCase();
+  if (command === "ask") return "ask";
   if (command === "plan") return "plan";
+  if (command === "code") return "code";
   if (command === "review") return "review";
-  return "default";
+  return "usage";
 }
 
 export function replaceTextRange(
