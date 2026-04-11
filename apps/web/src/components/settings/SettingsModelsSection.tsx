@@ -736,7 +736,7 @@ export function SettingsModelsSection({
             control={
               <ModelSelectionControl
                 provider={provider}
-                lockedProvider={activePreset?.provider ?? null}
+                lockedProvider={presetProvider}
                 model={model}
                 modelOptions={modelOptions}
                 models={models}

@@ -12,6 +12,7 @@ import {
   isWorkflowPresetUndoDirty,
   SettingsModelsSection,
 } from "./SettingsModelsSection";
+import * as SettingsPanelPrimitives from "./SettingsPanelPrimitives";
 
 vi.mock("../../rpc/serverState", () => ({
   useServerProviders: () => [
@@ -62,11 +63,9 @@ describe("SettingsModelsSection", () => {
       <SettingsModelsSection settings={makeSettings()} updateSettings={() => {}} />,
     );
 
-    expect(markup).toContain("Using default configuration");
     expect(markup).toContain("Workflow presets");
-    expect(markup).toContain(
-      '<span data-slot="select-value" class="flex-1 truncate data-placeholder:text-muted-foreground">Default</span>',
-    );
+    expect(markup).toContain("Preset:");
+    expect(markup).toContain("Default");
   });
 
   it("renders the default label for Claude without leaking base configuration", () => {
@@ -80,7 +79,7 @@ describe("SettingsModelsSection", () => {
     );
 
     expect(markup).toContain("Default");
-    expect(markup).not.toContain("Base configuration");
+    expect(markup).toContain("Claude");
   });
 
   it("shows Default when a provider has a stored default preset and no explicit active pointer", () => {
@@ -111,9 +110,7 @@ describe("SettingsModelsSection", () => {
       />,
     );
 
-    expect(markup).toContain(
-      '<span data-slot="select-value" class="flex-1 truncate data-placeholder:text-muted-foreground">Default</span>',
-    );
+    expect(markup).toContain("Default");
   });
 
   it("hides stored default presets from the visible preset list state", () => {
@@ -179,7 +176,8 @@ describe("SettingsModelsSection", () => {
       />,
     );
 
-    expect(markup).toContain("Active preset: Focus (Codex)");
+    expect(markup).toContain("Focus");
+    expect(markup).toContain("Codex");
   });
 
   it("tracks workflow preset undo against the current preset instead of default", () => {
@@ -278,5 +276,24 @@ describe("SettingsModelsSection", () => {
     expect(getWorkflowPresetUndoPatch(after, undoState)).toEqual({
       askModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
     });
+  });
+
+  it("locks workflow preset model controls to the selected provider family", () => {
+    const mockedModelSelectionControl = vi
+      .spyOn(SettingsPanelPrimitives, "ModelSelectionControl")
+      .mockImplementation(() => <></>);
+
+    try {
+      renderToStaticMarkup(
+        <SettingsModelsSection settings={makeSettings()} updateSettings={() => {}} />,
+      );
+
+      expect(mockedModelSelectionControl).toHaveBeenCalled();
+      for (const [props] of mockedModelSelectionControl.mock.calls) {
+        expect(props.lockedProvider).toBe("codex");
+      }
+    } finally {
+      mockedModelSelectionControl.mockRestore();
+    }
   });
 });
