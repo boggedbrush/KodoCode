@@ -36,12 +36,13 @@ import { applySettingsUpdated, getServerConfig, useServerSettings } from "~/rpc/
 
 const CLIENT_SETTINGS_STORAGE_KEY = "t3code:client-settings:v1";
 const OLD_SETTINGS_KEY = "t3code:app-settings:v1";
+export type SettingsUpdatePatch = Partial<UnifiedSettings> & ServerSettingsPatch;
 
 // ── Key sets for routing patches ─────────────────────────────────────
 
-const SERVER_SETTINGS_KEYS = new Set<string>(Struct.keys(ServerSettings.fields));
+const SERVER_SETTINGS_KEYS = new Set<string>(Struct.keys(ServerSettingsPatch.fields));
 
-function splitPatch(patch: Partial<UnifiedSettings>): {
+function splitPatch(patch: SettingsUpdatePatch): {
   serverPatch: ServerSettingsPatch;
   clientPatch: Partial<ClientSettings>;
 } {
@@ -102,7 +103,7 @@ export function useUpdateSettings() {
   );
 
   const updateSettings = useCallback(
-    (patch: Partial<UnifiedSettings>) => {
+    (patch: SettingsUpdatePatch) => {
       const { serverPatch, clientPatch } = splitPatch(patch);
 
       if (Object.keys(serverPatch).length > 0) {

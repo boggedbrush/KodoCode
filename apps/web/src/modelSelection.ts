@@ -1,6 +1,8 @@
 import {
+  DEFAULT_MODEL_SELECTION_PRESET_ID,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   type ModelSelection,
+  type ModelSelectionPreset,
   type ProviderInteractionMode,
   type ProviderKind,
   type ServerProvider,
@@ -16,6 +18,7 @@ import {
 
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
+const PRESET_PROVIDER_ORDER: readonly ProviderKind[] = ["codex", "claudeAgent"];
 
 export type ProviderCustomModelConfig = {
   provider: ProviderKind;
@@ -147,6 +150,35 @@ export function resolveAppModelSelection(
   );
 }
 
+export function resolveProviderScopedModelSelectionState(
+  provider: ProviderKind,
+  rawSelection: Omit<ModelSelection, "provider"> & { provider?: ProviderKind },
+  settings: UnifiedSettings,
+  providers: ReadonlyArray<ServerProvider>,
+): ModelSelection {
+  const model =
+    resolveSelectableModel(
+      provider,
+      rawSelection.model,
+      getAppModelOptions(settings, providers, provider, rawSelection.model),
+    ) ?? getDefaultServerModel(providers, provider);
+  const { modelOptionsForDispatch } = getComposerProviderState({
+    provider,
+    model,
+    models: getProviderModels(providers, provider),
+    prompt: "",
+    modelOptions: {
+      [provider]: rawSelection.options,
+    },
+  });
+
+  return {
+    provider,
+    model,
+    ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
+  };
+}
+
 export function getCustomModelOptionsByProvider(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
@@ -203,6 +235,78 @@ export function resolveAppModelSelectionState(
 
 // ── Kodo: mode-aware model resolution ─────────────────────────────
 
+function getModeSelectionKey(
+  mode: ProviderInteractionMode,
+): keyof Pick<
+  UnifiedSettings,
+  "askModelSelection" | "planModelSelection" | "codeModelSelection" | "reviewModelSelection"
+> {
+  return mode === "ask"
+    ? "askModelSelection"
+    : mode === "plan"
+      ? "planModelSelection"
+      : mode === "review"
+        ? "reviewModelSelection"
+        : "codeModelSelection";
+}
+
+export function getBaseModeModelSelection(
+  mode: ProviderInteractionMode,
+  settings: UnifiedSettings,
+): ModelSelection | null {
+  const selectionKey = getModeSelectionKey(mode);
+  return settings[selectionKey];
+}
+
+export function getActiveModelSelectionPreset(
+  settings: UnifiedSettings,
+  preferredProvider?: ProviderKind | null,
+): ModelSelectionPreset | null {
+  if (preferredProvider) {
+    const presetId = settings.activeModelSelectionPresetByProvider[preferredProvider];
+    if (!presetId || presetId === DEFAULT_MODEL_SELECTION_PRESET_ID) {
+      return null;
+    }
+
+    return settings.modelSelectionPresets[preferredProvider][presetId] ?? null;
+  }
+
+  const providerOrder = [...PRESET_PROVIDER_ORDER];
+
+  for (const provider of providerOrder) {
+    const presetId = settings.activeModelSelectionPresetByProvider[provider];
+    if (!presetId || presetId === DEFAULT_MODEL_SELECTION_PRESET_ID) {
+      continue;
+    }
+
+    const preset = settings.modelSelectionPresets[provider][presetId];
+    if (preset) {
+      return preset;
+    }
+  }
+
+  return null;
+}
+
+export function getModeModelSelectionSource(
+  mode: ProviderInteractionMode,
+  settings: UnifiedSettings,
+  preferredProvider?: ProviderKind | null,
+): ModelSelection | null {
+  const baseSelection = getBaseModeModelSelection(mode, settings);
+  const scopedBaseSelection =
+    preferredProvider && baseSelection?.provider !== preferredProvider ? null : baseSelection;
+  const preset = getActiveModelSelectionPreset(
+    settings,
+    preferredProvider ?? baseSelection?.provider,
+  );
+  if (!preset) {
+    return scopedBaseSelection;
+  }
+
+  return preset[getModeSelectionKey(mode)];
+}
+
 /**
  * Resolve the ModelSelection that should be active for a given interaction
  * mode based on the Kodo ask/plan/code model settings.
@@ -215,14 +319,7 @@ export function resolveModeModelSelection(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
 ): ModelSelection | null {
-  const modeSelection =
-    mode === "ask"
-      ? settings.askModelSelection
-      : mode === "plan"
-        ? settings.planModelSelection
-        : mode === "review"
-          ? settings.reviewModelSelection
-          : settings.codeModelSelection;
+  const modeSelection = getModeModelSelectionSource(mode, settings);
   if (!modeSelection) {
     return null;
   }

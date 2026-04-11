@@ -1,5 +1,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { DEFAULT_SERVER_SETTINGS, ServerSettingsPatch } from "@t3tools/contracts";
+import {
+  DEFAULT_MODEL_SELECTION_PRESET_ID,
+  DEFAULT_SERVER_SETTINGS,
+  type ModelSelectionPreset,
+  ServerSettingsPatch,
+} from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Schema } from "effect";
 import { ServerConfig } from "./config";
@@ -15,6 +20,20 @@ const makeServerSettingsLayer = () =>
       ),
     ),
   );
+
+const makeCodexPreset = (
+  id: string,
+  name: string,
+  model = "gpt-5.4",
+): Extract<ModelSelectionPreset, { provider: "codex" }> => ({
+  id,
+  provider: "codex",
+  name,
+  askModelSelection: { provider: "codex", model },
+  planModelSelection: { provider: "codex", model },
+  codeModelSelection: { provider: "codex", model },
+  reviewModelSelection: { provider: "codex", model },
+});
 
 it.layer(NodeServices.layer)("server settings", (it) => {
   it.effect("decodes nested settings patches", () =>
@@ -66,6 +85,41 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.deepEqual(decodePatch({ commitMessageStyle: "summary" }), {
         commitMessageStyle: "summary",
       });
+    }),
+  );
+
+  it.effect("decodes preset patch operations", () =>
+    Effect.sync(() => {
+      const decodePatch = Schema.decodeUnknownSync(ServerSettingsPatch);
+
+      assert.deepEqual(
+        decodePatch({
+          modelSelectionPresetOps: [
+            {
+              op: "create",
+              preset: makeCodexPreset("focus", "Focus"),
+            },
+            {
+              op: "select",
+              provider: "codex",
+              presetId: "focus",
+            },
+          ],
+        }),
+        {
+          modelSelectionPresetOps: [
+            {
+              op: "create",
+              preset: makeCodexPreset("focus", "Focus"),
+            },
+            {
+              op: "select",
+              provider: "codex",
+              presetId: "focus",
+            },
+          ],
+        },
+      );
     }),
   );
 
@@ -328,6 +382,331 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
+  it.effect("creates a preset and selects it", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      const next = yield* serverSettings.updateSettings({
+        modelSelectionPresetOps: [
+          {
+            op: "create",
+            preset: makeCodexPreset("focus", "Focus"),
+          },
+          {
+            op: "select",
+            provider: "codex",
+            presetId: "focus",
+          },
+        ],
+      });
+
+      assert.equal(next.activeModelSelectionPresetByProvider.codex, "focus");
+      assert.equal(next.modelSelectionPresets.codex.focus?.name, "Focus");
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("seeds built-in starter presets for Codex and Claude", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const next = yield* serverSettings.getSettings;
+
+      assert.equal(next.modelSelectionPresets.codex[DEFAULT_MODEL_SELECTION_PRESET_ID], undefined);
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-free"]?.name, "free");
+      assert.deepEqual(
+        next.modelSelectionPresets.codex["starter-codex-pro-200"]?.reviewModelSelection,
+        {
+          provider: "codex",
+          model: "gpt-5.3-codex",
+          options: {
+            reasoningEffort: "xhigh",
+          },
+        },
+      );
+      assert.equal(
+        next.modelSelectionPresets.claudeAgent[DEFAULT_MODEL_SELECTION_PRESET_ID],
+        undefined,
+      );
+      assert.equal(next.modelSelectionPresets.claudeAgent["starter-claude-free"]?.name, "free");
+      assert.deepEqual(
+        next.modelSelectionPresets.claudeAgent["starter-claude-max-20x"]?.reviewModelSelection,
+        {
+          provider: "claudeAgent",
+          model: "claude-opus-4-6",
+          options: {
+            effort: "high",
+          },
+        },
+      );
+      assert.equal(next.activeModelSelectionPresetByProvider.codex, null);
+      assert.equal(next.activeModelSelectionPresetByProvider.claudeAgent, null);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("renames and deletes a preset", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      yield* serverSettings.updateSettings({
+        modelSelectionPresetOps: [
+          {
+            op: "create",
+            preset: makeCodexPreset("focus", "Focus"),
+          },
+          {
+            op: "select",
+            provider: "codex",
+            presetId: "focus",
+          },
+        ],
+      });
+
+      const renamed = yield* serverSettings.updateSettings({
+        modelSelectionPresetOps: [
+          {
+            op: "update",
+            provider: "codex",
+            presetId: "focus",
+            patch: {
+              name: "Focused work",
+            },
+          },
+        ],
+      });
+
+      assert.equal(renamed.modelSelectionPresets.codex.focus?.name, "Focused work");
+
+      const deleted = yield* serverSettings.updateSettings({
+        modelSelectionPresetOps: [
+          {
+            op: "delete",
+            provider: "codex",
+            presetId: "focus",
+          },
+        ],
+      });
+
+      assert.equal(deleted.modelSelectionPresets.codex.focus, undefined);
+      assert.equal(deleted.activeModelSelectionPresetByProvider.codex, null);
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("switches the active preset", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+
+      yield* serverSettings.updateSettings({
+        modelSelectionPresetOps: [
+          {
+            op: "create",
+            preset: makeCodexPreset("focus", "Focus"),
+          },
+          {
+            op: "create",
+            preset: makeCodexPreset("speed", "Speed", "gpt-5.3-codex"),
+          },
+          {
+            op: "select",
+            provider: "codex",
+            presetId: "focus",
+          },
+        ],
+      });
+
+      const next = yield* serverSettings.updateSettings({
+        modelSelectionPresetOps: [
+          {
+            op: "select",
+            provider: "codex",
+            presetId: "speed",
+          },
+        ],
+      });
+
+      assert.equal(next.activeModelSelectionPresetByProvider.codex, "speed");
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("persists and reloads presets", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3code-server-settings-preset-persist-",
+      });
+      const firstLayer = Layer.fresh(
+        ServerSettingsLive.pipe(Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir))),
+      );
+      const secondLayer = Layer.fresh(
+        ServerSettingsLive.pipe(Layer.provideMerge(ServerConfig.layerTest(process.cwd(), baseDir))),
+      );
+
+      yield* Effect.gen(function* () {
+        const serverSettings = yield* ServerSettingsService;
+        yield* serverSettings.updateSettings({
+          modelSelectionPresetOps: [
+            {
+              op: "create",
+              preset: makeCodexPreset("focus", "Focus"),
+            },
+            {
+              op: "select",
+              provider: "codex",
+              presetId: "focus",
+            },
+          ],
+        });
+      }).pipe(Effect.provide(firstLayer));
+
+      const reloaded = yield* Effect.gen(function* () {
+        const serverSettings = yield* ServerSettingsService;
+        return yield* serverSettings.getSettings;
+      }).pipe(Effect.provide(secondLayer));
+
+      assert.equal(reloaded.modelSelectionPresets.codex.focus?.name, "Focus");
+      assert.equal(reloaded.activeModelSelectionPresetByProvider.codex, "focus");
+    }),
+  );
+
+  it.effect("migrates existing per-mode selections into the default preset", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const next = yield* serverSettings.getSettings;
+
+      assert.equal(next.activeModelSelectionPresetByProvider.codex, null);
+      assert.equal(
+        next.modelSelectionPresets.codex[DEFAULT_MODEL_SELECTION_PRESET_ID]?.name,
+        "Default",
+      );
+      assert.equal(
+        next.modelSelectionPresets.claudeAgent[DEFAULT_MODEL_SELECTION_PRESET_ID],
+        undefined,
+      );
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-free"]?.name, "free");
+    }).pipe(
+      Effect.provide(
+        ServerSettingsService.layerTest({
+          askModelSelection: { provider: "codex", model: "gpt-5.4" },
+          planModelSelection: { provider: "codex", model: "gpt-5.4" },
+          codeModelSelection: { provider: "codex", model: "gpt-5.4" },
+          reviewModelSelection: { provider: "codex", model: "gpt-5.4" },
+        }),
+      ),
+    ),
+  );
+
+  it.effect("does not replace an existing active preset when adding a missing default preset", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const next = yield* serverSettings.getSettings;
+
+      assert.equal(next.activeModelSelectionPresetByProvider.codex, "focus");
+      assert.equal(
+        next.modelSelectionPresets.codex[DEFAULT_MODEL_SELECTION_PRESET_ID]?.name,
+        "Default",
+      );
+      assert.equal(next.modelSelectionPresets.codex.focus?.name, "Focus");
+    }).pipe(
+      Effect.provide(
+        ServerSettingsService.layerTest({
+          askModelSelection: { provider: "codex", model: "gpt-5.4" },
+          planModelSelection: { provider: "codex", model: "gpt-5.4" },
+          codeModelSelection: { provider: "codex", model: "gpt-5.4" },
+          reviewModelSelection: { provider: "codex", model: "gpt-5.4" },
+          modelSelectionPresets: {
+            codex: {
+              focus: makeCodexPreset("focus", "Focus"),
+            },
+            claudeAgent: {},
+          },
+          activeModelSelectionPresetByProvider: {
+            codex: "focus",
+            claudeAgent: null,
+          },
+        }),
+      ),
+    ),
+  );
+
+  it.effect("clears persisted default preset pointers back to the virtual default state", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const next = yield* serverSettings.getSettings;
+
+      assert.equal(next.activeModelSelectionPresetByProvider.codex, null);
+      assert.equal(
+        next.modelSelectionPresets.codex[DEFAULT_MODEL_SELECTION_PRESET_ID]?.name,
+        "Default",
+      );
+    }).pipe(
+      Effect.provide(
+        ServerSettingsService.layerTest({
+          askModelSelection: { provider: "codex", model: "gpt-5.4" },
+          planModelSelection: { provider: "codex", model: "gpt-5.4" },
+          codeModelSelection: { provider: "codex", model: "gpt-5.4" },
+          reviewModelSelection: { provider: "codex", model: "gpt-5.4" },
+          activeModelSelectionPresetByProvider: {
+            codex: DEFAULT_MODEL_SELECTION_PRESET_ID,
+            claudeAgent: null,
+          },
+        }),
+      ),
+    ),
+  );
+
+  it.effect("preserves preset data when the preset provider is disabled", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const next = yield* serverSettings.getSettings;
+
+      assert.equal(next.activeModelSelectionPresetByProvider.codex, "focus");
+      assert.equal(next.modelSelectionPresets.codex.focus?.askModelSelection.provider, "codex");
+    }).pipe(
+      Effect.provide(
+        ServerSettingsService.layerTest({
+          providers: {
+            codex: {
+              enabled: false,
+            },
+          },
+          modelSelectionPresets: {
+            codex: {
+              focus: makeCodexPreset("focus", "Focus"),
+            },
+            claudeAgent: {},
+          },
+          activeModelSelectionPresetByProvider: {
+            codex: "focus",
+            claudeAgent: null,
+          },
+        }),
+      ),
+    ),
+  );
+
+  it.effect("clears invalid active preset pointers without corrupting preset data", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const next = yield* serverSettings.getSettings;
+
+      assert.equal(next.activeModelSelectionPresetByProvider.codex, null);
+      assert.equal(next.modelSelectionPresets.codex.focus?.name, "Focus");
+    }).pipe(
+      Effect.provide(
+        ServerSettingsService.layerTest({
+          modelSelectionPresets: {
+            codex: {
+              focus: makeCodexPreset("focus", "Focus"),
+            },
+            claudeAgent: {},
+          },
+          activeModelSelectionPresetByProvider: {
+            codex: "missing",
+            claudeAgent: null,
+          },
+        }),
+      ),
+    ),
+  );
+
   it.effect("defaults commitMessageStyle to summary", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
@@ -348,6 +727,19 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       yield* serverSettings.updateSettings({
         commitMessageStyle: DEFAULT_SERVER_SETTINGS.commitMessageStyle,
       });
+
+      const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
+      assert.deepEqual(JSON.parse(raw), {});
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  );
+
+  it.effect("does not persist built-in presets when writing sparse settings", () =>
+    Effect.gen(function* () {
+      const serverSettings = yield* ServerSettingsService;
+      const serverConfig = yield* ServerConfig;
+      const fileSystem = yield* FileSystem.FileSystem;
+
+      yield* serverSettings.updateSettings({});
 
       const raw = yield* fileSystem.readFileString(serverConfig.settingsPath);
       assert.deepEqual(JSON.parse(raw), {});

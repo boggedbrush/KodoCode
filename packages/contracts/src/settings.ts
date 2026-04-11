@@ -7,7 +7,12 @@ import {
   CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
 } from "./model";
-import { ModelSelection } from "./orchestration";
+import {
+  ClaudeModelSelection,
+  CodexModelSelection,
+  ModelSelection,
+  ProviderKind,
+} from "./orchestration";
 import { PromptEnhancePreset } from "./enhance";
 
 // ── Client Settings (local-only) ───────────────────────────────
@@ -89,6 +94,49 @@ export const ObservabilitySettings = Schema.Struct({
 });
 export type ObservabilitySettings = typeof ObservabilitySettings.Type;
 
+export const MODEL_SELECTION_PRESET_ID_MAX_LENGTH = 64;
+export const MODEL_SELECTION_PRESET_NAME_MAX_LENGTH = 64;
+export const DEFAULT_MODEL_SELECTION_PRESET_ID = "default";
+export const DEFAULT_MODEL_SELECTION_PRESET_NAME = "Default";
+
+export const ModelSelectionPresetId = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(MODEL_SELECTION_PRESET_ID_MAX_LENGTH),
+);
+export type ModelSelectionPresetId = typeof ModelSelectionPresetId.Type;
+
+export const ModelSelectionPresetName = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(MODEL_SELECTION_PRESET_NAME_MAX_LENGTH),
+);
+export type ModelSelectionPresetName = typeof ModelSelectionPresetName.Type;
+
+export const CodexModelSelectionPreset = Schema.Struct({
+  id: ModelSelectionPresetId,
+  provider: Schema.Literal("codex"),
+  name: ModelSelectionPresetName,
+  askModelSelection: CodexModelSelection,
+  planModelSelection: CodexModelSelection,
+  codeModelSelection: CodexModelSelection,
+  reviewModelSelection: CodexModelSelection,
+});
+export type CodexModelSelectionPreset = typeof CodexModelSelectionPreset.Type;
+
+export const ClaudeModelSelectionPreset = Schema.Struct({
+  id: ModelSelectionPresetId,
+  provider: Schema.Literal("claudeAgent"),
+  name: ModelSelectionPresetName,
+  askModelSelection: ClaudeModelSelection,
+  planModelSelection: ClaudeModelSelection,
+  codeModelSelection: ClaudeModelSelection,
+  reviewModelSelection: ClaudeModelSelection,
+});
+export type ClaudeModelSelectionPreset = typeof ClaudeModelSelectionPreset.Type;
+
+export const ModelSelectionPreset = Schema.Union([
+  CodexModelSelectionPreset,
+  ClaudeModelSelectionPreset,
+]);
+export type ModelSelectionPreset = typeof ModelSelectionPreset.Type;
+
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
@@ -118,6 +166,21 @@ export const ServerSettings = Schema.Struct({
   planModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
   codeModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
   reviewModelSelection: Schema.NullOr(ModelSelection).pipe(Schema.withDecodingDefault(() => null)),
+
+  modelSelectionPresets: Schema.Struct({
+    codex: Schema.Record(
+      TrimmedNonEmptyString,
+      Schema.suspend(() => CodexModelSelectionPreset),
+    ).pipe(Schema.withDecodingDefault(() => ({}))),
+    claudeAgent: Schema.Record(
+      TrimmedNonEmptyString,
+      Schema.suspend(() => ClaudeModelSelectionPreset),
+    ).pipe(Schema.withDecodingDefault(() => ({}))),
+  }).pipe(Schema.withDecodingDefault(() => ({}))),
+  activeModelSelectionPresetByProvider: Schema.Struct({
+    codex: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
+    claudeAgent: Schema.NullOr(TrimmedNonEmptyString).pipe(Schema.withDecodingDefault(() => null)),
+  }).pipe(Schema.withDecodingDefault(() => ({}))),
 
   // Provider specific settings
   providers: Schema.Struct({
@@ -178,6 +241,61 @@ const ModelSelectionPatch = Schema.Union([
   }),
 ]);
 
+const CodexModelSelectionPatch = Schema.Struct({
+  provider: Schema.optionalKey(Schema.Literal("codex")),
+  model: Schema.optionalKey(TrimmedNonEmptyString),
+  options: Schema.optionalKey(CodexModelOptionsPatch),
+});
+
+const ClaudeModelSelectionPatch = Schema.Struct({
+  provider: Schema.optionalKey(Schema.Literal("claudeAgent")),
+  model: Schema.optionalKey(TrimmedNonEmptyString),
+  options: Schema.optionalKey(ClaudeModelOptionsPatch),
+});
+
+const CodexModelSelectionPresetUpdatePatch = Schema.Struct({
+  name: Schema.optionalKey(ModelSelectionPresetName),
+  askModelSelection: Schema.optionalKey(CodexModelSelectionPatch),
+  planModelSelection: Schema.optionalKey(CodexModelSelectionPatch),
+  codeModelSelection: Schema.optionalKey(CodexModelSelectionPatch),
+  reviewModelSelection: Schema.optionalKey(CodexModelSelectionPatch),
+});
+
+const ClaudeModelSelectionPresetUpdatePatch = Schema.Struct({
+  name: Schema.optionalKey(ModelSelectionPresetName),
+  askModelSelection: Schema.optionalKey(ClaudeModelSelectionPatch),
+  planModelSelection: Schema.optionalKey(ClaudeModelSelectionPatch),
+  codeModelSelection: Schema.optionalKey(ClaudeModelSelectionPatch),
+  reviewModelSelection: Schema.optionalKey(ClaudeModelSelectionPatch),
+});
+
+export const ModelSelectionPresetPatchOperation = Schema.Union([
+  Schema.Struct({
+    op: Schema.Literal("create"),
+    preset: ModelSelectionPreset,
+  }),
+  Schema.Struct({
+    op: Schema.Literal("update"),
+    provider: ProviderKind,
+    presetId: ModelSelectionPresetId,
+    patch: Schema.Union([
+      CodexModelSelectionPresetUpdatePatch,
+      ClaudeModelSelectionPresetUpdatePatch,
+    ]),
+  }),
+  Schema.Struct({
+    op: Schema.Literal("delete"),
+    provider: ProviderKind,
+    presetId: ModelSelectionPresetId,
+  }),
+  Schema.Struct({
+    op: Schema.Literal("select"),
+    provider: ProviderKind,
+    presetId: Schema.NullOr(ModelSelectionPresetId),
+  }),
+]);
+export type ModelSelectionPresetPatchOperation = typeof ModelSelectionPresetPatchOperation.Type;
+
 const CodexSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(Schema.String),
@@ -203,6 +321,7 @@ export const ServerSettingsPatch = Schema.Struct({
   planModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
   codeModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
   reviewModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelectionPatch)),
+  modelSelectionPresetOps: Schema.optionalKey(Schema.Array(ModelSelectionPresetPatchOperation)),
 
   observability: Schema.optionalKey(
     Schema.Struct({

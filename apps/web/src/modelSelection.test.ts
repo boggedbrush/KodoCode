@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
 import type { ModelSelection, ServerProvider } from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@t3tools/contracts/settings";
-import { resolveModeModelSelection, resolveModeModelSelectionState } from "./modelSelection";
+import {
+  DEFAULT_MODEL_SELECTION_PRESET_ID,
+  DEFAULT_UNIFIED_SETTINGS,
+  type UnifiedSettings,
+} from "@t3tools/contracts/settings";
+import {
+  getActiveModelSelectionPreset,
+  getModeModelSelectionSource,
+  resolveModeModelSelection,
+  resolveModeModelSelectionState,
+} from "./modelSelection";
 
 // ── Test helpers ──────────────────────────────────────────────────
 
@@ -193,6 +202,50 @@ describe("resolveModeModelSelection", () => {
     expect(codeResult!.model).toBe("gpt-5.4");
   });
 
+  it("prefers the active preset over base mode selections", () => {
+    const settings = makeSettings({
+      askModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      modelSelectionPresets: {
+        codex: {
+          focus: {
+            id: "focus",
+            provider: "codex",
+            name: "Focus",
+            askModelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
+            planModelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
+            codeModelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
+            reviewModelSelection: {
+              provider: "codex",
+              model: "gpt-5.3-codex",
+            },
+          },
+        },
+        claudeAgent: {},
+      },
+      activeModelSelectionPresetByProvider: {
+        codex: "focus",
+        claudeAgent: null,
+      },
+    });
+
+    const result = resolveModeModelSelection("ask", settings, makeProviders());
+
+    expect(result).not.toBeNull();
+    expect(result!.model).toBe("gpt-5.3-codex");
+  });
+
   it("ask model does not affect plan mode resolution", () => {
     const askModelSelection: ModelSelection = {
       provider: "claudeAgent",
@@ -260,5 +313,147 @@ describe("resolveModeModelSelectionState", () => {
     expect(result.provider).toBe("codex");
     // Should still have a valid model (custom model will be added to options)
     expect(result.model).toBeTruthy();
+  });
+});
+
+describe("getActiveModelSelectionPreset", () => {
+  it("returns the active preset for the preferred provider", () => {
+    const settings = makeSettings({
+      modelSelectionPresets: {
+        codex: {
+          focus: {
+            id: "focus",
+            provider: "codex",
+            name: "Focus",
+            askModelSelection: { provider: "codex", model: "gpt-5.4" },
+            planModelSelection: { provider: "codex", model: "gpt-5.4" },
+            codeModelSelection: { provider: "codex", model: "gpt-5.4" },
+            reviewModelSelection: { provider: "codex", model: "gpt-5.4" },
+          },
+        },
+        claudeAgent: {
+          review: {
+            id: "review",
+            provider: "claudeAgent",
+            name: "Review",
+            askModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+            planModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+            codeModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+            reviewModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+          },
+        },
+      },
+      activeModelSelectionPresetByProvider: {
+        codex: "focus",
+        claudeAgent: "review",
+      },
+    });
+
+    expect(getActiveModelSelectionPreset(settings, "claudeAgent")?.id).toBe("review");
+    expect(getActiveModelSelectionPreset(settings, "codex")?.id).toBe("focus");
+  });
+
+  it("does not fall through to another provider when the preferred provider has no active preset", () => {
+    const settings = makeSettings({
+      modelSelectionPresets: {
+        codex: {
+          focus: {
+            id: "focus",
+            provider: "codex",
+            name: "Focus",
+            askModelSelection: { provider: "codex", model: "gpt-5.4" },
+            planModelSelection: { provider: "codex", model: "gpt-5.4" },
+            codeModelSelection: { provider: "codex", model: "gpt-5.4" },
+            reviewModelSelection: { provider: "codex", model: "gpt-5.4" },
+          },
+        },
+        claudeAgent: {
+          [DEFAULT_MODEL_SELECTION_PRESET_ID]: {
+            id: DEFAULT_MODEL_SELECTION_PRESET_ID,
+            provider: "claudeAgent",
+            name: "Default",
+            askModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+            planModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+            codeModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+            reviewModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+          },
+        },
+      },
+      activeModelSelectionPresetByProvider: {
+        codex: "focus",
+        claudeAgent: null,
+      },
+    });
+
+    expect(getActiveModelSelectionPreset(settings, "claudeAgent")).toBeNull();
+    expect(getActiveModelSelectionPreset(settings)?.id).toBe("focus");
+  });
+
+  it("ignores a persisted default preset pointer", () => {
+    const settings = makeSettings({
+      modelSelectionPresets: {
+        codex: {
+          [DEFAULT_MODEL_SELECTION_PRESET_ID]: {
+            id: DEFAULT_MODEL_SELECTION_PRESET_ID,
+            provider: "codex",
+            name: "Default",
+            askModelSelection: { provider: "codex", model: "gpt-5.4" },
+            planModelSelection: { provider: "codex", model: "gpt-5.4" },
+            codeModelSelection: { provider: "codex", model: "gpt-5.4" },
+            reviewModelSelection: { provider: "codex", model: "gpt-5.4" },
+          },
+        },
+        claudeAgent: {},
+      },
+      activeModelSelectionPresetByProvider: {
+        codex: DEFAULT_MODEL_SELECTION_PRESET_ID,
+        claudeAgent: null,
+      },
+    });
+
+    expect(getActiveModelSelectionPreset(settings, "codex")).toBeNull();
+    expect(getActiveModelSelectionPreset(settings)).toBeNull();
+  });
+});
+
+describe("getModeModelSelectionSource", () => {
+  it("ignores stored default presets when resolving a provider-scoped selection", () => {
+    const settings = makeSettings({
+      askModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      modelSelectionPresets: {
+        codex: {},
+        claudeAgent: {
+          [DEFAULT_MODEL_SELECTION_PRESET_ID]: {
+            id: DEFAULT_MODEL_SELECTION_PRESET_ID,
+            provider: "claudeAgent",
+            name: "Default",
+            askModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+            planModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+            codeModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+            reviewModelSelection: { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+          },
+        },
+      },
+      activeModelSelectionPresetByProvider: {
+        codex: null,
+        claudeAgent: null,
+      },
+    });
+
+    expect(getModeModelSelectionSource("ask", settings, "claudeAgent")).toBeNull();
+  });
+
+  it("does not reuse another provider's base selection when scoped to a provider", () => {
+    const settings = makeSettings({
+      askModelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+    });
+
+    expect(getModeModelSelectionSource("ask", settings, "claudeAgent")).toBeNull();
   });
 });

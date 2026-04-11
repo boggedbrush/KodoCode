@@ -11,9 +11,13 @@
  * @module ServerSettings
  */
 import {
+  DEFAULT_MODEL_SELECTION_PRESET_ID,
+  DEFAULT_MODEL_SELECTION_PRESET_NAME,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
   type ModelSelection,
+  type ModelSelectionPreset,
+  type ModelSelectionPresetPatchOperation,
   type ProviderKind,
   ServerSettings,
   ServerSettingsError,
@@ -71,17 +75,18 @@ export class ServerSettingsService extends ServiceMap.Service<
       ServerSettingsService,
       Effect.gen(function* () {
         const currentSettingsRef = yield* Ref.make<ServerSettings>(
-          deepMerge(DEFAULT_SERVER_SETTINGS, overrides),
+          normalizePresetState(deepMerge(DEFAULT_SERVER_SETTINGS, overrides)),
         );
 
         return {
           start: Effect.void,
           ready: Effect.void,
-          getSettings: Ref.get(currentSettingsRef),
+          getSettings: Ref.get(currentSettingsRef).pipe(Effect.map(resolveEnabledModelSelections)),
           updateSettings: (patch) =>
             Ref.get(currentSettingsRef).pipe(
               Effect.map((currentSettings) => mergeServerSettingsPatch(currentSettings, patch)),
               Effect.tap((nextSettings) => Ref.set(currentSettingsRef, nextSettings)),
+              Effect.map(resolveEnabledModelSelections),
             ),
           streamChanges: Stream.empty,
         } satisfies ServerSettingsShape;
@@ -101,6 +106,172 @@ const MODEL_SELECTION_SETTINGS_KEYS = [
   "reviewModelSelection",
 ] as const;
 type ModelSelectionSettingsKey = (typeof MODEL_SELECTION_SETTINGS_KEYS)[number];
+type ProviderPresetMap = ServerSettings["modelSelectionPresets"][ProviderKind];
+
+const PRESET_SELECTION_SETTINGS_KEYS = [
+  "askModelSelection",
+  "planModelSelection",
+  "codeModelSelection",
+  "reviewModelSelection",
+] as const;
+type PresetSelectionSettingsKey = (typeof PRESET_SELECTION_SETTINGS_KEYS)[number];
+
+function makeCodexPreset(
+  id: string,
+  name: string,
+  selections: {
+    ask: { model: string; effort: "xhigh" | "high" | "medium" | "low" };
+    plan: { model: string; effort: "xhigh" | "high" | "medium" | "low" };
+    code: { model: string; effort: "xhigh" | "high" | "medium" | "low" };
+    review: { model: string; effort: "xhigh" | "high" | "medium" | "low" };
+  },
+): Extract<ModelSelectionPreset, { provider: "codex" }> {
+  return {
+    id,
+    provider: "codex",
+    name,
+    askModelSelection: {
+      provider: "codex",
+      model: selections.ask.model,
+      options: { reasoningEffort: selections.ask.effort },
+    },
+    planModelSelection: {
+      provider: "codex",
+      model: selections.plan.model,
+      options: { reasoningEffort: selections.plan.effort },
+    },
+    codeModelSelection: {
+      provider: "codex",
+      model: selections.code.model,
+      options: { reasoningEffort: selections.code.effort },
+    },
+    reviewModelSelection: {
+      provider: "codex",
+      model: selections.review.model,
+      options: { reasoningEffort: selections.review.effort },
+    },
+  };
+}
+
+function makeClaudePreset(
+  id: string,
+  name: string,
+  selections: {
+    ask: {
+      model: string;
+      thinking?: boolean;
+      effort?: "low" | "medium" | "high" | "max" | "ultrathink";
+    };
+    plan: {
+      model: string;
+      thinking?: boolean;
+      effort?: "low" | "medium" | "high" | "max" | "ultrathink";
+    };
+    code: {
+      model: string;
+      thinking?: boolean;
+      effort?: "low" | "medium" | "high" | "max" | "ultrathink";
+    };
+    review: {
+      model: string;
+      thinking?: boolean;
+      effort?: "low" | "medium" | "high" | "max" | "ultrathink";
+    };
+  },
+): Extract<ModelSelectionPreset, { provider: "claudeAgent" }> {
+  return {
+    id,
+    provider: "claudeAgent",
+    name,
+    askModelSelection: toClaudePresetSelection(selections.ask),
+    planModelSelection: toClaudePresetSelection(selections.plan),
+    codeModelSelection: toClaudePresetSelection(selections.code),
+    reviewModelSelection: toClaudePresetSelection(selections.review),
+  };
+}
+
+function toClaudePresetSelection(selection: {
+  model: string;
+  thinking?: boolean;
+  effort?: "low" | "medium" | "high" | "max" | "ultrathink";
+}) {
+  return {
+    provider: "claudeAgent" as const,
+    model: selection.model,
+    ...(selection.thinking !== undefined || selection.effort !== undefined
+      ? {
+          options: {
+            ...(selection.thinking !== undefined ? { thinking: selection.thinking } : {}),
+            ...(selection.effort !== undefined ? { effort: selection.effort } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+const BUILT_IN_MODEL_SELECTION_PRESETS: {
+  readonly codex: ReadonlyArray<Extract<ModelSelectionPreset, { provider: "codex" }>>;
+  readonly claudeAgent: ReadonlyArray<Extract<ModelSelectionPreset, { provider: "claudeAgent" }>>;
+} = {
+  codex: [
+    makeCodexPreset("starter-codex-free", "free", {
+      ask: { model: "gpt-5.4-mini", effort: "low" },
+      plan: { model: "gpt-5.4-mini", effort: "medium" },
+      code: { model: "gpt-5.4-mini", effort: "low" },
+      review: { model: "gpt-5.4", effort: "low" },
+    }),
+    makeCodexPreset("starter-codex-go", "go", {
+      ask: { model: "gpt-5.4-mini", effort: "low" },
+      plan: { model: "gpt-5.4-mini", effort: "medium" },
+      code: { model: "gpt-5.4-mini", effort: "low" },
+      review: { model: "gpt-5.4", effort: "medium" },
+    }),
+    makeCodexPreset("starter-codex-plus", "plus", {
+      ask: { model: "gpt-5.4-mini", effort: "low" },
+      plan: { model: "gpt-5.4", effort: "medium" },
+      code: { model: "gpt-5.4-mini", effort: "medium" },
+      review: { model: "gpt-5.3-codex", effort: "medium" },
+    }),
+    makeCodexPreset("starter-codex-pro-100", "pro 100", {
+      ask: { model: "gpt-5.4-mini", effort: "low" },
+      plan: { model: "gpt-5.4", effort: "high" },
+      code: { model: "gpt-5.4-mini", effort: "medium" },
+      review: { model: "gpt-5.3-codex", effort: "high" },
+    }),
+    makeCodexPreset("starter-codex-pro-200", "pro 200", {
+      ask: { model: "gpt-5.4-mini", effort: "low" },
+      plan: { model: "gpt-5.3-codex", effort: "high" },
+      code: { model: "gpt-5.4-mini", effort: "medium" },
+      review: { model: "gpt-5.3-codex", effort: "xhigh" },
+    }),
+  ],
+  claudeAgent: [
+    makeClaudePreset("starter-claude-free", "free", {
+      ask: { model: "claude-haiku-4-5", thinking: false },
+      plan: { model: "claude-haiku-4-5", thinking: true },
+      code: { model: "claude-haiku-4-5", thinking: false },
+      review: { model: "claude-haiku-4-5", thinking: true },
+    }),
+    makeClaudePreset("starter-claude-pro", "pro", {
+      ask: { model: "claude-haiku-4-5", thinking: false },
+      plan: { model: "claude-sonnet-4-6", effort: "low" },
+      code: { model: "claude-sonnet-4-6", effort: "low" },
+      review: { model: "claude-sonnet-4-6", effort: "medium" },
+    }),
+    makeClaudePreset("starter-claude-max-5x", "max 5x", {
+      ask: { model: "claude-haiku-4-5", thinking: false },
+      plan: { model: "claude-sonnet-4-6", effort: "low" },
+      code: { model: "claude-sonnet-4-6", effort: "low" },
+      review: { model: "claude-sonnet-4-6", effort: "high" },
+    }),
+    makeClaudePreset("starter-claude-max-20x", "max 20x", {
+      ask: { model: "claude-haiku-4-5", thinking: false },
+      plan: { model: "claude-sonnet-4-6", effort: "medium" },
+      code: { model: "claude-sonnet-4-6", effort: "low" },
+      review: { model: "claude-opus-4-6", effort: "high" },
+    }),
+  ],
+};
 
 /**
  * Ensure the `textGenerationModelSelection` points to an enabled provider.
@@ -142,6 +313,140 @@ function resolveEnabledModelSelections(settings: ServerSettings): ServerSettings
   return resolvePromptEnhanceProvider(resolveTextGenerationProvider(settings));
 }
 
+function isSelectionForProvider(
+  selection: ServerSettings[PresetSelectionSettingsKey],
+  provider: ProviderKind,
+): selection is ModelSelection {
+  return selection !== null && selection.provider === provider;
+}
+
+function buildDefaultPresetFromBaseSelections(
+  settings: ServerSettings,
+  provider: ProviderKind,
+): ModelSelectionPreset | null {
+  const askModelSelection = settings.askModelSelection;
+  const planModelSelection = settings.planModelSelection;
+  const codeModelSelection = settings.codeModelSelection;
+  const reviewModelSelection = settings.reviewModelSelection;
+
+  if (
+    !isSelectionForProvider(askModelSelection, provider) ||
+    !isSelectionForProvider(planModelSelection, provider) ||
+    !isSelectionForProvider(codeModelSelection, provider) ||
+    !isSelectionForProvider(reviewModelSelection, provider)
+  ) {
+    return null;
+  }
+
+  return {
+    id: DEFAULT_MODEL_SELECTION_PRESET_ID,
+    provider,
+    name: DEFAULT_MODEL_SELECTION_PRESET_NAME,
+    askModelSelection,
+    planModelSelection,
+    codeModelSelection,
+    reviewModelSelection,
+  } as ModelSelectionPreset;
+}
+
+function seedBuiltInPresets(settings: ServerSettings): ServerSettings {
+  let changed = false;
+  const nextPresets = {
+    ...settings.modelSelectionPresets,
+    codex: { ...settings.modelSelectionPresets.codex },
+    claudeAgent: { ...settings.modelSelectionPresets.claudeAgent },
+  };
+
+  for (const provider of PROVIDER_ORDER) {
+    for (const preset of BUILT_IN_MODEL_SELECTION_PRESETS[provider]) {
+      if (nextPresets[provider][preset.id]) {
+        continue;
+      }
+
+      nextPresets[provider][preset.id] = preset as ProviderPresetMap[string];
+      changed = true;
+    }
+  }
+
+  return changed
+    ? {
+        ...settings,
+        modelSelectionPresets: nextPresets,
+      }
+    : settings;
+}
+
+function seedDefaultPresetFromBaseSelections(settings: ServerSettings): ServerSettings {
+  const nextPresets = {
+    ...settings.modelSelectionPresets,
+    codex: { ...settings.modelSelectionPresets.codex },
+    claudeAgent: { ...settings.modelSelectionPresets.claudeAgent },
+  };
+  let changed = false;
+
+  for (const provider of PROVIDER_ORDER) {
+    if (nextPresets[provider][DEFAULT_MODEL_SELECTION_PRESET_ID]) {
+      continue;
+    }
+
+    const preset = buildDefaultPresetFromBaseSelections(settings, provider);
+    if (!preset) {
+      continue;
+    }
+
+    nextPresets[provider][preset.id] = preset as Extract<
+      ModelSelectionPreset,
+      { provider: typeof provider }
+    >;
+    changed = true;
+  }
+
+  return changed
+    ? {
+        ...settings,
+        modelSelectionPresets: nextPresets,
+      }
+    : settings;
+}
+
+function normalizeActivePresetPointers(settings: ServerSettings): ServerSettings {
+  let changed = false;
+  const nextActive = { ...settings.activeModelSelectionPresetByProvider };
+
+  for (const provider of PROVIDER_ORDER) {
+    const activePresetId = nextActive[provider];
+    if (!activePresetId) {
+      continue;
+    }
+
+    if (activePresetId === DEFAULT_MODEL_SELECTION_PRESET_ID) {
+      nextActive[provider] = null;
+      changed = true;
+      continue;
+    }
+
+    if (!(activePresetId in settings.modelSelectionPresets[provider])) {
+      nextActive[provider] = null;
+      changed = true;
+    }
+  }
+
+  return changed
+    ? {
+        ...settings,
+        activeModelSelectionPresetByProvider: nextActive,
+      }
+    : settings;
+}
+
+function normalizePresetState(settings: ServerSettings): ServerSettings {
+  return normalizeActivePresetPointers(
+    seedDefaultPresetFromBaseSelections(seedBuiltInPresets(settings)),
+  );
+}
+
+const DEFAULT_NORMALIZED_SERVER_SETTINGS = normalizePresetState(DEFAULT_SERVER_SETTINGS);
+
 function isCompleteModelSelectionPatch(
   patch: ServerSettingsPatch[ModelSelectionSettingsKey],
 ): patch is Exclude<ServerSettings[ModelSelectionSettingsKey], null | undefined> {
@@ -176,11 +481,149 @@ function mergeModelSelectionSetting(
   return deepMerge(current, patch) as ServerSettings[ModelSelectionSettingsKey];
 }
 
+function mergePresetSelectionPatch<T extends ModelSelectionPreset>(
+  current: T[PresetSelectionSettingsKey],
+  patch: Partial<T[PresetSelectionSettingsKey]> | undefined,
+): T[PresetSelectionSettingsKey] {
+  if (patch === undefined) {
+    return current;
+  }
+
+  if ("provider" in patch && patch.provider !== undefined && patch.provider !== current.provider) {
+    return current;
+  }
+
+  if ("model" in patch && patch.model !== undefined) {
+    return deepMerge(current, patch as DeepPartial<T[PresetSelectionSettingsKey]>);
+  }
+
+  return current;
+}
+
+function applyPresetOperation(
+  settings: ServerSettings,
+  operation: ModelSelectionPresetPatchOperation,
+): ServerSettings {
+  switch (operation.op) {
+    case "create": {
+      const provider = operation.preset.provider;
+      return normalizePresetState({
+        ...settings,
+        modelSelectionPresets: {
+          ...settings.modelSelectionPresets,
+          [provider]: {
+            ...settings.modelSelectionPresets[provider],
+            [operation.preset.id]: operation.preset as Extract<
+              ModelSelectionPreset,
+              { provider: typeof provider }
+            >,
+          },
+        },
+      });
+    }
+    case "update": {
+      const currentPreset = settings.modelSelectionPresets[operation.provider][operation.presetId];
+      if (!currentPreset) {
+        return settings;
+      }
+
+      const nextPreset =
+        operation.provider === "codex"
+          ? ({
+              ...currentPreset,
+              ...(operation.patch.name !== undefined ? { name: operation.patch.name } : {}),
+              askModelSelection: mergePresetSelectionPatch(
+                currentPreset.askModelSelection,
+                operation.patch.askModelSelection,
+              ),
+              planModelSelection: mergePresetSelectionPatch(
+                currentPreset.planModelSelection,
+                operation.patch.planModelSelection,
+              ),
+              codeModelSelection: mergePresetSelectionPatch(
+                currentPreset.codeModelSelection,
+                operation.patch.codeModelSelection,
+              ),
+              reviewModelSelection: mergePresetSelectionPatch(
+                currentPreset.reviewModelSelection,
+                operation.patch.reviewModelSelection,
+              ),
+            } as Extract<ModelSelectionPreset, { provider: "codex" }>)
+          : ({
+              ...currentPreset,
+              ...(operation.patch.name !== undefined ? { name: operation.patch.name } : {}),
+              askModelSelection: mergePresetSelectionPatch(
+                currentPreset.askModelSelection,
+                operation.patch.askModelSelection,
+              ),
+              planModelSelection: mergePresetSelectionPatch(
+                currentPreset.planModelSelection,
+                operation.patch.planModelSelection,
+              ),
+              codeModelSelection: mergePresetSelectionPatch(
+                currentPreset.codeModelSelection,
+                operation.patch.codeModelSelection,
+              ),
+              reviewModelSelection: mergePresetSelectionPatch(
+                currentPreset.reviewModelSelection,
+                operation.patch.reviewModelSelection,
+              ),
+            } as Extract<ModelSelectionPreset, { provider: "claudeAgent" }>);
+
+      return normalizePresetState({
+        ...settings,
+        modelSelectionPresets: {
+          ...settings.modelSelectionPresets,
+          [operation.provider]: {
+            ...settings.modelSelectionPresets[operation.provider],
+            [operation.presetId]: nextPreset as Extract<
+              ModelSelectionPreset,
+              { provider: typeof operation.provider }
+            >,
+          },
+        },
+      });
+    }
+    case "delete": {
+      const currentProviderPresets = {
+        ...settings.modelSelectionPresets[operation.provider],
+      } as Record<string, ModelSelectionPreset>;
+      if (!(operation.presetId in currentProviderPresets)) {
+        return settings;
+      }
+
+      delete currentProviderPresets[operation.presetId];
+
+      return normalizePresetState({
+        ...settings,
+        modelSelectionPresets: {
+          ...settings.modelSelectionPresets,
+          [operation.provider]: currentProviderPresets as ProviderPresetMap,
+        },
+      });
+    }
+    case "select":
+      return normalizePresetState({
+        ...settings,
+        activeModelSelectionPresetByProvider: {
+          ...settings.activeModelSelectionPresetByProvider,
+          [operation.provider]:
+            operation.presetId !== null &&
+            operation.presetId !== DEFAULT_MODEL_SELECTION_PRESET_ID &&
+            operation.presetId in settings.modelSelectionPresets[operation.provider]
+              ? operation.presetId
+              : null,
+        },
+      });
+  }
+}
+
 function mergeServerSettingsPatch(
   current: ServerSettings,
   patch: ServerSettingsPatch,
 ): ServerSettings {
-  const next = deepMerge(current, patch);
+  const { modelSelectionPresetOps, ...basePatch } = patch;
+  const next = deepMerge(current, basePatch);
   const nextSelections = next as Record<
     ModelSelectionSettingsKey,
     ServerSettings[ModelSelectionSettingsKey] | undefined
@@ -193,11 +636,16 @@ function mergeServerSettingsPatch(
     nextSelections[key] = mergeModelSelectionSetting(current[key], patch[key]);
   }
 
-  return next;
+  const withPresetOps = (modelSelectionPresetOps ?? []).reduce(applyPresetOperation, next);
+  return normalizePresetState(withPresetOps);
 }
 
 // Values under these keys are compared as a whole — never stripped field-by-field.
-const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set(MODEL_SELECTION_SETTINGS_KEYS);
+const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
+  ...MODEL_SELECTION_SETTINGS_KEYS,
+  "modelSelectionPresets",
+  "activeModelSelectionPresetByProvider",
+]);
 
 function stripDefaultServerSettings(current: unknown, defaults: unknown): unknown | undefined {
   if (Array.isArray(current) || Array.isArray(defaults)) {
@@ -272,7 +720,7 @@ const makeServerSettings = Effect.gen(function* () {
 
   const loadSettingsFromDisk = Effect.gen(function* () {
     if (!(yield* readConfigExists)) {
-      return DEFAULT_SERVER_SETTINGS;
+      return DEFAULT_NORMALIZED_SERVER_SETTINGS;
     }
 
     const raw = yield* readRawConfig;
@@ -282,9 +730,9 @@ const makeServerSettings = Effect.gen(function* () {
         path: settingsPath,
         issues: Cause.pretty(decoded.cause),
       });
-      return DEFAULT_SERVER_SETTINGS;
+      return DEFAULT_NORMALIZED_SERVER_SETTINGS;
     }
-    return decoded.value;
+    return normalizePresetState(decoded.value);
   });
 
   const settingsCache = yield* Cache.make<typeof cacheKey, ServerSettings, ServerSettingsError>({
@@ -296,7 +744,8 @@ const makeServerSettings = Effect.gen(function* () {
 
   const writeSettingsAtomically = (settings: ServerSettings) => {
     const tempPath = `${settingsPath}.${process.pid}.${Date.now()}.tmp`;
-    const sparseSettings = stripDefaultServerSettings(settings, DEFAULT_SERVER_SETTINGS) ?? {};
+    const sparseSettings =
+      stripDefaultServerSettings(settings, DEFAULT_NORMALIZED_SERVER_SETTINGS) ?? {};
 
     return Effect.succeed(`${JSON.stringify(sparseSettings, null, 2)}\n`).pipe(
       Effect.tap(() => fs.makeDirectory(pathService.dirname(settingsPath), { recursive: true })),
