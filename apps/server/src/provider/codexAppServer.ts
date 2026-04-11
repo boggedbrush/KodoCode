@@ -14,6 +14,89 @@ function readErrorMessage(response: JsonRpcProbeResponse): string | undefined {
   return typeof response.error?.message === "string" ? response.error.message : undefined;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function extractJsonObjectText(input: string): string | null {
+  const start = input.indexOf("{");
+  if (start < 0) {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < input.length; index += 1) {
+    const char = input[index]!;
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return input.slice(start, index + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+function parseRateLimitsFromErrorMessage(errorMessage: string): unknown | null {
+  const bodyIndex = errorMessage.indexOf("body=");
+  if (bodyIndex < 0) {
+    return null;
+  }
+
+  const parsedBodyText = extractJsonObjectText(errorMessage.slice(bodyIndex + 5));
+  if (!parsedBodyText) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(parsedBodyText);
+  } catch {
+    return null;
+  }
+}
+
+export interface CodexUsageProbeSnapshot {
+  readonly account: CodexAccountSnapshot;
+  readonly email: string | null;
+  readonly rateLimits: unknown | null;
+}
+
 export function buildCodexInitializeParams() {
   return {
     clientInfo: {
@@ -40,11 +123,11 @@ export function killCodexChildProcess(child: ChildProcessWithoutNullStreams): vo
   child.kill();
 }
 
-export async function probeCodexAccount(input: {
+export async function probeCodexUsage(input: {
   readonly binaryPath: string;
   readonly homePath?: string;
   readonly signal?: AbortSignal;
-}): Promise<CodexAccountSnapshot> {
+}): Promise<CodexUsageProbeSnapshot> {
   return await new Promise((resolve, reject) => {
     const child = spawn(input.binaryPath, ["app-server"], {
       env: {
@@ -102,13 +185,23 @@ export async function probeCodexAccount(input: {
     let accountReadSettled = false;
     let modelListResult: unknown;
     let modelListSettled = false;
+    let rateLimitsResult: unknown = null;
+    let rateLimitsSettled = false;
 
     const maybeFinish = () => {
-      if (!accountReadSettled || !modelListSettled) {
+      if (!accountReadSettled || !modelListSettled || !rateLimitsSettled) {
         return;
       }
 
-      finish(() => resolve(readCodexAccountSnapshot(accountReadResult, modelListResult)));
+      finish(() => {
+        const accountReadRecord = asRecord(accountReadResult);
+        const accountRecord = asRecord(accountReadRecord?.account) ?? accountReadRecord;
+        resolve({
+          account: readCodexAccountSnapshot(accountReadResult, modelListResult),
+          email: asString(accountRecord?.email) ?? null,
+          rateLimits: rateLimitsResult,
+        });
+      });
     };
 
     output.on("line", (line) => {
@@ -135,6 +228,7 @@ export async function probeCodexAccount(input: {
         writeMessage({ method: "initialized" });
         writeMessage({ id: 2, method: "account/read", params: {} });
         writeMessage({ id: 3, method: "model/list", params: {} });
+        writeMessage({ id: 4, method: "account/rateLimits/read", params: {} });
         return;
       }
 
@@ -157,6 +251,18 @@ export async function probeCodexAccount(input: {
         }
         modelListSettled = true;
         maybeFinish();
+        return;
+      }
+
+      if (response.id === 4) {
+        const errorMessage = readErrorMessage(response);
+        if (errorMessage) {
+          rateLimitsResult = parseRateLimitsFromErrorMessage(errorMessage);
+        } else {
+          rateLimitsResult = response.result ?? null;
+        }
+        rateLimitsSettled = true;
+        maybeFinish();
       }
     });
 
@@ -176,4 +282,13 @@ export async function probeCodexAccount(input: {
       params: buildCodexInitializeParams(),
     });
   });
+}
+
+export async function probeCodexAccount(input: {
+  readonly binaryPath: string;
+  readonly homePath?: string;
+  readonly signal?: AbortSignal;
+}): Promise<CodexAccountSnapshot> {
+  const probe = await probeCodexUsage(input);
+  return probe.account;
 }

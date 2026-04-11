@@ -11,8 +11,13 @@ import {
   type ProviderUsageSnapshot,
   type UsageProviderModule,
 } from "../fetchStrategy";
-import { makeCodexAccountProbeApi, makeSubprocessApi } from "../hostApis";
-import { defaultIdentity, findStringByKeys, parseRateLimitWindow } from "./runtimeUsageParsing";
+import { makeCodexUsageProbeApi, makeSubprocessApi } from "../hostApis";
+import {
+  defaultIdentity,
+  findStringByKeys,
+  mergeUsageWindows,
+  parseRateLimitWindows,
+} from "./runtimeUsageParsing";
 
 const PROVIDER = "codex" as const;
 
@@ -36,31 +41,54 @@ function toUsageState(status: "ready" | "warning" | "error"): ProviderUsageState
   }
 }
 
-function snapshotFromAccount(account: CodexAccountSnapshot): ProviderUsageSnapshot {
-  const planName = codexAuthSubLabel(account) ?? null;
+function snapshotFromProbe(input: {
+  readonly account: CodexAccountSnapshot;
+  readonly email: string | null;
+  readonly rateLimits: unknown | null;
+}): ProviderUsageSnapshot {
+  const planName = codexAuthSubLabel(input.account) ?? null;
   const loginMethod =
-    account.type === "apiKey" ? "API key" : account.type === "chatgpt" ? "ChatGPT" : null;
+    input.account.type === "apiKey"
+      ? "API key"
+      : input.account.type === "chatgpt"
+        ? "ChatGPT"
+        : null;
+  const parsedRateLimits = parseRateLimitWindows({
+    payload: input.rateLimits,
+    sessionLabel: PROVIDER_USAGE_METADATA.codex.sessionLabel,
+    weeklyLabel: PROVIDER_USAGE_METADATA.codex.weeklyLabel,
+    keyPrefix: "codex-rate-limit",
+  });
+  const status = parsedRateLimits?.state ?? (planName ? "ready" : "unknown");
+  const summary =
+    status === "exhausted"
+      ? "Codex usage exhausted"
+      : status === "limited"
+        ? "Codex usage limited"
+        : planName
+          ? `Plan: ${planName}`
+          : "Codex account detected";
 
   return {
     provider: PROVIDER,
     checkedAt: nowIso(),
-    status: planName ? "ready" : "unknown",
-    summary: planName ? `Plan: ${planName}` : "Codex account detected",
+    status,
+    summary,
     detail: null,
-    resetAt: null,
+    resetAt: parsedRateLimits?.resetAt ?? null,
     identity: {
       planName,
       loginMethod,
-      email: null,
+      email: input.email,
       org: null,
     },
-    windows: [],
+    windows: parsedRateLimits?.windows ?? [],
   };
 }
 
 export const makeCodexUsageModule = Effect.gen(function* () {
   const subprocess = yield* makeSubprocessApi;
-  const accountProbe = yield* makeCodexAccountProbeApi;
+  const accountProbe = yield* makeCodexUsageProbeApi;
   const settingsService = yield* ServerSettingsService;
   const codexSettings = settingsService.getSettings.pipe(
     Effect.map((settings) => settings.providers.codex),
@@ -82,14 +110,14 @@ export const makeCodexUsageModule = Effect.gen(function* () {
           timeoutMs: 8_000,
         }),
       ),
-      Effect.flatMap((account) =>
-        account.type === "unknown"
+      Effect.flatMap((usageProbe) =>
+        usageProbe.account.type === "unknown"
           ? Effect.fail(new Error("Codex account probe returned unknown account type."))
-          : Effect.succeed(account),
+          : Effect.succeed(usageProbe),
       ),
-      Effect.map((account) => ({
+      Effect.map((usageProbe) => ({
         sourceLabel: "account-probe",
-        usage: snapshotFromAccount(account),
+        usage: snapshotFromProbe(usageProbe),
       })),
     ),
     shouldFallback: (error: Error) => !isCommandMissingCause(error),
@@ -185,10 +213,11 @@ export const makeCodexUsageModule = Effect.gen(function* () {
       }
 
       if (event.type === "account.rate-limits.updated") {
-        const parsed = parseRateLimitWindow({
+        const parsed = parseRateLimitWindows({
           payload: event.payload.rateLimits,
-          label: PROVIDER_USAGE_METADATA.codex.sessionLabel,
-          key: "codex-rate-limit",
+          sessionLabel: PROVIDER_USAGE_METADATA.codex.sessionLabel,
+          weeklyLabel: PROVIDER_USAGE_METADATA.codex.weeklyLabel,
+          keyPrefix: "codex-rate-limit",
         });
         if (!parsed) {
           return undefined;
@@ -204,7 +233,7 @@ export const makeCodexUsageModule = Effect.gen(function* () {
                 ? "Codex usage limited"
                 : current.summary,
           resetAt: parsed.resetAt,
-          windows: [parsed.window],
+          windows: mergeUsageWindows(current.windows, parsed.windows),
         };
       }
 

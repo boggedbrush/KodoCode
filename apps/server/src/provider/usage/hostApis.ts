@@ -2,7 +2,11 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { Effect, Option } from "effect";
 
 import type { CodexAccountSnapshot } from "../codexAccount";
-import { probeCodexAccount } from "../codexAppServer";
+import {
+  probeCodexAccount,
+  probeCodexUsage,
+  type CodexUsageProbeSnapshot,
+} from "../codexAppServer";
 import { spawnAndCollect } from "../providerSnapshot";
 
 function toError(cause: unknown): Error {
@@ -62,6 +66,14 @@ export interface CodexAccountProbeApi {
   }) => Effect.Effect<CodexAccountSnapshot, Error>;
 }
 
+export interface CodexUsageProbeApi {
+  readonly probe: (input: {
+    readonly binaryPath: string;
+    readonly homePath?: string;
+    readonly timeoutMs: number;
+  }) => Effect.Effect<CodexUsageProbeSnapshot, Error>;
+}
+
 export const makeSubprocessApi = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const api: SubprocessApi = {
@@ -113,6 +125,27 @@ export const makeCodexAccountProbeApi = Effect.succeed<CodexAccountProbeApi>({
         Option.match(result, {
           onNone: () =>
             Effect.fail(new Error(`Codex account probe timed out after ${input.timeoutMs}ms`)),
+          onSome: (value) => Effect.succeed(value),
+        }),
+      ),
+      Effect.mapError(toError),
+    ),
+});
+
+export const makeCodexUsageProbeApi = Effect.succeed<CodexUsageProbeApi>({
+  probe: (input) =>
+    Effect.tryPromise((signal) =>
+      probeCodexUsage({
+        binaryPath: input.binaryPath,
+        ...(input.homePath ? { homePath: input.homePath } : {}),
+        signal,
+      }),
+    ).pipe(
+      Effect.timeoutOption(input.timeoutMs),
+      Effect.flatMap((result) =>
+        Option.match(result, {
+          onNone: () =>
+            Effect.fail(new Error(`Codex usage probe timed out after ${input.timeoutMs}ms`)),
           onSome: (value) => Effect.succeed(value),
         }),
       ),

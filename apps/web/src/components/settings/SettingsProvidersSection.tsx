@@ -12,6 +12,7 @@ import {
   type ProviderKind,
   type ServerProvider,
   type ServerProviderModel,
+  type ServerProviderUsageWindow,
 } from "@t3tools/contracts";
 import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@t3tools/contracts/settings";
 import { normalizeModelSlug, resolveUtilityModelSelectionDefault } from "@t3tools/shared/model";
@@ -158,6 +159,135 @@ function shouldHideUsageSummary(input: {
   }
 
   return false;
+}
+
+function clampPercent(percentUsed: number | null): number | null {
+  if (percentUsed === null || Number.isNaN(percentUsed)) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, percentUsed));
+}
+
+function toRemainingPercent(percentUsed: number | null): number | null {
+  if (percentUsed === null) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, 100 - percentUsed));
+}
+
+function normalizeUsageWindowToken(value: string): string {
+  return value.trim().replaceAll(/\s+/g, " ").toLowerCase();
+}
+
+function isWeeklyWindow(window: ServerProviderUsageWindow): boolean {
+  const token = normalizeUsageWindowToken(`${window.key} ${window.label}`);
+  return (
+    token.includes("weekly") ||
+    token.includes("week") ||
+    token.includes("7d") ||
+    token.includes("7-day")
+  );
+}
+
+function isSessionWindow(window: ServerProviderUsageWindow): boolean {
+  const token = normalizeUsageWindowToken(`${window.key} ${window.label}`);
+  return (
+    token.includes("session") ||
+    token.includes("5h") ||
+    token.includes("5-hour") ||
+    token.includes("hour")
+  );
+}
+
+function takePreferredWindow(input: {
+  readonly windows: ReadonlyArray<ServerProviderUsageWindow>;
+  readonly usedKeys: Set<string>;
+  readonly preferredLabel: string;
+  readonly matcher: (window: ServerProviderUsageWindow) => boolean;
+}): ServerProviderUsageWindow | null {
+  const preferredLabel = normalizeUsageWindowToken(input.preferredLabel);
+  const byLabel = input.windows.find((window) => {
+    if (input.usedKeys.has(window.key)) {
+      return false;
+    }
+    return normalizeUsageWindowToken(window.label) === preferredLabel;
+  });
+  if (byLabel) {
+    input.usedKeys.add(byLabel.key);
+    return byLabel;
+  }
+
+  const byMatcher = input.windows.find((window) => {
+    if (input.usedKeys.has(window.key)) {
+      return false;
+    }
+    return input.matcher(window);
+  });
+  if (byMatcher) {
+    input.usedKeys.add(byMatcher.key);
+    return byMatcher;
+  }
+
+  const firstUnclaimed = input.windows.find((window) => !input.usedKeys.has(window.key));
+  if (firstUnclaimed) {
+    input.usedKeys.add(firstUnclaimed.key);
+    return firstUnclaimed;
+  }
+
+  return null;
+}
+
+function usageBarToneClass(percentRemaining: number | null): string {
+  if (percentRemaining === null) {
+    return "bg-muted-foreground/30";
+  }
+  if (percentRemaining <= 5) {
+    return "bg-destructive";
+  }
+  if (percentRemaining <= 20) {
+    return "bg-warning";
+  }
+  return "bg-success";
+}
+
+function isSameLocalDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function formatUsageResetLabel(resetAt: string): string {
+  const resetDate = new Date(resetAt);
+  if (Number.isNaN(resetDate.getTime())) {
+    return `Resets ${resetAt}`;
+  }
+
+  const now = new Date();
+  const formatted = isSameLocalDay(resetDate, now)
+    ? new Intl.DateTimeFormat(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(resetDate)
+    : new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+        .format(resetDate)
+        .replace(", ", " ");
+
+  return `Resets ${formatted}`;
+}
+
+function getUsageLimitTitle(input: { key: "session" | "weekly"; label: string }): string {
+  if (input.key === "session") {
+    return "5 hour usage limit";
+  }
+  return `${input.label} usage limit`;
 }
 
 function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }) {
@@ -431,6 +561,32 @@ export function SettingsProvidersSection({
             ? providerCard.providerUsage.summary
             : null;
         const usageDetail = providerCard.providerUsage?.detail ?? null;
+        const usageWindows = providerCard.providerUsage?.windows ?? [];
+        const claimedWindowKeys = new Set<string>();
+        const sessionWindow = takePreferredWindow({
+          windows: usageWindows,
+          usedKeys: claimedWindowKeys,
+          preferredLabel: providerCard.providerUsageMetadata.sessionLabel,
+          matcher: isSessionWindow,
+        });
+        const weeklyWindow = takePreferredWindow({
+          windows: usageWindows,
+          usedKeys: claimedWindowKeys,
+          preferredLabel: providerCard.providerUsageMetadata.weeklyLabel,
+          matcher: isWeeklyWindow,
+        });
+        const usageBarRows = [
+          {
+            key: "session" as const,
+            label: providerCard.providerUsageMetadata.sessionLabel,
+            window: sessionWindow,
+          },
+          {
+            key: "weekly" as const,
+            label: providerCard.providerUsageMetadata.weeklyLabel,
+            window: weeklyWindow,
+          },
+        ];
 
         return (
           <div key={providerCard.provider} className="border-t border-border first:border-t-0">
@@ -496,31 +652,46 @@ export function SettingsProvidersSection({
                           {usageSummary && usageDetail ? ` - ${usageDetail}` : null}
                         </p>
                       ) : null}
-                      {providerCard.providerUsage.windows.length > 0 ? (
-                        <div className="mt-1.5 space-y-1">
-                          {providerCard.providerUsage.windows.map((window) => (
-                            <div key={window.key} className="flex flex-wrap items-center gap-x-2">
-                              <span className="font-medium text-foreground/90">{window.label}</span>
-                              {window.usedText ? <span>Used: {window.usedText}</span> : null}
-                              {window.limitText ? <span>Limit: {window.limitText}</span> : null}
-                              {window.remainingText ? (
-                                <span>Remaining: {window.remainingText}</span>
-                              ) : null}
-                              {window.percentUsed !== null ? (
-                                <span>{Math.round(window.percentUsed)}%</span>
-                              ) : null}
+                      <div className="mt-1 grid gap-1 md:grid-cols-2">
+                        {usageBarRows.map((row) => {
+                          const percentUsed = clampPercent(row.window?.percentUsed ?? null);
+                          const percentRemaining = toRemainingPercent(percentUsed);
+                          const hasRemaining = percentRemaining !== null;
+                          return (
+                            <div
+                              key={row.key}
+                              className="rounded-md border border-border/70 bg-background/15 px-2 py-1.5"
+                            >
+                              <p className="text-[11px] font-medium text-muted-foreground/90">
+                                {getUsageLimitTitle({ key: row.key, label: row.label })}
+                              </p>
+                              <div className="mt-0.5 flex items-baseline gap-1">
+                                <span className="text-2xl font-semibold leading-none text-foreground tabular-nums">
+                                  {hasRemaining ? `${Math.round(percentRemaining)}%` : "--"}
+                                </span>
+                                <span className="text-sm leading-none text-foreground/90">
+                                  remaining
+                                </span>
+                              </div>
+                              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-foreground/20">
+                                <div
+                                  className={cn(
+                                    "h-full rounded-full transition-[width] duration-300",
+                                    usageBarToneClass(percentRemaining),
+                                  )}
+                                  style={{ width: `${percentRemaining ?? 0}%` }}
+                                />
+                              </div>
+                              <p className="mt-1.5 text-[11px] text-muted-foreground/90">
+                                {row.window?.resetAt
+                                  ? formatUsageResetLabel(row.window.resetAt)
+                                  : "Resets unavailable"}
+                              </p>
                             </div>
-                          ))}
-                        </div>
-                      ) : null}
+                          );
+                        })}
+                      </div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-x-2">
-                        {providerCard.providerUsage.resetAt ? (
-                          <span>
-                            Resets:{" "}
-                            {formatRelativeTime(providerCard.providerUsage.resetAt)?.value ??
-                              providerCard.providerUsage.resetAt}
-                          </span>
-                        ) : null}
                         {providerCard.providerUsageMetadata.usageUrl ? (
                           <a
                             href={providerCard.providerUsageMetadata.usageUrl}
