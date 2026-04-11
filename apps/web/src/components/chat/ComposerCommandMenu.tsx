@@ -1,7 +1,15 @@
 import { type ProjectEntry, type ProviderKind } from "@t3tools/contracts";
 import { memo, useLayoutEffect, useRef } from "react";
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
-import { BotIcon } from "lucide-react";
+import {
+  EyeIcon,
+  ListTodoIcon,
+  SlidersHorizontalIcon,
+  SquarePenIcon,
+  TerminalSquareIcon,
+  WrenchIcon,
+  type LucideIcon,
+} from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
 import { Command, CommandItem, CommandList } from "../ui/command";
@@ -91,6 +99,15 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   );
 });
 
+const SLASH_COMMAND_ICON_BY_COMMAND: Record<ComposerSlashCommand, LucideIcon> = {
+  model: SlidersHorizontalIcon,
+  ask: SquarePenIcon,
+  plan: ListTodoIcon,
+  code: TerminalSquareIcon,
+  review: WrenchIcon,
+  usage: EyeIcon,
+};
+
 const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
   item: ComposerCommandItem;
   resolvedTheme: "light" | "dark";
@@ -123,9 +140,12 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           theme={props.resolvedTheme}
         />
       ) : null}
-      {props.item.type === "slash-command" ? (
-        <BotIcon className="size-4 text-muted-foreground/80" />
-      ) : null}
+      {props.item.type === "slash-command"
+        ? (() => {
+            const SlashCommandIcon = SLASH_COMMAND_ICON_BY_COMMAND[props.item.command];
+            return <SlashCommandIcon className="size-4 text-muted-foreground/80" />;
+          })()
+        : null}
       {props.item.type === "model" ? (
         <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
           model
