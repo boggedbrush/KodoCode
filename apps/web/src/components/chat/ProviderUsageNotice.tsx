@@ -105,7 +105,7 @@ export const ProviderUsageNotice = memo(function ProviderUsageNotice({
   ];
 
   return (
-    <div className="mx-auto max-w-3xl pt-2">
+    <div className="pointer-events-none fixed right-4 top-[calc(var(--desktop-window-safe-inset)+52px+6.5rem)] z-40 w-[min(22.5rem,calc(100vw-2rem))] sm:right-8 sm:w-[min(22.5rem,calc(100vw-4rem))]">
       <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-medium text-foreground/90">{providerLabel} usage</span>
@@ -124,7 +124,7 @@ export const ProviderUsageNotice = memo(function ProviderUsageNotice({
             <button
               type="button"
               aria-label="Hide usage panel"
-              className="ml-auto inline-flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:text-foreground"
+              className="pointer-events-auto ml-auto inline-flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:text-foreground"
               onClick={onDismiss}
             >
               <XIcon className="size-3.5" />
@@ -180,7 +180,7 @@ export const ProviderUsageNotice = memo(function ProviderUsageNotice({
                 href={metadata.usageUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-primary hover:underline"
+                className="pointer-events-auto text-primary hover:underline"
               >
                 Usage
               </a>
@@ -190,7 +190,7 @@ export const ProviderUsageNotice = memo(function ProviderUsageNotice({
                 href={metadata.dashboardUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-primary hover:underline"
+                className="pointer-events-auto text-primary hover:underline"
               >
                 {metadata.dashboardLabel ?? "Dashboard"}
               </a>
