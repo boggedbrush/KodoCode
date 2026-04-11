@@ -23,11 +23,7 @@ function isComposerDraftEmpty(draft: ComposerThreadDraftState | null | undefined
     (draft.prompt.length === 0 &&
       draft.images.length === 0 &&
       draft.persistedAttachments.length === 0 &&
-      draft.terminalContexts.length === 0 &&
-      Object.keys(draft.modelSelectionByProvider).length === 0 &&
-      draft.activeProvider === null &&
-      draft.runtimeMode === null &&
-      draft.interactionMode === null)
+      draft.terminalContexts.length === 0)
   );
 }
 

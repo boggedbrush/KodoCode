@@ -1079,25 +1079,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [selectedModel, selectedModelOptionsForDispatch, selectedProvider],
   );
   const selectedModelForPicker = selectedModel;
-  // Show "Auto" for model/effort pickers when a predefined per-mode model selection from
-  // settings is driving the current selection (as opposed to an explicit per-conversation pick).
-  const isModelFromModeSettings = useMemo(() => {
-    const modeSelection = resolveModeModelSelection(interactionMode, settings, providerStatuses);
-    const selectedProviderOptions = composerModelOptions?.[selectedProvider];
-    return (
-      modeSelection !== null &&
-      modeSelection.provider === selectedProvider &&
-      selectedModel === modeSelection.model &&
-      Equal.equals(selectedProviderOptions, modeSelection.options)
-    );
-  }, [
-    composerModelOptions,
-    interactionMode,
-    providerStatuses,
-    selectedModel,
-    selectedProvider,
-    settings,
-  ]);
+  const modeModelSelection = useMemo(
+    () => resolveModeModelSelection(interactionMode, settings, providerStatuses),
+    [interactionMode, providerStatuses, settings],
+  );
+  // Keep model "Auto" tied to provider/model defaults from mode settings.
+  const isModelFromModeSettings =
+    modeModelSelection !== null &&
+    modeModelSelection.provider === selectedProvider &&
+    selectedModel === modeModelSelection.model;
+  // Keep effort/traits "Auto" tied to whether options still match mode defaults.
+  const isTraitsFromModeSettings =
+    isModelFromModeSettings &&
+    Equal.equals(composerModelOptions?.[selectedProvider], modeModelSelection.options);
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
@@ -1205,6 +1199,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     pendingUserInputs.length > 0 ||
     (showPlanFollowUpPrompt && activeProposedPlan !== null);
   const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
+  const composerFooterCompact = isComposerFooterCompact || composerFooterHasWideActions;
   const composerFooterActionLayoutKey = useMemo(() => {
     if (activePendingProgress) {
       return `pending:${activePendingProgress.questionIndex}:${activePendingProgress.isLastQuestion}:${activePendingIsResponding}`;
@@ -2478,7 +2473,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
         actionsWidth: composerFooterActionsRef.current?.scrollWidth ?? null,
       };
       const nextFooterCompact =
-        heuristicFooterCompact || shouldForceCompactComposerFooterForFit(fitInput);
+        composerFooterHasWideActions ||
+        heuristicFooterCompact ||
+        shouldForceCompactComposerFooterForFit(fitInput);
       const nextPrimaryActionsCompact =
         nextFooterCompact &&
         shouldUseCompactComposerPrimaryActions(composerFormWidth, {
@@ -4195,7 +4192,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     modelOptions: composerModelOptions?.[selectedProvider],
     prompt,
     onPromptChange: setPromptFromTraits,
-    showAsAuto: isModelFromModeSettings,
+    showAsAuto: isTraitsFromModeSettings,
   });
   const providerTraitsPicker = renderProviderTraitsPicker({
     provider: selectedProvider,
@@ -4205,7 +4202,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     modelOptions: composerModelOptions?.[selectedProvider],
     prompt,
     onPromptChange: setPromptFromTraits,
-    showAsAuto: isModelFromModeSettings,
+    showAsAuto: isTraitsFromModeSettings,
   });
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {
@@ -4852,24 +4849,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     <div
                       ref={composerFooterRef}
                       data-chat-composer-footer="true"
-                      data-chat-composer-footer-compact={isComposerFooterCompact ? "true" : "false"}
+                      data-chat-composer-footer-compact={composerFooterCompact ? "true" : "false"}
                       className={cn(
                         "flex min-w-0 flex-nowrap items-center justify-between gap-2 overflow-hidden px-2.5 pb-2.5 sm:px-3 sm:pb-3",
-                        isComposerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0",
+                        composerFooterCompact ? "gap-1.5" : "gap-2 sm:gap-0",
                       )}
                     >
                       <div
                         ref={composerFooterLeadingRef}
                         className={cn(
                           "flex min-w-0 flex-1 items-center",
-                          isComposerFooterCompact
+                          composerFooterCompact
                             ? "gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
                             : "gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:min-w-max sm:overflow-visible",
                         )}
                       >
                         {/* Provider/model picker */}
                         <ProviderModelPicker
-                          compact={isComposerFooterCompact}
+                          compact={composerFooterCompact}
                           provider={selectedProvider}
                           model={selectedModelForPickerWithCustomFallback}
                           lockedProvider={lockedProvider}
@@ -4885,7 +4882,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           onProviderModelChange={onProviderModelSelect}
                         />
 
-                        {isComposerFooterCompact ? (
+                        {composerFooterCompact ? (
                           <CompactComposerControlsMenu
                             activePlan={Boolean(
                               activePlan || sidebarProposedPlan || planSidebarOpen,
