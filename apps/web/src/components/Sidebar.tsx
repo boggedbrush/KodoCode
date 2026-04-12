@@ -1992,6 +1992,13 @@ export default function Sidebar() {
   const newThreadShortcutLabel =
     shortcutLabelForCommand(keybindings, "chat.newLocal", sidebarShortcutLabelOptions) ??
     shortcutLabelForCommand(keybindings, "chat.new", sidebarShortcutLabelOptions);
+  const sidebarToggleShortcutLabel = shortcutLabelForCommand(
+    keybindings,
+    "sidebar.toggle",
+    sidebarShortcutLabelOptions,
+  );
+  const showSidebarToggleShortcutHint =
+    showThreadJumpHints && sidebarToggleShortcutLabel !== null && sidebarToggleShortcutLabel !== "";
 
   const handleDesktopUpdateButtonClick = useCallback(() => {
     const bridge = window.desktopBridge;
@@ -2086,10 +2093,17 @@ export default function Sidebar() {
                     type="button"
                     aria-label="Collapse sidebar"
                     data-testid="sidebar-inline-logo-toggle"
-                    className="group/logo inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 outline-hidden ring-ring transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 [-webkit-app-region:no-drag]"
+                    className={cn(
+                      "group/logo relative inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 outline-hidden ring-ring transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 [-webkit-app-region:no-drag]",
+                    )}
                     onClick={toggleSidebar}
                   >
-                    <span className="relative flex size-6 shrink-0 items-center justify-center">
+                    <span
+                      className={cn(
+                        "relative flex size-6 shrink-0 items-center justify-center",
+                        showSidebarToggleShortcutHint && "opacity-0",
+                      )}
+                    >
                       <img
                         src={sidebarWordmarkLogo}
                         alt=""
@@ -2100,6 +2114,14 @@ export default function Sidebar() {
                         <SidebarCollapseGlyph />
                       </span>
                     </span>
+                    {showSidebarToggleShortcutHint ? (
+                      <span
+                        className="pointer-events-none absolute top-1/2 left-1/2 inline-flex h-5 -translate-x-1/2 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/90 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground whitespace-nowrap shadow-sm"
+                        title={sidebarToggleShortcutLabel}
+                      >
+                        {sidebarToggleShortcutLabel}
+                      </span>
+                    ) : null}
                   </button>
                 ) : null}
                 <Link

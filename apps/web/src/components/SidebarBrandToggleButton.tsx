@@ -1,4 +1,9 @@
+import { useEffect, useMemo } from "react";
+import { shortcutLabelForCommand, shouldShowThreadJumpHints } from "../keybindings";
+import { isTerminalFocused } from "../lib/terminalFocus";
 import { cn } from "../lib/utils";
+import { useServerKeybindings } from "../rpc/serverState";
+import { useThreadJumpHintVisibility } from "./Sidebar.logic";
 import { useSidebar } from "./ui/sidebar";
 import devLogo from "../../../../assets/dev/blueprint.svg";
 import prodLogo from "../../../../assets/prod/logo.svg";
@@ -61,6 +66,69 @@ function SidebarExpandGlyph() {
 
 export function SidebarBrandToggleButton({ className }: { className?: string }) {
   const { open: sidebarOpen, toggleSidebar } = useSidebar();
+  const keybindings = useServerKeybindings();
+  const platform = navigator.platform;
+  const { showThreadJumpHints, updateThreadJumpHintsVisibility } = useThreadJumpHintVisibility();
+  const sidebarShortcutLabelOptions = useMemo(
+    () => ({
+      platform,
+      context: {
+        terminalFocus: false,
+        terminalOpen: false,
+      },
+    }),
+    [platform],
+  );
+  const sidebarToggleShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "sidebar.toggle", sidebarShortcutLabelOptions),
+    [keybindings, sidebarShortcutLabelOptions],
+  );
+  const showSidebarToggleShortcutHint =
+    showThreadJumpHints && sidebarToggleShortcutLabel !== null && sidebarToggleShortcutLabel !== "";
+
+  useEffect(() => {
+    if (sidebarOpen) {
+      updateThreadJumpHintsVisibility(false);
+      return;
+    }
+
+    const getShortcutContext = () => ({
+      terminalFocus: isTerminalFocused(),
+      terminalOpen: false,
+    });
+
+    const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
+      updateThreadJumpHintsVisibility(
+        shouldShowThreadJumpHints(event, keybindings, {
+          platform,
+          context: getShortcutContext(),
+        }),
+      );
+    };
+
+    const onWindowKeyUp = (event: globalThis.KeyboardEvent) => {
+      updateThreadJumpHintsVisibility(
+        shouldShowThreadJumpHints(event, keybindings, {
+          platform,
+          context: getShortcutContext(),
+        }),
+      );
+    };
+
+    const onWindowBlur = () => {
+      updateThreadJumpHintsVisibility(false);
+    };
+
+    window.addEventListener("keydown", onWindowKeyDown);
+    window.addEventListener("keyup", onWindowKeyUp);
+    window.addEventListener("blur", onWindowBlur);
+
+    return () => {
+      window.removeEventListener("keydown", onWindowKeyDown);
+      window.removeEventListener("keyup", onWindowKeyUp);
+      window.removeEventListener("blur", onWindowBlur);
+    };
+  }, [keybindings, platform, sidebarOpen, updateThreadJumpHintsVisibility]);
 
   return (
     <button
@@ -69,13 +137,18 @@ export function SidebarBrandToggleButton({ className }: { className?: string }) 
       data-testid="sidebar-brand-toggle"
       tabIndex={sidebarOpen ? -1 : undefined}
       className={cn(
-        "group inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 outline-hidden ring-ring transition-[width,opacity,color,background-color] duration-200 ease-linear hover:bg-accent hover:text-foreground focus-visible:ring-2 [-webkit-app-region:no-drag]",
+        "group relative inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 outline-hidden ring-ring transition-[width,opacity,color,background-color] duration-200 ease-linear hover:bg-accent hover:text-foreground focus-visible:ring-2 [-webkit-app-region:no-drag]",
         sidebarOpen && "w-0 overflow-hidden opacity-0",
         className,
       )}
       onClick={toggleSidebar}
     >
-      <span className="relative flex size-6 shrink-0 items-center justify-center">
+      <span
+        className={cn(
+          "relative flex size-6 shrink-0 items-center justify-center",
+          showSidebarToggleShortcutHint && "opacity-0",
+        )}
+      >
         <img
           src={sidebarWordmarkLogo}
           alt=""
@@ -86,6 +159,14 @@ export function SidebarBrandToggleButton({ className }: { className?: string }) 
           {sidebarOpen ? <SidebarCollapseGlyph /> : <SidebarExpandGlyph />}
         </span>
       </span>
+      {showSidebarToggleShortcutHint ? (
+        <span
+          className="pointer-events-none absolute top-1/2 left-1/2 inline-flex h-5 -translate-x-1/2 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/90 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground whitespace-nowrap shadow-sm"
+          title={sidebarToggleShortcutLabel}
+        >
+          {sidebarToggleShortcutLabel}
+        </span>
+      ) : null}
     </button>
   );
 }
