@@ -50,7 +50,8 @@ const hmrHost = configuredHmrHost || (isWildcardHost(host) ? undefined : host);
 
 export default defineConfig({
   plugins: [
-    tanstackRouter(),
+    // Split route modules into async boundaries so first-load JS stays smaller.
+    tanstackRouter({ autoCodeSplitting: true }),
     react(),
     babel({
       // We need to be explicit about the parser options after moving to @vitejs/plugin-react v6.0.0

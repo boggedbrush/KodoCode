@@ -1,4 +1,3 @@
-import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
 import { CheckIcon, CopyIcon } from "lucide-react";
 import React, {
   Children,
@@ -24,6 +23,7 @@ import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
+import type { DiffsHighlighter, SupportedLanguages } from "@pierre/diffs";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -60,6 +60,19 @@ const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
+let sharedHighlighterLoaderPromise: Promise<
+  Pick<typeof import("@pierre/diffs"), "getSharedHighlighter">
+> | null = null;
+
+function loadSharedHighlighterModule() {
+  if (sharedHighlighterLoaderPromise) {
+    return sharedHighlighterLoaderPromise;
+  }
+
+  // Keep the heavy highlighter runtime out of the initial chat bundle.
+  sharedHighlighterLoaderPromise = import("@pierre/diffs");
+  return sharedHighlighterLoaderPromise;
+}
 
 function extractFenceLanguage(className: string | undefined): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
@@ -115,19 +128,23 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   const cached = highlighterPromiseCache.get(language);
   if (cached) return cached;
 
-  const promise = getSharedHighlighter({
-    themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
-    langs: [language as SupportedLanguages],
-    preferredHighlighter: "shiki-js",
-  }).catch((err) => {
-    highlighterPromiseCache.delete(language);
-    if (language === "text") {
-      // "text" itself failed — Shiki cannot initialize at all, surface the error
-      throw err;
-    }
-    // Language not supported by Shiki — fall back to "text"
-    return getHighlighterPromise("text");
-  });
+  const promise = loadSharedHighlighterModule()
+    .then(({ getSharedHighlighter }) =>
+      getSharedHighlighter({
+        themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
+        langs: [language as SupportedLanguages],
+        preferredHighlighter: "shiki-js",
+      }),
+    )
+    .catch((err) => {
+      highlighterPromiseCache.delete(language);
+      if (language === "text") {
+        // "text" itself failed — Shiki cannot initialize at all, surface the error
+        throw err;
+      }
+      // Language not supported by Shiki — fall back to "text"
+      return getHighlighterPromise("text");
+    });
   highlighterPromiseCache.set(language, promise);
   return promise;
 }

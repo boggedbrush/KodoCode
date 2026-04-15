@@ -12,16 +12,27 @@ const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 let listeners: Array<() => void> = [];
 let lastSnapshot: ThemeSnapshot | null = null;
 let lastDesktopTheme: Theme | null = null;
+let didInitializeTheme = false;
 function emitChange() {
   for (const listener of listeners) listener();
 }
 
 function getSystemDark(): boolean {
+  if (typeof window.matchMedia !== "function") {
+    return false;
+  }
+
   return window.matchMedia(MEDIA_QUERY).matches;
 }
 
 function getStored(): Theme {
-  const raw = localStorage.getItem(STORAGE_KEY);
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return "system";
+  }
+
   if (raw === "light" || raw === "dark" || raw === "system") return raw;
   return "system";
 }
@@ -32,7 +43,19 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
   }
   const isDark = theme === "dark" || (theme === "system" && getSystemDark());
   document.documentElement.classList.toggle("dark", isDark);
-  syncDesktopTheme(theme);
+  const desktopThemeSync = syncDesktopTheme(theme);
+  if (theme === "system" && desktopThemeSync) {
+    // Electron can start with a stale renderer media query until main applies
+    // nativeTheme.themeSource="system". Re-check once that IPC write completes.
+    void desktopThemeSync.finally(() => {
+      if (getStored() !== "system") {
+        return;
+      }
+
+      document.documentElement.classList.toggle("dark", getSystemDark());
+      emitChange();
+    });
+  }
   if (suppressTransitions) {
     // Force a reflow so the no-transitions class takes effect before removal
     // oxlint-disable-next-line no-unused-expressions
@@ -46,19 +69,25 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
 function syncDesktopTheme(theme: Theme) {
   const bridge = window.desktopBridge;
   if (!bridge || lastDesktopTheme === theme) {
-    return;
+    return null;
   }
 
   lastDesktopTheme = theme;
-  void bridge.setTheme(theme).catch(() => {
+  return bridge.setTheme(theme).catch(() => {
     if (lastDesktopTheme === theme) {
       lastDesktopTheme = null;
     }
   });
 }
 
-// Apply immediately on module load to prevent flash
-applyTheme(getStored());
+export function initializeThemeFromStorage() {
+  if (didInitializeTheme) {
+    return;
+  }
+
+  didInitializeTheme = true;
+  applyTheme(getStored());
+}
 
 function getSnapshot(): ThemeSnapshot {
   const theme = getStored();
@@ -100,6 +129,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 export function useTheme() {
+  initializeThemeFromStorage();
   const snapshot = useSyncExternalStore(subscribe, getSnapshot);
   const theme = snapshot.theme;
 
