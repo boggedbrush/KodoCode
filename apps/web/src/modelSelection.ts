@@ -1,4 +1,5 @@
 import {
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   DEFAULT_MODEL_SELECTION_PRESET_ID,
   type ModelSelection,
   type ModelSelectionPreset,
@@ -247,7 +248,7 @@ export function resolveAppModelSelectionState(
 
 // ── Kodo: mode-aware model resolution ─────────────────────────────
 
-function getModeSelectionKey(
+export function getModeModelSelectionKey(
   mode: ProviderInteractionMode,
 ): keyof Pick<
   UnifiedSettings,
@@ -262,11 +263,34 @@ function getModeSelectionKey(
         : "codeModelSelection";
 }
 
+export type WorkflowPresetModeSelectionKey = ReturnType<typeof getModeModelSelectionKey>;
+export type WorkflowPresetModeSelections = Record<WorkflowPresetModeSelectionKey, ModelSelection>;
+export type ProviderScopedModelSelection<P extends ProviderKind> = Extract<
+  ModelSelection,
+  { provider: P }
+>;
+export type WorkflowPresetModeSelectionsByProvider<P extends ProviderKind> = Record<
+  WorkflowPresetModeSelectionKey,
+  ProviderScopedModelSelection<P>
+>;
+const WORKFLOW_PRESET_MODES: readonly ProviderInteractionMode[] = ["ask", "plan", "code", "review"];
+
+export function createModelSelectionPresetId(name: string): string {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+  const suffix = crypto.randomUUID().slice(0, 8);
+  return `${slug || "preset"}-${suffix}`;
+}
+
 export function getBaseModeModelSelection(
   mode: ProviderInteractionMode,
   settings: UnifiedSettings,
 ): ModelSelection | null {
-  const selectionKey = getModeSelectionKey(mode);
+  const selectionKey = getModeModelSelectionKey(mode);
   return settings[selectionKey];
 }
 
@@ -316,7 +340,32 @@ export function getModeModelSelectionSource(
     return scopedBaseSelection;
   }
 
-  return preset[getModeSelectionKey(mode)];
+  return preset[getModeModelSelectionKey(mode)];
+}
+
+export function buildWorkflowPresetModeSelectionsForProvider<P extends ProviderKind>(input: {
+  provider: P;
+  settings: UnifiedSettings;
+  providers: ReadonlyArray<ServerProvider>;
+}): WorkflowPresetModeSelectionsByProvider<P> {
+  const { provider, settings, providers } = input;
+  return Object.fromEntries(
+    WORKFLOW_PRESET_MODES.map((mode) => {
+      const key = getModeModelSelectionKey(mode);
+      const sourceSelection = getModeModelSelectionSource(mode, settings, provider);
+      const providerSelection =
+        sourceSelection?.provider === provider
+          ? sourceSelection
+          : {
+              provider,
+              model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[provider],
+            };
+      return [
+        key,
+        resolveProviderScopedModelSelectionState(provider, providerSelection, settings, providers),
+      ];
+    }),
+  ) as WorkflowPresetModeSelectionsByProvider<P>;
 }
 
 /**

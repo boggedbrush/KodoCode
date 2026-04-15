@@ -10,6 +10,8 @@ import {
 } from "@t3tools/contracts";
 
 import {
+  buildWorkflowPresetModeSelectionsForProvider,
+  createModelSelectionPresetId,
   getActiveModelSelectionPreset,
   getBaseModeModelSelection,
   getCustomModelOptionsByProvider,
@@ -506,17 +508,6 @@ function getInitialPresetProvider(settings: UnifiedSettings): ProviderKind {
   return "codex";
 }
 
-function makePresetId(name: string) {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
-  const suffix = crypto.randomUUID().slice(0, 8);
-  return `${slug || "preset"}-${suffix}`;
-}
-
 function getSelectionForProvider(
   selection: ModelSelection | null,
   provider: ProviderKind,
@@ -735,31 +726,12 @@ export function SettingsModelsSection({
   };
 
   const createPreset = (name: string) => {
-    const presetId = makePresetId(name);
-
-    const modeSelections = Object.fromEntries(
-      MODE_CONFIGS.map((modeConfig) => {
-        const currentSelection = getModeModelSelectionSource(
-          modeConfig.mode,
-          settings,
-          presetProvider,
-        );
-        const providerSelection = getSelectionForProvider(currentSelection, presetProvider) ?? {
-          provider: presetProvider,
-          model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[presetProvider],
-        };
-
-        return [
-          modeConfig.key,
-          resolveProviderScopedModelSelectionState(
-            presetProvider,
-            providerSelection,
-            settings,
-            serverProviders,
-          ),
-        ];
-      }),
-    ) as Record<ModeConfig["key"], ModelSelection>;
+    const presetId = createModelSelectionPresetId(name);
+    const modeSelections = buildWorkflowPresetModeSelectionsForProvider({
+      provider: presetProvider,
+      settings,
+      providers: serverProviders,
+    });
 
     applyWorkflowPresetContextChange({
       modelSelectionPresetOps: [
@@ -789,7 +761,7 @@ export function SettingsModelsSection({
       return;
     }
 
-    const presetId = makePresetId(name);
+    const presetId = createModelSelectionPresetId(name);
     applyWorkflowPresetContextChange({
       modelSelectionPresetOps: [
         {

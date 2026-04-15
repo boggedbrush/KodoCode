@@ -7,6 +7,7 @@ import {
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
   parseStandaloneComposerSlashCommand,
+  parseStandaloneComposerPresetsCommand,
   replaceTextRange,
 } from "./composer-logic";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
@@ -43,6 +44,18 @@ describe("detectComposerTrigger", () => {
     expect(trigger).toEqual({
       kind: "slash-model",
       query: "spark",
+      rangeStart: 0,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("detects slash presets query after /presets", () => {
+    const text = "/presets cod";
+    const trigger = detectComposerTrigger(text, text.length);
+
+    expect(trigger).toEqual({
+      kind: "slash-presets",
+      query: "cod",
       rangeStart: 0,
       rangeEnd: text.length,
     });
@@ -254,5 +267,23 @@ describe("parseStandaloneComposerSlashCommand", () => {
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  });
+
+  it("does not parse /presets as standalone send command", () => {
+    expect(parseStandaloneComposerSlashCommand("/presets")).toBeNull();
+  });
+});
+
+describe("parseStandaloneComposerPresetsCommand", () => {
+  it("parses /presets with a query", () => {
+    expect(parseStandaloneComposerPresetsCommand("/presets pro")).toEqual({ query: "pro" });
+  });
+
+  it("parses /presets with no query", () => {
+    expect(parseStandaloneComposerPresetsCommand("/presets")).toEqual({ query: "" });
+  });
+
+  it("ignores non-presets commands", () => {
+    expect(parseStandaloneComposerPresetsCommand("/plan")).toBeNull();
   });
 });

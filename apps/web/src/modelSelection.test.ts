@@ -6,6 +6,8 @@ import {
   type UnifiedSettings,
 } from "@t3tools/contracts/settings";
 import {
+  buildWorkflowPresetModeSelectionsForProvider,
+  createModelSelectionPresetId,
   getActiveModelSelectionPreset,
   getModeModelSelectionSource,
   resolveModeModelSelection,
@@ -547,5 +549,59 @@ describe("getModeModelSelectionSource", () => {
     });
 
     expect(getModeModelSelectionSource("ask", settings, "claudeAgent")).toBeNull();
+  });
+});
+
+describe("preset helper utilities", () => {
+  it("creates preset ids with a slug and random suffix", () => {
+    const presetId = createModelSelectionPresetId("My Focus Preset!");
+    expect(presetId).toMatch(/^my-focus-preset-[a-f0-9]{8}$/);
+  });
+
+  it("builds provider-scoped mode selections from defaults when no selections are configured", () => {
+    const selections = buildWorkflowPresetModeSelectionsForProvider({
+      provider: "claudeAgent",
+      settings: makeSettings(),
+      providers: makeProviders(),
+    });
+
+    expect(selections.askModelSelection.provider).toBe("claudeAgent");
+    expect(selections.planModelSelection.provider).toBe("claudeAgent");
+    expect(selections.codeModelSelection.provider).toBe("claudeAgent");
+    expect(selections.reviewModelSelection.provider).toBe("claudeAgent");
+  });
+
+  it("builds provider-scoped mode selections from the active provider preset", () => {
+    const settings = makeSettings({
+      modelSelectionPresets: {
+        codex: {
+          focus: {
+            id: "focus",
+            provider: "codex",
+            name: "Focus",
+            askModelSelection: { provider: "codex", model: "gpt-5.3-codex" },
+            planModelSelection: { provider: "codex", model: "gpt-5.3-codex" },
+            codeModelSelection: { provider: "codex", model: "gpt-5.3-codex" },
+            reviewModelSelection: { provider: "codex", model: "gpt-5.3-codex" },
+          },
+        },
+        claudeAgent: {},
+      },
+      activeModelSelectionPresetByProvider: {
+        codex: "focus",
+        claudeAgent: null,
+      },
+    });
+
+    const selections = buildWorkflowPresetModeSelectionsForProvider({
+      provider: "codex",
+      settings,
+      providers: makeProviders(),
+    });
+
+    expect(selections.askModelSelection.model).toBe("gpt-5.3-codex");
+    expect(selections.planModelSelection.model).toBe("gpt-5.3-codex");
+    expect(selections.codeModelSelection.model).toBe("gpt-5.3-codex");
+    expect(selections.reviewModelSelection.model).toBe("gpt-5.3-codex");
   });
 });

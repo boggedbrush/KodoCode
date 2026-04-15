@@ -1,15 +1,17 @@
 import {
+  DEFAULT_MODEL_SELECTION_PRESET_ID,
   type ApprovalRequestId,
   DEFAULT_MODEL_BY_PROVIDER,
   type ClaudeCodeEffort,
   type MessageId,
   type ModelSelection,
   type ProjectScript,
-  type ProviderKind,
+  ProviderKind,
   type ProjectEntry,
   type ProjectId,
   type ProviderApprovalDecision,
   type PromptEnhancePreset,
+  PROVIDER_DISPLAY_NAMES,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   type ServerProvider,
@@ -30,6 +32,7 @@ import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import * as Equal from "effect/Equal";
+import * as Schema from "effect/Schema";
 import { useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
@@ -42,6 +45,7 @@ import {
   collapseExpandedComposerCursor,
   detectComposerTrigger,
   expandCollapsedComposerCursor,
+  parseStandaloneComposerPresetsCommand,
   parseStandaloneComposerSlashCommand,
   replaceTextRange,
 } from "../composer-logic";
@@ -133,8 +137,14 @@ import {
   getProviderModels,
   resolveSelectableProvider,
 } from "../providerModels";
-import { useSettings } from "../hooks/useSettings";
-import { resolveAppModelSelection, resolveModeModelSelection } from "../modelSelection";
+import { useSettings, useUpdateSettings } from "../hooks/useSettings";
+import {
+  buildWorkflowPresetModeSelectionsForProvider,
+  createModelSelectionPresetId,
+  getModeModelSelectionKey,
+  resolveAppModelSelection,
+  resolveModeModelSelection,
+} from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import {
   type ComposerImageAttachment,
@@ -230,6 +240,13 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const LAST_USED_PRESET_SELECTION_STORAGE_KEY = "t3code:last-used-model-selection-preset:v1";
+const LastUsedPresetSelectionSchema = Schema.Struct({
+  provider: ProviderKind,
+  presetId: Schema.NullOr(Schema.String),
+});
+type LastUsedPresetSelection = typeof LastUsedPresetSelectionSchema.Type;
+const LastUsedPresetSelectionStorageSchema = Schema.NullOr(LastUsedPresetSelectionSchema);
 
 type ThreadPlanCatalogEntry = Pick<Thread, "id" | "proposedPlans">;
 
@@ -631,6 +648,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       store.threadChangedFilesExpandedById[threadId] ?? EMPTY_CHANGED_FILES_EXPANDED_BY_TURN_ID,
   );
   const settings = useSettings();
+  const { updateSettings } = useUpdateSettings();
+  const [lastUsedPresetSelection, setLastUsedPresetSelection] = useLocalStorage<
+    LastUsedPresetSelection | null,
+    LastUsedPresetSelection | null
+  >(LAST_USED_PRESET_SELECTION_STORAGE_KEY, null, LastUsedPresetSelectionStorageSchema);
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
   );
@@ -1543,6 +1565,168 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }),
   );
   const workspaceEntries = workspaceEntriesQuery.data?.entries ?? EMPTY_PROJECT_ENTRIES;
+  type PresetCommandMenuItem = Extract<ComposerCommandItem, { type: "preset" }>;
+  const buildPresetCommandItems = useCallback((): PresetCommandMenuItem[] => {
+    const presetProviders: ProviderKind[] =
+      lockedProvider !== null
+        ? [lockedProvider]
+        : [
+            selectedProvider,
+            ...AVAILABLE_PROVIDER_OPTIONS.map((option) => option.value).filter(
+              (provider) => provider !== selectedProvider,
+            ),
+          ];
+    const toResolvedPresetSelection = (
+      provider: ProviderKind,
+      presetId: string | null | undefined,
+    ): {
+      provider: ProviderKind;
+      presetId: string | null;
+      presetName: string;
+    } | null => {
+      if (
+        presetId === null ||
+        presetId === undefined ||
+        presetId === DEFAULT_MODEL_SELECTION_PRESET_ID
+      ) {
+        return {
+          provider,
+          presetId: null,
+          presetName: "Default",
+        };
+      }
+      const preset = settings.modelSelectionPresets[provider][presetId];
+      if (!preset || preset.id === DEFAULT_MODEL_SELECTION_PRESET_ID) {
+        return null;
+      }
+      return {
+        provider,
+        presetId: preset.id,
+        presetName: preset.name,
+      };
+    };
+
+    let resolvedLastUsedPreset: {
+      provider: ProviderKind;
+      presetId: string | null;
+      presetName: string;
+    } | null = null;
+    if (lastUsedPresetSelection && presetProviders.includes(lastUsedPresetSelection.provider)) {
+      resolvedLastUsedPreset = toResolvedPresetSelection(
+        lastUsedPresetSelection.provider,
+        lastUsedPresetSelection.presetId,
+      );
+    }
+    if (!resolvedLastUsedPreset) {
+      for (const provider of presetProviders) {
+        resolvedLastUsedPreset = toResolvedPresetSelection(
+          provider,
+          settings.activeModelSelectionPresetByProvider[provider],
+        );
+        if (resolvedLastUsedPreset) {
+          break;
+        }
+      }
+    }
+
+    const presetItems: PresetCommandMenuItem[] = [];
+    if (resolvedLastUsedPreset) {
+      const lastUsedProviderLabel = PROVIDER_DISPLAY_NAMES[resolvedLastUsedPreset.provider];
+      const providerSuffix = lockedProvider === null ? ` (${lastUsedProviderLabel})` : "";
+      presetItems.push({
+        id: `preset:last-used:${resolvedLastUsedPreset.provider}:${resolvedLastUsedPreset.presetId ?? "default"}`,
+        type: "preset",
+        action: "select",
+        provider: resolvedLastUsedPreset.provider,
+        presetId: resolvedLastUsedPreset.presetId,
+        label: `Last used${providerSuffix}`,
+        description:
+          resolvedLastUsedPreset.presetId === null
+            ? `Use ${lastUsedProviderLabel} defaults (no preset)`
+            : `Switch to ${resolvedLastUsedPreset.presetName}`,
+      });
+    }
+    for (const provider of presetProviders) {
+      const providerLabel = PROVIDER_DISPLAY_NAMES[provider];
+      const providerSuffix = lockedProvider === null ? ` (${providerLabel})` : "";
+      const providerPresets = Object.values(settings.modelSelectionPresets[provider]).filter(
+        (preset) => preset.id !== DEFAULT_MODEL_SELECTION_PRESET_ID,
+      );
+      presetItems.push({
+        id: `preset:create:${provider}`,
+        type: "preset",
+        action: "create",
+        provider,
+        presetId: null,
+        label: `+ New${providerSuffix}`,
+        description: `Create and switch to a new ${providerLabel} preset`,
+      });
+      presetItems.push({
+        id: `preset:select:${provider}:default`,
+        type: "preset",
+        action: "select",
+        provider,
+        presetId: null,
+        label: `Default${providerSuffix}`,
+        description: `Use ${providerLabel} defaults (no preset)`,
+      });
+      for (const preset of providerPresets) {
+        presetItems.push({
+          id: `preset:select:${provider}:${preset.id}`,
+          type: "preset",
+          action: "select",
+          provider,
+          presetId: preset.id,
+          label: `${preset.name}${providerSuffix}`,
+          description: `${providerLabel} preset`,
+        });
+      }
+    }
+    return presetItems;
+  }, [lastUsedPresetSelection, lockedProvider, selectedProvider, settings]);
+  const filterPresetCommandItems = useCallback(
+    (items: PresetCommandMenuItem[], query: string): PresetCommandMenuItem[] => {
+      if (!query) {
+        return items;
+      }
+      const normalizedQuery = query.trim().toLowerCase();
+      return items.filter((item) => {
+        const searchText = `${item.label} ${item.description}`.toLowerCase();
+        return searchText.includes(normalizedQuery);
+      });
+    },
+    [],
+  );
+  const resolvePresetSelectionFromCommandQuery = useCallback(
+    (query: string): PresetCommandMenuItem | null => {
+      const selectableItems = buildPresetCommandItems().filter((item) => item.action === "select");
+      const normalizedQuery = query.trim().toLowerCase();
+      if (normalizedQuery.length === 0) {
+        return selectableItems[0] ?? null;
+      }
+      const normalizeLabel = (label: string): string =>
+        label
+          .toLowerCase()
+          .replace(/\s+\([^)]*\)\s*$/, "")
+          .trim();
+      const exact =
+        selectableItems.find((item) => normalizeLabel(item.label) === normalizedQuery) ??
+        selectableItems.find((item) => item.label.toLowerCase() === normalizedQuery);
+      if (exact) {
+        return exact;
+      }
+      const prefix = selectableItems.find((item) =>
+        normalizeLabel(item.label).startsWith(normalizedQuery),
+      );
+      if (prefix) {
+        return prefix;
+      }
+      return (
+        selectableItems.find((item) => normalizeLabel(item.label).includes(normalizedQuery)) ?? null
+      );
+    },
+    [buildPresetCommandItems],
+  );
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
@@ -1564,6 +1748,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
           command: "model",
           label: "/model",
           description: "Switch response model for this thread",
+        },
+        {
+          id: "slash:presets",
+          type: "slash-command",
+          command: "presets",
+          label: "/presets",
+          description: "Switch model preset or create a new one",
         },
         {
           id: "slash:ask",
@@ -1610,6 +1801,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       );
     }
 
+    if (composerTrigger.kind === "slash-presets") {
+      const query = composerTrigger.query.trim().toLowerCase();
+      return filterPresetCommandItems(buildPresetCommandItems(), query);
+    }
+
     return searchableModelOptions
       .filter(({ searchSlug, searchName, searchProvider }) => {
         const query = composerTrigger.query.trim().toLowerCase();
@@ -1626,7 +1822,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         label: name,
         description: `${providerLabel} · ${slug}`,
       }));
-  }, [composerTrigger, searchableModelOptions, workspaceEntries]);
+  }, [
+    buildPresetCommandItems,
+    composerTrigger,
+    filterPresetCommandItems,
+    searchableModelOptions,
+    workspaceEntries,
+  ]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -2219,6 +2421,140 @@ export default function ChatView({ threadId }: ChatViewProps) {
       void handleInteractionModeChange(command);
     },
     [handleInteractionModeChange],
+  );
+  const applyPresetSelectionToComposer = useCallback(
+    (provider: ProviderKind, presetId: string | null) => {
+      if (!activeThread) {
+        return;
+      }
+
+      const modeKey = getModeModelSelectionKey(interactionMode);
+      const modeSelection =
+        presetId !== null
+          ? (settings.modelSelectionPresets[provider][presetId]?.[modeKey] ?? null)
+          : buildWorkflowPresetModeSelectionsForProvider({
+              provider,
+              settings,
+              providers: providerStatuses,
+            })[modeKey];
+
+      if (!modeSelection) {
+        return;
+      }
+
+      setComposerDraftModelSelection(activeThread.id, modeSelection);
+      setStickyComposerModelSelection(modeSelection);
+    },
+    [
+      activeThread,
+      interactionMode,
+      providerStatuses,
+      setComposerDraftModelSelection,
+      setStickyComposerModelSelection,
+      settings,
+    ],
+  );
+  const handlePresetSelection = useCallback(
+    (provider: ProviderKind, presetId: string | null) => {
+      if (lockedProvider !== null && provider !== lockedProvider) {
+        scheduleComposerFocus();
+        return;
+      }
+
+      updateSettings({
+        modelSelectionPresetOps: [
+          {
+            op: "select",
+            provider,
+            presetId,
+          },
+        ],
+      });
+      applyPresetSelectionToComposer(provider, presetId);
+      setLastUsedPresetSelection({
+        provider,
+        presetId,
+      });
+      scheduleComposerFocus();
+    },
+    [
+      applyPresetSelectionToComposer,
+      lockedProvider,
+      scheduleComposerFocus,
+      setLastUsedPresetSelection,
+      updateSettings,
+    ],
+  );
+  const handlePresetCreate = useCallback(
+    (provider: ProviderKind) => {
+      if (lockedProvider !== null && provider !== lockedProvider) {
+        scheduleComposerFocus();
+        return;
+      }
+
+      const existingNames = new Set(
+        Object.values(settings.modelSelectionPresets[provider])
+          .filter((preset) => preset.id !== DEFAULT_MODEL_SELECTION_PRESET_ID)
+          .map((preset) => preset.name.trim().toLowerCase()),
+      );
+      let suffix = 1;
+      let presetName = `${PROVIDER_DISPLAY_NAMES[provider]} preset ${suffix}`;
+      while (existingNames.has(presetName.toLowerCase())) {
+        suffix += 1;
+        presetName = `${PROVIDER_DISPLAY_NAMES[provider]} preset ${suffix}`;
+      }
+
+      const presetId = createModelSelectionPresetId(presetName);
+      const modeSelections = buildWorkflowPresetModeSelectionsForProvider({
+        provider,
+        settings,
+        providers: providerStatuses,
+      });
+
+      updateSettings({
+        modelSelectionPresetOps: [
+          {
+            op: "create",
+            preset: {
+              id: presetId,
+              provider,
+              name: presetName,
+              ...modeSelections,
+            } as Extract<
+              (typeof settings.modelSelectionPresets)[ProviderKind][string],
+              { provider: typeof provider }
+            >,
+          },
+          {
+            op: "select",
+            provider,
+            presetId,
+          },
+        ],
+      });
+      setLastUsedPresetSelection({
+        provider,
+        presetId,
+      });
+      const modeSelection = modeSelections[getModeModelSelectionKey(interactionMode)] ?? null;
+      if (activeThread && modeSelection) {
+        setComposerDraftModelSelection(activeThread.id, modeSelection);
+        setStickyComposerModelSelection(modeSelection);
+      }
+      scheduleComposerFocus();
+    },
+    [
+      activeThread,
+      lockedProvider,
+      providerStatuses,
+      scheduleComposerFocus,
+      setComposerDraftModelSelection,
+      setLastUsedPresetSelection,
+      setStickyComposerModelSelection,
+      settings,
+      updateSettings,
+      interactionMode,
+    ],
   );
 
   useEffect(() => {
@@ -3166,6 +3502,30 @@ export default function ChatView({ threadId }: ChatViewProps) {
     e?.preventDefault();
     const api = readNativeApi();
     if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
+    const standalonePresetsCommand =
+      composerImages.length === 0 && composerTerminalContexts.length === 0
+        ? parseStandaloneComposerPresetsCommand(promptRef.current.trim())
+        : null;
+    if (standalonePresetsCommand) {
+      const presetSelection = resolvePresetSelectionFromCommandQuery(
+        standalonePresetsCommand.query,
+      );
+      if (!presetSelection) {
+        toastManager.add({
+          type: "warning",
+          title: "No matching preset",
+          description: "Type `/presets` to browse available presets and pick one.",
+        });
+        return;
+      }
+      handlePresetSelection(presetSelection.provider, presetSelection.presetId);
+      promptRef.current = "";
+      clearComposerDraftContent(activeThread.id);
+      setComposerHighlightedItemId(null);
+      setComposerCursor(0);
+      setComposerTrigger(null);
+      return;
+    }
     const standaloneSlashCommand =
       composerImages.length === 0 && composerTerminalContexts.length === 0
         ? parseStandaloneComposerSlashCommand(promptRef.current.trim())
@@ -4218,7 +4578,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [
       activeThread,
-      interactionMode,
       lockedProvider,
       scheduleComposerFocus,
       setComposerDraftModelSelection,
@@ -4376,8 +4735,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
       if (item.type === "slash-command") {
-        if (item.command === "model") {
-          const replacement = "/model ";
+        if (item.command === "model" || item.command === "presets") {
+          const replacement = item.command === "model" ? "/model " : "/presets ";
           const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
             snapshot.value,
             trigger.rangeEnd,
@@ -4403,6 +4762,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
         return;
       }
+      if (item.type === "preset") {
+        if (item.action === "create") {
+          handlePresetCreate(item.provider);
+        } else {
+          handlePresetSelection(item.provider, item.presetId);
+        }
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+        });
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+        return;
+      }
       onProviderModelSelect(item.provider, item.model);
       const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
         expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -4413,6 +4786,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [
       applyPromptReplacement,
+      handlePresetCreate,
+      handlePresetSelection,
       handleStandaloneSlashCommand,
       onProviderModelSelect,
       resolveActiveComposerTrigger,

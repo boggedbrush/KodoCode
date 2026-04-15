@@ -1,9 +1,16 @@
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
-export type ComposerTriggerKind = "path" | "slash-command" | "slash-model";
-export type ComposerSlashCommand = "model" | "ask" | "plan" | "code" | "review" | "usage";
-export type ComposerStandaloneSlashCommand = Exclude<ComposerSlashCommand, "model">;
+export type ComposerTriggerKind = "path" | "slash-command" | "slash-model" | "slash-presets";
+export type ComposerSlashCommand =
+  | "model"
+  | "presets"
+  | "ask"
+  | "plan"
+  | "code"
+  | "review"
+  | "usage";
+export type ComposerStandaloneSlashCommand = Exclude<ComposerSlashCommand, "model" | "presets">;
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -14,6 +21,7 @@ export interface ComposerTrigger {
 
 const SLASH_COMMANDS: readonly ComposerSlashCommand[] = [
   "model",
+  "presets",
   "ask",
   "plan",
   "code",
@@ -209,6 +217,14 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
           rangeEnd: cursor,
         };
       }
+      if (commandQuery.toLowerCase() === "presets") {
+        return {
+          kind: "slash-presets",
+          query: "",
+          rangeStart: lineStart,
+          rangeEnd: cursor,
+        };
+      }
       if (SLASH_COMMANDS.some((command) => command.startsWith(commandQuery.toLowerCase()))) {
         return {
           kind: "slash-command",
@@ -225,6 +241,16 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
       return {
         kind: "slash-model",
         query: (modelMatch[1] ?? "").trim(),
+        rangeStart: lineStart,
+        rangeEnd: cursor,
+      };
+    }
+
+    const presetsMatch = /^\/presets(?:\s+(.*))?$/.exec(linePrefix);
+    if (presetsMatch) {
+      return {
+        kind: "slash-presets",
+        query: (presetsMatch[1] ?? "").trim(),
         rangeStart: lineStart,
         rangeEnd: cursor,
       };
@@ -258,6 +284,14 @@ export function parseStandaloneComposerSlashCommand(
   if (command === "code") return "code";
   if (command === "review") return "review";
   return "usage";
+}
+
+export function parseStandaloneComposerPresetsCommand(text: string): { query: string } | null {
+  const match = /^\/presets(?:\s+(.*))?\s*$/i.exec(text.trim());
+  if (!match) {
+    return null;
+  }
+  return { query: (match[1] ?? "").trim() };
 }
 
 export function replaceTextRange(

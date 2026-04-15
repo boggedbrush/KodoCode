@@ -2,6 +2,8 @@ import { type ProjectEntry, type ProviderKind } from "@t3tools/contracts";
 import { memo, useLayoutEffect, useRef } from "react";
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import {
+  BookmarkIcon,
+  CirclePlusIcon,
   EyeIcon,
   ListTodoIcon,
   SlidersHorizontalIcon,
@@ -36,6 +38,15 @@ export type ComposerCommandItem =
       type: "model";
       provider: ProviderKind;
       model: string;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
+      type: "preset";
+      action: "select" | "create";
+      provider: ProviderKind;
+      presetId: string | null;
       label: string;
       description: string;
     };
@@ -101,6 +112,7 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
 
 const SLASH_COMMAND_ICON_BY_COMMAND: Record<ComposerSlashCommand, LucideIcon> = {
   model: SlidersHorizontalIcon,
+  presets: BookmarkIcon,
   ask: SquarePenIcon,
   plan: ListTodoIcon,
   code: TerminalSquareIcon,
@@ -150,6 +162,13 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
           model
         </Badge>
+      ) : null}
+      {props.item.type === "preset" ? (
+        props.item.action === "create" ? (
+          <CirclePlusIcon className="size-4 text-muted-foreground/80" />
+        ) : (
+          <BookmarkIcon className="size-4 text-muted-foreground/80" />
+        )
       ) : null}
       <span className="flex min-w-0 items-center gap-1.5 truncate">
         <span className="truncate">{props.item.label}</span>
