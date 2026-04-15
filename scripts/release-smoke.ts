@@ -98,6 +98,12 @@ try {
     cwd: tempRoot,
     stdio: "inherit",
   });
+  // Keep release smoke opinionated about dependency safety:
+  // if advisories regress in the lockfile graph, release readiness should fail here.
+  execFileSync("bun", ["audit"], {
+    cwd: tempRoot,
+    stdio: "inherit",
+  });
 
   const lockfile = readFileSync(resolve(tempRoot, "bun.lock"), "utf8");
   assertContains(
