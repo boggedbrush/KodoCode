@@ -42,8 +42,8 @@ This document covers how to run desktop releases from one tag, first without sig
 
 ## 0) npm OIDC trusted publishing setup (CLI)
 
-The workflow publishes the CLI with `bun publish` from `apps/server` after bumping
-the package version to the release tag version.
+The workflow publishes the CLI via `node apps/server/scripts/cli.ts publish`
+from `apps/server` after bumping the package version to the release tag version.
 
 Checklist:
 
@@ -57,7 +57,7 @@ Checklist:
 4. Create release tag `vX.Y.Z` and push; workflow will:
    - set `apps/server/package.json` version to `X.Y.Z`
    - build web + server
-   - run `bun publish --access public`
+   - run the CLI publish command (which calls `npm publish --access public`)
 
 ## 1) Dry-run release without signing
 

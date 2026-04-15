@@ -17,7 +17,7 @@ export interface ReviewRequestDraft {
   diffText?: string;
 }
 
-const REVIEW_SEVERITIES: readonly ReviewSeverity[] = ["critical", "high", "medium", "low", "info"];
+const REVIEW_SEVERITIES = new Set<ReviewSeverity>(["critical", "high", "medium", "low", "info"]);
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
@@ -40,10 +40,11 @@ function parseFinding(value: unknown): ReviewFinding | null {
   if (!record) {
     return null;
   }
-  const severity = asTrimmedString(record.severity)?.toLowerCase() as ReviewSeverity | undefined;
-  const normalizedSeverity = REVIEW_SEVERITIES.includes(severity as ReviewSeverity)
-    ? (severity as ReviewSeverity)
-    : null;
+  const severityCandidate = asTrimmedString(record.severity)?.toLowerCase();
+  const normalizedSeverity =
+    severityCandidate && REVIEW_SEVERITIES.has(severityCandidate as ReviewSeverity)
+      ? (severityCandidate as ReviewSeverity)
+      : null;
   const title = asTrimmedString(record.title);
   const rationale = asTrimmedString(record.rationale);
   const suggestedFix = asTrimmedString(record.suggestedFix ?? record.suggested_fix);

@@ -35,7 +35,11 @@ interface PublishPackageJson {
   readonly overrides: Record<string, unknown>;
 }
 
-export const PUBLISH_BUILD_ASSET_PATHS = ["dist/bin.mjs", "dist/client/index.html"] as const;
+export const PUBLISH_BUILD_ASSET_PATHS = [
+  "dist/bin.mjs",
+  "dist/client/index.html",
+  "kodo",
+] as const;
 
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("../../..", import.meta.url))),

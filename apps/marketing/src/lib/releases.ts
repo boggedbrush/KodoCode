@@ -1,6 +1,8 @@
-const REPO = "pingdotgg/t3code";
+export const REPO = "boggedbrush/KodoCode";
 
-export const RELEASES_URL = `https://github.com/${REPO}/releases`;
+export const GITHUB_REPO_URL = `https://github.com/${REPO}`;
+
+export const RELEASES_URL = `${GITHUB_REPO_URL}/releases`;
 
 const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 const CACHE_KEY = "t3code-latest-release";

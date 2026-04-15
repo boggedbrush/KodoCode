@@ -2634,7 +2634,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       return !open;
     });
-  }, [activePlan?.turnId, sidebarProposedPlan?.turnId]);
+  }, [activePlan, sidebarProposedPlan]);
 
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
@@ -3965,6 +3965,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectedProvider,
     selectedProviderModels,
     selectedPromptEffort,
+    clearComposerDraftContent,
     setComposerHighlightedItemId,
     setComposerCursor,
     setComposerTrigger,

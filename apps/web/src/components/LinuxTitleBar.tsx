@@ -51,21 +51,18 @@ function CloseIcon() {
 const windowControlButtonBase =
   "flex h-full w-10 items-center justify-center text-muted-foreground/60 transition-colors [-webkit-app-region:no-drag]";
 const linuxTitleBarLogo = import.meta.env.DEV ? devLogo : prodLogo;
+const handleMinimize = () => {
+  window.desktopBridge?.windowControls.minimize();
+};
+const handleToggleMaximize = () => {
+  window.desktopBridge?.windowControls.toggleMaximize();
+};
+const handleClose = () => {
+  window.desktopBridge?.windowControls.close();
+};
 
 export function LinuxTitleBar() {
   const { isMaximized } = useDesktopWindowFrame();
-
-  const handleMinimize = () => {
-    window.desktopBridge?.windowControls.minimize();
-  };
-
-  const handleToggleMaximize = () => {
-    window.desktopBridge?.windowControls.toggleMaximize();
-  };
-
-  const handleClose = () => {
-    window.desktopBridge?.windowControls.close();
-  };
 
   return (
     <div

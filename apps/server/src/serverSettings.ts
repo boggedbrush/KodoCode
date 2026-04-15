@@ -447,17 +447,6 @@ function normalizePresetState(settings: ServerSettings): ServerSettings {
 
 const DEFAULT_NORMALIZED_SERVER_SETTINGS = normalizePresetState(DEFAULT_SERVER_SETTINGS);
 
-function isCompleteModelSelectionPatch(
-  patch: ServerSettingsPatch[ModelSelectionSettingsKey],
-): patch is Exclude<ServerSettings[ModelSelectionSettingsKey], null | undefined> {
-  return (
-    patch !== null &&
-    patch !== undefined &&
-    patch.provider !== undefined &&
-    patch.model !== undefined
-  );
-}
-
 function mergeModelSelectionPatch<T extends ModelSelection>(
   current: T | null | undefined,
   patch: DeepPartial<T> | null | undefined,

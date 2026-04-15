@@ -1360,6 +1360,7 @@ export default function Sidebar() {
       copyPathToClipboard,
       getDraftThreadByProjectId,
       projects,
+      sidebarThreadsById,
       threadIdsByProjectId,
     ],
   );

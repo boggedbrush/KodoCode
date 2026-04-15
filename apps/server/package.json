@@ -4,14 +4,15 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/pingdotgg/t3code",
+    "url": "https://github.com/boggedbrush/KodoCode",
     "directory": "apps/server"
   },
   "bin": {
-    "kodo": "./dist/bin.mjs"
+    "kodo": "kodo"
   },
   "files": [
-    "dist"
+    "dist",
+    "kodo"
   ],
   "type": "module",
   "scripts": {
