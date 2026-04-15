@@ -1,4 +1,4 @@
-import { Effect, Queue, Scope } from "effect";
+import { Effect, Exit, Queue, Scope } from "effect";
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import {
   RpcMessage,
@@ -98,7 +98,17 @@ export const makeRpcWebSocketServer = <Rpcs extends Rpc.Any>(
           );
 
           const client: RpcWebSocketClient = {
-            close: (event) => writeRaw(event),
+            close: (event) =>
+              writeRaw(event).pipe(
+                // Writing a close frame does not always complete shutdown synchronously.
+                // Close the per-client scope as well so disconnect callbacks fire immediately.
+                Effect.catchIf(
+                  (error): error is Socket.SocketError => error.reason._tag === "SocketCloseError",
+                  () => Effect.void,
+                  (error) => Effect.fail(error),
+                ),
+                Effect.andThen(Scope.close(scope, Exit.void)),
+              ),
             write: (response) => {
               try {
                 const encoded = parser.encode(response);

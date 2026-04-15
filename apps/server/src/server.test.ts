@@ -1426,14 +1426,6 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   it.effect("closes live websocket rpc clients when their session is revoked", () =>
     Effect.gen(function* () {
       const sessionId = AuthSessionId.makeUnsafe("session-client-revoked");
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-revoked-" });
-      yield* fs.writeFileString(
-        path.join(workspaceDir, "needle-file.ts"),
-        "export const needle = 1;",
-      );
-
       const changes = yield* PubSub.unbounded<SessionCredentialChange>();
       let resolveDisconnected: (() => void) | null = null;
       const disconnected = new Promise<void>((resolve) => {
@@ -1462,54 +1454,67 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           },
         },
       });
-
       const wsUrl = yield* getWsServerUrl("/ws?wsToken=issued-session-token");
-      const secondCallResult = yield* Effect.scoped(
-        makeWsRpcClient.pipe(
-          Effect.provide(wsRpcProtocolLayer(wsUrl)),
-          Effect.flatMap((client) =>
-            Effect.gen(function* () {
-              const firstResponse = yield* client[WS_METHODS.projectsSearchEntries]({
-                cwd: workspaceDir,
-                query: "needle",
-                limit: 10,
-              });
-              assert.isAtLeast(firstResponse.entries.length, 1);
+      let resolveClosed:
+        | ((event: { readonly code: number; readonly reason: string }) => void)
+        | null = null;
+      const closed = new Promise<{ readonly code: number; readonly reason: string }>((resolve) => {
+        resolveClosed = resolve;
+      });
 
-              yield* PubSub.publish(changes, {
-                type: "clientRemoved",
-                sessionId,
+      const socket = yield* Effect.promise<globalThis.WebSocket>(
+        () =>
+          new Promise((resolve, reject) => {
+            const ws = new WebSocket(wsUrl);
+            ws.addEventListener("open", () => resolve(ws), { once: true });
+            ws.addEventListener("error", () => reject(new Error("Failed to open websocket")), {
+              once: true,
+            });
+            ws.addEventListener("close", (event) => {
+              resolveClosed?.({
+                code: event.code,
+                reason: event.reason,
               });
-              yield* Effect.promise(() =>
-                Promise.race([
-                  disconnected,
-                  new Promise<never>((_, reject) => {
-                    setTimeout(
-                      () =>
-                        reject(
-                          new Error("Timed out waiting for websocket disconnect after revocation."),
-                        ),
-                      1_000,
-                    );
-                  }),
-                ]),
-              );
-
-              return yield* client[WS_METHODS.projectsSearchEntries]({
-                cwd: workspaceDir,
-                query: "needle",
-                limit: 10,
-              }).pipe(Effect.result);
-            }),
-          ),
-        ),
+            });
+          }),
       );
 
-      assertTrue(secondCallResult._tag === "Failure");
-      assertTrue(
-        String(secondCallResult.failure).includes("SocketCloseError") ||
-          String(secondCallResult.failure).includes("Session revoked"),
+      yield* PubSub.publish(changes, {
+        type: "clientRemoved",
+        sessionId,
+      });
+
+      const closeEvent = yield* Effect.promise(() =>
+        Promise.race([
+          closed,
+          new Promise<never>((_, reject) => {
+            setTimeout(
+              () => reject(new Error("Timed out waiting for websocket close after revocation.")),
+              1_000,
+            );
+          }),
+        ]),
       );
+
+      yield* Effect.promise(() => {
+        socket.close();
+        return Promise.resolve();
+      });
+
+      yield* Effect.promise(() =>
+        Promise.race([
+          disconnected,
+          new Promise<never>((_, reject) => {
+            setTimeout(
+              () => reject(new Error("Timed out waiting for session disconnect marker.")),
+              1_000,
+            );
+          }),
+        ]),
+      );
+
+      assert.equal(closeEvent.code, 1008);
+      assert.equal(closeEvent.reason, "Session revoked");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

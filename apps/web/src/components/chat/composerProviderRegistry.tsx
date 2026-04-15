@@ -81,21 +81,8 @@ function getProviderStateFromCapabilities(
     provider === "codex"
       ? normalizeCodexModelOptionsWithCapabilities(caps, providerOptions)
       : normalizeClaudeModelOptionsWithCapabilities(caps, providerOptions);
-  const modelOptionsForDispatch = normalizedOptions
-    ? (() => {
-        const nextOptions = { ...normalizedOptions } as Record<string, unknown>;
-        if (rawEffort === null) {
-          if (provider === "codex") {
-            delete nextOptions.reasoningEffort;
-          } else {
-            delete nextOptions.effort;
-          }
-        }
-        return Object.keys(nextOptions).length > 0
-          ? (nextOptions as ProviderModelOptions[ProviderKind])
-          : undefined;
-      })()
-    : undefined;
+  const modelOptionsForDispatch =
+    normalizedOptions && Object.keys(normalizedOptions).length > 0 ? normalizedOptions : undefined;
 
   // Ultrathink styling (driven by capabilities data, not provider identity)
   const ultrathinkActive =
@@ -104,7 +91,8 @@ function getProviderStateFromCapabilities(
   return {
     provider,
     promptEffort,
-    // Preserve "Auto" effort by omitting the provider-specific effort key when unset.
+    // Keep normalized defaults in dispatch options so merges can reliably clear
+    // stale non-default values from prior turns/selections.
     modelOptionsForDispatch,
     ...(ultrathinkActive ? { composerFrameClassName: "ultrathink-frame" } : {}),
     ...(ultrathinkActive

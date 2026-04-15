@@ -46,10 +46,131 @@ interface ResolvedTransportSession {
 const LEGACY_TOKEN_QUERY_PARAM = "token";
 const WEBSOCKET_TOKEN_QUERY_PARAM = "wsToken";
 
-function formatErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
+const ERROR_CAUSE_KEYS = ["cause", "error", "defect", "failure", "reason"] as const;
+
+function collectErrorMessageCandidates(error: unknown): string[] {
+  const candidates: string[] = [];
+  const seen = new Set<unknown>();
+
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 4 || value == null || seen.has(value)) {
+      return;
+    }
+
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed.length > 0) {
+        candidates.push(trimmed);
+      }
+      return;
+    }
+
+    if (value instanceof Error) {
+      const trimmedMessage = value.message.trim();
+      if (trimmedMessage.length > 0) {
+        candidates.push(trimmedMessage);
+      }
+      const trimmedName = value.name.trim();
+      if (trimmedName.length > 0) {
+        candidates.push(trimmedName);
+      }
+      visit(value.cause, depth + 1);
+      return;
+    }
+
+    if (typeof value !== "object") {
+      return;
+    }
+
+    seen.add(value);
+    const record = value as Record<string, unknown>;
+    if (record.constructor && typeof record.constructor === "function") {
+      const constructorName = record.constructor.name.trim();
+      if (constructorName.length > 0) {
+        candidates.push(constructorName);
+      }
+    }
+    for (const key of ["message", "name", "_tag"] as const) {
+      const field = record[key];
+      if (typeof field === "string") {
+        const trimmed = field.trim();
+        if (trimmed.length > 0) {
+          candidates.push(trimmed);
+        }
+      }
+    }
+    for (const key of ERROR_CAUSE_KEYS) {
+      visit(record[key], depth + 1);
+    }
+
+    const ownPropertyKeys = [
+      ...Object.getOwnPropertyNames(record),
+      ...Object.getOwnPropertySymbols(record),
+    ];
+    for (const key of ownPropertyKeys) {
+      if (typeof key === "string" && key === "stack") {
+        continue;
+      }
+      if (key === "message" || key === "name" || key === "_tag") {
+        continue;
+      }
+      if (
+        typeof key === "string" &&
+        ERROR_CAUSE_KEYS.includes(key as (typeof ERROR_CAUSE_KEYS)[number])
+      ) {
+        continue;
+      }
+      visit((record as Record<string | symbol, unknown>)[key], depth + 1);
+    }
+  };
+
+  visit(error, 0);
+  return candidates;
+}
+
+function safeSerializeError(error: unknown): string | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
   }
+
+  const visited = new WeakSet<object>();
+  try {
+    return JSON.stringify(error, (_key, value) => {
+      if (typeof value === "object" && value !== null) {
+        if (visited.has(value)) {
+          return "[Circular]";
+        }
+        visited.add(value);
+      }
+      if (typeof value === "bigint") {
+        return value.toString();
+      }
+      return value;
+    });
+  } catch {
+    return null;
+  }
+}
+
+function formatErrorMessage(error: unknown): string {
+  const candidates = collectErrorMessageCandidates(error);
+  const transportCandidate = candidates.find((candidate) =>
+    isTransportConnectionErrorMessage(candidate),
+  );
+  if (transportCandidate) {
+    return transportCandidate;
+  }
+
+  const preferredCandidate = candidates[0];
+  if (preferredCandidate) {
+    return preferredCandidate;
+  }
+
+  const serializedError = safeSerializeError(error);
+  if (serializedError && serializedError !== "{}") {
+    return serializedError;
+  }
+
   return String(error);
 }
 

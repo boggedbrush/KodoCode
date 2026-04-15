@@ -43,7 +43,9 @@ function buildRepositoryIdentity(input: {
   readonly remoteName: string;
   readonly remoteUrl: string;
 }): RepositoryIdentity {
-  const canonicalKey = normalizeGitRemoteUrl(input.remoteUrl);
+  // Normalize case so remotes that differ only by host/owner capitalization map
+  // to the same canonical identity key and cache entry.
+  const canonicalKey = normalizeGitRemoteUrl(input.remoteUrl).toLowerCase();
   const hostingProvider = detectGitHostingProviderFromRemoteUrl(input.remoteUrl);
   const repositoryPath = canonicalKey.split("/").slice(1).join("/");
   const repositoryPathSegments = repositoryPath.split("/").filter((segment) => segment.length > 0);

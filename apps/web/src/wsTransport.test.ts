@@ -719,6 +719,45 @@ describe("WsTransport", () => {
     await transport.dispose();
   });
 
+  it("keeps retrying when transport failures arrive as structured objects", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let attempts = 0;
+
+    const unsubscribe = transport.subscribe(
+      () =>
+        Stream.suspend(() => {
+          attempts += 1;
+          return Stream.fail({
+            _tag: "FiberFailure",
+            cause: {
+              _tag: "SocketCloseError",
+              message: "SocketCloseError: WebSocket closed",
+            },
+          } as unknown as Error);
+        }),
+      vi.fn(),
+      { retryDelay: 10 },
+    );
+
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+
+    getSocket().open();
+
+    await waitFor(() => {
+      expect(attempts).toBeGreaterThanOrEqual(2);
+    });
+
+    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription disconnected", {
+      error: "SocketCloseError: WebSocket closed",
+    });
+
+    unsubscribe();
+    await transport.dispose();
+  });
+
   it("logs a transport disconnect once even when multiple subscriptions fail together", async () => {
     const transport = new WsTransport("ws://localhost:3020");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
