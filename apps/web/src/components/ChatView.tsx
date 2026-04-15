@@ -238,6 +238,8 @@ import { useProviderUsage } from "~/rpc/providerUsageState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 
 const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+// TODO(perf): Preserve these lazy boundaries; avoid importing terminal/editor modules statically into ChatView.
+// Any new heavy chat-only UI should follow this pattern so the initial chat route chunk stays below warning budgets.
 // Keep xterm + fit addon code out of the default chat route payload.
 // We only need the terminal runtime after a user opens a terminal drawer.
 const LazyThreadTerminalDrawer = lazy(() => import("./ThreadTerminalDrawer"));

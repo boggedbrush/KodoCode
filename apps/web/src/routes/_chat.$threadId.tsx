@@ -2,6 +2,8 @@ import { ThreadId } from "@t3tools/contracts";
 import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
 import { Suspense, lazy, type ReactNode, useCallback, useEffect, useState } from "react";
 
+// TODO(perf): Keep the /_chat/$threadId route payload under the Vite 500 kB warning budget.
+// If this route grows, split additional chat-only features behind lazy boundaries and re-check `bun run build`.
 import ChatView from "../components/ChatView";
 import {
   DiffPanelHeaderSkeleton,

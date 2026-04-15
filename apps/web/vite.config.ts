@@ -110,6 +110,8 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
+    // TODO(perf): Keep default chunk-size warnings enabled; do not raise chunkSizeWarningLimit to mask regressions.
+    // Treat warnings as a prompt to split route-heavy code paths (especially /_chat/$threadId).
     sourcemap: buildSourcemap,
   },
 });
