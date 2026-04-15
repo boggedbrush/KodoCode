@@ -287,6 +287,15 @@ describe("resolveContextWindow", () => {
 });
 
 describe("resolveApiModelId", () => {
+  it("resolves codex auto to the provider default model", () => {
+    expect(
+      resolveModelSelectionDefault({
+        provider: "codex",
+        model: "Auto",
+      }).model,
+    ).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
+  });
+
   it("resolves claude auto to the provider default model", () => {
     expect(
       resolveModelSelectionDefault({
@@ -337,6 +346,12 @@ describe("resolveApiModelId", () => {
 
   it("returns the model as-is for Codex selections", () => {
     expect(resolveApiModelId({ provider: "codex", model: "gpt-5.4" })).toBe("gpt-5.4");
+  });
+
+  it("resolves codex auto for API model ids", () => {
+    expect(resolveApiModelId({ provider: "codex", model: "auto" })).toBe(
+      DEFAULT_MODEL_BY_PROVIDER.codex,
+    );
   });
 });
 

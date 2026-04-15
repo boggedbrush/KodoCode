@@ -32,7 +32,10 @@ import {
 } from "../Utils.ts";
 import { getCodexModelCapabilities } from "../../provider/Layers/CodexProvider.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
-import { normalizeCodexModelOptionsWithCapabilities } from "@t3tools/shared/model";
+import {
+  normalizeCodexModelOptionsWithCapabilities,
+  resolveModelSelectionDefault,
+} from "@t3tools/shared/model";
 
 const CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT = "low";
 const CODEX_TIMEOUT_MS = 180_000;
@@ -158,12 +161,17 @@ const makeCodexTextGeneration = Effect.gen(function* () {
     ).pipe(Effect.catch(() => Effect.undefined));
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
+      // Resolve frontend sentinel models like `auto` before invoking Codex CLI.
+      const resolvedModelSelection = resolveModelSelectionDefault(
+        modelSelection,
+      ) as CodexModelSelection;
       const normalizedOptions = normalizeCodexModelOptionsWithCapabilities(
-        getCodexModelCapabilities(modelSelection.model),
-        modelSelection.options,
+        getCodexModelCapabilities(resolvedModelSelection.model),
+        resolvedModelSelection.options,
       );
       const reasoningEffort =
-        modelSelection.options?.reasoningEffort ?? CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT;
+        resolvedModelSelection.options?.reasoningEffort ??
+        CODEX_GIT_TEXT_GENERATION_REASONING_EFFORT;
       const command = ChildProcess.make(
         codexSettings?.binaryPath || "codex",
         [
@@ -172,7 +180,7 @@ const makeCodexTextGeneration = Effect.gen(function* () {
           "-s",
           "read-only",
           "--model",
-          modelSelection.model,
+          resolvedModelSelection.model,
           "--config",
           `model_reasoning_effort="${reasoningEffort}"`,
           ...(normalizedOptions?.fastMode ? ["--config", `service_tier="fast"`] : []),

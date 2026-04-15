@@ -9,6 +9,7 @@
 import {
   type CanonicalItemType,
   type CanonicalRequestType,
+  type ModelSelection,
   type ProviderEvent,
   type ProviderRuntimeEvent,
   type ThreadTokenUsageSnapshot,
@@ -22,6 +23,7 @@ import {
   TurnId,
   ProviderSendTurnInput,
 } from "@t3tools/contracts";
+import { resolveModelSelectionDefault } from "@t3tools/shared/model";
 import { Effect, FileSystem, Layer, Queue, Schema, ServiceMap, Stream } from "effect";
 
 import {
@@ -91,6 +93,18 @@ function toRequestError(threadId: ThreadId, method: string, cause: unknown): Pro
     detail: toMessage(cause, `${method} failed`),
     cause,
   });
+}
+
+function resolveCodexModelSelection(
+  modelSelection: ModelSelection | undefined,
+): Extract<ModelSelection, { provider: "codex" }> | undefined {
+  if (modelSelection?.provider !== "codex") {
+    return undefined;
+  }
+
+  // Normalize frontend sentinels like `auto` before invoking Codex runtime APIs.
+  const resolved = resolveModelSelectionDefault(modelSelection);
+  return resolved.provider === "codex" ? resolved : undefined;
 }
 
 function asObject(value: unknown): Record<string, unknown> | undefined {
@@ -1405,6 +1419,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       );
       const binaryPath = codexSettings.binaryPath;
       const homePath = codexSettings.homePath;
+      const resolvedCodexModelSelection = resolveCodexModelSelection(input.modelSelection);
       const managerInput: CodexAppServerStartSessionInput = {
         threadId: input.threadId,
         provider: "codex",
@@ -1413,12 +1428,8 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         runtimeMode: input.runtimeMode,
         binaryPath,
         ...(homePath ? { homePath } : {}),
-        ...(input.modelSelection?.provider === "codex"
-          ? { model: input.modelSelection.model }
-          : {}),
-        ...(input.modelSelection?.provider === "codex" && input.modelSelection.options?.fastMode
-          ? { serviceTier: "fast" }
-          : {}),
+        ...(resolvedCodexModelSelection ? { model: resolvedCodexModelSelection.model } : {}),
+        ...(resolvedCodexModelSelection?.options?.fastMode ? { serviceTier: "fast" } : {}),
       };
 
       return yield* Effect.tryPromise({
@@ -1475,19 +1486,15 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
 
     return yield* Effect.tryPromise({
       try: () => {
+        const resolvedCodexModelSelection = resolveCodexModelSelection(input.modelSelection);
         const managerInput = {
           threadId: input.threadId,
           ...(input.input !== undefined ? { input: input.input } : {}),
-          ...(input.modelSelection?.provider === "codex"
-            ? { model: input.modelSelection.model }
+          ...(resolvedCodexModelSelection ? { model: resolvedCodexModelSelection.model } : {}),
+          ...(resolvedCodexModelSelection?.options?.reasoningEffort !== undefined
+            ? { effort: resolvedCodexModelSelection.options.reasoningEffort }
             : {}),
-          ...(input.modelSelection?.provider === "codex" &&
-          input.modelSelection.options?.reasoningEffort !== undefined
-            ? { effort: input.modelSelection.options.reasoningEffort }
-            : {}),
-          ...(input.modelSelection?.provider === "codex" && input.modelSelection.options?.fastMode
-            ? { serviceTier: "fast" }
-            : {}),
+          ...(resolvedCodexModelSelection?.options?.fastMode ? { serviceTier: "fast" } : {}),
           ...(input.interactionMode !== undefined
             ? { interactionMode: input.interactionMode }
             : {}),

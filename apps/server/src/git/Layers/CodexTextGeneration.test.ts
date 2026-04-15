@@ -34,6 +34,7 @@ function makeFakeCodexBinary(
     requireImage?: boolean;
     requireFastServiceTier?: boolean;
     requireReasoningEffort?: string;
+    requireModel?: string;
     forbidReasoningEffort?: boolean;
     stdinMustContain?: string;
     stdinMustNotContain?: string;
@@ -54,12 +55,19 @@ function makeFakeCodexBinary(
         'seen_image="0"',
         'seen_fast_service_tier="0"',
         'seen_reasoning_effort=""',
+        'seen_model=""',
         "while [ $# -gt 0 ]; do",
         '  if [ "$1" = "--image" ]; then',
         "    shift",
         '    if [ -n "$1" ]; then',
         '      seen_image="1"',
         "    fi",
+        "    shift",
+        "    continue",
+        "  fi",
+        '  if [ "$1" = "--model" ]; then',
+        "    shift",
+        '    seen_model="$1"',
         "    shift",
         "    continue",
         "  fi",
@@ -106,6 +114,14 @@ function makeFakeCodexBinary(
               `if [ "$seen_reasoning_effort" != "model_reasoning_effort=\\"${input.requireReasoningEffort}\\"" ]; then`,
               '  printf "%s\\n" "unexpected reasoning effort config: $seen_reasoning_effort" >&2',
               `  exit 6`,
+              "fi",
+            ]
+          : []),
+        ...(input.requireModel !== undefined
+          ? [
+              `if [ "$seen_model" != "${input.requireModel}" ]; then`,
+              '  printf "%s\\n" "unexpected model: $seen_model" >&2',
+              `  exit 8`,
               "fi",
             ]
           : []),
@@ -158,6 +174,7 @@ function withFakeCodexEnv<A, E, R>(
     requireImage?: boolean;
     requireFastServiceTier?: boolean;
     requireReasoningEffort?: string;
+    requireModel?: string;
     forbidReasoningEffort?: boolean;
     stdinMustContain?: string;
     stdinMustNotContain?: string;
@@ -258,6 +275,33 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
           });
         }),
       ),
+  );
+
+  it.effect("maps codex auto model selection to a concrete CLI model", () =>
+    withFakeCodexEnv(
+      {
+        output: JSON.stringify({
+          subject: "Add important change",
+          body: "",
+        }),
+        requireModel: "gpt-5.4",
+      },
+      Effect.gen(function* () {
+        const textGeneration = yield* TextGeneration;
+
+        yield* textGeneration.generateCommitMessage({
+          cwd: process.cwd(),
+          branch: "feature/codex-effect",
+          stagedSummary: "M README.md",
+          stagedPatch: "diff --git a/README.md b/README.md",
+          commitMessageStyle: DEFAULT_COMMIT_MESSAGE_STYLE,
+          modelSelection: {
+            provider: "codex",
+            model: "auto",
+          },
+        });
+      }),
+    ),
   );
 
   it.effect("defaults git text generation codex effort to low", () =>

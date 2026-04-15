@@ -676,6 +676,45 @@ describe("ProviderCommandReactor", () => {
     });
   });
 
+  it("resolves codex auto model selection on first turn for new threads", async () => {
+    const harness = await createHarness({
+      threadModelSelection: { provider: "codex", model: "Auto" },
+    });
+    const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.makeUnsafe("cmd-turn-start-codex-auto"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-codex-auto"),
+          role: "user",
+          text: "hello with auto",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      modelSelection: {
+        provider: "codex",
+        model: DEFAULT_MODEL_BY_PROVIDER.codex,
+      },
+    });
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      modelSelection: {
+        provider: "codex",
+        model: DEFAULT_MODEL_BY_PROVIDER.codex,
+      },
+    });
+  });
+
   it("forwards claude fast mode options through session start and turn send", async () => {
     const harness = await createHarness({
       threadModelSelection: { provider: "claudeAgent", model: "claude-opus-4-6" },

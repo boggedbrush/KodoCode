@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import rootPackageJson from "../package.json" with { type: "json" };
@@ -390,6 +390,59 @@ function resolveDesktopRuntimeDependencies(
   return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop");
 }
 
+function readInstalledDependencyVersion(
+  repoRoot: string,
+  dependencyName: string,
+): string | undefined {
+  const dependencyPackageJsonPath = join(
+    repoRoot,
+    "node_modules",
+    ...dependencyName.split("/"),
+    "package.json",
+  );
+  if (!existsSync(dependencyPackageJsonPath)) {
+    return undefined;
+  }
+
+  const dependencyPackageJson = JSON.parse(readFileSync(dependencyPackageJsonPath, "utf8")) as {
+    readonly version?: unknown;
+  };
+  if (
+    typeof dependencyPackageJson.version !== "string" ||
+    dependencyPackageJson.version.length === 0
+  ) {
+    return undefined;
+  }
+
+  return dependencyPackageJson.version;
+}
+
+function pinInstalledDependencyVersions(
+  dependencies: Record<string, unknown>,
+  repoRoot: string,
+): Record<string, unknown> {
+  const pinnedDependencies: Record<string, unknown> = {};
+  const missingInstalledVersions: string[] = [];
+
+  // Pin to installed versions so stage installs remain deterministic across release runs.
+  for (const [dependencyName] of Object.entries(dependencies)) {
+    const installedVersion = readInstalledDependencyVersion(repoRoot, dependencyName);
+    if (!installedVersion) {
+      missingInstalledVersions.push(dependencyName);
+      continue;
+    }
+    pinnedDependencies[dependencyName] = installedVersion;
+  }
+
+  if (missingInstalledVersions.length > 0) {
+    throw new Error(
+      `Could not resolve installed versions for: ${missingInstalledVersions.join(", ")}. Run 'bun install --frozen-lockfile' before packaging.`,
+    );
+  }
+
+  return pinnedDependencies;
+}
+
 function resolveGitHubPublishConfig():
   | {
       readonly provider: "github";
@@ -546,6 +599,22 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         cause,
       }),
   });
+  const pinnedServerDependencies = yield* Effect.try({
+    try: () => pinInstalledDependencyVersions(resolvedServerDependencies, repoRoot),
+    catch: (cause) =>
+      new BuildScriptError({
+        message: "Could not pin server runtime dependencies from the local install state.",
+        cause,
+      }),
+  });
+  const pinnedDesktopRuntimeDependencies = yield* Effect.try({
+    try: () => pinInstalledDependencyVersions(resolvedDesktopRuntimeDependencies, repoRoot),
+    catch: (cause) =>
+      new BuildScriptError({
+        message: "Could not pin desktop runtime dependencies from the local install state.",
+        cause,
+      }),
+  });
 
   const appVersion = options.version ?? serverPackageJson.version;
   const commitHash = resolveGitCommitHash(repoRoot);
@@ -622,8 +691,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.mockUpdateServerPort,
     ),
     dependencies: {
-      ...resolvedServerDependencies,
-      ...resolvedDesktopRuntimeDependencies,
+      ...pinnedServerDependencies,
+      ...pinnedDesktopRuntimeDependencies,
     },
     devDependencies: {
       electron: electronVersion,

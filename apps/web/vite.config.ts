@@ -11,12 +11,13 @@ const configuredWsUrl = process.env.VITE_WS_URL?.trim();
 const configuredHmrHost = process.env.T3CODE_WEB_HMR_HOST?.trim();
 const sourcemapEnv = process.env.T3CODE_WEB_SOURCEMAP?.trim().toLowerCase();
 
+// Release builds should default to no sourcemaps to avoid shipping source maps unless explicitly requested.
 const buildSourcemap =
-  sourcemapEnv === "0" || sourcemapEnv === "false"
-    ? false
+  sourcemapEnv === "1" || sourcemapEnv === "true"
+    ? true
     : sourcemapEnv === "hidden"
       ? "hidden"
-      : true;
+      : false;
 
 function resolveDevProxyTarget(wsUrl: string | undefined): string | undefined {
   if (!wsUrl) {

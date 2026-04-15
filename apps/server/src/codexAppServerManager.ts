@@ -347,9 +347,14 @@ export function normalizeCodexModelSlug(
   model: string | undefined | null,
   preferredId?: string,
 ): string | undefined {
-  const normalized = normalizeModelSlug(model);
+  const normalized = normalizeModelSlug(model, "codex");
   if (!normalized) {
     return undefined;
+  }
+
+  // `auto` is a frontend-only sentinel and should never be forwarded to Codex CLI.
+  if (normalized === "auto") {
+    return preferredId?.endsWith("-codex") ? preferredId : undefined;
   }
 
   if (preferredId?.endsWith("-codex") && preferredId !== normalized) {

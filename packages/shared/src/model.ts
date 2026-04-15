@@ -260,13 +260,11 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
 }
 
 export function resolveModelSelectionDefault(modelSelection: ModelSelection): ModelSelection {
-  if (
-    modelSelection.provider === "claudeAgent" &&
-    modelSelection.model.trim().toLowerCase() === "auto"
-  ) {
+  // `auto` is a UI sentinel; execution layers require a concrete provider model id.
+  if (modelSelection.model.trim().toLowerCase() === "auto") {
     return {
       ...modelSelection,
-      model: DEFAULT_MODEL_BY_PROVIDER.claudeAgent,
+      model: DEFAULT_MODEL_BY_PROVIDER[modelSelection.provider],
     };
   }
   return modelSelection;

@@ -19,7 +19,7 @@ jobs:
   preflight:
     name: Preflight
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     outputs:
       version: ${{ steps.release_meta.outputs.version }}
       tag: ${{ steps.release_meta.outputs.tag }}
@@ -69,6 +69,9 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Format
+        run: bun run fmt:check
+
       - name: Lint
         run: bun run lint
 
@@ -77,6 +80,14 @@ jobs:
 
       - name: Test
         run: bun run test
+
+      - name: Install browser test runtime
+        run: |
+          cd apps/web
+          bunx playwright install --with-deps chromium
+
+      - name: Browser test
+        run: bun run --cwd apps/web test:browser
 
   build:
     name: Build ${{ matrix.label }}
@@ -326,18 +337,10 @@ jobs:
         run: bun run build --filter=@t3tools/web --filter=kodo
 
       - name: Publish CLI package
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
-            echo "NPM_TOKEN secret is required to publish the CLI package." >&2
-            exit 1
-          fi
-
           # Pre-releases must not move npm's stable latest dist-tag.
-          # We also pass --provenance so npm can attach the GitHub OIDC attestation for
-          # this workflow run; without auth plus provenance the release job either fails
-          # with ENEEDAUTH or publishes without the expected supply-chain metadata.
+          # We pass --provenance so npm can attach the GitHub OIDC attestation.
+          # Trusted publishing should authenticate via this workflow's id-token permission.
           npm_tag=latest
           if [[ "${{ needs.preflight.outputs.is_prerelease }}" == "true" ]]; then
             npm_tag=next

@@ -257,6 +257,11 @@ describe("normalizeCodexModelSlug", () => {
     expect(normalizeCodexModelSlug("gpt-5.2-codex")).toBe("gpt-5.2-codex");
     expect(normalizeCodexModelSlug("gpt-5.2")).toBe("gpt-5.2");
   });
+
+  it("does not forward frontend auto sentinel values", () => {
+    expect(normalizeCodexModelSlug("auto")).toBeUndefined();
+    expect(normalizeCodexModelSlug("Auto", "gpt-5.3-codex")).toBe("gpt-5.3-codex");
+  });
 });
 
 describe("isRecoverableThreadResumeError", () => {

@@ -5,7 +5,7 @@ This document covers how to run desktop releases from one tag, first without sig
 ## What the workflow does
 
 - Trigger: push tag matching `v*.*.*`.
-- Runs quality gates first: lint, typecheck, test.
+- Runs quality gates first: format check, lint, typecheck, test, browser test.
 - Builds four artifacts in parallel:
   - macOS `arm64` DMG
   - macOS `x64` DMG
@@ -58,6 +58,11 @@ Checklist:
    - set `apps/server/package.json` version to `X.Y.Z`
    - build web + server
    - run the CLI publish command (which calls `npm publish --access public`)
+
+Notes:
+
+- `NPM_TOKEN` is not required for the release workflow when trusted publishing is configured.
+- The workflow relies on GitHub Actions OIDC (`id-token: write`) plus `--provenance`.
 
 ## 1) Dry-run release without signing
 
