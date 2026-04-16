@@ -835,6 +835,14 @@ async function waitForProductionStyles(): Promise<void> {
   );
 }
 
+async function waitForDocumentFonts(): Promise<void> {
+  if (document.fonts === undefined) {
+    return;
+  }
+  await document.fonts.ready;
+  await waitForLayout();
+}
+
 async function waitForElement<T extends Element>(
   query: () => T | null,
   errorMessage: string,
@@ -1116,6 +1124,7 @@ async function mountChatView(options: {
   customWsRpcResolver = options.resolveRpc ?? null;
   await setViewport(options.viewport);
   await waitForProductionStyles();
+  await waitForDocumentFonts();
 
   const host = document.createElement("div");
   host.style.position = "fixed";
@@ -1144,6 +1153,7 @@ async function mountChatView(options: {
 
   await waitForWsClient();
   await waitForAppBootstrap();
+  await waitForDocumentFonts();
   await waitForLayout();
 
   const cleanup = async () => {
@@ -1159,6 +1169,7 @@ async function mountChatView(options: {
     setViewport: async (viewport: ViewportSpec) => {
       await setViewport(viewport);
       await waitForProductionStyles();
+      await waitForDocumentFonts();
     },
     setContainerSize: async (viewport) => {
       host.style.width = `${viewport.width}px`;

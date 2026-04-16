@@ -478,6 +478,14 @@ async function waitForProductionStyles(): Promise<void> {
   );
 }
 
+async function waitForDocumentFonts(): Promise<void> {
+  if (document.fonts === undefined) {
+    return;
+  }
+  await document.fonts.ready;
+  await waitForLayout();
+}
+
 async function waitForElement<T extends Element>(
   query: () => T | null,
   errorMessage: string,
@@ -573,6 +581,7 @@ async function mountMessagesTimeline(input: {
   const viewport = input.viewport ?? DEFAULT_VIEWPORT;
   await setViewport(viewport);
   await waitForProductionStyles();
+  await waitForDocumentFonts();
 
   const host = document.createElement("div");
   host.style.width = `${viewport.width}px`;
@@ -588,6 +597,7 @@ async function mountMessagesTimeline(input: {
   const screen = await render(<MessagesTimelineBrowserHarness {...input.props} />, {
     container: host,
   });
+  await waitForDocumentFonts();
   await waitForLayout();
 
   return {
@@ -596,6 +606,7 @@ async function mountMessagesTimeline(input: {
       nextProps: Omit<ComponentProps<typeof MessagesTimeline>, "scrollContainer">,
     ) => {
       await screen.rerender(<MessagesTimelineBrowserHarness {...nextProps} />);
+      await waitForDocumentFonts();
       await waitForLayout();
     },
     setContainerSize: async (nextViewport: { width: number; height: number }) => {
@@ -606,6 +617,7 @@ async function mountMessagesTimeline(input: {
       host.style.height = `${nextViewport.height}px`;
       host.style.minHeight = `${nextViewport.height}px`;
       host.style.maxHeight = `${nextViewport.height}px`;
+      await waitForDocumentFonts();
       await waitForLayout();
     },
     cleanup: async () => {

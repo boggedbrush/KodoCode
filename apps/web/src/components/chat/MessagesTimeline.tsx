@@ -138,6 +138,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onVirtualizerSnapshot,
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
+  const pendingMeasureFrameRef = useRef<number | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
 
   useLayoutEffect(() => {
@@ -247,10 +248,39 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     useAnimationFrameWithResizeObserver: true,
     overscan: 8,
   });
+  const scheduleVirtualizerMeasure = useCallback(() => {
+    if (pendingMeasureFrameRef.current !== null) return;
+    pendingMeasureFrameRef.current = window.requestAnimationFrame(() => {
+      pendingMeasureFrameRef.current = null;
+      rowVirtualizer.measure();
+    });
+  }, [rowVirtualizer]);
   useEffect(() => {
     if (timelineWidthPx === null) return;
     rowVirtualizer.measure();
   }, [rowVirtualizer, timelineWidthPx]);
+  useEffect(() => {
+    if (typeof document === "undefined" || document.fonts === undefined) {
+      return;
+    }
+
+    const fontSet = document.fonts;
+    let active = true;
+    const handleFontSettle = () => {
+      if (!active) return;
+      scheduleVirtualizerMeasure();
+    };
+
+    void fontSet.ready.then(handleFontSettle, () => {});
+    fontSet.addEventListener("loadingdone", handleFontSettle);
+    fontSet.addEventListener("loadingerror", handleFontSettle);
+
+    return () => {
+      active = false;
+      fontSet.removeEventListener("loadingdone", handleFontSettle);
+      fontSet.removeEventListener("loadingerror", handleFontSettle);
+    };
+  }, [scheduleVirtualizerMeasure]);
   useEffect(() => {
     rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
       const viewportHeight = instance.scrollRect?.height ?? 0;
@@ -267,14 +297,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = undefined;
     };
   }, [rowVirtualizer]);
-  const pendingMeasureFrameRef = useRef<number | null>(null);
   const onTimelineImageLoad = useCallback(() => {
-    if (pendingMeasureFrameRef.current !== null) return;
-    pendingMeasureFrameRef.current = window.requestAnimationFrame(() => {
-      pendingMeasureFrameRef.current = null;
-      rowVirtualizer.measure();
-    });
-  }, [rowVirtualizer]);
+    scheduleVirtualizerMeasure();
+  }, [scheduleVirtualizerMeasure]);
   useEffect(() => {
     return () => {
       const frame = pendingMeasureFrameRef.current;
