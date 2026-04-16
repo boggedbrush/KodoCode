@@ -23,6 +23,15 @@ type SidebarThreadSortInput = Pick<Thread, "createdAt" | "updatedAt"> & {
 };
 
 type SidebarProjectThreadInput = Pick<Thread, "id" | "archivedAt">;
+type ProjectRemovalProjectInput<TProjectId> = {
+  id: TProjectId;
+  workspaceRoot: string;
+  deletedAt: string | null;
+};
+type ProjectRemovalThreadInput<TProjectId> = {
+  projectId: TProjectId;
+  deletedAt: string | null;
+};
 
 export type ThreadTraversalDirection = "previous" | "next";
 
@@ -406,6 +415,37 @@ export function getProjectThreadsForSidebar<T extends SidebarProjectThreadInput>
   return input.threadIds
     .map((threadId) => input.threadsById[threadId])
     .filter((thread): thread is T => thread !== undefined && thread.archivedAt === null);
+}
+
+export function resolveProjectRemovalTargets<TProjectId>(input: {
+  projectId: TProjectId;
+  projectCwd: string;
+  projects: readonly ProjectRemovalProjectInput<TProjectId>[];
+  threads: readonly ProjectRemovalThreadInput<TProjectId>[];
+}): {
+  matchingProjectIds: TProjectId[];
+  activeThreadCount: number;
+} {
+  const matchingProjectIds = input.projects
+    .filter(
+      (project) =>
+        project.deletedAt === null &&
+        (project.id === input.projectId || project.workspaceRoot === input.projectCwd),
+    )
+    .map((project) => project.id)
+    .filter(
+      (projectId, index, ids) => ids.findIndex((candidate) => candidate === projectId) === index,
+    );
+
+  const matchingProjectIdSet = new Set(matchingProjectIds);
+  const activeThreadCount = input.threads.filter(
+    (thread) => thread.deletedAt === null && matchingProjectIdSet.has(thread.projectId),
+  ).length;
+
+  return {
+    matchingProjectIds,
+    activeThreadCount,
+  };
 }
 
 export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input: {

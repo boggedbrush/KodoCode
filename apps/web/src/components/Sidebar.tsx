@@ -118,6 +118,7 @@ import {
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
+  resolveProjectRemovalTargets,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
   orderItemsByPreferredIds,
@@ -1317,11 +1318,14 @@ export default function Sidebar() {
       }
       if (clicked !== "delete") return;
 
-      const projectThreads = getProjectThreadsForSidebar({
-        threadIds: threadIdsByProjectId[projectId] ?? [],
-        threadsById: sidebarThreadsById,
+      const snapshot = await api.orchestration.getSnapshot();
+      const { activeThreadCount, matchingProjectIds } = resolveProjectRemovalTargets({
+        projectId,
+        projectCwd: project.cwd,
+        projects: snapshot.projects,
+        threads: snapshot.threads,
       });
-      if (projectThreads.length > 0) {
+      if (activeThreadCount > 0) {
         toastManager.add({
           type: "warning",
           title: "Project is not empty",
@@ -1334,16 +1338,19 @@ export default function Sidebar() {
       if (!confirmed) return;
 
       try {
-        const projectDraftThread = getDraftThreadByProjectId(projectId);
-        if (projectDraftThread) {
-          clearComposerDraftForThread(projectDraftThread.threadId);
+        const removalProjectIds = matchingProjectIds.length > 0 ? matchingProjectIds : [projectId];
+        for (const removalProjectId of removalProjectIds) {
+          const projectDraftThread = getDraftThreadByProjectId(removalProjectId);
+          if (projectDraftThread) {
+            clearComposerDraftForThread(projectDraftThread.threadId);
+          }
+          clearProjectDraftThreadId(removalProjectId);
+          await api.orchestration.dispatchCommand({
+            type: "project.delete",
+            commandId: newCommandId(),
+            projectId: removalProjectId,
+          });
         }
-        clearProjectDraftThreadId(projectId);
-        await api.orchestration.dispatchCommand({
-          type: "project.delete",
-          commandId: newCommandId(),
-          projectId,
-        });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown error removing project.";
         console.error("Failed to remove project", { projectId, error });
@@ -1360,8 +1367,6 @@ export default function Sidebar() {
       copyPathToClipboard,
       getDraftThreadByProjectId,
       projects,
-      sidebarThreadsById,
-      threadIdsByProjectId,
     ],
   );
 

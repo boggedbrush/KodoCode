@@ -11,6 +11,7 @@ import {
   hasUnseenCompletion,
   isContextMenuPointerDown,
   orderItemsByPreferredIds,
+  resolveProjectRemovalTargets,
   resolveProjectStatusIndicator,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
@@ -275,6 +276,73 @@ describe("orderItemsByPreferredIds", () => {
       ProjectId.makeUnsafe("project-2"),
       ProjectId.makeUnsafe("project-1"),
     ]);
+  });
+});
+
+describe("resolveProjectRemovalTargets", () => {
+  it("matches the rendered project by id and any active duplicates by workspace root", () => {
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const recreatedProjectId = ProjectId.makeUnsafe("project-2");
+
+    const result = resolveProjectRemovalTargets({
+      projectId,
+      projectCwd: "C:\\Users\\Admin\\Documents\\Playground",
+      projects: [
+        {
+          id: projectId,
+          workspaceRoot: "C:\\Users\\Admin\\Documents\\Playground",
+          deletedAt: null,
+        },
+        {
+          id: recreatedProjectId,
+          workspaceRoot: "C:\\Users\\Admin\\Documents\\Playground",
+          deletedAt: null,
+        },
+      ],
+      threads: [],
+    });
+
+    expect(result).toEqual({
+      matchingProjectIds: [projectId, recreatedProjectId],
+      activeThreadCount: 0,
+    });
+  });
+
+  it("counts active threads across all matching project ids", () => {
+    const projectId = ProjectId.makeUnsafe("project-1");
+    const recreatedProjectId = ProjectId.makeUnsafe("project-2");
+
+    const result = resolveProjectRemovalTargets({
+      projectId,
+      projectCwd: "C:\\Users\\Admin\\Documents\\Playground",
+      projects: [
+        {
+          id: projectId,
+          workspaceRoot: "C:\\Users\\Admin\\Documents\\Playground",
+          deletedAt: null,
+        },
+        {
+          id: recreatedProjectId,
+          workspaceRoot: "C:\\Users\\Admin\\Documents\\Playground",
+          deletedAt: null,
+        },
+      ],
+      threads: [
+        {
+          projectId: recreatedProjectId,
+          deletedAt: null,
+        },
+        {
+          projectId: recreatedProjectId,
+          deletedAt: "2026-04-16T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      matchingProjectIds: [projectId, recreatedProjectId],
+      activeThreadCount: 1,
+    });
   });
 });
 
