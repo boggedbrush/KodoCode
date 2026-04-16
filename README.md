@@ -164,10 +164,10 @@ Plans aren't just conversation turns — they're stored artifacts with state. A 
 
 ```mermaid
 flowchart TD
-    UI["🖥️ **Kōdō Desktop UI**\nAsk · Plan · Code · Review"]
-    ORC["⚙️ **Kōdō Orchestrator**\nModel switching · Enhance pipeline\nWorkflow state · Settings & policy"]
-    CODEX["**Codex CLI**\nOpenAI"]
-    CLAUDE["**Claude Agent SDK**\nAnthropic"]
+    UI["🖥️ Kōdō Desktop UI\nAsk · Plan · Code · Review"]
+    ORC["⚙️ Kōdō Orchestrator\nModel switching · Enhance pipeline\nWorkflow state · Settings & policy"]
+    CODEX["Codex CLI\nOpenAI"]
+    CLAUDE["Claude Agent SDK\nAnthropic"]
     REPO["Repo · Terminal · Files"]
 
     UI --> ORC
