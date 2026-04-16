@@ -38,7 +38,7 @@ describe("WebSocketConnectionSurface.logic", () => {
     ).toBe(true);
   });
 
-  it("forces reconnect on focus only for previously connected disconnected states", () => {
+  it("forces reconnect on focus for disconnected states while online", () => {
     expect(
       shouldAutoReconnect(
         makeStatus({
@@ -63,7 +63,7 @@ describe("WebSocketConnectionSurface.logic", () => {
         }),
         "focus",
       ),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("forces reconnect on focus for exhausted reconnect loops", () => {

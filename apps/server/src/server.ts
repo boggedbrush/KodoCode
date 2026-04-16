@@ -11,7 +11,7 @@ import {
   staticAndDevRouteLayer,
 } from "./http";
 import { fixPath } from "./os-jank";
-import { websocketRpcRouteLayer } from "./ws";
+import { makeWebsocketRpcRouteLayer } from "./ws";
 import { OpenLive } from "./open";
 import {
   authLayerConfig as AuthSqlitePersistenceLayerLive,
@@ -248,30 +248,31 @@ const RuntimeServicesLive = ServerRuntimeStartupLive.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
 );
 
-export const makeRoutesLayer = Layer.mergeAll(
-  // Keep auth routes out of the wildcard browser API CORS policy. Fresh standalone
-  // environments allow one anonymous owner bootstrap, so letting any origin read
-  // those responses would let an arbitrary webpage claim the local server.
-  authBearerBootstrapRouteLayer,
-  authBootstrapRouteLayer,
-  authClientsRevokeOthersRouteLayer,
-  authClientsRevokeRouteLayer,
-  authClientsRouteLayer,
-  authPairingLinksRevokeRouteLayer,
-  authPairingLinksRouteLayer,
-  authPairingCredentialRouteLayer,
-  authSessionRouteLayer,
-  authWebSocketTokenRouteLayer,
-  attachmentsRouteLayer,
-  projectFaviconRouteLayer,
-  serverEnvironmentRouteLayer,
-  staticAndDevRouteLayer,
-  websocketRpcRouteLayer,
-  // Browser-origin OTLP exports are the only cross-origin HTTP API we expect.
-  // File-backed routes like `/api/project-favicon` and `/attachments/*` must stay
-  // same-origin so a random webpage cannot probe local files through the server.
-  otlpTracesProxyRouteLayer.pipe(Layer.provide(browserApiCorsLayer)),
-);
+export const makeRoutesLayer = () =>
+  Layer.mergeAll(
+    // Keep auth routes out of the wildcard browser API CORS policy. Fresh standalone
+    // environments allow one anonymous owner bootstrap, so letting any origin read
+    // those responses would let an arbitrary webpage claim the local server.
+    authBearerBootstrapRouteLayer,
+    authBootstrapRouteLayer,
+    authClientsRevokeOthersRouteLayer,
+    authClientsRevokeRouteLayer,
+    authClientsRouteLayer,
+    authPairingLinksRevokeRouteLayer,
+    authPairingLinksRouteLayer,
+    authPairingCredentialRouteLayer,
+    authSessionRouteLayer,
+    authWebSocketTokenRouteLayer,
+    attachmentsRouteLayer,
+    projectFaviconRouteLayer,
+    serverEnvironmentRouteLayer,
+    staticAndDevRouteLayer,
+    makeWebsocketRpcRouteLayer(),
+    // Browser-origin OTLP exports are the only cross-origin HTTP API we expect.
+    // File-backed routes like `/api/project-favicon` and `/attachments/*` must stay
+    // same-origin so a random webpage cannot probe local files through the server.
+    otlpTracesProxyRouteLayer.pipe(Layer.provide(browserApiCorsLayer)),
+  );
 
 export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {
@@ -288,7 +289,7 @@ export const makeServerLayer = Layer.unwrap(
     );
 
     const serverApplicationLayer = Layer.mergeAll(
-      HttpRouter.serve(makeRoutesLayer, {
+      HttpRouter.serve(makeRoutesLayer(), {
         disableLogger: !config.logWebSocketEvents,
       }),
       httpListeningLayer,
