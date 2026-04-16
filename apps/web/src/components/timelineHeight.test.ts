@@ -116,6 +116,15 @@ describe("estimateTimelineMessageHeight", () => {
     expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 768 })).toBe(96.75);
   });
 
+  it("uses the markdown wrap model for plain user text at measured widths", () => {
+    const message = {
+      role: "user" as const,
+      text: "x".repeat(72),
+    };
+
+    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 768 })).toBe(117.5);
+  });
+
   it("does not clamp user wrapping too aggressively on very narrow layouts", () => {
     const message = {
       role: "user" as const,

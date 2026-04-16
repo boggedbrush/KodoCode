@@ -17,6 +17,7 @@ const USER_ATTACHMENT_ROW_HEIGHT_PX = 116;
 const USER_BUBBLE_WIDTH_RATIO = 0.8;
 const USER_BUBBLE_HORIZONTAL_PADDING_PX = 32;
 const ASSISTANT_MESSAGE_HORIZONTAL_PADDING_PX = 8;
+const USER_MARKDOWN_AVG_CHAR_WIDTH_PX = 8.1;
 const USER_MONO_AVG_CHAR_WIDTH_PX = 8;
 const ASSISTANT_AVG_CHAR_WIDTH_PX = 7.2;
 const MIN_USER_CHARS_PER_LINE = 4;
@@ -55,11 +56,14 @@ function isFinitePositiveNumber(value: number | null | undefined): value is numb
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
-function estimateCharsPerLineForUser(timelineWidthPx: number | null): number {
+function estimateCharsPerLineForUser(
+  timelineWidthPx: number | null,
+  averageCharWidthPx: number,
+): number {
   if (!isFinitePositiveNumber(timelineWidthPx)) return USER_CHARS_PER_LINE_FALLBACK;
   const bubbleWidthPx = timelineWidthPx * USER_BUBBLE_WIDTH_RATIO;
   const textWidthPx = Math.max(bubbleWidthPx - USER_BUBBLE_HORIZONTAL_PADDING_PX, 0);
-  return Math.max(MIN_USER_CHARS_PER_LINE, Math.floor(textWidthPx / USER_MONO_AVG_CHAR_WIDTH_PX));
+  return Math.max(MIN_USER_CHARS_PER_LINE, Math.floor(textWidthPx / averageCharWidthPx));
 }
 
 function estimateCharsPerLineForAssistant(timelineWidthPx: number | null): number {
@@ -82,7 +86,6 @@ export function estimateTimelineMessageHeight(
   }
 
   if (message.role === "user") {
-    const charsPerLine = estimateCharsPerLineForUser(layout.timelineWidthPx);
     const displayedUserMessage = deriveDisplayedUserMessageState(message.text);
     const renderedText =
       displayedUserMessage.contexts.length > 0
@@ -93,6 +96,16 @@ export function estimateTimelineMessageHeight(
             .filter((part) => part.length > 0)
             .join(" ")
         : displayedUserMessage.visibleText;
+    // Plain user text renders through `ChatMarkdown` with proportional UI copy,
+    // while terminal-context messages render in a monospaced `pre-wrap` body.
+    // Keep those wrap models separate so long browser-test paragraphs track the
+    // real DOM more closely across desktop and CI font stacks.
+    const charsPerLine = estimateCharsPerLineForUser(
+      layout.timelineWidthPx,
+      displayedUserMessage.contexts.length > 0
+        ? USER_MONO_AVG_CHAR_WIDTH_PX
+        : USER_MARKDOWN_AVG_CHAR_WIDTH_PX,
+    );
     const estimatedLines = estimateWrappedLineCount(renderedText, charsPerLine);
     const attachmentCount = message.attachments?.length ?? 0;
     const attachmentRows = Math.ceil(attachmentCount / ATTACHMENTS_PER_ROW);
