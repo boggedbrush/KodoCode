@@ -24,7 +24,7 @@ it.layer(NodeServices.layer)("server scripts cli", (it) => {
         assert.equal(pkg.overrides["@effect/platform-node-shared"], "4.0.0-beta.43");
         assert.equal(pkg.overrides.defu, "^6.1.5");
         assert.equal(pkg.overrides.picomatch, "^2.3.2");
-        assert.equal(pkg.overrides["vitest>vite"], "^8.0.8");
+        assert.equal(pkg.overrides["vitest>vite"], undefined);
       }),
   );
 });

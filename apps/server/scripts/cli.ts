@@ -35,6 +35,17 @@ interface PublishPackageJson {
   readonly overrides: Record<string, unknown>;
 }
 
+function sanitizePublishOverrides(overrides: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(overrides).filter(([name]) => {
+      // npm rejects Bun-style nested override selectors like `vitest>vite` in a
+      // published package manifest. They are only relevant to the monorepo's
+      // dev/test toolchain, so strip them from the runtime package we publish.
+      return !name.includes(">");
+    }),
+  );
+}
+
 export const PUBLISH_BUILD_ASSET_PATHS = [
   "dist/bin.mjs",
   "dist/client/index.html",
@@ -68,7 +79,7 @@ export const resolvePublishPackageJson = (appVersion: Option.Option<string>) =>
         "apps/server dependencies",
       ),
       overrides: resolveCatalogDependencies(
-        pkg.overrides,
+        sanitizePublishOverrides(pkg.overrides),
         rootPackageJson.workspaces.catalog,
         "root overrides",
       ),
