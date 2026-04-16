@@ -7,6 +7,11 @@ on:
         description: "Release version to rebuild and replace (for example 0.0.1 or v0.0.1)"
         required: true
         type: string
+      ref:
+        description: "Git ref to rebuild from (defaults to the release tag)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -23,6 +28,7 @@ jobs:
         shell: bash
         run: |
           raw="${{ github.event.inputs.version }}"
+          checkout_ref="${{ github.event.inputs.ref }}"
           version="${raw#v}"
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid release version: $raw" >&2
@@ -31,11 +37,15 @@ jobs:
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          if [[ -z "$checkout_ref" ]]; then
+            checkout_ref="refs/tags/v$version"
+          fi
+          echo "checkout_ref=$checkout_ref" >> "$GITHUB_OUTPUT"
 
-      - name: Checkout tagged release
+      - name: Checkout release source
         uses: actions/checkout@v6
         with:
-          ref: refs/tags/${{ steps.release_meta.outputs.tag }}
+          ref: ${{ steps.release_meta.outputs.checkout_ref }}
           fetch-depth: 0
 
       - name: Setup Bun
