@@ -4,6 +4,7 @@ import { beforeAll, describe, expect, it, vi } from "vitest";
 import { INTERACTION_MODE_ACCENT_COLORS } from "../modeColors";
 import { shouldAutoExpandPlanMarkdown } from "./planSidebar.logic";
 import type { ActivePlanState, LatestProposedPlanState } from "../session-logic";
+import PlanSidebar from "./PlanSidebar";
 
 beforeAll(() => {
   const classList = {
@@ -68,8 +69,7 @@ describe("PlanSidebar", () => {
     ).toBe(true);
   });
 
-  it("renders the header badge with the plan accent color", async () => {
-    const { default: PlanSidebar } = await import("./PlanSidebar");
+  it("renders the header badge with the plan accent color", () => {
     const markup = renderToStaticMarkup(
       <PlanSidebar
         activePlan={null}
@@ -85,8 +85,7 @@ describe("PlanSidebar", () => {
     expect(markup).toContain(`color:${INTERACTION_MODE_ACCENT_COLORS.plan}`);
   });
 
-  it("renders in-progress step styling with the plan accent color", async () => {
-    const { default: PlanSidebar } = await import("./PlanSidebar");
+  it("renders in-progress step styling with the plan accent color", () => {
     const markup = renderToStaticMarkup(
       <PlanSidebar
         activePlan={{

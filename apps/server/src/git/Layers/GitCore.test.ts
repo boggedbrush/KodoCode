@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { execPath } from "node:process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it } from "@effect/vitest";
@@ -101,6 +102,10 @@ function runShellCommand(input: {
   });
 }
 
+function shellEscape(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
 const makeIsolatedGitCore = (executeOverride: GitCoreShape["execute"]) =>
   makeGitCore({ executeOverride }).pipe(
     Effect.provide(Layer.provideMerge(ServerConfigLayer, NodeServices.layer)),
@@ -169,7 +174,7 @@ it.layer(TestLayer)("git integration", (it) => {
     it.effect("caps captured output when maxOutputBytes is exceeded", () =>
       Effect.gen(function* () {
         const result = yield* runShellCommand({
-          command: `node -e "process.stdout.write('x'.repeat(2000))"`,
+          command: `${shellEscape(execPath)} -e "process.stdout.write('x'.repeat(2000))"`,
           cwd: process.cwd(),
           timeoutMs: 10_000,
           maxOutputBytes: 128,

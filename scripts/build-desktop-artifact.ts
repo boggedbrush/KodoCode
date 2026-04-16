@@ -1,14 +1,15 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync } from "node:fs";
+import { delimiter, join } from "node:path";
 
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
 import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
+import { pinInstalledDependencyVersions } from "./lib/installed-dependency-versions.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -152,6 +153,20 @@ function resolvePythonForNodeGyp(): string | undefined {
   }
 
   return executable;
+}
+
+function prependRepoToolingToPath(env: NodeJS.ProcessEnv, repoRoot: string): NodeJS.ProcessEnv {
+  const repoNodeModulesBin = join(repoRoot, "node_modules", ".bin");
+  const currentPath = env.PATH ?? env.Path ?? "";
+  const nextPath = currentPath
+    ? `${repoNodeModulesBin}${delimiter}${currentPath}`
+    : repoNodeModulesBin;
+
+  return {
+    ...env,
+    PATH: nextPath,
+    Path: nextPath,
+  };
 }
 
 interface ResolvedBuildOptions {
@@ -388,59 +403,6 @@ function resolveDesktopRuntimeDependencies(
   );
 
   return resolveCatalogDependencies(runtimeDependencies, catalog, "apps/desktop");
-}
-
-function readInstalledDependencyVersion(
-  repoRoot: string,
-  dependencyName: string,
-): string | undefined {
-  const dependencyPackageJsonPath = join(
-    repoRoot,
-    "node_modules",
-    ...dependencyName.split("/"),
-    "package.json",
-  );
-  if (!existsSync(dependencyPackageJsonPath)) {
-    return undefined;
-  }
-
-  const dependencyPackageJson = JSON.parse(readFileSync(dependencyPackageJsonPath, "utf8")) as {
-    readonly version?: unknown;
-  };
-  if (
-    typeof dependencyPackageJson.version !== "string" ||
-    dependencyPackageJson.version.length === 0
-  ) {
-    return undefined;
-  }
-
-  return dependencyPackageJson.version;
-}
-
-function pinInstalledDependencyVersions(
-  dependencies: Record<string, unknown>,
-  repoRoot: string,
-): Record<string, unknown> {
-  const pinnedDependencies: Record<string, unknown> = {};
-  const missingInstalledVersions: string[] = [];
-
-  // Pin to installed versions so stage installs remain deterministic across release runs.
-  for (const [dependencyName] of Object.entries(dependencies)) {
-    const installedVersion = readInstalledDependencyVersion(repoRoot, dependencyName);
-    if (!installedVersion) {
-      missingInstalledVersions.push(dependencyName);
-      continue;
-    }
-    pinnedDependencies[dependencyName] = installedVersion;
-  }
-
-  if (missingInstalledVersions.length > 0) {
-    throw new Error(
-      `Could not resolve installed versions for: ${missingInstalledVersions.join(", ")}. Run 'bun install --frozen-lockfile' before packaging.`,
-    );
-  }
-
-  return pinnedDependencies;
 }
 
 function resolveGitHubPublishConfig():
@@ -702,10 +664,12 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
   yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);
 
+  const stageInstallEnv = prependRepoToolingToPath({ ...process.env }, repoRoot);
   yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
   yield* runCommand(
     ChildProcess.make({
       cwd: stageAppDir,
+      env: stageInstallEnv,
       ...commandOutputOptions(options.verbose),
       // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
       shell: process.platform === "win32",

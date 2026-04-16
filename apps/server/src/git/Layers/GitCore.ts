@@ -57,6 +57,7 @@ const STATUS_UPSTREAM_REFRESH_INTERVAL = Duration.seconds(15);
 const STATUS_UPSTREAM_REFRESH_TIMEOUT = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_FAILURE_COOLDOWN = Duration.seconds(5);
 const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
+const STATUS_UPSTREAM_REFRESH_SSH_CONNECT_TIMEOUT_SECONDS = 1;
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
 const GIT_LIST_BRANCHES_DEFAULT_LIMIT = 100;
 
@@ -74,6 +75,7 @@ class StatusUpstreamRefreshCacheKey extends Data.Class<{
 
 interface ExecuteGitOptions {
   stdin?: string | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
   timeoutMs?: number | undefined;
   allowNonZeroExit?: boolean | undefined;
   fallbackErrorMessage?: string | undefined;
@@ -325,6 +327,19 @@ function deriveLocalBranchNameFromRemoteRef(branchName: string): string | null {
   return localBranch.length > 0 ? localBranch : null;
 }
 
+function isLocallyAddressableGitRemoteUrl(url: string | null): boolean {
+  const trimmed = url?.trim() ?? "";
+  if (trimmed.length === 0) {
+    return false;
+  }
+
+  if (trimmed.startsWith("file://")) {
+    return true;
+  }
+
+  return /^(?:[A-Za-z]:[\\/]|\/|\.{1,2}[\\/])/.test(trimmed);
+}
+
 function commandLabel(args: readonly string[]): string {
   return `git ${args.join(" ")}`;
 }
@@ -381,6 +396,20 @@ interface Trace2Monitor {
 }
 
 const nowUnixNano = (): bigint => BigInt(Date.now()) * 1_000_000n;
+
+function buildNonInteractiveGitEnv(baseEnv?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...baseEnv,
+    GIT_TERMINAL_PROMPT: baseEnv?.GIT_TERMINAL_PROMPT ?? "0",
+    GCM_INTERACTIVE: baseEnv?.GCM_INTERACTIVE ?? "never",
+  };
+
+  if (!env.GIT_SSH_COMMAND) {
+    env.GIT_SSH_COMMAND = `ssh -o BatchMode=yes -o ConnectTimeout=${STATUS_UPSTREAM_REFRESH_SSH_CONNECT_TIMEOUT_SECONDS}`;
+  }
+
+  return env;
+}
 
 const addCurrentSpanEvent = (name: string, attributes: Record<string, unknown>) =>
   Effect.currentSpan.pipe(
@@ -665,7 +694,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
             ChildProcess.make("git", commandInput.args, {
               cwd: commandInput.cwd,
               env: {
-                ...process.env,
+                ...buildNonInteractiveGitEnv(process.env),
                 ...input.env,
                 ...trace2Monitor.env,
               },
@@ -776,6 +805,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       cwd,
       args,
       ...(options.stdin !== undefined ? { stdin: options.stdin } : {}),
+      ...(options.env !== undefined ? { env: options.env } : {}),
       allowNonZeroExit: true,
       ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
       ...(options.maxOutputBytes !== undefined ? { maxOutputBytes: options.maxOutputBytes } : {}),
@@ -910,6 +940,7 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       {
         allowNonZeroExit: true,
         timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
+        env: buildNonInteractiveGitEnv(process.env),
       },
     ).pipe(Effect.asVoid);
   };
@@ -948,6 +979,12 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   ) {
     const upstream = yield* resolveCurrentUpstream(cwd);
     if (!upstream) return;
+    const remoteUrl = yield* readConfigValue(cwd, `remote.${upstream.remoteName}.url`).pipe(
+      Effect.catch(() => Effect.succeed(null)),
+    );
+    if (remoteUrl !== null && !isLocallyAddressableGitRemoteUrl(remoteUrl)) {
+      return;
+    }
     const gitCommonDir = yield* resolveGitCommonDir(cwd);
     yield* Cache.get(
       statusUpstreamRefreshCache,

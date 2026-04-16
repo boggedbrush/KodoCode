@@ -15,14 +15,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
-
-const showContextMenuFallbackMock =
-  vi.fn<
-    <T extends string>(
-      items: readonly ContextMenuItem<T>[],
-      position?: { x: number; y: number },
-    ) => Promise<T | null>
-  >();
+import { __resetWsNativeApiForTests, createWsNativeApi } from "./wsNativeApi";
 
 function registerListener<T>(listeners: Set<(event: T) => void>, listener: (event: T) => void) {
   listeners.add(listener);
@@ -31,70 +24,93 @@ function registerListener<T>(listeners: Set<(event: T) => void>, listener: (even
   };
 }
 
-const terminalEventListeners = new Set<(event: TerminalEvent) => void>();
-const orchestrationEventListeners = new Set<(event: OrchestrationEvent) => void>();
-const gitStatusListeners = new Set<(event: GitStatusResult) => void>();
+const {
+  gitStatusListeners,
+  orchestrationEventListeners,
+  rpcClientMock,
+  showContextMenuFallbackMock,
+  terminalEventListeners,
+} = vi.hoisted(() => {
+  const terminalEventListeners = new Set<(event: TerminalEvent) => void>();
+  const orchestrationEventListeners = new Set<(event: OrchestrationEvent) => void>();
+  const gitStatusListeners = new Set<(event: GitStatusResult) => void>();
+  const showContextMenuFallbackMock =
+    vi.fn<
+      <T extends string>(
+        items: readonly ContextMenuItem<T>[],
+        position?: { x: number; y: number },
+      ) => Promise<T | null>
+    >();
 
-const rpcClientMock = {
-  dispose: vi.fn(),
-  terminal: {
-    open: vi.fn(),
-    write: vi.fn(),
-    resize: vi.fn(),
-    clear: vi.fn(),
-    restart: vi.fn(),
-    close: vi.fn(),
-    onEvent: vi.fn((listener: (event: TerminalEvent) => void) =>
-      registerListener(terminalEventListeners, listener),
-    ),
-  },
-  projects: {
-    searchEntries: vi.fn(),
-    writeFile: vi.fn(),
-  },
-  shell: {
-    openInEditor: vi.fn(),
-  },
-  git: {
-    pull: vi.fn(),
-    refreshStatus: vi.fn(),
-    onStatus: vi.fn((input: { cwd: string }, listener: (event: GitStatusResult) => void) =>
-      registerListener(gitStatusListeners, listener),
-    ),
-    runStackedAction: vi.fn(),
-    listBranches: vi.fn(),
-    createWorktree: vi.fn(),
-    removeWorktree: vi.fn(),
-    createBranch: vi.fn(),
-    checkout: vi.fn(),
-    init: vi.fn(),
-    resolvePullRequest: vi.fn(),
-    preparePullRequestThread: vi.fn(),
-  },
-  server: {
-    getConfig: vi.fn(),
-    refreshProviders: vi.fn(),
-    getUsageStatus: vi.fn(),
-    refreshUsageStatus: vi.fn(),
-    upsertKeybinding: vi.fn(),
-    getSettings: vi.fn(),
-    updateSettings: vi.fn(),
-    enhancePrompt: vi.fn(),
-    subscribeConfig: vi.fn(),
-    subscribeLifecycle: vi.fn(),
-    subscribeUsageStatus: vi.fn(),
-  },
-  orchestration: {
-    getSnapshot: vi.fn(),
-    dispatchCommand: vi.fn(),
-    getTurnDiff: vi.fn(),
-    getFullThreadDiff: vi.fn(),
-    replayEvents: vi.fn(),
-    onDomainEvent: vi.fn((listener: (event: OrchestrationEvent) => void) =>
-      registerListener(orchestrationEventListeners, listener),
-    ),
-  },
-};
+  const rpcClientMock = {
+    dispose: vi.fn(),
+    terminal: {
+      open: vi.fn(),
+      write: vi.fn(),
+      resize: vi.fn(),
+      clear: vi.fn(),
+      restart: vi.fn(),
+      close: vi.fn(),
+      onEvent: vi.fn((listener: (event: TerminalEvent) => void) =>
+        registerListener(terminalEventListeners, listener),
+      ),
+    },
+    projects: {
+      searchEntries: vi.fn(),
+      writeFile: vi.fn(),
+    },
+    shell: {
+      openInEditor: vi.fn(),
+    },
+    git: {
+      pull: vi.fn(),
+      refreshStatus: vi.fn(),
+      onStatus: vi.fn((input: { cwd: string }, listener: (event: GitStatusResult) => void) =>
+        registerListener(gitStatusListeners, listener),
+      ),
+      runStackedAction: vi.fn(),
+      listBranches: vi.fn(),
+      createWorktree: vi.fn(),
+      removeWorktree: vi.fn(),
+      createBranch: vi.fn(),
+      checkout: vi.fn(),
+      init: vi.fn(),
+      resolvePullRequest: vi.fn(),
+      preparePullRequestThread: vi.fn(),
+    },
+    server: {
+      getConfig: vi.fn(),
+      refreshProviders: vi.fn(),
+      getUsageStatus: vi.fn(),
+      refreshUsageStatus: vi.fn(),
+      upsertKeybinding: vi.fn(),
+      getSettings: vi.fn(),
+      updateSettings: vi.fn(),
+      enhancePrompt: vi.fn(),
+      subscribeConfig: vi.fn(),
+      subscribeLifecycle: vi.fn(),
+      subscribeUsageStatus: vi.fn(),
+    },
+    orchestration: {
+      getSnapshot: vi.fn(),
+      dispatchCommand: vi.fn(),
+      getTurnDiff: vi.fn(),
+      getFullThreadDiff: vi.fn(),
+      replayEvents: vi.fn(),
+      onDomainEvent: vi.fn((listener: (event: OrchestrationEvent) => void) =>
+        registerListener(orchestrationEventListeners, listener),
+      ),
+    },
+  };
+
+  return {
+    gitStatusListeners,
+    orchestrationEventListeners,
+    rpcClientMock,
+    showContextMenuFallbackMock,
+    terminalEventListeners,
+  };
+});
 
 vi.mock("./wsRpcClient", () => {
   return {
@@ -213,7 +229,6 @@ const baseGitStatus: GitStatusResult = {
 };
 
 beforeEach(() => {
-  vi.resetModules();
   vi.clearAllMocks();
   showContextMenuFallbackMock.mockReset();
   terminalEventListeners.clear();
@@ -226,10 +241,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+beforeEach(async () => {
+  await __resetWsNativeApiForTests();
+});
+
 describe("wsNativeApi", () => {
   it("forwards server config fetches directly to the RPC client", async () => {
     rpcClientMock.server.getConfig.mockResolvedValue(baseServerConfig);
-    const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
 
@@ -241,7 +259,6 @@ describe("wsNativeApi", () => {
 
   it("forwards prompt enhancement requests directly to the RPC client", async () => {
     rpcClientMock.server.enhancePrompt.mockResolvedValue({ prompt: "enhanced" });
-    const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
 
@@ -260,8 +277,6 @@ describe("wsNativeApi", () => {
   });
 
   it("forwards terminal and orchestration stream events", async () => {
-    const { createWsNativeApi } = await import("./wsNativeApi");
-
     const api = createWsNativeApi();
     const onTerminalEvent = vi.fn();
     const onDomainEvent = vi.fn();
@@ -309,8 +324,6 @@ describe("wsNativeApi", () => {
   });
 
   it("forwards git status stream events", async () => {
-    const { createWsNativeApi } = await import("./wsNativeApi");
-
     const api = createWsNativeApi();
     const onStatus = vi.fn();
 
@@ -325,7 +338,6 @@ describe("wsNativeApi", () => {
 
   it("forwards git status refreshes directly to the RPC client", async () => {
     rpcClientMock.git.refreshStatus.mockResolvedValue(baseGitStatus);
-    const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
 
@@ -335,8 +347,6 @@ describe("wsNativeApi", () => {
   });
 
   it("forwards orchestration stream subscription options to the RPC client", async () => {
-    const { createWsNativeApi } = await import("./wsNativeApi");
-
     const api = createWsNativeApi();
     const onDomainEvent = vi.fn();
     const onResubscribe = vi.fn();
@@ -350,7 +360,6 @@ describe("wsNativeApi", () => {
 
   it("sends orchestration dispatch commands as the direct RPC payload", async () => {
     rpcClientMock.orchestration.dispatchCommand.mockResolvedValue({ sequence: 1 });
-    const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
     const command = {
@@ -372,7 +381,6 @@ describe("wsNativeApi", () => {
 
   it("forwards workspace file writes to the project RPC", async () => {
     rpcClientMock.projects.writeFile.mockResolvedValue({ relativePath: "plan.md" });
-    const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
     await api.projects.writeFile({
@@ -390,7 +398,6 @@ describe("wsNativeApi", () => {
 
   it("forwards full-thread diff requests to the orchestration RPC", async () => {
     rpcClientMock.orchestration.getFullThreadDiff.mockResolvedValue({ diff: "patch" });
-    const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
     await api.orchestration.getFullThreadDiff({
@@ -412,7 +419,6 @@ describe("wsNativeApi", () => {
       },
     ];
     rpcClientMock.server.refreshProviders.mockResolvedValue({ providers: nextProviders });
-    const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
 
@@ -426,7 +432,6 @@ describe("wsNativeApi", () => {
       enableAssistantStreaming: true,
     };
     rpcClientMock.server.updateSettings.mockResolvedValue(nextSettings);
-    const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
 
@@ -442,7 +447,6 @@ describe("wsNativeApi", () => {
     const showContextMenu = vi.fn().mockResolvedValue("delete");
     getWindowForTest().desktopBridge = makeDesktopBridge({ showContextMenu });
 
-    const { createWsNativeApi } = await import("./wsNativeApi");
     const api = createWsNativeApi();
     const items = [{ id: "delete", label: "Delete" }] as const;
 
@@ -452,7 +456,6 @@ describe("wsNativeApi", () => {
 
   it("falls back to the browser context menu helper when the desktop bridge is missing", async () => {
     showContextMenuFallbackMock.mockResolvedValue("rename");
-    const { createWsNativeApi } = await import("./wsNativeApi");
 
     const api = createWsNativeApi();
     const items = [{ id: "rename", label: "Rename" }] as const;

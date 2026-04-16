@@ -1,6 +1,7 @@
 import { MessageId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { MessagesTimeline } from "./MessagesTimeline";
 
 function matchMedia() {
   return {
@@ -43,8 +44,7 @@ beforeAll(() => {
 });
 
 describe("MessagesTimeline", () => {
-  it("renders inline terminal labels with the composer chip UI", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
+  it("renders inline terminal labels with the composer chip UI", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         hasMessages
@@ -99,8 +99,7 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("yoo what&#x27;s ");
   });
 
-  it("renders context compaction entries in the normal work log", async () => {
-    const { MessagesTimeline } = await import("./MessagesTimeline");
+  it("renders context compaction entries in the normal work log", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         hasMessages
