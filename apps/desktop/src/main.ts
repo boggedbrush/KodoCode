@@ -29,6 +29,7 @@ import { RotatingFileSink } from "@t3tools/shared/logging";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort";
 import { showDesktopConfirmDialog } from "./confirmDialog";
+import { resolveDesktopBackendEntryPath, resolveDesktopStaticDirPath } from "./packagedPaths";
 import { syncShellEnvironment } from "./syncShellEnvironment";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
 import {
@@ -444,7 +445,12 @@ function resolveAboutCommitHash(): string | null {
 }
 
 function resolveBackendEntry(): string {
-  return Path.join(resolveAppRoot(), "apps/server/dist/bin.mjs");
+  return resolveDesktopBackendEntryPath({
+    appPath: resolveAppRoot(),
+    existsSync: FS.existsSync,
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+  });
 }
 
 function resolveBackendCwd(): string {
@@ -455,19 +461,15 @@ function resolveBackendCwd(): string {
 }
 
 function resolveDesktopStaticDir(): string | null {
-  const appRoot = resolveAppRoot();
-  const candidates = [
-    Path.join(appRoot, "apps/server/dist/client"),
-    Path.join(appRoot, "apps/web/dist"),
-  ];
-
-  for (const candidate of candidates) {
-    if (FS.existsSync(Path.join(candidate, "index.html"))) {
-      return candidate;
-    }
-  }
-
-  return null;
+  return resolveDesktopStaticDirPath(
+    {
+      appPath: resolveAppRoot(),
+      existsSync: FS.existsSync,
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+    },
+    FS.existsSync,
+  );
 }
 
 function resolveDesktopStaticPath(staticRoot: string, requestUrl: string): string {

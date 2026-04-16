@@ -107,8 +107,7 @@ export function shouldAutoReconnect(
 
   return (
     status.online &&
-    status.hasConnected &&
-    (uiState === "reconnecting" || status.reconnectPhase === "exhausted")
+    (uiState === "reconnecting" || uiState === "error" || status.reconnectPhase === "exhausted")
   );
 }
 
@@ -119,8 +118,7 @@ export function shouldRestartStalledReconnect(
   return (
     status.reconnectPhase === "waiting" &&
     status.nextRetryAt === expectedNextRetryAt &&
-    status.online &&
-    status.hasConnected
+    status.online
   );
 }
 
@@ -361,12 +359,7 @@ export function WebSocketConnectionCoordinator() {
   }, [status.nextRetryAt, status.reconnectPhase]);
 
   useEffect(() => {
-    if (
-      status.reconnectPhase !== "waiting" ||
-      status.nextRetryAt === null ||
-      !status.online ||
-      !status.hasConnected
-    ) {
+    if (status.reconnectPhase !== "waiting" || status.nextRetryAt === null || !status.online) {
       return;
     }
 
@@ -384,13 +377,7 @@ export function WebSocketConnectionCoordinator() {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [
-    status.hasConnected,
-    status.nextRetryAt,
-    status.online,
-    status.reconnectAttemptCount,
-    status.reconnectPhase,
-  ]);
+  }, [status.nextRetryAt, status.online, status.reconnectAttemptCount, status.reconnectPhase]);
 
   useEffect(() => {
     const uiState = getWsConnectionUiState(status);

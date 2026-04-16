@@ -8,7 +8,7 @@ import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
-import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
+import { BRAND_ASSET_PATHS, PUBLISH_ICON_OVERRIDES } from "./lib/brand-assets.ts";
 import { pinInstalledDependencyVersions } from "./lib/installed-dependency-versions.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
@@ -390,6 +390,34 @@ function validateBundledClientAssets(clientDir: string) {
   });
 }
 
+function applyStageWebIconOverrides(repoRoot: string, stageAppDir: string) {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+
+    for (const override of PUBLISH_ICON_OVERRIDES) {
+      const sourcePath = path.join(repoRoot, override.sourceRelativePath);
+      const targetPath = path.join(stageAppDir, "apps/server", override.targetRelativePath);
+
+      if (!(yield* fs.exists(sourcePath))) {
+        return yield* new BuildScriptError({
+          message: `Missing production web icon source at ${sourcePath}`,
+        });
+      }
+
+      if (!(yield* fs.exists(targetPath))) {
+        return yield* new BuildScriptError({
+          message: `Missing staged web icon target at ${targetPath}`,
+        });
+      }
+
+      yield* fs.copyFile(sourcePath, targetPath);
+    }
+
+    yield* Effect.log("[desktop-artifact] Applied production web icons to staged client bundle.");
+  });
+}
+
 function resolveDesktopRuntimeDependencies(
   dependencies: Record<string, unknown> | undefined,
   catalog: Record<string, unknown>,
@@ -442,6 +470,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
     appId: "com.kodo.code",
     productName,
     artifactName: "Kodo-Code-${version}-${arch}.${ext}",
+    asarUnpack: ["apps/server/dist/**", "node_modules/**"],
     directories: {
       buildResources: "apps/desktop/resources",
     },
@@ -629,6 +658,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
+  yield* applyStageWebIconOverrides(repoRoot, stageAppDir);
 
   yield* assertPlatformBuildResources(options.platform, stageResourcesDir);
 
@@ -642,7 +672,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     kodoCodeCommitHash: commitHash,
     private: true,
     description: "Kodo Code desktop build",
-    author: "Kodo Tools",
+    author: "boggedbrush",
     main: "apps/desktop/dist-electron/main.js",
     build: yield* createBuildConfig(
       options.platform,
