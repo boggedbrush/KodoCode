@@ -1,77 +1,125 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 300" width="100%" height="100%" role="img" aria-label="Kōdo Code Logo">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 300" width="100%" height="100%" role="img" aria-label="Kōdō Code Logo">
   <defs>
     <style>
-      .bg { fill: #0d0d0f; }
-      .oct {
-        fill: #141418;
-        stroke: #2a2a2e;
-        stroke-width: 1.5;
-        stroke-linejoin: miter;
-      }
-      .oct-inner {
-        fill: none;
-        stroke: #3a3a40;
-        stroke-width: 0.5;
-        stroke-linejoin: miter;
-      }
+      .oct { fill: #141418; stroke: #2a2a2e; stroke-width: 1.5; stroke-linejoin: miter; }
+      .oct-inner { fill: none; stroke: #3a3a40; stroke-width: 0.5; stroke-linejoin: miter; }
       .kanji {
         font-family: 'Noto Serif JP', 'Yu Mincho', serif;
-        font-size: 72px;
-        font-weight: 500;
-        fill: #c4bba8;
-        text-anchor: middle;
+        font-size: 72px; font-weight: 500;
+        fill: #c4bba8; text-anchor: middle;
       }
       .brand {
         font-family: 'Noto Serif', 'Yu Mincho', 'Hiragino Mincho ProN', serif;
-        font-size: 56px;
-        font-weight: 500;
-        fill: #c4bba8;
-        letter-spacing: 0.03em;
+        font-size: 56px; font-weight: 500;
+        fill: #c4bba8; letter-spacing: 0.03em;
       }
       .tagline {
         font-family: 'Noto Serif', 'Times New Roman', Georgia, serif;
-        font-size: 22px;
-        font-style: italic;
-        font-weight: 400;
-        fill: #7a7264;
-        letter-spacing: 0.01em;
+        font-size: 22px; font-style: italic; font-weight: 400;
+        fill: #7a7264; letter-spacing: 0.01em;
       }
-      .rule {
-        stroke: #2a2a2e;
-        stroke-width: 1;
+      .incense-holder { fill: #1e1e22; stroke: #3a3a40; stroke-width: 1.2; }
+      .incense-holder-rim { fill: none; stroke: #4a4a50; stroke-width: 0.6; }
+      .smoke {
+        fill: none; stroke: #9a9490; stroke-width: 1.2;
+        stroke-linecap: round; stroke-dasharray: 300; stroke-dashoffset: 300; opacity: 0;
       }
-      .dot {
-        fill: #a08050;
+      .smoke-1 { animation: smoke-rise-1 6s ease-out infinite; }
+      .smoke-2 { animation: smoke-rise-2 6s ease-out 1.5s infinite; }
+      .smoke-3 { animation: smoke-rise-3 6s ease-out 3s infinite; }
+      .smoke-4 { animation: smoke-rise-4 6s ease-out 4.5s infinite; }
+      .smoke-thin { stroke-width: 0.7; stroke: #8a8480; }
+
+      @keyframes smoke-rise-1 {
+        0%   { stroke-dashoffset: 300; opacity: 0; transform: translate(0,0); }
+        6%   { opacity: 0.32; }
+        45%  { stroke-dashoffset: 0; opacity: 0.18; }
+        100% { opacity: 0; transform: translate(8px,-12px); }
       }
+      @keyframes smoke-rise-2 {
+        0%   { stroke-dashoffset: 300; opacity: 0; transform: translate(0,0); }
+        6%   { opacity: 0.26; }
+        45%  { stroke-dashoffset: 0; opacity: 0.14; }
+        100% { opacity: 0; transform: translate(-6px,-14px); }
+      }
+      @keyframes smoke-rise-3 {
+        0%   { stroke-dashoffset: 300; opacity: 0; transform: translate(0,0); }
+        6%   { opacity: 0.28; }
+        45%  { stroke-dashoffset: 0; opacity: 0.15; }
+        100% { opacity: 0; transform: translate(5px,-10px); }
+      }
+      @keyframes smoke-rise-4 {
+        0%   { stroke-dashoffset: 300; opacity: 0; transform: translate(0,0); }
+        6%   { opacity: 0.22; }
+        45%  { stroke-dashoffset: 0; opacity: 0.1; }
+        100% { opacity: 0; transform: translate(-7px,-11px); }
+      }
+
+      @keyframes ember-glow {
+        0%,100% { opacity: 0.75; } 50% { opacity: 1; }
+      }
+      .ember-glow { animation: ember-glow 2.5s ease-in-out infinite; }
     </style>
+
+    <linearGradient id="stick-grad" gradientUnits="userSpaceOnUse"
+      x1="480" y1="250" x2="620" y2="225">
+      <stop offset="0%" stop-color="#8a6a40" />
+      <stop offset="55%" stop-color="#a08050" />
+      <stop offset="100%" stop-color="#907048" />
+    </linearGradient>
+
+    <radialGradient id="ember-core">
+      <stop offset="0%" stop-color="#ffc070" />
+      <stop offset="45%" stop-color="#d07030" />
+      <stop offset="100%" stop-color="#a04820" />
+    </radialGradient>
+    <radialGradient id="ember-halo">
+      <stop offset="0%" stop-color="#ff8040" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#ff6020" stop-opacity="0" />
+    </radialGradient>
+    <filter id="smoke-soft"><feGaussianBlur stdDeviation="1" /></filter>
+    <filter id="glow-soft"><feGaussianBlur stdDeviation="2.5" /></filter>
   </defs>
 
-  <!-- Background -->
-  <rect class="bg" width="800" height="300"/>
-
-  <!-- Octagon — double stroke -->
-  <polygon
-    class="oct"
-    points="91.4,45 208.6,45 255,91.4 255,208.6 208.6,255 91.4,255 45,208.6 45,91.4"
-  />
-  <polygon
-    class="oct-inner"
-    points="98,54 202,54 246,98 246,202 202,246 98,246 54,202 54,98"
-  />
+  <!-- Octagon -->
+  <polygon class="oct"
+    points="91.4,45 208.6,45 255,91.4 255,208.6 208.6,255 91.4,255 45,208.6 45,91.4" />
+  <polygon class="oct-inner"
+    points="98,54 202,54 246,98 246,202 202,246 98,246 54,202 54,98" />
 
   <!-- Kanji -->
   <text x="150" y="138" class="kanji">香</text>
   <text x="150" y="218" class="kanji">道</text>
 
-  <!-- Brand — Kōdo with macron -->
-  <text x="320" y="142" class="brand">Kōdo Code</text>
-
-  <!-- Tagline -->
+  <!-- Brand -->
+  <text x="320" y="142" class="brand">Kōdō Code</text>
   <text x="320" y="172" class="tagline">code with intention</text>
 
-  <!-- Rule -->
-  <line x1="320" y1="204" x2="600" y2="204" class="rule"/>
+  <!-- Incense Holder — shifted right and down -->
+  <ellipse class="incense-holder" cx="478" cy="252" rx="28" ry="7" />
+  <ellipse class="incense-holder-rim" cx="478" cy="250" rx="26" ry="5.5" />
 
-  <!-- Dot -->
-  <circle cx="320" cy="204" r="4" class="dot"/>
+  <!-- Incense Stick — gentle upward angle, clear of text -->
+  <line x1="492" y1="249" x2="622" y2="225"
+    stroke="url(#stick-grad)" stroke-width="2.5" stroke-linecap="round" />
+
+  <!-- Ember -->
+  <g class="ember-glow">
+    <circle cx="622" cy="225" r="15" fill="url(#ember-halo)" filter="url(#glow-soft)" />
+    <circle cx="622" cy="225" r="7" fill="url(#ember-halo)" />
+    <circle cx="622" cy="225" r="2.8" fill="url(#ember-core)" />
+    <circle cx="622" cy="225" r="1.2" fill="#ffd090" />
+  </g>
+
+  <!-- Smoke — rises into the upper-right quadrant, clear of text -->
+  <g filter="url(#smoke-soft)">
+    <path class="smoke smoke-1"
+      d="M622,222 C618,202 626,182 621,160 C616,138 625,118 620,96 C615,74 624,54 619,32" />
+    <path class="smoke smoke-2"
+      d="M622,222 C627,200 619,178 625,156 C631,134 620,112 628,90 C636,68 625,46 633,24" />
+    <path class="smoke smoke-3"
+      d="M623,222 C619,204 627,186 621,168 C615,150 626,132 620,114 C614,96 625,78 620,60" />
+    <path class="smoke smoke-4 smoke-thin"
+      d="M621,222 C626,198 618,174 624,150 C630,126 619,102 627,78 C635,54 624,30 632,6" />
+  </g>
 </svg>
