@@ -12,7 +12,6 @@ const workspaceFiles = [
   "apps/server/package.json",
   "apps/desktop/package.json",
   "apps/web/package.json",
-  "apps/marketing/package.json",
   "packages/contracts/package.json",
   "packages/shared/package.json",
   "scripts/package.json",
