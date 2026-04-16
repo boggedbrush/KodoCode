@@ -1,5 +1,6 @@
 import { Effect, Layer } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { ServerConfig } from "./config";
 import {
@@ -185,6 +186,11 @@ const ProviderLayerLive = Layer.unwrap(
 );
 
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
+const PersistenceWarmupLayerLive = Layer.effectDiscard(
+  Effect.gen(function* () {
+    yield* SqlClient.SqlClient;
+  }),
+);
 // Keep auth tables on their own scoped SQLite file so standalone servers that
 // share a base dir do not accidentally share sessions or pairing state.
 const AuthPersistenceLayerLive = Layer.empty.pipe(
@@ -227,6 +233,7 @@ const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
   Layer.provideMerge(TerminalLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
+  Layer.provideMerge(PersistenceWarmupLayerLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
   Layer.provideMerge(ProviderUsageRegistryLive),

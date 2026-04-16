@@ -194,6 +194,7 @@ interface StagePackageJson {
   readonly main: string;
   readonly build: Record<string, unknown>;
   readonly dependencies: Record<string, unknown>;
+  readonly overrides: Record<string, unknown>;
   readonly devDependencies: {
     readonly electron: string;
   };
@@ -590,6 +591,19 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         cause,
       }),
   });
+  const resolvedRootOverrides = yield* Effect.try({
+    try: () =>
+      resolveCatalogDependencies(
+        rootPackageJson.overrides,
+        rootPackageJson.workspaces.catalog,
+        "root overrides",
+      ),
+    catch: (cause) =>
+      new BuildScriptError({
+        message: "Could not resolve root overrides for the desktop staging manifest.",
+        cause,
+      }),
+  });
   const pinnedServerDependencies = yield* Effect.try({
     try: () => pinInstalledDependencyVersions(resolvedServerDependencies, repoRoot),
     catch: (cause) =>
@@ -686,6 +700,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       ...pinnedServerDependencies,
       ...pinnedDesktopRuntimeDependencies,
     },
+    overrides: resolvedRootOverrides,
     devDependencies: {
       electron: electronVersion,
     },

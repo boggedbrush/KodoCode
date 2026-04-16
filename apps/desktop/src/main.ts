@@ -752,7 +752,13 @@ function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
               ? Path.join(ROOT_DIR, "assets/dev/blueprint-windows.ico")
               : Path.join(ROOT_DIR, "assets/prod/kodo-black-windows.ico"),
           ]
-        : [];
+        : ext === "icns"
+          ? [
+              isDevelopment
+                ? Path.join(ROOT_DIR, "assets/dev/blueprint-macos.icns")
+                : Path.join(ROOT_DIR, "assets/prod/kodo-black-macos.icns"),
+            ]
+          : [];
 
   for (const candidate of brandAssetCandidates) {
     if (FS.existsSync(candidate)) {
