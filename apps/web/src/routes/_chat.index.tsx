@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 
 import { isElectron } from "../env";
-import { isLinuxPlatform, isMacPlatform, cn } from "../lib/utils";
+import { cn, isMacPlatform, usesCustomDesktopTitlebar } from "../lib/utils";
 import { SidebarTrigger, useSidebar } from "../components/ui/sidebar";
 import { SidebarBrandToggleButton } from "../components/SidebarBrandToggleButton";
-import { LinuxWindowControls } from "../components/LinuxTitleBar";
+import { DesktopWindowControls } from "../components/DesktopTitleBar";
 
-const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+const hasCustomDesktopTitlebar = isElectron && usesCustomDesktopTitlebar(navigator.platform);
 
 function ChatIndexRouteView() {
   const { open: sidebarOpen } = useSidebar();
@@ -34,7 +34,7 @@ function ChatIndexRouteView() {
         >
           <SidebarBrandToggleButton />
           <span className="text-xs text-muted-foreground/50">No active thread</span>
-          {isLinuxDesktop && <LinuxWindowControls />}
+          {hasCustomDesktopTitlebar && <DesktopWindowControls />}
         </div>
       )}
 

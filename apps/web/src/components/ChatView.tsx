@@ -45,8 +45,8 @@ import * as Schema from "effect/Schema";
 import { useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
-import { isLinuxPlatform } from "../lib/utils";
-import { LinuxWindowControls } from "./LinuxTitleBar";
+import { usesCustomDesktopTitlebar } from "../lib/utils";
+import { DesktopWindowControls } from "./DesktopTitleBar";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
   clampCollapsedComposerCursor,
@@ -238,7 +238,7 @@ import {
 import { useProviderUsage } from "~/rpc/providerUsageState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 
-const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+const hasCustomDesktopTitlebar = isElectron && usesCustomDesktopTitlebar(navigator.platform);
 // TODO(perf): Preserve these lazy boundaries; avoid importing terminal/editor modules statically into ChatView.
 // Any new heavy chat-only UI should follow this pattern so the initial chat route chunk stays below warning budgets.
 // Keep xterm + fit addon code out of the default chat route payload.
@@ -4980,7 +4980,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             )}
           >
             <span className="text-xs text-muted-foreground/50">No active thread</span>
-            {isLinuxDesktop && <LinuxWindowControls />}
+            {hasCustomDesktopTitlebar && <DesktopWindowControls />}
           </div>
         )}
         <div className="flex flex-1 items-center justify-center">
@@ -5029,7 +5029,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
         />
-        {isLinuxDesktop && <LinuxWindowControls />}
+        {hasCustomDesktopTitlebar && <DesktopWindowControls />}
       </header>
 
       {/* Error banner */}

@@ -21,6 +21,10 @@ export function isLinuxPlatform(platform: string): boolean {
   return /linux/i.test(platform);
 }
 
+export function usesCustomDesktopTitlebar(platform: string): boolean {
+  return isLinuxPlatform(platform) || isWindowsPlatform(platform);
+}
+
 export function randomUUID(): string {
   if (typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();

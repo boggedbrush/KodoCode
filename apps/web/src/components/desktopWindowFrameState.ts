@@ -1,12 +1,12 @@
 import { createContext, useContext } from "react";
 
 export type DesktopWindowFrameContextValue = {
-  isLinuxDesktop: boolean;
+  hasCustomTitlebar: boolean;
   isMaximized: boolean;
 };
 
 export const DesktopWindowFrameContext = createContext<DesktopWindowFrameContextValue>({
-  isLinuxDesktop: false,
+  hasCustomTitlebar: false,
   isMaximized: false,
 });
 

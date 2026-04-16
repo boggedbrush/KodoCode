@@ -1496,8 +1496,12 @@ function shouldUseLinuxTransparentWindow(): boolean {
   return process.platform === "linux" && process.env.KODO_DISABLE_LINUX_TRANSPARENT_WINDOW !== "1";
 }
 
+function shouldUseCustomTitlebar(): boolean {
+  return process.platform === "linux" || process.platform === "win32";
+}
+
 function createWindow(): BrowserWindow {
-  const isLinux = process.platform === "linux";
+  const customTitlebarEnabled = shouldUseCustomTitlebar();
   const linuxTransparentWindowEnabled = shouldUseLinuxTransparentWindow();
   const window = new BrowserWindow({
     width: 1100,
@@ -1508,7 +1512,7 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: true,
     ...getIconOption(),
     title: APP_DISPLAY_NAME,
-    ...(isLinux ? { frame: false } : {}),
+    ...(customTitlebarEnabled ? { frame: false } : {}),
     ...(linuxTransparentWindowEnabled
       ? {
           backgroundColor: "#00000000",

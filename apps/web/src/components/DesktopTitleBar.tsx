@@ -86,7 +86,7 @@ function SidebarCollapsedIcon() {
 
 const windowControlButtonBase =
   "flex h-9 w-10 items-center justify-center text-muted-foreground/60 transition-colors [-webkit-app-region:no-drag]";
-const linuxTitleBarLogo = import.meta.env.DEV ? devLogo : prodLogo;
+const desktopTitleBarLogo = import.meta.env.DEV ? devLogo : prodLogo;
 const handleMinimize = () => {
   window.desktopBridge?.windowControls.minimize();
 };
@@ -98,11 +98,11 @@ const handleClose = () => {
 };
 
 /**
- * The three Linux window control buttons (minimize, maximize/restore, close).
+ * The custom desktop window control buttons (minimize, maximize/restore, close).
  * Rendered at the trailing edge of whichever header acts as the titlebar for
  * the current view, mirroring how macOS traffic lights sit at the leading edge.
  */
-export function LinuxWindowControls() {
+export function DesktopWindowControls() {
   const { isMaximized } = useDesktopWindowFrame();
   return (
     <div className="-mr-3 ms-auto flex shrink-0 items-center self-stretch pl-2 sm:-mr-5">
@@ -140,7 +140,7 @@ export function LinuxWindowControls() {
   );
 }
 
-export function LinuxTitleBar() {
+export function DesktopTitleBar() {
   const { open: sidebarOpen, toggleSidebar } = useSidebar();
   const { showSidebarToggleShortcutHint, sidebarToggleShortcutLabel } =
     useSidebarToggleShortcutHint();
@@ -175,7 +175,7 @@ export function LinuxTitleBar() {
             )}
           >
             <img
-              src={linuxTitleBarLogo}
+              src={desktopTitleBarLogo}
               alt=""
               aria-hidden="true"
               className="size-5 shrink-0 transition-opacity duration-150 group-hover/logo:opacity-0 group-focus-visible/logo:opacity-0"
@@ -201,7 +201,7 @@ export function LinuxTitleBar() {
         </span>
       </div>
 
-      <LinuxWindowControls />
+      <DesktopWindowControls />
     </div>
   );
 }

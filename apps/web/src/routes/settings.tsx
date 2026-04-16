@@ -6,13 +6,13 @@ import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
 import { SidebarInset, SidebarTrigger, useSidebar } from "../components/ui/sidebar";
 import { isElectron } from "../env";
-import { cn, isLinuxPlatform, isMacPlatform } from "../lib/utils";
+import { cn, isMacPlatform, usesCustomDesktopTitlebar } from "../lib/utils";
 import { SidebarBrandToggleButton } from "../components/SidebarBrandToggleButton";
-import { LinuxWindowControls } from "../components/LinuxTitleBar";
+import { DesktopWindowControls } from "../components/DesktopTitleBar";
 
 function SettingsContentLayout() {
   const { open: sidebarOpen } = useSidebar();
-  const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+  const hasCustomDesktopTitlebar = isElectron && usesCustomDesktopTitlebar(navigator.platform);
   const shouldOffsetForMacTrafficLights =
     isElectron && isMacPlatform(navigator.platform) && !sidebarOpen;
   const [restoreSignal, setRestoreSignal] = useState(0);
@@ -81,7 +81,7 @@ function SettingsContentLayout() {
                 Restore defaults
               </Button>
             </div>
-            {isLinuxDesktop && <LinuxWindowControls />}
+            {hasCustomDesktopTitlebar && <DesktopWindowControls />}
           </div>
         )}
 

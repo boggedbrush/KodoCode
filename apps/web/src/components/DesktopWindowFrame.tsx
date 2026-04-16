@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { isElectron } from "../env";
-import { cn, isLinuxPlatform } from "../lib/utils";
+import { cn, isLinuxPlatform, usesCustomDesktopTitlebar } from "../lib/utils";
 import {
   DesktopWindowFrameContext,
   type DesktopWindowFrameContextValue,
@@ -10,21 +10,22 @@ import { SidebarProvider } from "./ui/sidebar";
 
 const LINUX_WINDOW_CORNER_RADIUS_PX = 12;
 const SIDEBAR_LAYOUT_CLASS_NAME = "h-dvh min-h-0";
-const LINUX_SIDEBAR_LAYOUT_CLASS_NAME = "min-h-0 flex-1";
+const CUSTOM_TITLEBAR_SIDEBAR_LAYOUT_CLASS_NAME = "min-h-0 flex-1";
 
 export function DesktopWindowFrame({ children }: { children: ReactNode }) {
-  const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+  const hasCustomTitlebar = isElectron && usesCustomDesktopTitlebar(navigator.platform);
+  const isLinuxDesktop = hasCustomTitlebar && isLinuxPlatform(navigator.platform);
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
-    if (!isLinuxDesktop) return;
+    if (!hasCustomTitlebar) return;
 
     const bridge = window.desktopBridge;
     if (!bridge) return;
 
     void bridge.windowControls.isMaximized().then(setIsMaximized);
     return bridge.windowControls.onMaximizedChange(setIsMaximized);
-  }, [isLinuxDesktop]);
+  }, [hasCustomTitlebar]);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -51,10 +52,10 @@ export function DesktopWindowFrame({ children }: { children: ReactNode }) {
   const contextValue = useMemo(
     () =>
       ({
-        isLinuxDesktop,
+        hasCustomTitlebar,
         isMaximized,
       }) satisfies DesktopWindowFrameContextValue,
-    [isLinuxDesktop, isMaximized],
+    [hasCustomTitlebar, isMaximized],
   );
 
   const frameChildren = !isLinuxDesktop ? (
@@ -74,7 +75,10 @@ export function DesktopWindowFrame({ children }: { children: ReactNode }) {
     <DesktopWindowFrameContext.Provider value={contextValue}>
       <SidebarProvider
         defaultOpen
-        className={cn(SIDEBAR_LAYOUT_CLASS_NAME, isLinuxDesktop && LINUX_SIDEBAR_LAYOUT_CLASS_NAME)}
+        className={cn(
+          SIDEBAR_LAYOUT_CLASS_NAME,
+          hasCustomTitlebar && CUSTOM_TITLEBAR_SIDEBAR_LAYOUT_CLASS_NAME,
+        )}
       >
         {frameChildren}
       </SidebarProvider>
