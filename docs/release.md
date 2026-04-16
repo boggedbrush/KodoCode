@@ -15,7 +15,7 @@ This document covers how to run desktop releases from one tag, first without sig
   - Versions with a suffix after `X.Y.Z` (for example `1.2.3-alpha.1`) are published as GitHub prereleases.
   - Only plain `X.Y.Z` releases are marked as the repository's latest release.
 - Includes Electron auto-update metadata (for example `latest*.yml` and `*.blockmap`) in release assets.
-- Publishes the CLI package (`apps/server`, npm package `@boggedbrush/kodo`) with OIDC trusted publishing.
+- Optionally publishes the CLI package (`apps/server`, npm package `@boggedbrush/kodo`) with OIDC trusted publishing.
 - Signing is optional and auto-detected per platform from secrets.
 
 ## Desktop auto-update notes
@@ -40,10 +40,12 @@ This document covers how to run desktop releases from one tag, first without sig
   - `electron-updater` reads `latest-mac.yml` for both Intel and Apple Silicon.
   - The workflow merges the per-arch mac manifests into one `latest-mac.yml` before publishing the GitHub Release.
 
-## 0) npm OIDC trusted publishing setup (CLI)
+## 0) npm OIDC trusted publishing setup (CLI, optional)
 
-The workflow publishes the CLI via `node apps/server/scripts/cli.ts publish`
+The workflow can publish the CLI via `node apps/server/scripts/cli.ts publish`
 from `apps/server` after bumping the package version to the release tag version.
+It is disabled by default and only runs when repository variable
+`KODO_RELEASE_PUBLISH_CLI` is set to `true`.
 
 Checklist:
 
@@ -54,7 +56,8 @@ Checklist:
    - Workflow file: `.github/workflows/release.yml`
    - Environment (if used): match your npm trusted publishing config
 3. Ensure npm account and org policies allow trusted publishing for the package.
-4. Create release tag `vX.Y.Z` and push; workflow will:
+4. Set repository variable `KODO_RELEASE_PUBLISH_CLI=true`.
+5. Create release tag `vX.Y.Z` and push; workflow will:
    - set `apps/server/package.json` version to `X.Y.Z`
    - build web + server
    - run the CLI publish command (which calls `npm publish --access public`)

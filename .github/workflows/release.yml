@@ -346,6 +346,7 @@ jobs:
   publish_cli:
     name: Publish CLI to npm
     needs: [preflight, build]
+    if: ${{ vars.KODO_RELEASE_PUBLISH_CLI == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
