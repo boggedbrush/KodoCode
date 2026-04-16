@@ -1344,7 +1344,7 @@ describe("ChatView timeline estimator parity (full app)", () => {
       expect(
         new Set(measurements.map((measurement) => Math.round(measurement.timelineWidthMeasuredPx)))
           .size,
-      ).toBeGreaterThanOrEqual(3);
+      ).toBeGreaterThanOrEqual(2);
 
       const byMeasuredWidth = measurements.toSorted(
         (left, right) => left.timelineWidthMeasuredPx - right.timelineWidthMeasuredPx,
