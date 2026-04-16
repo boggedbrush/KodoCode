@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { isElectron } from "../env";
-import { isLinuxPlatform } from "../lib/utils";
+import { cn, isLinuxPlatform } from "../lib/utils";
 import { LinuxTitleBar } from "./LinuxTitleBar";
 import {
   DesktopWindowFrameContext,
   type DesktopWindowFrameContextValue,
 } from "./desktopWindowFrameState";
+import { SidebarProvider } from "./ui/sidebar";
 
 const LINUX_WINDOW_CORNER_RADIUS_PX = 12;
+const SIDEBAR_LAYOUT_CLASS_NAME = "h-dvh min-h-0";
+const LINUX_SIDEBAR_LAYOUT_CLASS_NAME = "min-h-0 flex-1";
 
 export function DesktopWindowFrame({ children }: { children: ReactNode }) {
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
@@ -55,25 +58,28 @@ export function DesktopWindowFrame({ children }: { children: ReactNode }) {
     [isLinuxDesktop, isMaximized],
   );
 
-  if (!isLinuxDesktop) {
-    return (
-      <DesktopWindowFrameContext.Provider value={contextValue}>
-        {children}
-      </DesktopWindowFrameContext.Provider>
-    );
-  }
+  const frameChildren = !isLinuxDesktop ? (
+    children
+  ) : (
+    <div className="h-screen w-screen overflow-hidden bg-transparent">
+      <div
+        className="flex h-full min-h-0 flex-col overflow-hidden bg-background"
+        style={{ borderRadius: "var(--desktop-window-corner-radius)" }}
+      >
+        <LinuxTitleBar />
+        <div className="flex min-h-0 flex-1">{children}</div>
+      </div>
+    </div>
+  );
 
   return (
     <DesktopWindowFrameContext.Provider value={contextValue}>
-      <div className="h-screen w-screen overflow-hidden bg-transparent">
-        <div
-          className="flex h-full min-h-0 flex-col overflow-hidden bg-background"
-          style={{ borderRadius: "var(--desktop-window-corner-radius)" }}
-        >
-          <LinuxTitleBar />
-          <div className="flex min-h-0 flex-1">{children}</div>
-        </div>
-      </div>
+      <SidebarProvider
+        defaultOpen
+        className={cn(SIDEBAR_LAYOUT_CLASS_NAME, isLinuxDesktop && LINUX_SIDEBAR_LAYOUT_CLASS_NAME)}
+      >
+        {frameChildren}
+      </SidebarProvider>
     </DesktopWindowFrameContext.Provider>
   );
 }

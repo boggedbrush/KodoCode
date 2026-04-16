@@ -15,7 +15,7 @@ import { SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { SidebarBrandToggleButton } from "../SidebarBrandToggleButton";
 import { isElectron } from "~/env";
-import { cn, isMacPlatform } from "~/lib/utils";
+import { cn, isLinuxPlatform, isMacPlatform } from "~/lib/utils";
 
 interface ChatHeaderProps {
   activeThreadId: ThreadId;
@@ -65,6 +65,7 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleDiff,
 }: ChatHeaderProps) {
   const { open: sidebarOpen } = useSidebar();
+  const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const shouldOffsetForMacTrafficLights =
     isElectron && isMacPlatform(navigator.platform) && !sidebarOpen;
 
@@ -77,7 +78,7 @@ export const ChatHeader = memo(function ChatHeader({
         )}
       >
         <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-        <SidebarBrandToggleButton className="hidden md:inline-flex" />
+        {!isLinuxDesktop ? <SidebarBrandToggleButton className="hidden md:inline-flex" /> : null}
         <h2
           className="min-w-0 shrink truncate text-sm font-medium text-foreground"
           title={activeThreadTitle}

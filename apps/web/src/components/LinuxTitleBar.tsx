@@ -1,6 +1,8 @@
 import { APP_BASE_NAME, APP_STAGE_LABEL } from "../branding";
 import { cn } from "../lib/utils";
+import { useSidebarToggleShortcutHint } from "./sidebarToggleShortcut";
 import { useDesktopWindowFrame } from "./desktopWindowFrameState";
+import { useSidebar } from "./ui/sidebar";
 import devLogo from "../../../../assets/dev/blueprint.svg";
 import prodLogo from "../../../../assets/prod/logo.svg";
 
@@ -48,6 +50,40 @@ function CloseIcon() {
   );
 }
 
+function SidebarExpandedIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3.5">
+      <rect
+        x="2.5"
+        y="3"
+        width="11"
+        height="10"
+        rx="1.75"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <path d="M6 3v10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SidebarCollapsedIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3.5">
+      <rect
+        x="2.5"
+        y="3"
+        width="11"
+        height="10"
+        rx="1.75"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <path d="M5.5 3v10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 const windowControlButtonBase =
   "flex h-full w-10 items-center justify-center text-muted-foreground/60 transition-colors [-webkit-app-region:no-drag]";
 const linuxTitleBarLogo = import.meta.env.DEV ? devLogo : prodLogo;
@@ -63,6 +99,10 @@ const handleClose = () => {
 
 export function LinuxTitleBar() {
   const { isMaximized } = useDesktopWindowFrame();
+  const { open: sidebarOpen, toggleSidebar } = useSidebar();
+  const { showSidebarToggleShortcutHint, sidebarToggleShortcutLabel } =
+    useSidebarToggleShortcutHint();
+  const sidebarToggleLabel = sidebarOpen ? "Hide sidebar" : "Show sidebar";
 
   return (
     <div
@@ -70,9 +110,47 @@ export function LinuxTitleBar() {
       role="banner"
       aria-label="Application title bar"
     >
-      {/* Left: logo + app name. Keep this area draggable; only the buttons are no-drag. */}
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 px-3">
-        <img src={linuxTitleBarLogo} alt="" aria-hidden="true" className="size-5 shrink-0" />
+      <div className="flex min-w-0 flex-1 items-center gap-2 px-3">
+        <button
+          type="button"
+          className="group/logo relative inline-flex size-6 shrink-0 items-center justify-center rounded-md outline-hidden transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring [-webkit-app-region:no-drag]"
+          onClick={toggleSidebar}
+          aria-label={
+            sidebarToggleShortcutLabel
+              ? `${sidebarToggleLabel} (${sidebarToggleShortcutLabel})`
+              : sidebarToggleLabel
+          }
+          title={
+            sidebarToggleShortcutLabel
+              ? `${sidebarToggleLabel} (${sidebarToggleShortcutLabel})`
+              : sidebarToggleLabel
+          }
+        >
+          <span
+            className={cn(
+              "relative flex size-5 shrink-0 items-center justify-center",
+              showSidebarToggleShortcutHint && "opacity-0",
+            )}
+          >
+            <img
+              src={linuxTitleBarLogo}
+              alt=""
+              aria-hidden="true"
+              className="size-5 shrink-0 transition-opacity duration-150 group-hover/logo:opacity-0 group-focus-visible/logo:opacity-0"
+            />
+            <span className="pointer-events-none absolute opacity-0 transition-opacity duration-150 group-hover/logo:opacity-100 group-focus-visible/logo:opacity-100">
+              {sidebarOpen ? <SidebarExpandedIcon /> : <SidebarCollapsedIcon />}
+            </span>
+          </span>
+          {showSidebarToggleShortcutHint ? (
+            <span
+              className="pointer-events-none absolute top-1/2 left-1/2 inline-flex h-5 -translate-x-1/2 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/90 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground whitespace-nowrap shadow-sm"
+              title={sidebarToggleShortcutLabel ?? undefined}
+            >
+              {sidebarToggleShortcutLabel}
+            </span>
+          ) : null}
+        </button>
         <span className="truncate text-xs font-semibold tracking-tight text-foreground">
           {APP_BASE_NAME}
         </span>
@@ -81,7 +159,6 @@ export function LinuxTitleBar() {
         </span>
       </div>
 
-      {/* Right: window controls */}
       <div className="flex h-full shrink-0 items-stretch">
         <button
           type="button"
