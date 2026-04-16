@@ -160,9 +160,17 @@ export const makeAuthControlPlane = Effect.gen(function* () {
   } satisfies AuthControlPlaneShape;
 });
 
+const BootstrapCredentialRuntimeLive = BootstrapCredentialServiceLive.pipe(
+  Layer.provide(AuthSqlitePersistenceLayerLive),
+);
+
+const SessionCredentialRuntimeLive = SessionCredentialServiceLive.pipe(
+  Layer.provide(AuthSqlitePersistenceLayerLive),
+);
+
 export const AuthCoreLive = Layer.mergeAll(
-  BootstrapCredentialServiceLive,
-  SessionCredentialServiceLive,
+  BootstrapCredentialRuntimeLive,
+  SessionCredentialRuntimeLive,
 );
 
 export const AuthStorageLive = Layer.mergeAll(

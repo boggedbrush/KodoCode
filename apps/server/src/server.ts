@@ -5,11 +5,11 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { ServerConfig } from "./config";
 import {
   attachmentsRouteLayer,
-  browserApiCorsLayer,
   otlpTracesProxyRouteLayer,
   projectFaviconRouteLayer,
   serverEnvironmentRouteLayer,
   staticAndDevRouteLayer,
+  browserApiCorsLayer,
 } from "./http";
 import { fixPath } from "./os-jank";
 import { makeWebsocketRpcRouteLayer } from "./ws";
@@ -190,7 +190,7 @@ const PersistenceWarmupLayerLive = Layer.effectDiscard(
   Effect.gen(function* () {
     yield* SqlClient.SqlClient;
   }),
-);
+).pipe(Layer.provide(PersistenceLayerLive));
 // Keep auth tables on their own scoped SQLite file so standalone servers that
 // share a base dir do not accidentally share sessions or pairing state.
 const AuthPersistenceLayerLive = Layer.empty.pipe(
@@ -243,7 +243,6 @@ const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ProjectFaviconResolverLive),
   Layer.provideMerge(RepositoryIdentityResolverLive),
   Layer.provideMerge(ServerEnvironmentLive),
-  Layer.provideMerge(AuthLayerLive),
 
   // Misc.
   Layer.provideMerge(AnalyticsServiceLayerLive),
@@ -304,6 +303,8 @@ export const makeServerLayer = Layer.unwrap(
 
     return serverApplicationLayer.pipe(
       Layer.provideMerge(RuntimeServicesLive),
+      Layer.provide(AuthLayerLive),
+      Layer.provide(PersistenceLayerLive),
       Layer.provideMerge(HttpServerLive),
       Layer.provideMerge(ServerEnvironmentLive),
       Layer.provide(ObservabilityLive),
