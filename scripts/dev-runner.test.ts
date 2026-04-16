@@ -8,6 +8,7 @@ import {
   createDevRunnerEnv,
   DESKTOP_DEV_SHUTDOWN_SIGNAL,
   findFirstAvailableOffset,
+  getWindowsTaskkillArgs,
   isInheritedDesktopDevUrl,
   resolveModePortOffsets,
   resolveOffset,
@@ -349,6 +350,31 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         );
 
         assert.equal(inherited, false);
+      }),
+    );
+  });
+
+  describe("getWindowsTaskkillArgs", () => {
+    it.effect("uses taskkill tree shutdown for graceful Windows termination", () =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(getWindowsTaskkillArgs(4242, "SIGTERM"), ["/PID", "4242", "/T"]);
+      }),
+    );
+
+    it.effect("adds /F for forced Windows termination", () =>
+      Effect.sync(() => {
+        assert.deepStrictEqual(getWindowsTaskkillArgs(4242, "SIGKILL"), [
+          "/PID",
+          "4242",
+          "/T",
+          "/F",
+        ]);
+      }),
+    );
+
+    it.effect("ignores invalid pids", () =>
+      Effect.sync(() => {
+        assert.equal(getWindowsTaskkillArgs(0, "SIGTERM"), null);
       }),
     );
   });

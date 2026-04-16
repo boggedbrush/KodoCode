@@ -40,8 +40,18 @@ let restartQueue = Promise.resolve();
 const expectedExits = new WeakSet();
 const watchers = [];
 
-function killChildTreeByPid(pid, signal) {
-  if (process.platform === "win32" || typeof pid !== "number") {
+function terminatePidTree(pid, signal) {
+  if (typeof pid !== "number") {
+    return;
+  }
+
+  if (process.platform === "win32") {
+    const taskkillArgs = ["/PID", String(pid), "/T"];
+    if (signal === "KILL") {
+      taskkillArgs.push("/F");
+    }
+
+    spawnSync("taskkill", taskkillArgs, { stdio: "ignore", windowsHide: true });
     return;
   }
 
@@ -150,7 +160,7 @@ async function stopApp() {
 
     app.once("exit", finish);
     app.kill("SIGTERM");
-    killChildTreeByPid(app.pid, "TERM");
+    terminatePidTree(app.pid, "TERM");
 
     setTimeout(() => {
       if (settled) {
@@ -158,7 +168,7 @@ async function stopApp() {
       }
 
       app.kill("SIGKILL");
-      killChildTreeByPid(app.pid, "KILL");
+      terminatePidTree(app.pid, "KILL");
       finish();
     }, forcedShutdownTimeoutMs).unref();
   });

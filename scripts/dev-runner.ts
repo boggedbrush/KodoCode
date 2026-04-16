@@ -252,8 +252,29 @@ function signalExitCode(signal: NodeJS.Signals): number {
   }
 }
 
+export function getWindowsTaskkillArgs(
+  pid: number,
+  signal: NodeJS.Signals,
+): ReadonlyArray<string> | null {
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return null;
+  }
+
+  return ["/PID", String(pid), "/T", ...(signal === "SIGKILL" ? ["/F"] : [])];
+}
+
 function terminateProcessTree(pid: number, signal: NodeJS.Signals): void {
   if (!Number.isInteger(pid) || pid <= 0) {
+    return;
+  }
+
+  if (process.platform === "win32") {
+    const taskkillArgs = getWindowsTaskkillArgs(pid, signal);
+    if (taskkillArgs === null) {
+      return;
+    }
+
+    spawnSync("taskkill", taskkillArgs, { stdio: "ignore", windowsHide: true });
     return;
   }
 
@@ -261,10 +282,6 @@ function terminateProcessTree(pid: number, signal: NodeJS.Signals): void {
     process.kill(pid, signal);
   } catch {
     // Best-effort shutdown. The child may have already exited.
-  }
-
-  if (process.platform === "win32") {
-    return;
   }
 
   const pkillSignal = signal.replace(/^SIG/, "");
