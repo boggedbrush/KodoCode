@@ -1,4 +1,5 @@
 import { APP_BASE_NAME, APP_STAGE_LABEL } from "../branding";
+import { readDesktopBridge } from "../desktopRuntime";
 import { cn } from "../lib/utils";
 import { useDesktopWindowFrame } from "./desktopWindowFrameState";
 import devLogo from "../../../../assets/dev/blueprint.svg";
@@ -52,13 +53,13 @@ const windowControlButtonBase =
   "flex h-full w-10 items-center justify-center text-muted-foreground/60 transition-colors [-webkit-app-region:no-drag]";
 const linuxTitleBarLogo = import.meta.env.DEV ? devLogo : prodLogo;
 const handleMinimize = () => {
-  window.desktopBridge?.windowControls.minimize();
+  readDesktopBridge()?.windowControls.minimize();
 };
 const handleToggleMaximize = () => {
-  window.desktopBridge?.windowControls.toggleMaximize();
+  readDesktopBridge()?.windowControls.toggleMaximize();
 };
 const handleClose = () => {
-  window.desktopBridge?.windowControls.close();
+  readDesktopBridge()?.windowControls.close();
 };
 
 export function LinuxTitleBar() {

@@ -1,0 +1,21 @@
+{
+  "name": "@t3tools/electrobun",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "electrobun dev --watch",
+    "build": "electrobun build",
+    "start": "electrobun dev",
+    "refresh:windows-icons": "node scripts/refresh-windows-icons.mjs"
+  },
+  "dependencies": {
+    "@t3tools/contracts": "workspace:*",
+    "@t3tools/shared": "workspace:*",
+    "electrobun": "1.16.0",
+    "rcedit": "^4.0.1"
+  },
+  "devDependencies": {
+    "png-to-ico": "^3.0.1"
+  }
+}

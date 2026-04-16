@@ -128,6 +128,22 @@
 
 > **Rule:** _Harnesses execute. Kodo orchestrates._
 
+## Desktop targets
+
+- `bun dev:desktop`: Electron desktop app. This remains the default desktop path.
+- `bun dev:electrobun`: Experimental Electrobun shell. Treat this as testing-only until the benchmark report says otherwise. It currently runs against the built web/server assets rather than the Vite dev server.
+- `bun build:desktop`: Builds the Electron desktop baseline plus the shared server assets it depends on.
+- `bun build:electrobun`: Builds the experimental Electrobun target plus the shared web/server assets it depends on.
+- `bun run test:desktop:correctness`: Runs the shared desktop correctness flow for both targets.
+- `bun run benchmark:desktop`: Runs the desktop benchmark harness and writes raw artifacts under `artifacts/desktop-benchmarks/`.
+- `bun run report:desktop`: Regenerates `docs/desktop-benchmark-report.md` from the latest benchmark results.
+
+### Notes
+
+- Electron stays the baseline and primary supported desktop workflow.
+- Electrobun currently disables updater support explicitly instead of pretending parity.
+- The benchmark and correctness scripts are intended to run on the Windows host, not inside WSL.
+
 ---
 
 ## Configuration example

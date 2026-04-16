@@ -55,6 +55,10 @@
     "./provider-usage": {
       "types": "./src/provider-usage/metadata.ts",
       "import": "./src/provider-usage/metadata.ts"
+    },
+    "./desktop-runtime": {
+      "types": "./src/desktop-runtime/index.ts",
+      "import": "./src/desktop-runtime/index.ts"
     }
   },
   "scripts": {

@@ -14,7 +14,7 @@ import { Toggle } from "../ui/toggle";
 import { SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 import { SidebarBrandToggleButton } from "../SidebarBrandToggleButton";
-import { isElectron } from "~/env";
+import { isDesktopApp } from "~/desktopRuntime";
 import { cn, isMacPlatform } from "~/lib/utils";
 
 interface ChatHeaderProps {
@@ -66,7 +66,7 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const { open: sidebarOpen } = useSidebar();
   const shouldOffsetForMacTrafficLights =
-    isElectron && isMacPlatform(navigator.platform) && !sidebarOpen;
+    isDesktopApp && isMacPlatform(navigator.platform) && !sidebarOpen;
 
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">

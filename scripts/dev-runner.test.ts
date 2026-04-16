@@ -192,6 +192,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.T3CODE_HOME, resolve("/tmp/my-t3"));
         assert.equal(env.PORT, "5733");
         assert.equal(env.ELECTRON_RENDERER_PORT, "5733");
+        assert.equal(env.ELECTROBUN_RENDERER_PORT, "5733");
         assert.equal(env.VITE_DEV_SERVER_URL, "http://localhost:5733");
         assert.equal(env.T3CODE_PORT, undefined);
         assert.equal(env.T3CODE_AUTH_TOKEN, undefined);
@@ -201,6 +202,44 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.VITE_WS_URL, undefined);
         assert.equal(env.KODOCODE_DEV_RUNNER_PID, "4242");
         assert.equal(env.KODOCODE_DEV_SHUTDOWN_SIGNAL, DESKTOP_DEV_SHUTDOWN_SIGNAL);
+      }),
+    );
+
+    it.effect("treats dev:electrobun as a desktop shell mode", () =>
+      Effect.gen(function* () {
+        const env = yield* createDevRunnerEnv({
+          mode: "dev:electrobun",
+          baseEnv: {
+            T3CODE_PORT: "3773",
+            T3CODE_AUTH_TOKEN: "stale-token",
+            T3CODE_MODE: "web",
+            VITE_WS_URL: "ws://localhost:3773",
+          },
+          serverOffset: 0,
+          webOffset: 2,
+          t3Home: "/tmp/my-t3",
+          authToken: "fresh-token",
+          noBrowser: true,
+          autoBootstrapProjectFromCwd: undefined,
+          logWebSocketEvents: undefined,
+          host: "127.0.0.1",
+          port: 4222,
+          devUrl: undefined,
+          desktopDevRunnerPid: undefined,
+          desktopDevShutdownSignal: undefined,
+        });
+
+        assert.equal(env.T3CODE_HOME, resolve("/tmp/my-t3", "electrobun-dev"));
+        assert.equal(env.PORT, "5735");
+        assert.equal(env.ELECTRON_RENDERER_PORT, "5735");
+        assert.equal(env.ELECTROBUN_RENDERER_PORT, "5735");
+        assert.equal(env.VITE_DEV_SERVER_URL, undefined);
+        assert.equal(env.KODOCODE_ELECTROBUN_BUILD_FOLDER, `.electrobun/dev-${process.pid}`);
+        assert.equal(env.KODOCODE_ELECTROBUN_SOURCE_ROOT, process.cwd());
+        assert.equal(env.T3CODE_PORT, undefined);
+        assert.equal(env.T3CODE_AUTH_TOKEN, undefined);
+        assert.equal(env.T3CODE_MODE, undefined);
+        assert.equal(env.VITE_WS_URL, undefined);
       }),
     );
   });

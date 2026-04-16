@@ -12,21 +12,25 @@ const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
-const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
+const GET_BOOTSTRAP_CHANNEL = "desktop:get-bootstrap";
 const WINDOW_MINIMIZE_CHANNEL = "desktop:window-minimize";
 const WINDOW_TOGGLE_MAXIMIZE_CHANNEL = "desktop:window-toggle-maximize";
 const WINDOW_CLOSE_CHANNEL = "desktop:window-close";
 const WINDOW_IS_MAXIMIZED_CHANNEL = "desktop:window-is-maximized";
 const WINDOW_MAXIMIZED_CHANGE_CHANNEL = "desktop:window-maximized-change";
+const BENCHMARK_STATE_CHANNEL = "desktop:benchmark-state";
+const BENCHMARK_GET_STATE_CHANNEL = "desktop:benchmark-get-state";
+const BENCHMARK_MARK_MILESTONE_CHANNEL = "desktop:benchmark-mark-milestone";
+const BENCHMARK_MARK_EVENT_CHANNEL = "desktop:benchmark-mark-event";
+const BENCHMARK_COMPLETE_CHANNEL = "desktop:benchmark-complete";
+
+const bootstrap = ipcRenderer.sendSync(GET_BOOTSTRAP_CHANNEL) as DesktopBridge["bootstrap"];
 
 contextBridge.exposeInMainWorld("desktopBridge", {
-  getWsUrl: () => {
-    const result = ipcRenderer.sendSync(GET_WS_URL_CHANNEL);
-    return typeof result === "string" ? result : null;
-  },
+  bootstrap,
   pickFolder: () => ipcRenderer.invoke(PICK_FOLDER_CHANNEL),
   confirm: (message) => ipcRenderer.invoke(CONFIRM_CHANNEL, message),
-  setTheme: (theme) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme),
+  setTheme: (theme, options) => ipcRenderer.invoke(SET_THEME_CHANNEL, theme, options),
   showContextMenu: (items, position) => ipcRenderer.invoke(CONTEXT_MENU_CHANNEL, items, position),
   openExternal: (url: string) => ipcRenderer.invoke(OPEN_EXTERNAL_CHANNEL, url),
   onMenuAction: (listener) => {
@@ -69,5 +73,22 @@ contextBridge.exposeInMainWorld("desktopBridge", {
         ipcRenderer.removeListener(WINDOW_MAXIMIZED_CHANGE_CHANNEL, wrappedListener);
       };
     },
+  },
+  benchmark: {
+    getState: () => ipcRenderer.invoke(BENCHMARK_GET_STATE_CHANNEL),
+    onState: (listener) => {
+      const wrappedListener = (_event: Electron.IpcRendererEvent, state: unknown) => {
+        if (typeof state !== "object" || state === null) return;
+        listener(state as Parameters<typeof listener>[0]);
+      };
+
+      ipcRenderer.on(BENCHMARK_STATE_CHANNEL, wrappedListener);
+      return () => {
+        ipcRenderer.removeListener(BENCHMARK_STATE_CHANNEL, wrappedListener);
+      };
+    },
+    markMilestone: (milestone) => ipcRenderer.invoke(BENCHMARK_MARK_MILESTONE_CHANNEL, milestone),
+    markEvent: (name, detail) => ipcRenderer.invoke(BENCHMARK_MARK_EVENT_CHANNEL, name, detail),
+    complete: (result) => ipcRenderer.invoke(BENCHMARK_COMPLETE_CHANNEL, result),
   },
 } satisfies DesktopBridge);

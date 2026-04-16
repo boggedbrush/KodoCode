@@ -1,0 +1,15 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["@t3tools/web#build", "kodo#build"],
+      "outputs": [".electrobun/**", "views/**"],
+    },
+    "dev": {
+      "dependsOn": ["@t3tools/web#build", "kodo#build"],
+      "persistent": true,
+      "cache": false,
+    },
+  },
+}

@@ -77,6 +77,23 @@ export type DesktopUpdateStatus =
 
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
 export type DesktopTheme = "light" | "dark" | "system";
+export type DesktopResolvedTheme = Exclude<DesktopTheme, "system">;
+export type DesktopRuntime = "electron" | "electrobun";
+export type DesktopBenchmarkMilestone =
+  | "processSpawned"
+  | "firstWindowCreated"
+  | "firstWindowShown"
+  | "rendererBootstrap"
+  | "rendererReady"
+  | "backendConnected";
+
+export interface DesktopCapabilities {
+  updates: boolean;
+  applicationMenu: boolean;
+  nativeContextMenu: boolean;
+  windowControls: boolean;
+  benchmarkDriver: boolean;
+}
 
 export interface DesktopRuntimeInfo {
   hostArch: DesktopRuntimeArch;
@@ -119,11 +136,63 @@ export interface DesktopWindowControls {
   onMaximizedChange: (listener: (isMaximized: boolean) => void) => () => void;
 }
 
+export interface DesktopStartupMilestones {
+  processSpawnedAt: string | null;
+  firstWindowCreatedAt: string | null;
+  firstWindowShownAt: string | null;
+  rendererBootstrapAt: string | null;
+  rendererReadyAt: string | null;
+  backendConnectedAt: string | null;
+}
+
+export interface DesktopBridgeBootstrap {
+  runtime: DesktopRuntime;
+  capabilities: DesktopCapabilities;
+  connection: {
+    wsUrl: string | null;
+  };
+  startup: DesktopStartupMilestones;
+}
+
+export interface DesktopBenchmarkEvent {
+  name: string;
+  at: string;
+  detail: string | null;
+}
+
+export interface DesktopBenchmarkState {
+  enabled: boolean;
+  runtime: DesktopRuntime;
+  runId: string | null;
+  scenario: string | null;
+  outputPath: string | null;
+  status: "idle" | "running" | "completed" | "error";
+  startedAt: string | null;
+  completedAt: string | null;
+  completed: boolean;
+  success: boolean | null;
+  lastError: string | null;
+  milestones: DesktopStartupMilestones;
+  events: ReadonlyArray<DesktopBenchmarkEvent>;
+}
+
+export interface DesktopBenchmarkBridge {
+  getState: () => Promise<DesktopBenchmarkState>;
+  onState: (listener: (state: DesktopBenchmarkState) => void) => () => void;
+  markMilestone: (milestone: DesktopBenchmarkMilestone) => Promise<DesktopBenchmarkState>;
+  markEvent: (name: string, detail?: string) => Promise<DesktopBenchmarkState>;
+  complete: (result: { success: boolean; detail?: string }) => Promise<DesktopBenchmarkState>;
+}
+
+export interface DesktopThemeSyncOptions {
+  resolvedTheme?: DesktopResolvedTheme;
+}
+
 export interface DesktopBridge {
-  getWsUrl: () => string | null;
+  bootstrap: DesktopBridgeBootstrap;
   pickFolder: () => Promise<string | null>;
   confirm: (message: string) => Promise<boolean>;
-  setTheme: (theme: DesktopTheme) => Promise<void>;
+  setTheme: (theme: DesktopTheme, options?: DesktopThemeSyncOptions) => Promise<void>;
   showContextMenu: <T extends string>(
     items: readonly ContextMenuItem<T>[],
     position?: { x: number; y: number },
@@ -136,6 +205,7 @@ export interface DesktopBridge {
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
   windowControls: DesktopWindowControls;
+  benchmark: DesktopBenchmarkBridge;
 }
 
 export interface NativeApi {

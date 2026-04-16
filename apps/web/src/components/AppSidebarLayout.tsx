@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { useNavigate } from "@tanstack/react-router";
 
-import { isElectron } from "../env";
+import { isDesktopApp, readDesktopBridge, supportsDesktopCapability } from "../desktopRuntime";
 import { isLinuxPlatform } from "../lib/utils";
 import ThreadSidebar from "./Sidebar";
 import { Sidebar, SidebarProvider, SidebarRail } from "./ui/sidebar";
@@ -10,19 +10,23 @@ const THREAD_SIDEBAR_WIDTH_STORAGE_KEY = "chat_thread_sidebar_width";
 const THREAD_SIDEBAR_MIN_WIDTH = 13 * 16;
 const THREAD_MAIN_CONTENT_MIN_WIDTH = 40 * 16;
 
-const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+const isLinuxDesktop = isDesktopApp && isLinuxPlatform(navigator.platform);
 const sidebarLayoutClassName = isLinuxDesktop ? "min-h-0 flex-1" : "h-dvh min-h-0";
 
 export function AppSidebarLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const onMenuAction = window.desktopBridge?.onMenuAction;
-    if (typeof onMenuAction !== "function") {
+    if (!supportsDesktopCapability("applicationMenu")) {
       return;
     }
 
-    const unsubscribe = onMenuAction((action) => {
+    const bridge = readDesktopBridge();
+    if (!bridge) {
+      return;
+    }
+
+    const unsubscribe = bridge.onMenuAction((action) => {
       if (action !== "open-settings") return;
       void navigate({ to: "/settings/general" });
     });

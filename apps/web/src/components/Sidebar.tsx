@@ -54,7 +54,7 @@ import {
   type SidebarProjectSortOrder,
   type SidebarThreadSortOrder,
 } from "@t3tools/contracts/settings";
-import { isElectron } from "../env";
+import { isDesktopApp, readDesktopBridge, supportsDesktopCapability } from "../desktopRuntime";
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { cn, isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
@@ -755,12 +755,12 @@ export default function Sidebar() {
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
-  const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
-  const isMacDesktop = isElectron && isMacPlatform(navigator.platform);
+  const isLinuxDesktop = isDesktopApp && isLinuxPlatform(navigator.platform);
+  const isMacDesktop = isDesktopApp && isMacPlatform(navigator.platform);
   const shouldShowSidebarWordmark = !isLinuxDesktop;
   const shouldShowSidebarLogo = shouldShowSidebarWordmark;
   const platform = navigator.platform;
-  const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
+  const shouldBrowseForProjectImmediately = isDesktopApp && !isLinuxDesktop;
   const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
@@ -1948,8 +1948,8 @@ export default function Sidebar() {
   }, [clearSelection, selectedThreadIds.size]);
 
   useEffect(() => {
-    if (!isElectron) return;
-    const bridge = window.desktopBridge;
+    if (!isDesktopApp || !supportsDesktopCapability("updates")) return;
+    const bridge = readDesktopBridge();
     if (
       !bridge ||
       typeof bridge.getUpdateState !== "function" ||
@@ -1985,7 +1985,9 @@ export default function Sidebar() {
     ? resolveDesktopUpdateButtonAction(desktopUpdateState)
     : "none";
   const showArm64IntelBuildWarning =
-    isElectron && shouldShowArm64IntelBuildWarning(desktopUpdateState);
+    isDesktopApp &&
+    supportsDesktopCapability("updates") &&
+    shouldShowArm64IntelBuildWarning(desktopUpdateState);
   const arm64IntelBuildWarningDescription =
     desktopUpdateState && showArm64IntelBuildWarning
       ? getArm64IntelBuildWarningDescription(desktopUpdateState)
@@ -2002,7 +2004,7 @@ export default function Sidebar() {
     showThreadJumpHints && sidebarToggleShortcutLabel !== null && sidebarToggleShortcutLabel !== "";
 
   const handleDesktopUpdateButtonClick = useCallback(() => {
-    const bridge = window.desktopBridge;
+    const bridge = readDesktopBridge();
     if (!bridge || !desktopUpdateState) return;
     if (desktopUpdateButtonDisabled || desktopUpdateButtonAction === "none") return;
 
@@ -2156,7 +2158,7 @@ export default function Sidebar() {
 
   return (
     <>
-      {isLinuxDesktop ? null : isElectron ? (
+      {isLinuxDesktop ? null : isDesktopApp ? (
         // macOS: drag region + extra left padding to clear traffic-light buttons.
         // Windows and other non-Linux platforms: drag region, no extra padding.
         <SidebarHeader
@@ -2246,7 +2248,7 @@ export default function Sidebar() {
               </div>
               {shouldShowProjectPathEntry && (
                 <div className="mb-2 px-1">
-                  {isElectron && (
+                  {isDesktopApp && (
                     <button
                       type="button"
                       className="mb-1.5 flex w-full items-center justify-center gap-2 rounded-md border border-border bg-secondary py-1.5 text-xs text-foreground/80 transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"

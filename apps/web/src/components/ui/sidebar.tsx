@@ -3,7 +3,7 @@ import { useRender } from "@base-ui/react/use-render";
 import { cva, type VariantProps } from "class-variance-authority";
 import { PanelLeftCloseIcon, PanelLeftIcon } from "lucide-react";
 import * as React from "react";
-import { isElectron } from "~/env";
+import { isDesktopApp } from "~/desktopRuntime";
 import { cn, isLinuxPlatform } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
 import { Input } from "~/components/ui/input";
@@ -183,7 +183,7 @@ function Sidebar({
   resizable?: boolean | SidebarResizableOptions;
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar();
-  const shouldUseInLayoutDesktopSidebar = isElectron && isLinuxPlatform(navigator.platform);
+  const shouldUseInLayoutDesktopSidebar = isDesktopApp && isLinuxPlatform(navigator.platform);
   const resolvedResizable = React.useMemo<SidebarResolvedResizableOptions | null>(() => {
     if (isMobile || collapsible === "none" || !resizable) {
       return null;

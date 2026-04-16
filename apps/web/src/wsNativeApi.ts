@@ -1,5 +1,6 @@
 import { type ContextMenuItem, type NativeApi } from "@t3tools/contracts";
 
+import { readDesktopBridge } from "./desktopRuntime";
 import { resetGitStatusStateForTests } from "./lib/gitStatusState";
 import { showContextMenuFallback } from "./contextMenuFallback";
 import { __resetWsRpcAtomClientForTests } from "./rpc/client";
@@ -32,12 +33,14 @@ export function createWsNativeApi(): NativeApi {
   const api: NativeApi = {
     dialogs: {
       pickFolder: async () => {
-        if (!window.desktopBridge) return null;
-        return window.desktopBridge.pickFolder();
+        const bridge = readDesktopBridge();
+        if (!bridge) return null;
+        return bridge.pickFolder();
       },
       confirm: async (message) => {
-        if (window.desktopBridge) {
-          return window.desktopBridge.confirm(message);
+        const bridge = readDesktopBridge();
+        if (bridge) {
+          return bridge.confirm(message);
         }
         return window.confirm(message);
       },
@@ -58,8 +61,9 @@ export function createWsNativeApi(): NativeApi {
     shell: {
       openInEditor: (cwd, editor) => rpcClient.shell.openInEditor({ cwd, editor }),
       openExternal: async (url) => {
-        if (window.desktopBridge) {
-          const opened = await window.desktopBridge.openExternal(url);
+        const bridge = readDesktopBridge();
+        if (bridge) {
+          const opened = await bridge.openExternal(url);
           if (!opened) {
             throw new Error("Unable to open link.");
           }
@@ -87,8 +91,9 @@ export function createWsNativeApi(): NativeApi {
         items: readonly ContextMenuItem<T>[],
         position?: { x: number; y: number },
       ): Promise<T | null> => {
-        if (window.desktopBridge) {
-          return window.desktopBridge.showContextMenu(items, position) as Promise<T | null>;
+        const bridge = readDesktopBridge();
+        if (bridge) {
+          return bridge.showContextMenu(items, position) as Promise<T | null>;
         }
         return showContextMenuFallback(items, position);
       },

@@ -1,4 +1,4 @@
-import { Effect, Layer, FileSystem, Path } from "effect";
+import { Effect, Layer, FileSystem, Path, ServiceMap } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { runMigrations } from "../Migrations.ts";
@@ -12,6 +12,10 @@ type RuntimeSqliteLayerConfig = {
 type Loader = {
   layer: (config: RuntimeSqliteLayerConfig) => Layer.Layer<SqlClient.SqlClient>;
 };
+
+export class AuthSqlClient extends ServiceMap.Service<AuthSqlClient, SqlClient.SqlClient>()(
+  "t3/persistence/AuthSqlClient",
+) {}
 const defaultSqliteClientLoaders = {
   bun: () => import("@effect/sql-sqlite-bun/SqliteClient"),
   node: () => import("../NodeSqliteClient.ts"),
@@ -35,6 +39,15 @@ const setup = Layer.effectDiscard(
   }),
 );
 
+const authSetup = Layer.effectDiscard(
+  Effect.gen(function* () {
+    const sql = yield* AuthSqlClient;
+    yield* sql`PRAGMA journal_mode = WAL;`;
+    yield* sql`PRAGMA foreign_keys = ON;`;
+    yield* runMigrations().pipe(Effect.provideService(SqlClient.SqlClient, sql));
+  }),
+);
+
 export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(function* (
   dbPath: string,
 ) {
@@ -54,6 +67,28 @@ export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(
   );
 }, Layer.unwrap);
 
+export const makeAuthSqlitePersistenceLive = Effect.fn("makeAuthSqlitePersistenceLive")(function* (
+  dbPath: string,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
+
+  const clientLayer = makeRuntimeSqliteLayer({
+    filename: dbPath,
+    spanAttributes: {
+      "db.name": path.basename(dbPath),
+      "service.name": "kodo-server",
+    },
+  });
+
+  const authClientLayer = Layer.effect(AuthSqlClient, Effect.service(SqlClient.SqlClient)).pipe(
+    Layer.provide(clientLayer),
+  );
+
+  return authSetup.pipe(Layer.provideMerge(authClientLayer));
+}, Layer.unwrap);
+
 export const SqlitePersistenceMemory = Layer.provideMerge(
   setup,
   makeRuntimeSqliteLayer({ filename: ":memory:" }),
@@ -70,4 +105,8 @@ const layerFromServerConfig = (
 
 export const layerConfig = layerFromServerConfig(({ dbPath }) => dbPath);
 
-export const authLayerConfig = layerFromServerConfig(({ authDbPath }) => authDbPath);
+export const authLayerConfig = Layer.unwrap(
+  Effect.map(Effect.service(ServerConfig), (config) =>
+    makeAuthSqlitePersistenceLive(config.authDbPath),
+  ),
+);

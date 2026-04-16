@@ -13,10 +13,7 @@ import {
 import { fixPath } from "./os-jank";
 import { websocketRpcRouteLayer } from "./ws";
 import { OpenLive } from "./open";
-import {
-  authLayerConfig as AuthSqlitePersistenceLayerLive,
-  layerConfig as SqlitePersistenceLayerLive,
-} from "./persistence/Layers/Sqlite";
+import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite";
 import { ServerLifecycleEventsLive } from "./serverLifecycleEvents";
 import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService";
 import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger";
@@ -145,10 +142,12 @@ const OrchestrationInfrastructureLayerLive = Layer.mergeAll(
   OrchestrationProjectionPipelineLayerLive,
 );
 
+const PersistenceLayerLive = SqlitePersistenceLayerLive;
+
 const OrchestrationLayerLive = Layer.mergeAll(
   OrchestrationInfrastructureLayerLive,
   OrchestrationEngineLive.pipe(Layer.provide(OrchestrationInfrastructureLayerLive)),
-);
+).pipe(Layer.provideMerge(PersistenceLayerLive));
 
 const CheckpointingLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointDiffQueryLive),
@@ -182,14 +181,7 @@ const ProviderLayerLive = Layer.unwrap(
       canonicalEventLogger ? { canonicalEventLogger } : undefined,
     ).pipe(Layer.provide(adapterRegistryLayer), Layer.provide(providerSessionDirectoryLayer));
   }),
-);
-
-const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
-// Keep auth tables on their own scoped SQLite file so standalone servers that
-// share a base dir do not accidentally share sessions or pairing state.
-const AuthPersistenceLayerLive = Layer.empty.pipe(
-  Layer.provideMerge(AuthSqlitePersistenceLayerLive),
-);
+).pipe(Layer.provideMerge(PersistenceLayerLive));
 
 const GitManagerLayerLive = GitManagerLive.pipe(
   Layer.provideMerge(ProjectSetupScriptRunnerLive),
@@ -215,10 +207,7 @@ const WorkspaceLayerLive = Layer.mergeAll(
   ),
 );
 
-const AuthLayerLive = ServerAuthLive.pipe(
-  Layer.provideMerge(AuthPersistenceLayerLive),
-  Layer.provide(ServerSecretStoreLive),
-);
+const AuthLayerLive = ServerAuthLive.pipe(Layer.provideMerge(ServerSecretStoreLive));
 
 const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   // Core Services
@@ -226,7 +215,6 @@ const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
   Layer.provideMerge(TerminalLayerLive),
-  Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),
   Layer.provideMerge(ProviderUsageRegistryLive),

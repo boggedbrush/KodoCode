@@ -4,6 +4,7 @@ import { type CxOptions, cx } from "class-variance-authority";
 import { twMerge } from "tailwind-merge";
 import * as Random from "effect/Random";
 import * as Effect from "effect/Effect";
+import { readDesktopConnectionWsUrl } from "../desktopRuntime";
 
 export function cn(...inputs: CxOptions) {
   return twMerge(cx(inputs));
@@ -67,7 +68,7 @@ export const resolveBackendHttpOrigin = (): string => {
   try {
     return toHttpOrigin(
       firstNonEmptyString(
-        window.desktopBridge?.getWsUrl(),
+        readDesktopConnectionWsUrl(),
         import.meta.env.VITE_WS_URL,
         window.location.origin,
       ),
@@ -97,7 +98,7 @@ export const resolveServerUrl = (options?: {
 }): string => {
   const rawUrl = firstNonEmptyString(
     options?.url,
-    window.desktopBridge?.getWsUrl(),
+    readDesktopConnectionWsUrl(),
     import.meta.env.VITE_WS_URL,
     window.location.origin,
   );

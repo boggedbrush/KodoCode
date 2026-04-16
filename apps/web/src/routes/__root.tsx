@@ -26,6 +26,8 @@ import {
 } from "../components/WebSocketConnectionSurface";
 import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
+import { readDesktopBridge } from "../desktopRuntime";
+import { DesktopBenchmarkDriver } from "../desktopBenchmarkDriver";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { readNativeApi } from "../nativeApi";
 import { resolveShortcutCommand } from "../keybindings";
@@ -89,6 +91,8 @@ function RootRouteView() {
         <AnchoredToastProvider>
           <ServerStateBootstrap />
           <ProviderUsageStateBootstrap />
+          <DesktopBenchmarkMilestones />
+          <DesktopBenchmarkDriver />
           <UtilityModelDefaultBootstrap />
           <GlobalAppShortcuts />
           <EventRouter />
@@ -226,6 +230,34 @@ function ServerStateBootstrap() {
 
 function ProviderUsageStateBootstrap() {
   useEffect(() => startProviderUsageSync(getWsRpcClient().server), []);
+
+  return null;
+}
+
+function DesktopBenchmarkMilestones() {
+  const serverConfig = useServerConfig();
+
+  useEffect(() => {
+    const bridge = readDesktopBridge();
+    if (!bridge) return;
+
+    void bridge.benchmark.markMilestone("rendererBootstrap").catch(() => undefined);
+
+    const frame = requestAnimationFrame(() => {
+      void bridge.benchmark.markMilestone("rendererReady").catch(() => undefined);
+    });
+
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  useEffect(() => {
+    const bridge = readDesktopBridge();
+    if (!bridge || !serverConfig) return;
+
+    void bridge.benchmark.markMilestone("backendConnected").catch(() => undefined);
+  }, [serverConfig]);
 
   return null;
 }

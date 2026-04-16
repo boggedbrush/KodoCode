@@ -1,5 +1,4 @@
 import { AuthSessionId } from "@t3tools/contracts";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import { Effect, Layer, Option, Schema } from "effect";
 
@@ -20,6 +19,7 @@ import {
   RevokeOtherAuthSessionsInput,
   SetAuthSessionLastConnectedAtInput,
 } from "../Services/AuthSessions.ts";
+import { authLayerConfig, AuthSqlClient } from "./Sqlite.ts";
 
 const AuthSessionDbRow = Schema.Struct({
   sessionId: AuthSessionId,
@@ -67,7 +67,7 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
 }
 
 const makeAuthSessionRepository = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+  const sql = yield* AuthSqlClient;
 
   const createSessionRow = SqlSchema.void({
     Request: CreateAuthSessionInput,
@@ -301,4 +301,4 @@ const makeAuthSessionRepository = Effect.gen(function* () {
 export const AuthSessionRepositoryLive = Layer.effect(
   AuthSessionRepository,
   makeAuthSessionRepository,
-);
+).pipe(Layer.provide(authLayerConfig));

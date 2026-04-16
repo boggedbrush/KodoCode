@@ -10,7 +10,7 @@ import {
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
-import { isElectron } from "../../env";
+import { isDesktopApp, readDesktopBridge } from "../../desktopRuntime";
 import { ensureNativeApi } from "../../nativeApi";
 import {
   setDesktopUpdateStateQueryData,
@@ -37,7 +37,7 @@ function AboutVersionSection() {
   const updateState = updateStateQuery.data ?? null;
 
   const handleButtonClick = useCallback(() => {
-    const bridge = window.desktopBridge;
+    const bridge = readDesktopBridge();
     if (!bridge) return;
 
     const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
@@ -193,7 +193,7 @@ export function SettingsAboutPanel() {
   return (
     <SettingsPageContainer>
       <SettingsSection title="About">
-        {isElectron ? (
+        {isDesktopApp ? (
           <AboutVersionSection />
         ) : (
           <SettingsRow

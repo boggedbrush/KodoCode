@@ -5,14 +5,14 @@ import { useEffect, useState } from "react";
 import { useSettingsRestore } from "../components/settings/SettingsPanels";
 import { Button } from "../components/ui/button";
 import { SidebarInset, SidebarTrigger, useSidebar } from "../components/ui/sidebar";
-import { isElectron } from "../env";
+import { isDesktopApp } from "../desktopRuntime";
 import { cn, isLinuxPlatform, isMacPlatform } from "../lib/utils";
 import { SidebarBrandToggleButton } from "../components/SidebarBrandToggleButton";
 
 function SettingsContentLayout() {
   const { open: sidebarOpen } = useSidebar();
   const shouldOffsetForMacTrafficLights =
-    isElectron && isMacPlatform(navigator.platform) && !sidebarOpen;
+    isDesktopApp && isMacPlatform(navigator.platform) && !sidebarOpen;
   const [restoreSignal, setRestoreSignal] = useState(0);
   const { changedSettingLabels, restoreDefaults } = useSettingsRestore(() =>
     setRestoreSignal((value) => value + 1),
@@ -36,7 +36,7 @@ function SettingsContentLayout() {
   return (
     <SidebarInset className="h-full min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-foreground">
-        {!isElectron && (
+        {!isDesktopApp && (
           <header className="border-b border-border px-3 py-2 sm:px-5">
             <div className="flex items-center gap-2">
               <SidebarTrigger className="size-7 shrink-0 md:hidden" />
@@ -57,7 +57,7 @@ function SettingsContentLayout() {
           </header>
         )}
 
-        {isElectron && !isLinuxPlatform(navigator.platform) && (
+        {isDesktopApp && !isLinuxPlatform(navigator.platform) && (
           <div
             className={cn(
               "drag-region flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-5 transition-[padding] duration-200 ease-linear",

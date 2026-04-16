@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 
-import { isElectron } from "../env";
+import { isDesktopApp, readDesktopBridge, supportsDesktopCapability } from "../desktopRuntime";
 import { isLinuxPlatform } from "../lib/utils";
 import { LinuxTitleBar } from "./LinuxTitleBar";
 import {
@@ -11,13 +11,14 @@ import {
 const LINUX_WINDOW_CORNER_RADIUS_PX = 12;
 
 export function DesktopWindowFrame({ children }: { children: ReactNode }) {
-  const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+  const isLinuxDesktop = isDesktopApp && isLinuxPlatform(navigator.platform);
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
     if (!isLinuxDesktop) return;
+    if (!supportsDesktopCapability("windowControls")) return;
 
-    const bridge = window.desktopBridge;
+    const bridge = readDesktopBridge();
     if (!bridge) return;
 
     void bridge.windowControls.isMaximized().then(setIsMaximized);

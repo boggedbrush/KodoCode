@@ -125,16 +125,48 @@ function getWindowForTest(): Window & typeof globalThis & { desktopBridge?: unkn
 
 function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridge {
   return {
-    getWsUrl: () => null,
+    bootstrap: {
+      runtime: "electron",
+      capabilities: {
+        updates: true,
+        applicationMenu: true,
+        nativeContextMenu: true,
+        windowControls: true,
+        benchmarkDriver: false,
+      },
+      connection: {
+        wsUrl: null,
+      },
+      startup: {
+        processSpawnedAt: null,
+        firstWindowCreatedAt: null,
+        firstWindowShownAt: null,
+        rendererBootstrapAt: null,
+        rendererReadyAt: null,
+        backendConnectedAt: null,
+      },
+    },
     pickFolder: async () => null,
     confirm: async () => true,
     setTheme: async () => undefined,
     showContextMenu: async () => null,
     openExternal: async () => true,
     onMenuAction: () => () => undefined,
-    getUpdateState: async () => {
-      throw new Error("getUpdateState not implemented in test");
-    },
+    getUpdateState: async () => ({
+      enabled: true,
+      status: "idle",
+      currentVersion: "0.0.0-test",
+      hostArch: "x64",
+      appArch: "x64",
+      runningUnderArm64Translation: false,
+      availableVersion: null,
+      downloadedVersion: null,
+      downloadPercent: null,
+      checkedAt: null,
+      message: null,
+      errorContext: null,
+      canRetry: false,
+    }),
     checkForUpdate: async () => {
       throw new Error("checkForUpdate not implemented in test");
     },
@@ -151,6 +183,40 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
       close: () => undefined,
       isMaximized: async () => false,
       onMaximizedChange: () => () => undefined,
+    },
+    benchmark: {
+      getState: async () => ({
+        enabled: false,
+        runtime: "electron",
+        runId: null,
+        scenario: null,
+        outputPath: null,
+        status: "idle",
+        startedAt: null,
+        completedAt: null,
+        completed: false,
+        success: null,
+        lastError: null,
+        milestones: {
+          processSpawnedAt: null,
+          firstWindowCreatedAt: null,
+          firstWindowShownAt: null,
+          rendererBootstrapAt: null,
+          rendererReadyAt: null,
+          backendConnectedAt: null,
+        },
+        events: [],
+      }),
+      onState: () => () => undefined,
+      markMilestone: async () => {
+        throw new Error("markMilestone not implemented in test");
+      },
+      markEvent: async () => {
+        throw new Error("markEvent not implemented in test");
+      },
+      complete: async () => {
+        throw new Error("complete not implemented in test");
+      },
     },
     ...overrides,
   };

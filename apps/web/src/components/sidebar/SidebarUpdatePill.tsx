@@ -1,7 +1,7 @@
 import { DownloadIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
-import { isElectron } from "../../env";
+import { isDesktopApp, readDesktopBridge, supportsDesktopCapability } from "../../desktopRuntime";
 import {
   setDesktopUpdateStateQueryData,
   useDesktopUpdateState,
@@ -26,17 +26,18 @@ export function SidebarUpdatePill() {
   const state = useDesktopUpdateState().data ?? null;
   const [dismissed, setDismissed] = useState(false);
 
-  const visible = isElectron && shouldShowDesktopUpdateButton(state) && !dismissed;
+  const updatesEnabled = isDesktopApp && supportsDesktopCapability("updates");
+  const visible = updatesEnabled && shouldShowDesktopUpdateButton(state) && !dismissed;
   const tooltip = state ? getDesktopUpdateButtonTooltip(state) : "Update available";
   const disabled = isDesktopUpdateButtonDisabled(state);
   const action = state ? resolveDesktopUpdateButtonAction(state) : "none";
 
-  const showArm64Warning = isElectron && shouldShowArm64IntelBuildWarning(state);
+  const showArm64Warning = updatesEnabled && shouldShowArm64IntelBuildWarning(state);
   const arm64Description =
     state && showArm64Warning ? getArm64IntelBuildWarningDescription(state) : null;
 
   const handleAction = useCallback(() => {
-    const bridge = window.desktopBridge;
+    const bridge = readDesktopBridge();
     if (!bridge || !state) return;
     if (disabled || action === "none") return;
 

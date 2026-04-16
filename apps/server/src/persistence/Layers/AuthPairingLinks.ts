@@ -1,4 +1,3 @@
-import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import { Effect, Layer, Schema } from "effect";
 
@@ -17,6 +16,7 @@ import {
   ListActiveAuthPairingLinksInput,
   RevokeAuthPairingLinkInput,
 } from "../Services/AuthPairingLinks.ts";
+import { authLayerConfig, AuthSqlClient } from "./Sqlite.ts";
 
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
   return (cause: unknown): AuthPairingLinkRepositoryError =>
@@ -26,7 +26,7 @@ function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: st
 }
 
 const makeAuthPairingLinkRepository = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+  const sql = yield* AuthSqlClient;
 
   const createPairingLinkRow = SqlSchema.void({
     Request: CreateAuthPairingLinkInput,
@@ -206,4 +206,4 @@ const makeAuthPairingLinkRepository = Effect.gen(function* () {
 export const AuthPairingLinkRepositoryLive = Layer.effect(
   AuthPairingLinkRepository,
   makeAuthPairingLinkRepository,
-);
+).pipe(Layer.provide(authLayerConfig));

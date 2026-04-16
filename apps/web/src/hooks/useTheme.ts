@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { readDesktopBridge } from "../desktopRuntime";
 
 type Theme = "light" | "dark" | "system";
+type ResolvedTheme = "light" | "dark";
 type ThemeSnapshot = {
   theme: Theme;
   systemDark: boolean;
@@ -11,7 +13,7 @@ const MEDIA_QUERY = "(prefers-color-scheme: dark)";
 
 let listeners: Array<() => void> = [];
 let lastSnapshot: ThemeSnapshot | null = null;
-let lastDesktopTheme: Theme | null = null;
+let lastDesktopThemeKey: string | null = null;
 let didInitializeTheme = false;
 function emitChange() {
   for (const listener of listeners) listener();
@@ -41,9 +43,11 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
   if (suppressTransitions) {
     document.documentElement.classList.add("no-transitions");
   }
-  const isDark = theme === "dark" || (theme === "system" && getSystemDark());
+  const resolvedTheme: ResolvedTheme =
+    theme === "dark" || (theme === "system" && getSystemDark()) ? "dark" : "light";
+  const isDark = resolvedTheme === "dark";
   document.documentElement.classList.toggle("dark", isDark);
-  const desktopThemeSync = syncDesktopTheme(theme);
+  const desktopThemeSync = syncDesktopTheme(theme, resolvedTheme);
   if (theme === "system" && desktopThemeSync) {
     // Electron can start with a stale renderer media query until main applies
     // nativeTheme.themeSource="system". Re-check once that IPC write completes.
@@ -66,16 +70,17 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
   }
 }
 
-function syncDesktopTheme(theme: Theme) {
-  const bridge = window.desktopBridge;
-  if (!bridge || lastDesktopTheme === theme) {
+function syncDesktopTheme(theme: Theme, resolvedTheme: ResolvedTheme) {
+  const bridge = readDesktopBridge();
+  const nextDesktopThemeKey = `${theme}:${resolvedTheme}`;
+  if (!bridge || lastDesktopThemeKey === nextDesktopThemeKey) {
     return null;
   }
 
-  lastDesktopTheme = theme;
-  return bridge.setTheme(theme).catch(() => {
-    if (lastDesktopTheme === theme) {
-      lastDesktopTheme = null;
+  lastDesktopThemeKey = nextDesktopThemeKey;
+  return bridge.setTheme(theme, { resolvedTheme }).catch(() => {
+    if (lastDesktopThemeKey === nextDesktopThemeKey) {
+      lastDesktopThemeKey = null;
     }
   });
 }

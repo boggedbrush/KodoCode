@@ -35,7 +35,7 @@ import * as Equal from "effect/Equal";
 import * as Schema from "effect/Schema";
 import { useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
-import { isElectron } from "../env";
+import { isDesktopApp } from "../desktopRuntime";
 import { isLinuxPlatform } from "../lib/utils";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
@@ -229,7 +229,7 @@ import {
 import { useProviderUsage } from "~/rpc/providerUsageState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 
-const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
+const isLinuxDesktop = isDesktopApp && isLinuxPlatform(navigator.platform);
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -2259,7 +2259,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         command: input.keybindingCommand,
       });
 
-      if (isElectron && keybindingRule) {
+      if (isDesktopApp && keybindingRule) {
         await api.server.upsertKeybinding(keybindingRule);
       }
     },
@@ -4943,7 +4943,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   if (!activeThread) {
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-muted-foreground/40">
-        {!isElectron && (
+        {!isDesktopApp && (
           <header className="border-b border-border px-3 py-2 md:hidden">
             <div className="flex items-center gap-2">
               <SidebarTrigger className="size-7 shrink-0" />
@@ -4951,7 +4951,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             </div>
           </header>
         )}
-        {isElectron && !isLinuxDesktop && (
+        {isDesktopApp && !isLinuxDesktop && (
           <div
             className={cn(
               "drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5 transition-[padding] duration-200 ease-linear",
@@ -4976,8 +4976,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
       <header
         className={cn(
           "sticky top-0 z-20 shrink-0 border-b border-border bg-background/95 px-3 transition-[padding] duration-200 ease-linear supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-5",
-          isElectron && !isLinuxDesktop ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
-          isElectron && /mac/i.test(navigator.platform) && !sidebarOpen && "pl-[90px]",
+          isDesktopApp && !isLinuxDesktop
+            ? "drag-region flex h-[52px] items-center"
+            : "py-2 sm:py-3",
+          isDesktopApp && /mac/i.test(navigator.platform) && !sidebarOpen && "pl-[90px]",
         )}
       >
         <ChatHeader

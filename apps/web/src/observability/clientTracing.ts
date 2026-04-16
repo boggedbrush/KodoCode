@@ -2,7 +2,7 @@ import { Exit, Layer, ManagedRuntime, Scope, Tracer } from "effect";
 import { FetchHttpClient, HttpClient } from "effect/unstable/http";
 import { OtlpSerialization, OtlpTracer } from "effect/unstable/observability";
 
-import { isElectron } from "../env";
+import { readDesktopRuntime } from "../desktopRuntime";
 import { resolveServerUrl } from "../lib/utils";
 import { APP_VERSION } from "~/branding";
 
@@ -11,7 +11,7 @@ const CLIENT_TRACING_RESOURCE = {
   serviceName: "kodo-web",
   attributes: {
     "service.runtime": "kodo-web",
-    "service.mode": isElectron ? "electron" : "browser",
+    "service.mode": readDesktopRuntime() ?? "browser",
     "service.version": APP_VERSION,
   },
 } as const;

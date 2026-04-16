@@ -17,6 +17,9 @@ import {
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
 import type {
+  DesktopBenchmarkMilestone,
+  DesktopBenchmarkState,
+  DesktopBridgeBootstrap,
   DesktopTheme,
   DesktopUpdateActionResult,
   DesktopUpdateCheckResult,
@@ -25,6 +28,11 @@ import type {
 import { autoUpdater } from "electron-updater";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
+import {
+  createDesktopBenchmarkState,
+  createDesktopBridgeBootstrap,
+  markDesktopBenchmarkMilestone,
+} from "@t3tools/shared/desktop-runtime";
 import { RotatingFileSink } from "@t3tools/shared/logging";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort";
@@ -58,12 +66,17 @@ const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
-const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
+const GET_BOOTSTRAP_CHANNEL = "desktop:get-bootstrap";
 const WINDOW_MINIMIZE_CHANNEL = "desktop:window-minimize";
 const WINDOW_TOGGLE_MAXIMIZE_CHANNEL = "desktop:window-toggle-maximize";
 const WINDOW_CLOSE_CHANNEL = "desktop:window-close";
 const WINDOW_IS_MAXIMIZED_CHANNEL = "desktop:window-is-maximized";
 const WINDOW_MAXIMIZED_CHANGE_CHANNEL = "desktop:window-maximized-change";
+const BENCHMARK_STATE_CHANNEL = "desktop:benchmark-state";
+const BENCHMARK_GET_STATE_CHANNEL = "desktop:benchmark-get-state";
+const BENCHMARK_MARK_MILESTONE_CHANNEL = "desktop:benchmark-mark-milestone";
+const BENCHMARK_MARK_EVENT_CHANNEL = "desktop:benchmark-mark-event";
+const BENCHMARK_COMPLETE_CHANNEL = "desktop:benchmark-complete";
 const BASE_DIR =
   process.env.KODOCODE_HOME?.trim() ||
   process.env.T3CODE_HOME?.trim() ||
@@ -94,6 +107,13 @@ const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
 const LINUX_TRANSPARENT_WINDOW_ARG = "--kodo-linux-transparent-window=1";
 const DEVTOOLS_ARG = "--devtools";
+const BENCHMARK_RUN_ID = process.env.KODOCODE_DESKTOP_BENCHMARK_RUN_ID?.trim() || null;
+const BENCHMARK_SCENARIO = process.env.KODOCODE_DESKTOP_BENCHMARK_SCENARIO?.trim() || null;
+const BENCHMARK_OUTPUT_PATH = process.env.KODOCODE_DESKTOP_BENCHMARK_OUTPUT_PATH?.trim() || null;
+const AUTOMATION_PICK_FOLDER = process.env.KODOCODE_DESKTOP_AUTOMATION_PICK_FOLDER?.trim() || null;
+const AUTOMATION_CONFIRM_RESPONSE = process.env.KODOCODE_DESKTOP_AUTOMATION_CONFIRM_RESPONSE;
+const AUTOMATION_DISABLE_EXTERNAL_OPEN =
+  process.env.KODOCODE_DESKTOP_AUTOMATION_DISABLE_EXTERNAL_OPEN === "1";
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
 type LinuxDesktopNamedApp = Electron.App & {
@@ -334,6 +354,30 @@ let updateDownloadInFlight = false;
 let updateInstallInFlight = false;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
+let startupMilestones = createDesktopBridgeBootstrap({
+  runtime: "electron",
+  wsUrl: null,
+  capabilities: {
+    updates: true,
+    applicationMenu: true,
+    nativeContextMenu: true,
+    windowControls: true,
+    benchmarkDriver: true,
+  },
+  startup: {
+    processSpawnedAt: new Date().toISOString(),
+  },
+}).startup;
+let benchmarkState: DesktopBenchmarkState = createDesktopBenchmarkState({
+  enabled:
+    BENCHMARK_OUTPUT_PATH !== null || BENCHMARK_RUN_ID !== null || BENCHMARK_SCENARIO !== null,
+  runtime: "electron",
+  runId: BENCHMARK_RUN_ID,
+  scenario: BENCHMARK_SCENARIO,
+  outputPath: BENCHMARK_OUTPUT_PATH,
+  startedAt: startupMilestones.processSpawnedAt,
+  startup: startupMilestones,
+});
 
 function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
   if (updateInstallInFlight) return "install";
@@ -507,6 +551,7 @@ function handleFatalStartupError(stage: string, error: unknown): void {
   const detail =
     error instanceof Error && typeof error.stack === "string" ? `\n${error.stack}` : "";
   writeDesktopLogHeader(`fatal startup error stage=${stage} message=${message}`);
+  completeBenchmarkRun({ success: false, detail: `fatal startup error (${stage}): ${message}` });
   console.error(`[desktop] fatal startup error (${stage})`, error);
   if (!isQuitting) {
     isQuitting = true;
@@ -862,6 +907,88 @@ function clearUpdatePollTimer(): void {
   }
 }
 
+function buildDesktopBootstrap(): DesktopBridgeBootstrap {
+  return createDesktopBridgeBootstrap({
+    runtime: "electron",
+    wsUrl: backendWsUrl,
+    capabilities: {
+      updates: true,
+      applicationMenu: true,
+      nativeContextMenu: true,
+      windowControls: true,
+      benchmarkDriver: true,
+    },
+    startup: startupMilestones,
+  });
+}
+
+function writeBenchmarkStateToDisk(): void {
+  if (!benchmarkState.enabled || !benchmarkState.outputPath) {
+    return;
+  }
+
+  try {
+    FS.mkdirSync(Path.dirname(benchmarkState.outputPath), { recursive: true });
+    FS.writeFileSync(
+      benchmarkState.outputPath,
+      `${JSON.stringify(benchmarkState, null, 2)}\n`,
+      "utf8",
+    );
+  } catch (error) {
+    console.error("[desktop-benchmark] failed to persist benchmark state", error);
+  }
+}
+
+function emitBenchmarkState(): void {
+  writeBenchmarkStateToDisk();
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (window.isDestroyed()) continue;
+    window.webContents.send(BENCHMARK_STATE_CHANNEL, benchmarkState);
+  }
+}
+
+function setBenchmarkState(patch: Partial<DesktopBenchmarkState>): DesktopBenchmarkState {
+  benchmarkState = { ...benchmarkState, ...patch };
+  emitBenchmarkState();
+  return benchmarkState;
+}
+
+function markStartupMilestone(
+  milestone: DesktopBenchmarkMilestone,
+  at = new Date().toISOString(),
+): DesktopBenchmarkState {
+  startupMilestones = markDesktopBenchmarkMilestone(startupMilestones, milestone, at);
+  return setBenchmarkState({ milestones: startupMilestones });
+}
+
+function recordBenchmarkEvent(name: string, detail?: string): DesktopBenchmarkState {
+  return setBenchmarkState({
+    events: benchmarkState.events.concat({
+      name,
+      at: new Date().toISOString(),
+      detail: detail ?? null,
+    }),
+  });
+}
+
+function completeBenchmarkRun(result: {
+  success: boolean;
+  detail?: string;
+}): DesktopBenchmarkState {
+  return setBenchmarkState({
+    completed: true,
+    success: result.success,
+    completedAt: new Date().toISOString(),
+    status: result.success ? "completed" : "error",
+    lastError: result.success ? null : (result.detail ?? benchmarkState.lastError),
+    events: benchmarkState.events.concat({
+      name: result.success ? "benchmark.complete" : "benchmark.error",
+      at: new Date().toISOString(),
+      detail: result.detail ?? null,
+    }),
+  });
+}
+
 function emitUpdateState(): void {
   for (const window of BrowserWindow.getAllWindows()) {
     if (window.isDestroyed()) continue;
@@ -1110,6 +1237,7 @@ async function refreshDesktopBackendConnectionEndpoint(): Promise<void> {
   });
   const baseUrl = `ws://127.0.0.1:${backendPort}`;
   backendWsUrl = `${baseUrl}/?token=${encodeURIComponent(backendAuthToken)}`;
+  recordBenchmarkEvent("backend.endpoint.resolved", backendWsUrl);
   writeDesktopLogHeader(
     `resolved backend connection endpoint startPort=${DEFAULT_DESKTOP_BACKEND_PORT} port=${backendPort}`,
   );
@@ -1293,13 +1421,17 @@ async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
 }
 
 function registerIpcHandlers(): void {
-  ipcMain.removeAllListeners(GET_WS_URL_CHANNEL);
-  ipcMain.on(GET_WS_URL_CHANNEL, (event) => {
-    event.returnValue = backendWsUrl;
+  ipcMain.removeAllListeners(GET_BOOTSTRAP_CHANNEL);
+  ipcMain.on(GET_BOOTSTRAP_CHANNEL, (event) => {
+    event.returnValue = buildDesktopBootstrap();
   });
 
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
   ipcMain.handle(PICK_FOLDER_CHANNEL, async () => {
+    if (AUTOMATION_PICK_FOLDER) {
+      return AUTOMATION_PICK_FOLDER;
+    }
+
     const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
     const result = owner
       ? await dialog.showOpenDialog(owner, {
@@ -1316,6 +1448,14 @@ function registerIpcHandlers(): void {
   ipcMain.handle(CONFIRM_CHANNEL, async (_event, message: unknown) => {
     if (typeof message !== "string") {
       return false;
+    }
+
+    if (AUTOMATION_CONFIRM_RESPONSE === "0") {
+      return false;
+    }
+
+    if (AUTOMATION_CONFIRM_RESPONSE === "1") {
+      return true;
     }
 
     const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
@@ -1402,6 +1542,11 @@ function registerIpcHandlers(): void {
       return false;
     }
 
+    if (AUTOMATION_DISABLE_EXTERNAL_OPEN) {
+      recordBenchmarkEvent("shell.openExternal.suppressed", externalUrl);
+      return true;
+    }
+
     try {
       await shell.openExternal(externalUrl);
       return true;
@@ -1453,6 +1598,58 @@ function registerIpcHandlers(): void {
       checked,
       state: updateState,
     } satisfies DesktopUpdateCheckResult;
+  });
+
+  ipcMain.removeHandler(BENCHMARK_GET_STATE_CHANNEL);
+  ipcMain.handle(BENCHMARK_GET_STATE_CHANNEL, async () => benchmarkState);
+
+  ipcMain.removeHandler(BENCHMARK_MARK_MILESTONE_CHANNEL);
+  ipcMain.handle(BENCHMARK_MARK_MILESTONE_CHANNEL, async (_event, rawMilestone: unknown) => {
+    if (
+      rawMilestone !== "processSpawned" &&
+      rawMilestone !== "firstWindowCreated" &&
+      rawMilestone !== "firstWindowShown" &&
+      rawMilestone !== "rendererBootstrap" &&
+      rawMilestone !== "rendererReady" &&
+      rawMilestone !== "backendConnected"
+    ) {
+      return benchmarkState;
+    }
+
+    return markStartupMilestone(rawMilestone);
+  });
+
+  ipcMain.removeHandler(BENCHMARK_MARK_EVENT_CHANNEL);
+  ipcMain.handle(
+    BENCHMARK_MARK_EVENT_CHANNEL,
+    async (_event, rawName: unknown, rawDetail?: unknown) => {
+      if (typeof rawName !== "string" || rawName.trim().length === 0) {
+        return benchmarkState;
+      }
+
+      return recordBenchmarkEvent(
+        rawName.trim(),
+        typeof rawDetail === "string" && rawDetail.trim().length > 0 ? rawDetail.trim() : undefined,
+      );
+    },
+  );
+
+  ipcMain.removeHandler(BENCHMARK_COMPLETE_CHANNEL);
+  ipcMain.handle(BENCHMARK_COMPLETE_CHANNEL, async (_event, rawResult: unknown) => {
+    const success =
+      typeof rawResult === "object" &&
+      rawResult !== null &&
+      "success" in rawResult &&
+      (rawResult as { success?: unknown }).success === true;
+    const detail =
+      typeof rawResult === "object" &&
+      rawResult !== null &&
+      "detail" in rawResult &&
+      typeof (rawResult as { detail?: unknown }).detail === "string"
+        ? (rawResult as { detail: string }).detail
+        : undefined;
+
+    return completeBenchmarkRun(detail === undefined ? { success } : { success, detail });
   });
 
   ipcMain.removeAllListeners(WINDOW_MINIMIZE_CHANNEL);
@@ -1529,6 +1726,7 @@ function createWindow(): BrowserWindow {
       sandbox: true,
     },
   });
+  markStartupMilestone("firstWindowCreated");
 
   window.webContents.on("context-menu", (event, params) => {
     event.preventDefault();
@@ -1575,6 +1773,7 @@ function createWindow(): BrowserWindow {
     emitUpdateState();
   });
   window.once("ready-to-show", () => {
+    markStartupMilestone("firstWindowShown");
     window.show();
   });
 
@@ -1635,6 +1834,8 @@ app
   .whenReady()
   .then(() => {
     writeDesktopLogHeader("app ready");
+    recordBenchmarkEvent("app.ready");
+    emitBenchmarkState();
     configureAppIdentity();
     configureApplicationMenu();
     registerDesktopProtocol();

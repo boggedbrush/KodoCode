@@ -16,6 +16,8 @@ const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
 const DESKTOP_DEV_RUNNER_PID_ENV = "KODOCODE_DEV_RUNNER_PID";
 const DESKTOP_DEV_SHUTDOWN_SIGNAL_ENV = "KODOCODE_DEV_SHUTDOWN_SIGNAL";
+const ELECTROBUN_DEV_BUILD_FOLDER_ENV = "KODOCODE_ELECTROBUN_BUILD_FOLDER";
+const ELECTROBUN_SOURCE_ROOT_ENV = "KODOCODE_ELECTROBUN_SOURCE_ROOT";
 
 export const DESKTOP_DEV_SHUTDOWN_SIGNAL: NodeJS.Signals =
   process.platform === "win32" ? "SIGTERM" : "SIGUSR2";
@@ -37,6 +39,7 @@ const MODE_ARGS = {
   "dev:server": ["run", "dev", "--filter=kodo"],
   "dev:web": ["run", "dev", "--filter=@t3tools/web"],
   "dev:desktop": ["run", "dev", "--filter=@t3tools/desktop", "--filter=@t3tools/web", "--parallel"],
+  "dev:electrobun": ["run", "dev", "--filter=@t3tools/electrobun"],
 } as const satisfies Record<string, ReadonlyArray<string>>;
 
 type DevMode = keyof typeof MODE_ARGS;
@@ -157,16 +160,25 @@ export function createDevRunnerEnv({
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
     const resolvedBaseDir = yield* resolveBaseDir(t3Home);
-    const isDesktopMode = mode === "dev:desktop";
+    const path = yield* Path.Path;
+    const isDesktopMode = mode === "dev:desktop" || mode === "dev:electrobun";
+    const effectiveBaseDir =
+      mode === "dev:electrobun" ? path.join(resolvedBaseDir, "electrobun-dev") : resolvedBaseDir;
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
       PORT: String(webPort),
       ELECTRON_RENDERER_PORT: String(webPort),
-      VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://localhost:${webPort}`,
-      KODOCODE_HOME: resolvedBaseDir,
-      T3CODE_HOME: resolvedBaseDir,
+      ELECTROBUN_RENDERER_PORT: String(webPort),
+      KODOCODE_HOME: effectiveBaseDir,
+      T3CODE_HOME: effectiveBaseDir,
     };
+
+    if (mode !== "dev:electrobun") {
+      output.VITE_DEV_SERVER_URL = devUrl?.toString() ?? `http://localhost:${webPort}`;
+    } else {
+      delete output.VITE_DEV_SERVER_URL;
+    }
 
     if (!isDesktopMode) {
       output.T3CODE_PORT = String(serverPort);
@@ -230,9 +242,18 @@ export function createDevRunnerEnv({
       } else {
         delete output[DESKTOP_DEV_SHUTDOWN_SIGNAL_ENV];
       }
+      if (mode === "dev:electrobun") {
+        output[ELECTROBUN_DEV_BUILD_FOLDER_ENV] = `.electrobun/dev-${process.pid}`;
+        output[ELECTROBUN_SOURCE_ROOT_ENV] = process.cwd();
+      } else {
+        delete output[ELECTROBUN_DEV_BUILD_FOLDER_ENV];
+        delete output[ELECTROBUN_SOURCE_ROOT_ENV];
+      }
     } else {
       delete output[DESKTOP_DEV_RUNNER_PID_ENV];
       delete output[DESKTOP_DEV_SHUTDOWN_SIGNAL_ENV];
+      delete output[ELECTROBUN_DEV_BUILD_FOLDER_ENV];
+      delete output[ELECTROBUN_SOURCE_ROOT_ENV];
     }
 
     return output;
