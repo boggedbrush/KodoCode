@@ -35,6 +35,13 @@ interface PublishPackageJson {
   readonly overrides: Record<string, unknown>;
 }
 
+interface ServerPackageJsonConfig {
+  readonly name: string;
+  readonly kodoRelease?: {
+    readonly publishPackageName?: string;
+  };
+}
+
 function sanitizePublishOverrides(overrides: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(overrides).filter(([name]) => {
@@ -58,9 +65,10 @@ const RepoRoot = Effect.service(Path.Path).pipe(
 
 export const resolvePublishPackageJson = (appVersion: Option.Option<string>) =>
   Effect.sync(() => {
+    const publishConfig = serverPackageJson as ServerPackageJsonConfig;
     const version = Option.getOrElse(appVersion, () => serverPackageJson.version);
     const pkg: PublishPackageJson = {
-      name: serverPackageJson.name,
+      name: publishConfig.kodoRelease?.publishPackageName ?? serverPackageJson.name,
       repository: serverPackageJson.repository,
       bin: serverPackageJson.bin,
       type: serverPackageJson.type,

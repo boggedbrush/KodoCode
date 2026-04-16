@@ -17,6 +17,7 @@ it.layer(NodeServices.layer)("server scripts cli", (it) => {
 
         const pkg = yield* resolvePublishPackageJson(Option.some("9.9.9"));
 
+        assert.equal(pkg.name, "@boggedbrush/kodo");
         assert.equal(pkg.version, "9.9.9");
         assert.equal(pkg.bin.kodo, "kodo");
         assert.deepStrictEqual(pkg.files, ["dist", "kodo"]);
