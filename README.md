@@ -28,12 +28,12 @@
 
 You end up either wiring raw CLI tools into your own scripts, or accepting opinionated wrappers that bury settings, collapse planning into execution, and lock you to one provider.
 
-|     | What you have today               | What you actually need                  |
-| :-: | :-------------------------------- | :-------------------------------------- |
-| 🧠  | One mode for everything           | Distinct modes for distinct intents     |
-| 🔧  | Settings buried in implementation | A first-class configuration surface     |
-| 🔒  | Locked to one provider            | Harness choice per project, per session |
-| ✍️  | Prompts as you typed them         | Prompts refined to your intent level    |
+|                                                       | What you have today               | What you actually need                  |
+| :---------------------------------------------------: | :-------------------------------- | :-------------------------------------- |
+|   <img src="./assets/readme/mind.svg" width="16" />   | One mode for everything           | Distinct modes for distinct intents     |
+| <img src="./assets/readme/settings.svg" width="16" /> | Settings buried in implementation | A first-class configuration surface     |
+|   <img src="./assets/readme/lock.svg" width="16" />   | Locked to one provider            | Harness choice per project, per session |
+|  <img src="./assets/readme/prompt.svg" width="16" />  | Prompts as you typed them         | Prompts refined to your intent level    |
 
 Kōdō Code reduces cognitive overhead by separating exploration, planning, execution, and validation into distinct modes.
 
@@ -57,10 +57,10 @@ It wraps **[Codex CLI](https://developers.openai.com/codex/cli/)** and **[Claude
 
 ```mermaid
 flowchart LR
-    ASK("🤔 Ask\nExplore")
-    PLAN("📋 Plan\nStrategize")
-    CODE("⚡ Code\nExecute")
-    REVIEW("🔍 Review\nValidate")
+    ASK("[?] Ask\nExplore")
+    PLAN("[#] Plan\nStrategize")
+    CODE("[>] Code\nExecute")
+    REVIEW("[v] Review\nValidate")
 
     ASK --> PLAN --> CODE --> REVIEW
 
@@ -83,7 +83,7 @@ Kōdō Code is built around a simple rule: **you should not have to think, plan,
 <br>
 
 <details open>
-<summary><b>🤔 Ask Mode</b> &nbsp;—&nbsp; question without execution</summary>
+<summary><img src="./assets/readme/ask.svg" width="16" alt="" /> <b>Ask Mode</b> &nbsp;—&nbsp; question without execution</summary>
 <br>
 
 Probe your codebase and your agents before committing to anything. Ask without triggering execution.
@@ -98,7 +98,7 @@ No side effects. No surprises. Just answers.
 </details>
 
 <details>
-<summary><b>📋 Plan Mode</b> &nbsp;—&nbsp; strategize before you build</summary>
+<summary><img src="./assets/readme/plan.svg" width="16" alt="" /> <b>Plan Mode</b> &nbsp;—&nbsp; strategize before you build</summary>
 <br>
 
 Designate a dedicated planning model — higher reasoning, slower deliberation — to map out your next move before a single file is touched.
@@ -112,7 +112,7 @@ Plans are artifacts. They carry forward into execution.
 </details>
 
 <details>
-<summary><b>⚡ Code Mode</b> &nbsp;—&nbsp; build with precision</summary>
+<summary><img src="./assets/readme/code.svg" width="16" alt="" /> <b>Code Mode</b> &nbsp;—&nbsp; build with precision</summary>
 <br>
 
 Switch to your acting model — optimized for speed and accuracy — and execute with the full weight of your approved plan.
@@ -125,7 +125,7 @@ Switch to your acting model — optimized for speed and accuracy — and execute
 </details>
 
 <details>
-<summary><b>🔍 Review Mode</b> &nbsp;—&nbsp; verify and validate</summary>
+<summary><img src="./assets/readme/review.svg" width="16" alt="" /> <b>Review Mode</b> &nbsp;—&nbsp; verify and validate</summary>
 <br>
 
 You built it. Now make sure it actually works — and that you didn't break anything you weren't looking at.
@@ -138,7 +138,7 @@ You built it. Now make sure it actually works — and that you didn't break anyt
 </details>
 
 <details>
-<summary><b>🔀 Dual Harness Support</b> &nbsp;—&nbsp; your choice of execution engine</summary>
+<summary><img src="./assets/readme/dual.svg" width="16" alt="" /> <b>Dual Harness Support</b> &nbsp;—&nbsp; your choice of execution engine</summary>
 <br>
 
 The same workflow semantics, regardless of which harness runs underneath.
@@ -152,7 +152,7 @@ Switch per-project. Switch per-session. The orchestration layer doesn't care —
 </details>
 
 <details>
-<summary><b>📄 Plans as Artifacts</b> &nbsp;—&nbsp; plans that persist and carry forward</summary>
+<summary><img src="./assets/readme/artifact.svg" width="16" alt="" /> <b>Plans as Artifacts</b> &nbsp;—&nbsp; plans that persist and carry forward</summary>
 <br>
 
 Plans aren't just conversation turns — they're stored artifacts with state. A plan created in Plan Mode persists, can be referenced later, and tracks whether it's been implemented. Code Mode carries the approved plan forward as structured context, not just chat history.
@@ -164,8 +164,8 @@ Plans aren't just conversation turns — they're stored artifacts with state. A 
 
 ```mermaid
 flowchart TD
-    UI["🖥️ Kōdō Desktop UI\nAsk · Plan · Code · Review"]
-    ORC["⚙️ Kōdō Orchestrator\nModel switching · Enhance pipeline\nWorkflow state · Settings & policy"]
+    UI["UI\nKōdō Desktop\nAsk · Plan · Code · Review"]
+    ORC["Core\nKōdō Orchestrator\nModel switching · Enhance pipeline\nWorkflow state · Settings & policy"]
     CODEX["Codex CLI\nOpenAI"]
     CLAUDE["Claude Agent SDK\nAnthropic"]
     REPO["Repo · Terminal · Files"]
@@ -218,15 +218,15 @@ _Illustrative comparison as of April 15, 2026. This category changes quickly._
 |                         |      **Kōdō Code**       |    Cline     |   Roo Code   |  Claude Code  |   Codex CLI   |
 | :---------------------- | :----------------------: | :----------: | :----------: | :-----------: | :-----------: |
 | **Harness**             | Codex + Claude Agent SDK |  API-based   |  API-based   | Native Claude | Native OpenAI |
-| **Workflow Modes**      |        ✅ 4 modes        |  ❌ Single   |   ✅ Modes   |      ❌       |      ❌       |
-| **Prompt Enhancer**     |       ✅ 3 levels        |      ❌      |      ❌      |      ❌       |      ❌       |
-| **Auto model switch**   |       ✅ Per mode        |      ❌      | ✅ Per-task  |      ❌       |      ❌       |
-| **Dual harness**        |            ✅            |      ❌      |      ❌      |       —       |       —       |
-| **Desktop UI**          |            ✅            |  ✅ VS Code  |  ✅ VS Code  |      ❌       |      ❌       |
-| **VS Code extension**   |        🔄 Phase 2        |      ✅      |      ✅      |      ❌       |      ❌       |
-| **Self-hostable**       |        🔮 Phase 3        |      ❌      |      ❌      |      ❌       |      ❌       |
-| **Commit model policy** |       ✅ Separate        |      ❌      |      ❌      |      ❌       |      ❌       |
-| **Settings surface**    |      ✅ First-class      |      ✅      |      ✅      |   ⚠️ Flags    |   ⚠️ Flags    |
+| **Workflow Modes**      |           ✓ 4            |      ✗       |      ✓       |       ✗       |       ✗       |
+| **Prompt Enhancer**     |        ✓ 3 levels        |      ✓       |      ✓       |       ✗       |       ✗       |
+| **Auto model switch**   |        ✓ per mode        |      ✗       |  ✓ per-task  |       ✗       |       ✗       |
+| **Dual harness**        |            ✓             |      ✗       |      ✗       |      --       |      --       |
+| **Desktop UI**          |            ✓             |  ✓ VS Code   |  ✓ VS Code   |       ✗       |       ✗       |
+| **VS Code extension**   |        ◐ Phase 2         |      ✓       |      ✓       |       ✗       |       ✗       |
+| **Self-hostable**       |        ◐ Phase 3         |      ✗       |      ✗       |       ✗       |       ✗       |
+| **Commit model policy** |        ✓ separate        |   ✓ basic    |      ✗       |       ✗       |    ✓ basic    |
+| **Settings surface**    |      ✓ first-class       |      ✓       |      ✓       |     Flags     |     Flags     |
 | **Philosophy**          |       Orchestrator       | Editor-first | Feature-rich |  Raw harness  |  Raw harness  |
 
 > Kōdō Code sits _between_ the harnesses and you — not competing with any of them directly.
@@ -319,7 +319,7 @@ That separation is the product boundary: Kōdō handles orchestration and workfl
 ## Platform Features
 
 <details>
-<summary><b>🌿 Git Worktrees</b> &nbsp;—&nbsp; isolated environments per project</summary>
+<summary><img src="./assets/readme/worktree.svg" width="16" alt="" /> <b>Git Worktrees</b> &nbsp;—&nbsp; isolated environments per project</summary>
 <br>
 
 Each project can run in its own git worktree, giving agents a clean, isolated environment without interfering with your working tree. Configure the default per-project: `local` or `worktree`.
@@ -328,7 +328,7 @@ Each project can run in its own git worktree, giving agents a clean, isolated en
 </details>
 
 <details>
-<summary><b>⌨️ Configurable Keybindings</b> &nbsp;—&nbsp; your shortcuts, your way</summary>
+<summary><img src="./assets/readme/key.svg" width="16" alt="" /> <b>Configurable Keybindings</b> &nbsp;—&nbsp; your shortcuts, your way</summary>
 <br>
 
 Every key action is configurable. Bindings are stored in a dedicated config file and documented in [`KEYBINDINGS.md`](KEYBINDINGS.md).
@@ -337,7 +337,7 @@ Every key action is configurable. Bindings are stored in a dedicated config file
 </details>
 
 <details>
-<summary><b>🌐 Remote Access</b> &nbsp;—&nbsp; run the server anywhere, connect from anywhere</summary>
+<summary><img src="./assets/readme/remote.svg" width="16" alt="" /> <b>Remote Access</b> &nbsp;—&nbsp; run the server anywhere, connect from anywhere</summary>
 <br>
 
 The Kōdō server supports `--host`, `--port`, and `--auth-token` for remote connections. These are Kōdō server options, separate from the underlying Codex or Claude harness configuration. Run it on a homelab or dev box and connect your desktop client over Tailscale or any network. See [`REMOTE.md`](REMOTE.md) for setup examples.
@@ -346,7 +346,7 @@ The Kōdō server supports `--host`, `--port`, and `--auth-token` for remote con
 </details>
 
 <details>
-<summary><b>📡 Observability</b> &nbsp;—&nbsp; traces and metrics, not just logs</summary>
+<summary><img src="./assets/readme/observability.svg" width="16" alt="" /> <b>Observability</b> &nbsp;—&nbsp; traces and metrics, not just logs</summary>
 <br>
 
 First-class OTLP support for both traces and metrics. Point it at Grafana Tempo, Prometheus, or any compatible collector. Local NDJSON trace files are written by default. See [`docs/observability.md`](docs/observability.md) for the full setup guide.
@@ -365,16 +365,16 @@ First-class OTLP support for both traces and metrics. Point it at Grafana Tempo,
 ```mermaid
 timeline
     title Kōdō Code Roadmap
-    section ✅ Phase 1 — Complete
+    section [1] Phase 1 — Complete
         Desktop release       : 4-mode workflow
                              : Prompt enhancer
                              : Dual harness support
                              : Model switching per mode
                              : Expanded settings
-    section 🔄 Phase 2 — Next
+    section [2] Phase 2 — Next
         VS Code extension    : Shared workflow semantics
                              : Editor-native Plan & Code modes
-    section 🔮 Phase 3 — Planned
+    section [3] Phase 3 — Planned
         Self-hosting         : Docker & homelab support
                              : Remote server deployment
 ```
@@ -389,11 +389,11 @@ timeline
 
 You'll like Kōdō Code if you:
 
-- ✦ Love tools like [Cline](https://github.com/cline/cline) but want a stronger harness underneath
-- ✦ Want **different models** for _thinking_ vs. _doing_ vs. _reviewing_
-- ✦ Care about **token efficiency** and cost-per-task
-- ✦ Believe prompts deserve to be **refined**, not just submitted as-is
-- ✦ Want a desktop experience today, editor integration soon, and self-hosting on the horizon
+- [ ] Love tools like [Cline](https://github.com/cline/cline) but want a stronger harness underneath
+- [ ] Want **different models** for _thinking_ vs. _doing_ vs. _reviewing_
+- [ ] Care about **token efficiency** and cost-per-task
+- [ ] Believe prompts deserve to be **refined**, not just submitted as-is
+- [ ] Want a desktop experience today, editor integration soon, and self-hosting on the horizon
 
 <br>
 
@@ -403,10 +403,10 @@ You'll like Kōdō Code if you:
 
 ## What It Isn't
 
-- ❌ A new harness — Codex and Claude already do that well
-- ❌ A reimplementation of runtime behavior
-- ❌ A generic chat app with coding bolted on
-- ❌ A terminal emulator pretending to be an IDE
+- [x] Not a new harness — Codex and Claude already do that well
+- [x] Not a reimplementation of runtime behavior
+- [x] Not a generic chat app with coding bolted on
+- [x] Not a terminal emulator pretending to be an IDE
 
 <br>
 
