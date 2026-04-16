@@ -757,8 +757,8 @@ export default function Sidebar() {
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
   const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const isMacDesktop = isElectron && isMacPlatform(navigator.platform);
-  const shouldShowSidebarWordmark = !isLinuxDesktop;
-  const shouldShowSidebarLogo = shouldShowSidebarWordmark;
+  const shouldShowSidebarWordmark = true;
+  const shouldShowSidebarLogo = true;
   const platform = navigator.platform;
   const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
   const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
@@ -2085,80 +2085,91 @@ export default function Sidebar() {
     <div className="flex items-center gap-2">
       <SidebarTrigger className="shrink-0 md:hidden" />
       {shouldShowSidebarWordmark ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <div className="flex min-w-0 items-center">
-                {shouldShowSidebarLogo ? (
-                  <button
-                    type="button"
-                    aria-label="Collapse sidebar"
-                    data-testid="sidebar-inline-logo-toggle"
-                    className={cn(
-                      "group/logo relative inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 outline-hidden ring-ring transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 [-webkit-app-region:no-drag]",
-                    )}
-                    onClick={toggleSidebar}
-                  >
-                    <span
-                      className={cn(
-                        "relative flex size-6 shrink-0 items-center justify-center",
-                        showSidebarToggleShortcutHint && "opacity-0",
-                      )}
-                    >
-                      <img
-                        src={sidebarWordmarkLogo}
-                        alt=""
-                        aria-hidden="true"
-                        className="size-6 transition-opacity duration-150 group-hover/logo:opacity-0 group-focus-visible/logo:opacity-0"
-                      />
-                      <span className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-150 group-hover/logo:opacity-100 group-focus-visible/logo:opacity-100">
-                        <SidebarCollapseGlyph />
-                      </span>
-                    </span>
-                    {showSidebarToggleShortcutHint ? (
-                      <span
-                        className="pointer-events-none absolute top-1/2 left-1/2 inline-flex h-5 -translate-x-1/2 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/90 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground whitespace-nowrap shadow-sm"
-                        title={sidebarToggleShortcutLabel}
-                      >
-                        {sidebarToggleShortcutLabel}
-                      </span>
-                    ) : null}
-                  </button>
-                ) : null}
+        <div className="flex min-w-0 items-center">
+          {shouldShowSidebarLogo ? (
+            <button
+              type="button"
+              aria-label={
+                sidebarToggleShortcutLabel
+                  ? `Collapse sidebar (${sidebarToggleShortcutLabel})`
+                  : "Collapse sidebar"
+              }
+              title={
+                sidebarToggleShortcutLabel
+                  ? `Collapse sidebar (${sidebarToggleShortcutLabel})`
+                  : "Collapse sidebar"
+              }
+              data-testid="sidebar-inline-logo-toggle"
+              className={cn(
+                "group/logo relative inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 outline-hidden ring-ring transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 [-webkit-app-region:no-drag]",
+              )}
+              onClick={toggleSidebar}
+            >
+              <span
+                className={cn(
+                  "relative flex size-6 shrink-0 items-center justify-center",
+                  showSidebarToggleShortcutHint && "opacity-0",
+                )}
+              >
+                <img
+                  src={sidebarWordmarkLogo}
+                  alt=""
+                  aria-hidden="true"
+                  className="size-6 transition-opacity duration-150 group-hover/logo:opacity-0 group-focus-visible/logo:opacity-0"
+                />
+                <span className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-150 group-hover/logo:opacity-100 group-focus-visible/logo:opacity-100">
+                  <SidebarCollapseGlyph />
+                </span>
+              </span>
+              {showSidebarToggleShortcutHint ? (
+                <span
+                  className="pointer-events-none absolute top-1/2 left-1/2 inline-flex h-5 -translate-x-1/2 -translate-y-1/2 items-center rounded-full border border-border/80 bg-background/90 px-1.5 font-mono text-[10px] font-medium tracking-tight text-foreground whitespace-nowrap shadow-sm"
+                  title={sidebarToggleShortcutLabel}
+                >
+                  {sidebarToggleShortcutLabel}
+                </span>
+              ) : null}
+            </button>
+          ) : null}
+          <Tooltip>
+            <TooltipTrigger
+              render={
                 <Link
                   aria-label="Go to threads"
                   className={cn(
                     "flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-[opacity,color] ease-linear hover:text-foreground focus-visible:ring-2",
-                    shouldShowSidebarLogo ? "ml-1" : undefined,
+                    shouldShowSidebarLogo ? "ml-2" : undefined,
                     sidebarOpen
                       ? "opacity-100 duration-200"
                       : "opacity-0 pointer-events-none duration-75",
                   )}
                   to="/"
-                >
-                  <span className="truncate text-xs font-semibold tracking-tight text-foreground">
-                    {APP_BASE_NAME}
-                  </span>
-                  <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
-                    {APP_STAGE_LABEL}
-                  </span>
-                </Link>
-              </div>
-            }
-          />
-          <TooltipPopup side="bottom" sideOffset={2}>
-            Version {APP_VERSION}
-          </TooltipPopup>
-        </Tooltip>
+                />
+              }
+            >
+              <span className="truncate text-xs font-semibold tracking-tight text-foreground">
+                {APP_BASE_NAME}
+              </span>
+              <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+                {APP_STAGE_LABEL}
+              </span>
+            </TooltipTrigger>
+            <TooltipPopup side="bottom" sideOffset={2}>
+              Version {APP_VERSION}
+            </TooltipPopup>
+          </Tooltip>
+        </div>
       ) : null}
     </div>
   );
 
   return (
     <>
-      {isLinuxDesktop ? null : isElectron ? (
-        // macOS: drag region + extra left padding to clear traffic-light buttons.
-        // Windows and other non-Linux platforms: drag region, no extra padding.
+      {isElectron ? (
+        // Electron: drag region so the window can be dragged from the sidebar header.
+        // macOS: extra left padding to clear traffic-light buttons.
+        // Linux: no extra padding (window controls live at the trailing edge of each
+        //        main-content header, so the sidebar header needs no adjustment).
         <SidebarHeader
           className={cn(
             "drag-region h-[52px] flex-row items-center gap-2 px-4 py-0",

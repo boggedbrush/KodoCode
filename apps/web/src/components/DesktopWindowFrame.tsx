@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { isElectron } from "../env";
 import { cn, isLinuxPlatform } from "../lib/utils";
-import { LinuxTitleBar } from "./LinuxTitleBar";
 import {
   DesktopWindowFrameContext,
   type DesktopWindowFrameContextValue,
@@ -61,12 +60,11 @@ export function DesktopWindowFrame({ children }: { children: ReactNode }) {
   const frameChildren = !isLinuxDesktop ? (
     children
   ) : (
-    <div className="h-screen w-screen overflow-hidden bg-transparent">
+    <div className="h-full w-full overflow-hidden bg-transparent">
       <div
         className="flex h-full min-h-0 flex-col overflow-hidden bg-background"
         style={{ borderRadius: "var(--desktop-window-corner-radius)" }}
       >
-        <LinuxTitleBar />
         <div className="flex min-h-0 flex-1">{children}</div>
       </div>
     </div>

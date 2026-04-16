@@ -4,6 +4,7 @@ import { isElectron } from "../env";
 import { isLinuxPlatform, isMacPlatform, cn } from "../lib/utils";
 import { SidebarTrigger, useSidebar } from "../components/ui/sidebar";
 import { SidebarBrandToggleButton } from "../components/SidebarBrandToggleButton";
+import { LinuxWindowControls } from "../components/LinuxTitleBar";
 
 const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
 
@@ -24,7 +25,7 @@ function ChatIndexRouteView() {
         </header>
       )}
 
-      {isElectron && !isLinuxDesktop && (
+      {isElectron && (
         <div
           className={cn(
             "drag-region flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-5 transition-[padding] duration-200 ease-linear",
@@ -33,6 +34,7 @@ function ChatIndexRouteView() {
         >
           <SidebarBrandToggleButton />
           <span className="text-xs text-muted-foreground/50">No active thread</span>
+          {isLinuxDesktop && <LinuxWindowControls />}
         </div>
       )}
 

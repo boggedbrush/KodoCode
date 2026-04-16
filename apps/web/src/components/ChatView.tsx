@@ -46,6 +46,7 @@ import { useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
 import { isLinuxPlatform } from "../lib/utils";
+import { LinuxWindowControls } from "./LinuxTitleBar";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
   clampCollapsedComposerCursor,
@@ -4971,7 +4972,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             </div>
           </header>
         )}
-        {isElectron && !isLinuxDesktop && (
+        {isElectron && (
           <div
             className={cn(
               "drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5 transition-[padding] duration-200 ease-linear",
@@ -4979,6 +4980,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             )}
           >
             <span className="text-xs text-muted-foreground/50">No active thread</span>
+            {isLinuxDesktop && <LinuxWindowControls />}
           </div>
         )}
         <div className="flex flex-1 items-center justify-center">
@@ -4996,7 +4998,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       <header
         className={cn(
           "sticky top-0 z-20 shrink-0 border-b border-border bg-background/95 px-3 transition-[padding] duration-200 ease-linear supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-sm sm:px-5",
-          isElectron && !isLinuxDesktop ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
+          isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
           isElectron && /mac/i.test(navigator.platform) && !sidebarOpen && "pl-[90px]",
         )}
       >
@@ -5027,6 +5029,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
         />
+        {isLinuxDesktop && <LinuxWindowControls />}
       </header>
 
       {/* Error banner */}

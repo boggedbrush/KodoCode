@@ -8,9 +8,11 @@ import { SidebarInset, SidebarTrigger, useSidebar } from "../components/ui/sideb
 import { isElectron } from "../env";
 import { cn, isLinuxPlatform, isMacPlatform } from "../lib/utils";
 import { SidebarBrandToggleButton } from "../components/SidebarBrandToggleButton";
+import { LinuxWindowControls } from "../components/LinuxTitleBar";
 
 function SettingsContentLayout() {
   const { open: sidebarOpen } = useSidebar();
+  const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const shouldOffsetForMacTrafficLights =
     isElectron && isMacPlatform(navigator.platform) && !sidebarOpen;
   const [restoreSignal, setRestoreSignal] = useState(0);
@@ -57,7 +59,7 @@ function SettingsContentLayout() {
           </header>
         )}
 
-        {isElectron && !isLinuxPlatform(navigator.platform) && (
+        {isElectron && (
           <div
             className={cn(
               "drag-region flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-5 transition-[padding] duration-200 ease-linear",
@@ -79,6 +81,7 @@ function SettingsContentLayout() {
                 Restore defaults
               </Button>
             </div>
+            {isLinuxDesktop && <LinuxWindowControls />}
           </div>
         )}
 

@@ -85,7 +85,7 @@ function SidebarCollapsedIcon() {
 }
 
 const windowControlButtonBase =
-  "flex h-full w-10 items-center justify-center text-muted-foreground/60 transition-colors [-webkit-app-region:no-drag]";
+  "flex h-9 w-10 items-center justify-center text-muted-foreground/60 transition-colors [-webkit-app-region:no-drag]";
 const linuxTitleBarLogo = import.meta.env.DEV ? devLogo : prodLogo;
 const handleMinimize = () => {
   window.desktopBridge?.windowControls.minimize();
@@ -97,8 +97,50 @@ const handleClose = () => {
   window.desktopBridge?.windowControls.close();
 };
 
-export function LinuxTitleBar() {
+/**
+ * The three Linux window control buttons (minimize, maximize/restore, close).
+ * Rendered at the trailing edge of whichever header acts as the titlebar for
+ * the current view, mirroring how macOS traffic lights sit at the leading edge.
+ */
+export function LinuxWindowControls() {
   const { isMaximized } = useDesktopWindowFrame();
+  return (
+    <div className="-mr-3 ms-auto flex shrink-0 items-center self-stretch pl-2 sm:-mr-5">
+      <button
+        type="button"
+        className={cn(windowControlButtonBase, "hover:bg-muted/60 hover:text-foreground/80")}
+        onClick={handleMinimize}
+        aria-label="Minimize window"
+        tabIndex={-1}
+      >
+        <MinimizeIcon />
+      </button>
+      <button
+        type="button"
+        className={cn(windowControlButtonBase, "hover:bg-muted/60 hover:text-foreground/80")}
+        onClick={handleToggleMaximize}
+        aria-label={isMaximized ? "Restore window" : "Maximize window"}
+        tabIndex={-1}
+      >
+        {isMaximized ? <RestoreIcon /> : <MaximizeIcon />}
+      </button>
+      <button
+        type="button"
+        className={cn(
+          windowControlButtonBase,
+          "hover:bg-red-500/15 hover:text-red-400 dark:hover:bg-red-500/20 dark:hover:text-red-400",
+        )}
+        onClick={handleClose}
+        aria-label="Close window"
+        tabIndex={-1}
+      >
+        <CloseIcon />
+      </button>
+    </div>
+  );
+}
+
+export function LinuxTitleBar() {
   const { open: sidebarOpen, toggleSidebar } = useSidebar();
   const { showSidebarToggleShortcutHint, sidebarToggleShortcutLabel } =
     useSidebarToggleShortcutHint();
@@ -159,38 +201,7 @@ export function LinuxTitleBar() {
         </span>
       </div>
 
-      <div className="flex h-full shrink-0 items-stretch">
-        <button
-          type="button"
-          className={cn(windowControlButtonBase, "hover:bg-muted/60 hover:text-foreground/80")}
-          onClick={handleMinimize}
-          aria-label="Minimize window"
-          tabIndex={-1}
-        >
-          <MinimizeIcon />
-        </button>
-        <button
-          type="button"
-          className={cn(windowControlButtonBase, "hover:bg-muted/60 hover:text-foreground/80")}
-          onClick={handleToggleMaximize}
-          aria-label={isMaximized ? "Restore window" : "Maximize window"}
-          tabIndex={-1}
-        >
-          {isMaximized ? <RestoreIcon /> : <MaximizeIcon />}
-        </button>
-        <button
-          type="button"
-          className={cn(
-            windowControlButtonBase,
-            "hover:bg-red-500/15 hover:text-red-400 dark:hover:bg-red-500/20 dark:hover:text-red-400",
-          )}
-          onClick={handleClose}
-          aria-label="Close window"
-          tabIndex={-1}
-        >
-          <CloseIcon />
-        </button>
-      </div>
+      <LinuxWindowControls />
     </div>
   );
 }
