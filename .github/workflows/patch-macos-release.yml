@@ -1,0 +1,302 @@
+name: Patch macOS Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version to rebuild and replace (for example 0.0.1 or v0.0.1)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  resolve_release:
+    name: Resolve Release Version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.release_meta.outputs.version }}
+      tag: ${{ steps.release_meta.outputs.tag }}
+    steps:
+      - id: release_meta
+        name: Resolve release version
+        shell: bash
+        run: |
+          raw="${{ github.event.inputs.version }}"
+          version="${raw#v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release version: $raw" >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+
+  build_macos_arm64:
+    name: Build macOS arm64 Assets
+    needs: resolve_release
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - name: Checkout tagged release
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ needs.resolve_release.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Cache Bun and Turbo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            .turbo
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json', 'apps/*/turbo.jsonc') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}-
+
+      - name: Cache Electron builder artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-builder-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "${{ needs.resolve_release.outputs.version }}"
+
+      - name: Build macOS arm64 artifacts
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          has_all() {
+            for value in "$@"; do
+              if [[ -z "$value" ]]; then
+                return 1
+              fi
+            done
+            return 0
+          }
+
+          args=(
+            --platform mac
+            --target dmg
+            --arch arm64
+            --build-version "${{ needs.resolve_release.outputs.version }}"
+            --verbose
+          )
+
+          if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER"; then
+            key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+            printf '%s' "$APPLE_API_KEY" > "$key_path"
+            export APPLE_API_KEY="$key_path"
+            args+=(--signed)
+          fi
+
+          bun run dist:desktop:artifact -- "${args[@]}"
+          bun run dist:desktop:artifact -- "${args[@]/dmg/zip}"
+
+      - name: Collect patched macOS arm64 assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-publish
+
+          shopt -s nullglob
+          for pattern in \
+            "release/*arm64.dmg" \
+            "release/*arm64.zip" \
+            "release/*arm64*.blockmap" \
+            "release/latest-mac.yml"; do
+            for file in $pattern; do
+              cp "$file" release-publish/
+            done
+          done
+
+          shopt -u nullglob
+          ls -la release-publish
+
+      - name: Upload macOS arm64 assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: patch-macos-arm64
+          path: release-publish/*
+          if-no-files-found: error
+
+  build_macos_x64:
+    name: Build macOS x64 Assets
+    needs: resolve_release
+    runs-on: macos-15-intel
+    timeout-minutes: 45
+    steps:
+      - name: Checkout tagged release
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ needs.resolve_release.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Cache Bun and Turbo
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            .turbo
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}-${{ hashFiles('turbo.json', 'apps/*/turbo.jsonc') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}-
+
+      - name: Cache Electron builder artifacts
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/electron
+            ~/.cache/electron-builder
+          key: ${{ runner.os }}-electron-builder-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-builder-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Align package versions to release version
+        run: node scripts/update-release-package-versions.ts "${{ needs.resolve_release.outputs.version }}"
+
+      - name: Build macOS x64 artifacts
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+        run: |
+          has_all() {
+            for value in "$@"; do
+              if [[ -z "$value" ]]; then
+                return 1
+              fi
+            done
+            return 0
+          }
+
+          args=(
+            --platform mac
+            --target dmg
+            --arch x64
+            --build-version "${{ needs.resolve_release.outputs.version }}"
+            --verbose
+          )
+
+          if has_all "$CSC_LINK" "$CSC_KEY_PASSWORD" "$APPLE_API_KEY" "$APPLE_API_KEY_ID" "$APPLE_API_ISSUER"; then
+            key_path="$RUNNER_TEMP/AuthKey_${APPLE_API_KEY_ID}.p8"
+            printf '%s' "$APPLE_API_KEY" > "$key_path"
+            export APPLE_API_KEY="$key_path"
+            args+=(--signed)
+          fi
+
+          bun run dist:desktop:artifact -- "${args[@]}"
+          bun run dist:desktop:artifact -- "${args[@]/dmg/zip}"
+
+      - name: Collect patched macOS x64 assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-publish
+
+          shopt -s nullglob
+          for pattern in \
+            "release/*x64.dmg" \
+            "release/*x64.zip" \
+            "release/*x64*.blockmap" \
+            "release/latest-mac.yml"; do
+            for file in $pattern; do
+              cp "$file" release-publish/
+            done
+          done
+
+          if [[ -f release-publish/latest-mac.yml ]]; then
+            mv release-publish/latest-mac.yml release-publish/latest-mac-x64.yml
+          fi
+
+          shopt -u nullglob
+          ls -la release-publish
+
+      - name: Upload macOS x64 assets
+        uses: actions/upload-artifact@v7
+        with:
+          name: patch-macos-x64
+          path: release-publish/*
+          if-no-files-found: error
+
+  publish_macos_release:
+    name: Upload Patched macOS Assets
+    needs: [resolve_release, build_macos_arm64, build_macos_x64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout tagged release
+        uses: actions/checkout@v6
+        with:
+          ref: refs/tags/${{ needs.resolve_release.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: package.json
+
+      - name: Download patched macOS assets
+        uses: actions/download-artifact@v5
+        with:
+          pattern: patch-macos-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Merge macOS update manifests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f release-assets/latest-mac.yml && -f release-assets/latest-mac-x64.yml ]]; then
+            node scripts/merge-mac-update-manifests.ts \
+              release-assets/latest-mac.yml \
+              release-assets/latest-mac-x64.yml
+          fi
+
+      - name: Upload patched macOS assets to existing release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.resolve_release.outputs.tag }}" release-assets/* --clobber

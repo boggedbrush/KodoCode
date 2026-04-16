@@ -1,4 +1,4 @@
-name: Patch Windows Release
+name: Patch Linux Release
 
 on:
   workflow_dispatch:
@@ -13,9 +13,9 @@ permissions:
   id-token: write
 
 jobs:
-  patch_windows_release:
-    name: Patch Windows x64 Assets
-    runs-on: windows-2022
+  patch_linux_release:
+    name: Patch Linux x64 Assets
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - id: release_meta
@@ -74,58 +74,17 @@ jobs:
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ steps.release_meta.outputs.version }}"
 
-      - name: Build Windows desktop artifacts
+      - name: Build Linux x64 artifacts
         shell: bash
-        env:
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
-          AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
-          AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
         run: |
-          has_all() {
-            for value in "$@"; do
-              if [[ -z "$value" ]]; then
-                return 1
-              fi
-            done
-            return 0
-          }
+          bun run dist:desktop:artifact -- \
+            --platform linux \
+            --target AppImage \
+            --arch x64 \
+            --build-version "${{ steps.release_meta.outputs.version }}" \
+            --verbose
 
-          if has_all \
-            "$AZURE_TENANT_ID" \
-            "$AZURE_CLIENT_ID" \
-            "$AZURE_CLIENT_SECRET" \
-            "$AZURE_TRUSTED_SIGNING_ENDPOINT" \
-            "$AZURE_TRUSTED_SIGNING_ACCOUNT_NAME" \
-            "$AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME" \
-            "$AZURE_TRUSTED_SIGNING_PUBLISHER_NAME"; then
-            echo "Windows signing enabled (Azure Trusted Signing)."
-            signed_flag=--signed
-          else
-            echo "Windows signing disabled (missing one or more Azure Trusted Signing secrets)."
-            signed_flag=
-          fi
-
-          for target in nsis zip; do
-            args=(
-              --platform win
-              --target "$target"
-              --arch x64
-              --build-version "${{ steps.release_meta.outputs.version }}"
-              --verbose
-            )
-
-            if [[ -n "$signed_flag" ]]; then
-              args+=("$signed_flag")
-            fi
-
-            bun run dist:desktop:artifact -- "${args[@]}"
-          done
-
-      - name: Collect patched Windows release assets
+      - name: Collect patched Linux release assets
         shell: bash
         run: |
           set -euo pipefail
@@ -133,10 +92,8 @@ jobs:
 
           shopt -s nullglob
           for pattern in \
-            "release/*.exe" \
-            "release/*.zip" \
-            "release/*.blockmap" \
-            "release/latest.yml"; do
+            "release/*.AppImage" \
+            "release/latest-linux.yml"; do
             for file in $pattern; do
               cp "$file" release-publish/
             done
@@ -145,7 +102,7 @@ jobs:
           shopt -u nullglob
           ls -la release-publish
 
-      - name: Upload patched Windows assets to existing release
+      - name: Upload patched Linux assets to existing release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
