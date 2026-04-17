@@ -9,6 +9,7 @@ import desktopPackageJson from "../apps/desktop/package.json" with { type: "json
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
 import { BRAND_ASSET_PATHS, PUBLISH_ICON_OVERRIDES } from "./lib/brand-assets.ts";
+import { repackLinuxAppImageWithExternalUpdater } from "./linux-appimage-updates.ts";
 import { pinInstalledDependencyVersions } from "./lib/installed-dependency-versions.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
@@ -786,6 +787,47 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     return yield* new BuildScriptError({
       message: `Build completed but no files were produced in ${stageDistDir}`,
     });
+  }
+
+  const publishConfig = resolveGitHubPublishConfig();
+  const appimagetoolPath = process.env.T3CODE_APPIMAGETOOL?.trim();
+  if (options.platform === "linux" && options.target === "AppImage" && publishConfig) {
+    if (!appimagetoolPath) {
+      yield* Effect.log(
+        "[desktop-artifact] Skipping AppImage external update metadata; T3CODE_APPIMAGETOOL is not set.",
+      );
+    } else {
+      const appImagePath = copiedArtifacts.find((artifactPath) =>
+        artifactPath.endsWith(".AppImage"),
+      );
+      const manifestPath = path.join(options.outputDir, "latest-linux.yml");
+      if (!appImagePath) {
+        return yield* new BuildScriptError({
+          message: `Expected a Linux AppImage artifact in ${options.outputDir}, but none was found.`,
+        });
+      }
+
+      yield* Effect.log(
+        "[desktop-artifact] Repacking AppImage with standard update metadata for Gear Lever/AppImageUpdate...",
+      );
+      const repackedResult = yield* Effect.try({
+        try: () =>
+          repackLinuxAppImageWithExternalUpdater({
+            appImagePath,
+            manifestPath,
+            appimagetoolPath,
+            owner: publishConfig.owner,
+            repo: publishConfig.repo,
+            version: appVersion,
+          }),
+        catch: (cause) =>
+          new BuildScriptError({
+            message: "Failed to repack the Linux AppImage with external update metadata.",
+            cause,
+          }),
+      });
+      copiedArtifacts.push(repackedResult.zsyncPath);
+    }
   }
 
   yield* Effect.log("[desktop-artifact] Done. Artifacts:").pipe(

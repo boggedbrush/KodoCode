@@ -176,6 +176,19 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install Linux AppImage update tooling
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zsync
+          mkdir -p "${RUNNER_TEMP}/appimage-tools"
+          curl -L \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage \
+            -o "${RUNNER_TEMP}/appimage-tools/appimagetool-x86_64.AppImage"
+          chmod +x "${RUNNER_TEMP}/appimage-tools/appimagetool-x86_64.AppImage"
+
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
 
@@ -194,6 +207,7 @@ jobs:
           AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
           AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME }}
           AZURE_TRUSTED_SIGNING_PUBLISHER_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_PUBLISHER_NAME }}
+          T3CODE_APPIMAGETOOL: ${{ runner.temp }}/appimage-tools/appimagetool-x86_64.AppImage
         run: |
           args=(
             --platform "${{ matrix.platform }}"
@@ -242,6 +256,21 @@ jobs:
 
           bun run dist:desktop:artifact -- "${args[@]}"
 
+      - name: Verify Linux AppImage update metadata
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          appimage=$(find release -maxdepth 1 -type f -name '*.AppImage' | head -n1)
+          if [[ -z "$appimage" ]]; then
+            echo "Linux AppImage was not produced." >&2
+            exit 1
+          fi
+
+          update_info=$("$appimage" --appimage-updateinformation)
+          printf '%s\n' "$update_info"
+          [[ "$update_info" == gh-releases-zsync\|boggedbrush\|KodoCode\|latest\|Kodo-Code-\*-x86_64.AppImage.zsync ]]
+
       - name: Collect release assets
         shell: bash
         run: |
@@ -253,6 +282,7 @@ jobs:
             "release/*.dmg" \
             "release/*.zip" \
             "release/*.AppImage" \
+            "release/*.AppImage.zsync" \
             "release/*.exe" \
             "release/*.blockmap" \
             "release/latest*.yml"; do
@@ -320,6 +350,7 @@ jobs:
             release-assets/*.dmg
             release-assets/*.zip
             release-assets/*.AppImage
+            release-assets/*.AppImage.zsync
             release-assets/*.exe
             release-assets/*.blockmap
             release-assets/latest*.yml

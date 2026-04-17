@@ -81,11 +81,25 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Install Linux AppImage update tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y zsync
+          mkdir -p "${RUNNER_TEMP}/appimage-tools"
+          curl -L \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage \
+            -o "${RUNNER_TEMP}/appimage-tools/appimagetool-x86_64.AppImage"
+          chmod +x "${RUNNER_TEMP}/appimage-tools/appimagetool-x86_64.AppImage"
+
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ steps.release_meta.outputs.version }}"
 
       - name: Build Linux x64 artifacts
         shell: bash
+        env:
+          T3CODE_APPIMAGETOOL: ${{ runner.temp }}/appimage-tools/appimagetool-x86_64.AppImage
         run: |
           bun run dist:desktop:artifact -- \
             --platform linux \
@@ -93,6 +107,20 @@ jobs:
             --arch x64 \
             --build-version "${{ steps.release_meta.outputs.version }}" \
             --verbose
+
+      - name: Verify Linux AppImage update metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          appimage=$(find release -maxdepth 1 -type f -name '*.AppImage' | head -n1)
+          if [[ -z "$appimage" ]]; then
+            echo "Linux AppImage was not produced." >&2
+            exit 1
+          fi
+
+          update_info=$("$appimage" --appimage-updateinformation)
+          printf '%s\n' "$update_info"
+          [[ "$update_info" == gh-releases-zsync\|boggedbrush\|KodoCode\|latest\|Kodo-Code-\*-x86_64.AppImage.zsync ]]
 
       - name: Collect patched Linux release assets
         shell: bash
@@ -103,6 +131,7 @@ jobs:
           shopt -s nullglob
           for pattern in \
             "release/*.AppImage" \
+            "release/*.AppImage.zsync" \
             "release/latest-linux.yml"; do
             for file in $pattern; do
               cp "$file" release-publish/

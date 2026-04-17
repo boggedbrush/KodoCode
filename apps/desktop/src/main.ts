@@ -30,6 +30,7 @@ import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serve
 import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort";
 import { showDesktopConfirmDialog } from "./confirmDialog";
 import { resolveDesktopBackendEntryPath, resolveDesktopStaticDirPath } from "./packagedPaths";
+import { patchStdIoWrite, type StdIoWrite } from "./stdioCapture";
 import { syncShellEnvironment } from "./syncShellEnvironment";
 import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
 import {
@@ -234,36 +235,48 @@ function installStdIoCapture(): void {
     return;
   }
 
-  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-  const originalStderrWrite = process.stderr.write.bind(process.stderr);
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout) as StdIoWrite;
+  const originalStderrWrite = process.stderr.write.bind(process.stderr) as StdIoWrite;
+  const stdoutCapture = patchStdIoWrite({
+    originalWrite: originalStdoutWrite,
+    onChunkCaptured: (chunk, encoding) => {
+      writeDesktopStreamChunk("stdout", chunk, encoding);
+    },
+    onPassthroughDisabled: () => {
+      writeDesktopLogHeader("stdout passthrough disabled after broken stdio pipe");
+    },
+  });
+  const stderrCapture = patchStdIoWrite({
+    originalWrite: originalStderrWrite,
+    onChunkCaptured: (chunk, encoding) => {
+      writeDesktopStreamChunk("stderr", chunk, encoding);
+    },
+    onPassthroughDisabled: () => {
+      writeDesktopLogHeader("stderr passthrough disabled after broken stdio pipe");
+    },
+  });
 
-  const patchWrite =
-    (streamName: "stdout" | "stderr", originalWrite: typeof process.stdout.write) =>
-    (
-      chunk: string | Uint8Array,
-      encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
-      callback?: (error?: Error | null) => void,
-    ): boolean => {
-      const encoding = typeof encodingOrCallback === "string" ? encodingOrCallback : undefined;
-      writeDesktopStreamChunk(streamName, chunk, encoding);
-      if (typeof encodingOrCallback === "function") {
-        return originalWrite(chunk, encodingOrCallback);
-      }
-      if (callback !== undefined) {
-        return originalWrite(chunk, encoding, callback);
-      }
-      if (encoding !== undefined) {
-        return originalWrite(chunk, encoding);
-      }
-      return originalWrite(chunk);
-    };
+  const stdoutErrorListener = (error: Error): void => {
+    if (!stdoutCapture.handleStreamError(error)) {
+      throw error;
+    }
+  };
+  const stderrErrorListener = (error: Error): void => {
+    if (!stderrCapture.handleStreamError(error)) {
+      throw error;
+    }
+  };
 
-  process.stdout.write = patchWrite("stdout", originalStdoutWrite);
-  process.stderr.write = patchWrite("stderr", originalStderrWrite);
+  process.stdout.write = stdoutCapture.write;
+  process.stderr.write = stderrCapture.write;
+  process.stdout.on("error", stdoutErrorListener);
+  process.stderr.on("error", stderrErrorListener);
 
   restoreStdIoCapture = () => {
     process.stdout.write = originalStdoutWrite;
     process.stderr.write = originalStderrWrite;
+    process.stdout.off("error", stdoutErrorListener);
+    process.stderr.off("error", stderrErrorListener);
     restoreStdIoCapture = null;
   };
 }

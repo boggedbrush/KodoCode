@@ -340,21 +340,16 @@ describe("readCodexAccountSnapshot", () => {
     });
   });
 
-  it("enables spark for unknown chatgpt plans when model/list includes spark", () => {
+  it("keeps spark disabled until the chatgpt plan is verified", () => {
     expect(
-      readCodexAccountSnapshot(
-        {
-          type: "chatgpt",
-          email: "unknown@example.com",
-        },
-        {
-          models: [{ id: "gpt-5.4" }, { id: "gpt-5.3-codex-spark" }],
-        },
-      ),
+      readCodexAccountSnapshot({
+        type: "chatgpt",
+        email: "unknown@example.com",
+      }),
     ).toEqual({
       type: "chatgpt",
       planType: "unknown",
-      sparkEnabled: true,
+      sparkEnabled: false,
     });
   });
 });
