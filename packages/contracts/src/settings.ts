@@ -29,7 +29,12 @@ export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
+export const ChatFontFamily = Schema.Literals(["auto", "dm-sans", "noto-sans-arabic"]);
+export type ChatFontFamily = typeof ChatFontFamily.Type;
+export const DEFAULT_CHAT_FONT_FAMILY: ChatFontFamily = "auto";
+
 export const ClientSettingsSchema = Schema.Struct({
+  chatFontFamily: ChatFontFamily.pipe(Schema.withDecodingDefault(() => DEFAULT_CHAT_FONT_FAMILY)),
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),

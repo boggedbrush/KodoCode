@@ -54,6 +54,7 @@ import {
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
+import { useSettings } from "../../hooks/useSettings";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
 import { parseReviewReport, type ReviewFinding } from "../../review";
@@ -63,6 +64,8 @@ import {
   formatInlineTerminalContextLabel,
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
+import { resolveChatTypographyClassName } from "~/lib/chatTypography";
+import { resolveTextDirection } from "~/lib/textDirection";
 
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 
@@ -708,6 +711,17 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
 }) {
+  const chatFontFamily = useSettings((settings) => settings.chatFontFamily);
+  const textDirection = resolveTextDirection(props.text);
+  const bodyClassName = cn(
+    "chat-message-inline-body whitespace-pre-wrap text-sm leading-relaxed text-foreground",
+    textDirection !== "rtl" && "font-mono",
+    resolveChatTypographyClassName({
+      direction: textDirection,
+      fontFamily: chatFontFamily,
+    }),
+  );
+
   if (props.terminalContexts.length > 0) {
     const hasEmbeddedInlineLabels = textContainsInlineTerminalContextLabels(
       props.text,
@@ -752,7 +766,11 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         }
 
         return (
-          <div className="wrap-break-word whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
+          <div
+            dir={textDirection}
+            lang={textDirection === "rtl" ? "ar" : undefined}
+            className={bodyClassName}
+          >
             {inlineNodes}
           </div>
         );
@@ -780,7 +798,11 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     }
 
     return (
-      <div className="wrap-break-word whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
+      <div
+        dir={textDirection}
+        lang={textDirection === "rtl" ? "ar" : undefined}
+        className={bodyClassName}
+      >
         {inlineNodes}
       </div>
     );

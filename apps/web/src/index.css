@@ -66,6 +66,12 @@
   --desktop-window-safe-inset: 0px;
   --desktop-window-corner-radius: 0px;
   --radius: 0.625rem;
+  --font-sans-ui:
+    "DM Sans", "Noto Sans Arabic", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    sans-serif;
+  --font-sans-chat-rtl:
+    "Noto Sans Arabic", "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
+    sans-serif;
   --background: var(--color-white);
   --foreground: var(--color-neutral-800);
   --card: var(--color-white);
@@ -123,13 +129,7 @@
 }
 
 body {
-  font-family:
-    "DM Sans",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    system-ui,
-    sans-serif;
+  font-family: var(--font-sans-ui);
   margin: 0;
   padding: 0;
   min-height: 100vh;
@@ -252,10 +252,43 @@ label:has(> select#reasoning-effort) select {
 }
 
 /* Chat markdown rendering */
+.chat-direction-rtl,
+.chat-composer-direction-rtl {
+  direction: rtl;
+  text-align: start;
+  font-family: var(--font-sans-chat-rtl);
+}
+
+.chat-direction-ltr,
+.chat-composer-direction-ltr {
+  direction: ltr;
+  text-align: start;
+}
+
+.chat-direction-auto,
+.chat-composer-direction-auto {
+  text-align: start;
+}
+
+.chat-font-dm-sans {
+  font-family: var(--font-sans-ui);
+}
+
+.chat-font-noto-sans-arabic {
+  font-family: var(--font-sans-chat-rtl);
+}
+
+.chat-message-inline-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .chat-markdown {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
+  text-align: start;
 }
 
 .chat-markdown > :first-child {
@@ -276,12 +309,12 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown ul {
-  padding-left: 1.25rem;
+  padding-inline-start: 1.25rem;
   list-style-type: disc;
 }
 
 .chat-markdown ol {
-  padding-left: 1.25rem;
+  padding-inline-start: 1.25rem;
   list-style-type: decimal;
 }
 
@@ -316,8 +349,8 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown blockquote {
-  border-left: 2px solid var(--border);
-  padding-left: 0.8rem;
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: 0.8rem;
   color: var(--muted-foreground);
 }
 
@@ -328,6 +361,7 @@ label:has(> select#reasoning-effort) select {
   padding: 0.1rem 0.35rem;
   color: var(--foreground);
   font-size: 0.75rem;
+  direction: ltr;
 }
 
 .chat-markdown pre {
@@ -350,6 +384,7 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown .chat-markdown-codeblock {
   position: relative;
   margin: 0.65rem 0;
+  direction: ltr;
 }
 
 .chat-markdown .chat-markdown-codeblock pre {
@@ -359,7 +394,7 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown .chat-markdown-copy-button {
   position: absolute;
   top: 0.5rem;
-  right: 0.5rem;
+  inset-inline-end: 0.5rem;
   z-index: 1;
   display: inline-flex;
   align-items: center;
@@ -402,7 +437,7 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown td {
   border: 1px solid var(--border);
   padding: 0.35rem 0.45rem;
-  text-align: left;
+  text-align: start;
 }
 
 /* Diffs theme bridge (match diff surfaces to app palette) */

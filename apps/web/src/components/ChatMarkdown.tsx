@@ -20,10 +20,14 @@ import { openInPreferredEditor } from "../editorPreferences";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
+import { useSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
 import type { DiffsHighlighter, SupportedLanguages } from "@pierre/diffs";
+import { resolveChatTypographyClassName } from "~/lib/chatTypography";
+import { cn } from "~/lib/utils";
+import { resolveTextDirection } from "~/lib/textDirection";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -255,7 +259,9 @@ function SuspenseShikiCodeBlock({
 
 function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
+  const chatFontFamily = useSettings((settings) => settings.chatFontFamily);
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const textDirection = useMemo(() => resolveTextDirection(text), [text]);
   const markdownUrlTransform = useCallback((href: string) => {
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
   }, []);
@@ -310,7 +316,17 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
   );
 
   return (
-    <div className="chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80">
+    <div
+      dir={textDirection}
+      lang={textDirection === "rtl" ? "ar" : undefined}
+      className={cn(
+        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80",
+        resolveChatTypographyClassName({
+          direction: textDirection,
+          fontFamily: chatFontFamily,
+        }),
+      )}
+    >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={markdownComponents}

@@ -1,4 +1,4 @@
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import { DEFAULT_UNIFIED_SETTINGS, type ChatFontFamily } from "@t3tools/contracts/settings";
 
 import { useTheme } from "../../hooks/useTheme";
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
@@ -22,6 +22,12 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
+
+const CHAT_FONT_LABELS = {
+  auto: "Auto",
+  "dm-sans": "DM Sans",
+  "noto-sans-arabic": "Noto Sans Arabic",
+} as const satisfies Record<ChatFontFamily, string>;
 
 export function SettingsAppearancePanel() {
   const { theme, setTheme } = useTheme();
@@ -59,6 +65,48 @@ export function SettingsAppearancePanel() {
                     {option.label}
                   </SelectItem>
                 ))}
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Chat font"
+          description="Auto keeps Arabic text on an Arabic-optimized font while preserving the default app styling elsewhere."
+          resetAction={
+            settings.chatFontFamily !== DEFAULT_UNIFIED_SETTINGS.chatFontFamily ? (
+              <SettingResetButton
+                label="chat font"
+                onClick={() =>
+                  updateSettings({
+                    chatFontFamily: DEFAULT_UNIFIED_SETTINGS.chatFontFamily,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.chatFontFamily}
+              onValueChange={(value) => {
+                if (value === "auto" || value === "dm-sans" || value === "noto-sans-arabic") {
+                  updateSettings({ chatFontFamily: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-52" aria-label="Chat font family">
+                <SelectValue>{CHAT_FONT_LABELS[settings.chatFontFamily]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="auto">
+                  {CHAT_FONT_LABELS.auto}
+                </SelectItem>
+                <SelectItem hideIndicator value="dm-sans">
+                  {CHAT_FONT_LABELS["dm-sans"]}
+                </SelectItem>
+                <SelectItem hideIndicator value="noto-sans-arabic">
+                  {CHAT_FONT_LABELS["noto-sans-arabic"]}
+                </SelectItem>
               </SelectPopup>
             </Select>
           }
