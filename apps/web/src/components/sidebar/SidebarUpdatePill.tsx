@@ -71,6 +71,18 @@ export function SidebarUpdatePill() {
       return;
     }
 
+    if (action === "open-release") {
+      if (!state.releasePageUrl) return;
+      void bridge.openExternal(state.releasePageUrl).catch((error) => {
+        toastManager.add({
+          type: "error",
+          title: "Could not open release page",
+          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        });
+      });
+      return;
+    }
+
     if (action === "install") {
       const confirmed = window.confirm(getDesktopUpdateInstallConfirmationMessage(state));
       if (!confirmed) return;
@@ -131,6 +143,11 @@ export function SidebarUpdatePill() {
                       <RotateCwIcon className="size-3.5" />
                       <span>Restart to update</span>
                     </>
+                  ) : action === "open-release" ? (
+                    <>
+                      <DownloadIcon className="size-3.5" />
+                      <span>Open latest release</span>
+                    </>
                   ) : state?.status === "downloading" ? (
                     <>
                       <DownloadIcon className="size-3.5" />
@@ -152,7 +169,7 @@ export function SidebarUpdatePill() {
             />
             <TooltipPopup side="top">{tooltip}</TooltipPopup>
           </Tooltip>
-          {action === "download" && (
+          {(action === "download" || action === "open-release") && (
             <Tooltip>
               <TooltipTrigger
                 render={

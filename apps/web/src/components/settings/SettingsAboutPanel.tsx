@@ -58,6 +58,18 @@ function AboutVersionSection() {
       return;
     }
 
+    if (action === "open-release") {
+      if (!updateState?.releasePageUrl) return;
+      void bridge.openExternal(updateState.releasePageUrl).catch((error: unknown) => {
+        toastManager.add({
+          type: "error",
+          title: "Could not open release page",
+          description: error instanceof Error ? error.message : "Could not open GitHub Releases.",
+        });
+      });
+      return;
+    }
+
     if (action === "install") {
       const confirmed = window.confirm(
         getDesktopUpdateInstallConfirmationMessage(
@@ -109,7 +121,11 @@ function AboutVersionSection() {
     action === "none"
       ? !canCheckForUpdate(updateState)
       : isDesktopUpdateButtonDisabled(updateState);
-  const actionLabel: Record<string, string> = { download: "Download", install: "Install" };
+  const actionLabel: Record<string, string> = {
+    download: "Download",
+    install: "Install",
+    "open-release": "Open Release",
+  };
   const statusLabel: Record<string, string> = {
     checking: "Checking…",
     downloading: "Downloading…",

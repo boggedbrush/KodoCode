@@ -406,6 +406,27 @@ function readAppUpdateYml(): Record<string, string> | null {
   }
 }
 
+function resolveGitHubLatestReleaseUrl(): string | null {
+  const appUpdateYml = readAppUpdateYml();
+  if (appUpdateYml?.provider !== "github") {
+    return null;
+  }
+
+  const owner = appUpdateYml.owner?.trim();
+  const repo = appUpdateYml.repo?.trim();
+  if (!owner || !repo) {
+    return null;
+  }
+
+  return `https://github.com/${owner}/${repo}/releases/latest`;
+}
+
+function shouldUseExternalUpdateDelivery(): boolean {
+  return (
+    process.platform === "darwin" && app.isPackaged && !process.env.T3CODE_DESKTOP_MOCK_UPDATES
+  );
+}
+
 function normalizeCommitHash(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -1013,11 +1034,16 @@ function configureAutoUpdater(): void {
     });
   }
 
+  const releasePageUrl = resolveGitHubLatestReleaseUrl();
+  const deliveryMethod =
+    shouldUseExternalUpdateDelivery() && releasePageUrl ? "external" : "native";
   const enabled = shouldEnableAutoUpdates();
   setUpdateState({
     ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo),
     enabled,
     status: enabled ? "idle" : "disabled",
+    deliveryMethod,
+    releasePageUrl,
   });
   if (!enabled) {
     return;

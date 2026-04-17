@@ -77,6 +77,7 @@ export type DesktopUpdateStatus =
 
 export type DesktopRuntimeArch = "arm64" | "x64" | "other";
 export type DesktopTheme = "light" | "dark" | "system";
+export type DesktopUpdateDeliveryMethod = "native" | "external";
 
 export interface DesktopRuntimeInfo {
   hostArch: DesktopRuntimeArch;
@@ -87,12 +88,14 @@ export interface DesktopRuntimeInfo {
 export interface DesktopUpdateState {
   enabled: boolean;
   status: DesktopUpdateStatus;
+  deliveryMethod: DesktopUpdateDeliveryMethod;
   currentVersion: string;
   hostArch: DesktopRuntimeArch;
   appArch: DesktopRuntimeArch;
   runningUnderArm64Translation: boolean;
   availableVersion: string | null;
   downloadedVersion: string | null;
+  releasePageUrl: string | null;
   downloadPercent: number | null;
   checkedAt: string | null;
   message: string | null;

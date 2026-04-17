@@ -2041,6 +2041,18 @@ export default function Sidebar() {
       return;
     }
 
+    if (desktopUpdateButtonAction === "open-release") {
+      if (!desktopUpdateState.releasePageUrl) return;
+      void bridge.openExternal(desktopUpdateState.releasePageUrl).catch((error) => {
+        toastManager.add({
+          type: "error",
+          title: "Could not open release page",
+          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        });
+      });
+      return;
+    }
+
     if (desktopUpdateButtonAction === "install") {
       const confirmed = window.confirm(
         getDesktopUpdateInstallConfirmationMessage(desktopUpdateState),

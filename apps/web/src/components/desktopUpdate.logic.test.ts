@@ -23,11 +23,13 @@ const baseState: DesktopUpdateState = {
   runningUnderArm64Translation: false,
   availableVersion: null,
   downloadedVersion: null,
+  releasePageUrl: null,
   downloadPercent: null,
   checkedAt: null,
   message: null,
   errorContext: null,
   canRetry: false,
+  deliveryMethod: "native",
 };
 
 describe("desktop update button state", () => {
@@ -39,6 +41,19 @@ describe("desktop update button state", () => {
     };
     expect(shouldShowDesktopUpdateButton(state)).toBe(true);
     expect(resolveDesktopUpdateButtonAction(state)).toBe("download");
+  });
+
+  it("opens the release page when an external update is available", () => {
+    const state: DesktopUpdateState = {
+      ...baseState,
+      status: "available",
+      availableVersion: "1.1.0",
+      deliveryMethod: "external",
+      releasePageUrl: "https://github.com/boggedbrush/KodoCode/releases/latest",
+    };
+    expect(shouldShowDesktopUpdateButton(state)).toBe(true);
+    expect(resolveDesktopUpdateButtonAction(state)).toBe("open-release");
+    expect(getDesktopUpdateButtonTooltip(state)).toContain("latest GitHub release");
   });
 
   it("keeps retry action available after a download error", () => {
@@ -204,6 +219,21 @@ describe("desktop update UI helpers", () => {
     };
 
     expect(getArm64IntelBuildWarningDescription(state)).toContain("Download the available update");
+  });
+
+  it("changes the warning copy when an external macOS update is available", () => {
+    const state: DesktopUpdateState = {
+      ...baseState,
+      hostArch: "arm64",
+      appArch: "x64",
+      runningUnderArm64Translation: true,
+      status: "available",
+      availableVersion: "1.1.0",
+      deliveryMethod: "external",
+      releasePageUrl: "https://github.com/boggedbrush/KodoCode/releases/latest",
+    };
+
+    expect(getArm64IntelBuildWarningDescription(state)).toContain("Open the latest release");
   });
 
   it("includes the downloaded version in the install confirmation copy", () => {

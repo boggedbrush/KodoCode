@@ -1,6 +1,6 @@
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
 
-export type DesktopUpdateButtonAction = "download" | "install" | "none";
+export type DesktopUpdateButtonAction = "download" | "install" | "open-release" | "none";
 
 export function resolveDesktopUpdateButtonAction(
   state: DesktopUpdateState,
@@ -9,6 +9,9 @@ export function resolveDesktopUpdateButtonAction(
     return "install";
   }
   if (state.status === "available") {
+    if (state.deliveryMethod === "external" && state.releasePageUrl) {
+      return "open-release";
+    }
     return "download";
   }
   if (state.status === "error") {
@@ -46,6 +49,9 @@ export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState):
   if (action === "download") {
     return "This Mac has Apple Silicon, but Kodo Code is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.";
   }
+  if (action === "open-release") {
+    return "This Mac has Apple Silicon, but Kodo Code is still running the Intel build under Rosetta. Open the latest release to download the native Apple Silicon build manually.";
+  }
   if (action === "install") {
     return "This Mac has Apple Silicon, but Kodo Code is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
   }
@@ -54,6 +60,9 @@ export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState):
 
 export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string {
   if (state.status === "available") {
+    if (state.deliveryMethod === "external" && state.releasePageUrl) {
+      return `Update ${state.availableVersion ?? "available"} ready. Click to open the latest GitHub release.`;
+    }
     return `Update ${state.availableVersion ?? "available"} ready to download`;
   }
   if (state.status === "downloading") {
