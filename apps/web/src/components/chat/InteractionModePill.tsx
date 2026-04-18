@@ -2,6 +2,7 @@ import { type ProviderInteractionMode } from "@t3tools/contracts";
 import { memo, useState } from "react";
 
 import { INTERACTION_MODE_ACCENT_COLORS } from "../../modeColors";
+import { SWARM_ACTIVE_TITLE } from "./swarmCopy";
 
 const MODES = [
   { mode: "ask" as const, label: "Ask", color: INTERACTION_MODE_ACCENT_COLORS.ask },
@@ -19,6 +20,20 @@ export const InteractionModePill = memo(function InteractionModePill({
 }) {
   const [hoveredMode, setHoveredMode] = useState<ProviderInteractionMode | null>(null);
   const activeMode = interactionMode === "default" ? "code" : interactionMode;
+
+  if (activeMode === "swarm") {
+    return (
+      <div className="flex items-center gap-0.5 rounded-full bg-black/10 px-1 py-0.5 dark:bg-white/5">
+        <div
+          className="rounded-full px-3 py-0.5 font-semibold text-sm text-white"
+          style={{ backgroundColor: INTERACTION_MODE_ACCENT_COLORS.swarm }}
+          title={SWARM_ACTIVE_TITLE}
+        >
+          Swarm
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-0.5 rounded-full bg-black/10 px-1 py-0.5 dark:bg-white/5">

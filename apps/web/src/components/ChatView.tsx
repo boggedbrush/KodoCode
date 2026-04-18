@@ -947,6 +947,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
   const interactionMode =
     composerDraft.interactionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
+  const lastNonSwarmInteractionModeRef = useRef<ProviderInteractionMode>(
+    interactionMode === "swarm" ? DEFAULT_INTERACTION_MODE : interactionMode,
+  );
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
@@ -1806,6 +1809,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
           description: "Switch this thread into review mode",
         },
         {
+          id: "slash:swarm",
+          type: "slash-command",
+          command: "swarm",
+          label: "/swarm",
+          description: "Toggle the questionnaire, planner, coder, and reviewer workflow",
+        },
+        {
           id: "slash:usage",
           type: "slash-command",
           command: "usage",
@@ -2407,6 +2417,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const handleInteractionModeChange = useCallback(
     (mode: ProviderInteractionMode) => {
       if (mode === interactionMode) return;
+      if (interactionMode !== "swarm") {
+        lastNonSwarmInteractionModeRef.current = interactionMode;
+      }
       setComposerDraftInteractionMode(threadId, mode);
       if (isLocalDraftThread) {
         setDraftThreadContext(threadId, { interactionMode: mode });
@@ -2433,15 +2446,28 @@ export default function ChatView({ threadId }: ChatViewProps) {
       threadId,
     ],
   );
+  useEffect(() => {
+    if (interactionMode !== "swarm") {
+      lastNonSwarmInteractionModeRef.current = interactionMode;
+    }
+  }, [interactionMode]);
   const handleStandaloneSlashCommand = useCallback(
     (command: ComposerStandaloneSlashCommand) => {
       if (command === "usage") {
         setProviderUsagePanelOpen((open) => !open);
         return;
       }
+      if (command === "swarm") {
+        void handleInteractionModeChange(
+          interactionMode === "swarm"
+            ? lastNonSwarmInteractionModeRef.current
+            : "swarm",
+        );
+        return;
+      }
       void handleInteractionModeChange(command);
     },
-    [handleInteractionModeChange],
+    [handleInteractionModeChange, interactionMode],
   );
   const applyPresetSelectionToComposer = useCallback(
     (provider: ProviderKind, presetId: string | null) => {
@@ -2607,7 +2633,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   ]);
   const toggleInteractionMode = useCallback(() => {
     const next =
-      interactionMode === "ask"
+      interactionMode === "swarm"
+        ? lastNonSwarmInteractionModeRef.current
+        : interactionMode === "ask"
         ? "plan"
         : interactionMode === "plan"
           ? "code"
@@ -3334,7 +3362,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             ? "ask"
             : command === "composer.mode.plan"
               ? "plan"
-              : command === "composer.mode.code"
+            : command === "composer.mode.code"
                 ? "code"
                 : "review";
         handleInteractionModeChange(nextMode);

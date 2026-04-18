@@ -209,7 +209,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                   : "Reviewing"
                 : promptHasText
                   ? "Add details"
-                  : "Review"
+                : "Review"
           : isConnecting
             ? "Connecting"
             : isPreparingWorktree

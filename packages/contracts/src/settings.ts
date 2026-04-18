@@ -60,6 +60,9 @@ export const CommitMessageStyle = Schema.Literals([
 ]);
 export type CommitMessageStyle = typeof CommitMessageStyle.Type;
 export const DEFAULT_COMMIT_MESSAGE_STYLE: CommitMessageStyle = "summary";
+export const SwarmMaxLoops = Schema.Literals([1, 2]);
+export type SwarmMaxLoops = typeof SwarmMaxLoops.Type;
+export const DEFAULT_SWARM_MAX_LOOPS: SwarmMaxLoops = 1;
 
 const makeBinaryPathSetting = (fallback: string) =>
   TrimmedString.pipe(
@@ -145,6 +148,7 @@ export const ServerSettings = Schema.Struct({
   commitMessageStyle: CommitMessageStyle.pipe(
     Schema.withDecodingDefault(() => DEFAULT_COMMIT_MESSAGE_STYLE),
   ),
+  swarmMaxLoops: SwarmMaxLoops.pipe(Schema.withDecodingDefault(() => DEFAULT_SWARM_MAX_LOOPS)),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(() => ({
       provider: "codex" as const,
@@ -313,6 +317,7 @@ export const ServerSettingsPatch = Schema.Struct({
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   commitMessageStyle: Schema.optionalKey(CommitMessageStyle),
+  swarmMaxLoops: Schema.optionalKey(SwarmMaxLoops),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   promptEnhanceModelSelection: Schema.optionalKey(ModelSelectionPatch),
 

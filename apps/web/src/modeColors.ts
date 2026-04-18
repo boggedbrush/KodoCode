@@ -5,6 +5,7 @@ export const INTERACTION_MODE_ACCENT_COLORS = {
   plan: "#c8954a",
   code: "#5236CC",
   review: "#4DB6AC",
+  swarm: "#E06C2F",
   default: "#5236CC",
 } as const satisfies Record<ProviderInteractionMode, string>;
 

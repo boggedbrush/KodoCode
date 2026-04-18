@@ -11,6 +11,7 @@ import {
   MenuSeparator as MenuDivider,
   MenuTrigger,
 } from "../ui/menu";
+import { SWARM_ACTIVE_HELP } from "./swarmCopy";
 
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   activePlan: boolean;
@@ -24,6 +25,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
 }) {
   const selectedInteractionMode =
     props.interactionMode === "default" ? "code" : props.interactionMode;
+  const swarmEnabled = selectedInteractionMode === "swarm";
 
   return (
     <Menu>
@@ -47,18 +49,22 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
           </>
         ) : null}
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
-        <MenuRadioGroup
-          value={selectedInteractionMode}
-          onValueChange={(value) => {
-            if (!value || value === selectedInteractionMode) return;
-            props.onSetInteractionMode(value as ProviderInteractionMode);
-          }}
-        >
-          <MenuRadioItem value="ask">Ask</MenuRadioItem>
-          <MenuRadioItem value="plan">Plan</MenuRadioItem>
-          <MenuRadioItem value="code">Code</MenuRadioItem>
-          <MenuRadioItem value="review">Review</MenuRadioItem>
-        </MenuRadioGroup>
+        {swarmEnabled ? (
+          <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">{SWARM_ACTIVE_HELP}</div>
+        ) : (
+          <MenuRadioGroup
+            value={selectedInteractionMode}
+            onValueChange={(value) => {
+              if (!value || value === selectedInteractionMode) return;
+              props.onSetInteractionMode(value as ProviderInteractionMode);
+            }}
+          >
+            <MenuRadioItem value="ask">Ask</MenuRadioItem>
+            <MenuRadioItem value="plan">Plan</MenuRadioItem>
+            <MenuRadioItem value="code">Code</MenuRadioItem>
+            <MenuRadioItem value="review">Review</MenuRadioItem>
+          </MenuRadioGroup>
+        )}
         <MenuDivider />
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
         <MenuRadioGroup

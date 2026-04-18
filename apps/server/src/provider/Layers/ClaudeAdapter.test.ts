@@ -14,6 +14,7 @@ import {
   ApprovalRequestId,
   ProviderItemId,
   ProviderRuntimeEvent,
+  type ServerSettings,
   ThreadId,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
@@ -135,6 +136,7 @@ function makeHarness(config?: {
   readonly nativeEventLogger?: ClaudeAdapterLiveOptions["nativeEventLogger"];
   readonly cwd?: string;
   readonly baseDir?: string;
+  readonly settingsOverrides?: Partial<ServerSettings>;
 }) {
   const query = new FakeClaudeQuery();
   let createInput:
@@ -169,7 +171,7 @@ function makeHarness(config?: {
           config?.baseDir ?? "/tmp",
         ),
       ),
-      Layer.provideMerge(ServerSettingsService.layerTest()),
+      Layer.provideMerge(ServerSettingsService.layerTest(config?.settingsOverrides)),
       Layer.provideMerge(NodeServices.layer),
     ),
     query,
@@ -2542,6 +2544,53 @@ describe("ClaudeAdapterLive", () => {
 
       // First call sets "plan", second call restores "bypassPermissions" (the base for full-access)
       assert.deepEqual(harness.query.setPermissionModeCalls, ["plan", "bypassPermissions"]);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
+  it.effect("injects the swarm workflow prompt and uses the configured loop cap", () => {
+    const harness = makeHarness({
+      settingsOverrides: {
+        swarmMaxLoops: 2,
+      },
+    });
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: "claudeAgent",
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "Implement the auth flow",
+        interactionMode: "swarm",
+        attachments: [],
+      });
+
+      const promptText = yield* Effect.promise(() =>
+        readFirstPromptText(harness.getLastCreateQueryInput()),
+      );
+      const configuredAgents = (
+        harness.getLastCreateQueryInput()?.options as ClaudeQueryOptions & {
+          readonly agents?: Readonly<Record<string, unknown>>;
+        }
+      ).agents;
+      assert.ok(promptText?.includes("SWARM MODE (max 2 loops)."));
+      assert.ok(promptText?.includes("Use real subagents in this exact order:"));
+      assert.ok(promptText?.includes("swarm-questionnaire"));
+      assert.ok(promptText?.includes("swarm-reviewer"));
+      assert.ok(promptText?.includes("User request:\nImplement the auth flow"));
+      assert.deepEqual(Object.keys(configuredAgents ?? {}).sort(), [
+        "swarm-coder",
+        "swarm-planner",
+        "swarm-questionnaire",
+        "swarm-reviewer",
+      ]);
+      assert.deepEqual(harness.query.setPermissionModeCalls, ["bypassPermissions"]);
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
       Effect.provide(harness.layer),

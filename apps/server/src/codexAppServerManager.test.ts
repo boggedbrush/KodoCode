@@ -624,6 +624,39 @@ describe("sendTurn", () => {
     });
   });
 
+  it("passes Codex swarm mode developer instructions with the configured loop cap", async () => {
+    const { manager, context, sendRequest } = createSendTurnHarness();
+
+    await manager.sendTurn({
+      threadId: asThreadId("thread_1"),
+      input: "Implement this without guesswork",
+      interactionMode: "swarm",
+      swarmMaxLoops: 2,
+    });
+
+    expect(sendRequest).toHaveBeenCalledWith(context, "turn/start", {
+      threadId: "thread_1",
+      input: [
+        {
+          type: "text",
+          text: "Implement this without guesswork",
+          text_elements: [],
+        },
+      ],
+      model: "gpt-5.3-codex",
+      collaborationMode: {
+        mode: "default",
+        settings: {
+          model: "gpt-5.3-codex",
+          reasoning_effort: "medium",
+          developer_instructions: expect.stringMatching(
+            /Max loops: 2\..*must use real sub-agents.*Questionnaire.*Planner.*Coder.*Reviewer/s,
+          ),
+        },
+      },
+    });
+  });
+
   it("keeps the session model when interaction mode is set without an explicit model", async () => {
     const { manager, context, sendRequest } = createSendTurnHarness();
     context.session.model = "gpt-5.2-codex";
