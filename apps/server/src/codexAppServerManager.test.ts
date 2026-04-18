@@ -340,7 +340,7 @@ describe("readCodexAccountSnapshot", () => {
     });
   });
 
-  it("enables spark for unknown chatgpt plans when model/list includes spark", () => {
+  it("falls back to model/list when the chatgpt plan is unknown", () => {
     expect(
       readCodexAccountSnapshot(
         {
@@ -348,7 +348,7 @@ describe("readCodexAccountSnapshot", () => {
           email: "unknown@example.com",
         },
         {
-          models: [{ id: "gpt-5.4" }, { id: "gpt-5.3-codex-spark" }],
+          models: [{ id: "gpt-5.4-mini" }, { id: "gpt-5.3-codex-spark" }],
         },
       ),
     ).toEqual({
@@ -367,7 +367,7 @@ describe("resolveCodexModelForAccount", () => {
         planType: "plus",
         sparkEnabled: false,
       }),
-    ).toBe("gpt-5.4-mini");
+    ).toBe("gpt-5.3-codex");
   });
 
   it("keeps spark for supported plans", () => {
@@ -387,7 +387,7 @@ describe("resolveCodexModelForAccount", () => {
         planType: null,
         sparkEnabled: false,
       }),
-    ).toBe("gpt-5.4-mini");
+    ).toBe("gpt-5.3-codex");
   });
 });
 
