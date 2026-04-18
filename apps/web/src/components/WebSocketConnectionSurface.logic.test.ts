@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import type { WsConnectionStatus } from "../rpc/wsConnectionState";
-import { shouldAutoReconnect, shouldRestartStalledReconnect } from "./WebSocketConnectionSurface";
+import {
+  shouldAutoReconnect,
+  shouldRestartStalledReconnect,
+  shouldShowProductionStartupLoader,
+} from "./WebSocketConnectionSurface";
 
 function makeStatus(overrides: Partial<WsConnectionStatus> = {}): WsConnectionStatus {
   return {
@@ -108,6 +112,44 @@ describe("WebSocketConnectionSurface.logic", () => {
         }),
         "2026-04-03T20:00:01.000Z",
       ),
+    ).toBe(false);
+  });
+
+  it("shows the production startup loader during the initial startup grace window", () => {
+    expect(
+      shouldShowProductionStartupLoader({
+        hasConnected: false,
+        startupTimedOut: false,
+        uiState: "connecting",
+      }),
+    ).toBe(!import.meta.env.DEV);
+    expect(
+      shouldShowProductionStartupLoader({
+        hasConnected: false,
+        startupTimedOut: false,
+        uiState: "error",
+      }),
+    ).toBe(!import.meta.env.DEV);
+    expect(
+      shouldShowProductionStartupLoader({
+        hasConnected: true,
+        startupTimedOut: false,
+        uiState: "connecting",
+      }),
+    ).toBe(!import.meta.env.DEV);
+    expect(
+      shouldShowProductionStartupLoader({
+        hasConnected: true,
+        startupTimedOut: false,
+        uiState: "reconnecting",
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowProductionStartupLoader({
+        hasConnected: false,
+        startupTimedOut: true,
+        uiState: "error",
+      }),
     ).toBe(false);
   });
 });

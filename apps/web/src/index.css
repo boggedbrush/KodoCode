@@ -4,6 +4,8 @@
 
 @theme inline {
   --animate-skeleton: skeleton 2s -1s infinite linear;
+  --animate-startup-emblem: startup-emblem 2.8s ease-in-out infinite;
+  --animate-startup-halo: startup-halo 2.8s ease-in-out infinite;
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-success-foreground: var(--success-foreground);
@@ -39,6 +41,28 @@
   @keyframes skeleton {
     to {
       background-position: -200% 0;
+    }
+  }
+  @keyframes startup-emblem {
+    0%,
+    100% {
+      opacity: 0.84;
+      transform: scale(0.96);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  @keyframes startup-halo {
+    0%,
+    100% {
+      opacity: 0.12;
+      transform: scale(0.9);
+    }
+    50% {
+      opacity: 0.3;
+      transform: scale(1.08);
     }
   }
 }
