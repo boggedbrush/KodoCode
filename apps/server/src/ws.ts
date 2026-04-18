@@ -360,6 +360,7 @@ const makeWsRpcLayer = () =>
                 branch: worktree.worktree.branch,
                 worktreePath: targetWorktreePath,
               });
+              yield* refreshGitStatus(targetWorktreePath);
             }
 
             yield* runSetupProgram();
