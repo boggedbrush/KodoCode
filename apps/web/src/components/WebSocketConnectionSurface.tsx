@@ -206,7 +206,14 @@ export function shouldShowProductionStartupLoader({
   readonly startupTimedOut: boolean;
   readonly uiState: WsConnectionUiState;
 }): boolean {
-  return !import.meta.env.DEV && !startupTimedOut && (!hasConnected || uiState === "connecting");
+  // Planned local-model support means some users may intentionally stay offline
+  // after install, so known offline state should remain explicit immediately.
+  return (
+    !import.meta.env.DEV &&
+    !startupTimedOut &&
+    uiState !== "offline" &&
+    (!hasConnected || uiState === "connecting")
+  );
 }
 
 function WebSocketBlockingState({

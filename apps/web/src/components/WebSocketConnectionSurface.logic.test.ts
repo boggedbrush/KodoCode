@@ -132,6 +132,13 @@ describe("WebSocketConnectionSurface.logic", () => {
     ).toBe(!import.meta.env.DEV);
     expect(
       shouldShowProductionStartupLoader({
+        hasConnected: false,
+        startupTimedOut: false,
+        uiState: "offline",
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowProductionStartupLoader({
         hasConnected: true,
         startupTimedOut: false,
         uiState: "connecting",
