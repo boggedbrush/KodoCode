@@ -41,6 +41,12 @@ Kōdō Code reduces cognitive overhead by separating exploration, planning, exec
 
 <br>
 
+<p align="center">
+  <img src="./assets/readme/screenshot.png" alt="Kōdō Code desktop screenshot" width="1100" />
+</p>
+
+<br>
+
 ---
 
 <br>
