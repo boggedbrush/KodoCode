@@ -183,6 +183,7 @@ export async function probeCodexUsage(input: {
 
     let accountReadResult: unknown;
     let accountReadSettled = false;
+    let modelListResult: unknown;
     let modelListSettled = false;
     let rateLimitsResult: unknown = null;
     let rateLimitsSettled = false;
@@ -196,7 +197,7 @@ export async function probeCodexUsage(input: {
         const accountReadRecord = asRecord(accountReadResult);
         const accountRecord = asRecord(accountReadRecord?.account) ?? accountReadRecord;
         resolve({
-          account: readCodexAccountSnapshot(accountReadResult),
+          account: readCodexAccountSnapshot(accountReadResult, modelListResult),
           email: asString(accountRecord?.email) ?? null,
           rateLimits: rateLimitsResult,
         });
@@ -245,6 +246,9 @@ export async function probeCodexUsage(input: {
       }
 
       if (response.id === 3) {
+        if (!readErrorMessage(response)) {
+          modelListResult = response.result;
+        }
         modelListSettled = true;
         maybeFinish();
         return;
