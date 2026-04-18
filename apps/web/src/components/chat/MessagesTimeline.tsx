@@ -733,7 +733,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   const textDirection = resolveTextDirection(props.text);
   const bodyClassName = cn(
     "chat-message-inline-body whitespace-pre-wrap text-foreground",
-    textDirection !== "rtl" && "font-mono",
+    textDirection === "ltr" && "font-mono",
     resolveChatReadabilityClassName({
       direction: textDirection,
       fontFamily: chatFontFamily,
