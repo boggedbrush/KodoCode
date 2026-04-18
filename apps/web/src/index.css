@@ -67,11 +67,16 @@
   --desktop-window-corner-radius: 0px;
   --radius: 0.625rem;
   --font-sans-ui:
-    "DM Sans", "Noto Sans Arabic", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
-    sans-serif;
-  --font-sans-chat-rtl:
-    "Noto Sans Arabic", "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
-    sans-serif;
+    "DM Sans", "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari",
+    "Noto Sans Thai", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans-chat-dm-sans:
+    "DM Sans", "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari",
+    "Noto Sans Thai", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans-chat-noto:
+    "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans-chat-multiscript:
+    "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari", "Noto Sans Thai",
+    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --background: var(--color-white);
   --foreground: var(--color-neutral-800);
   --card: var(--color-white);
@@ -251,31 +256,45 @@ label:has(> select#reasoning-effort) select {
   height: 100%;
 }
 
-/* Chat markdown rendering */
-.chat-direction-rtl,
-.chat-composer-direction-rtl {
+/* Chat readability */
+.chat-readability-surface {
+  text-align: start;
+  unicode-bidi: isolate;
+}
+
+.chat-readability-direction-rtl {
   direction: rtl;
-  text-align: start;
-  font-family: var(--font-sans-chat-rtl);
 }
 
-.chat-direction-ltr,
-.chat-composer-direction-ltr {
+.chat-readability-direction-ltr {
   direction: ltr;
-  text-align: start;
 }
 
-.chat-direction-auto,
-.chat-composer-direction-auto {
-  text-align: start;
+.chat-readability-font-dm-sans {
+  font-family: var(--font-sans-chat-dm-sans);
 }
 
-.chat-font-dm-sans {
-  font-family: var(--font-sans-ui);
+.chat-readability-font-noto-sans {
+  font-family: var(--font-sans-chat-noto);
 }
 
-.chat-font-noto-sans-arabic {
-  font-family: var(--font-sans-chat-rtl);
+.chat-readability-font-noto-sans-multiscript {
+  font-family: var(--font-sans-chat-multiscript);
+}
+
+.chat-readability-text-small {
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.chat-readability-text-default {
+  font-size: 0.875rem;
+  line-height: 1.625;
+}
+
+.chat-readability-text-large {
+  font-size: 0.9375rem;
+  line-height: 1.7;
 }
 
 .chat-message-inline-body {
@@ -288,7 +307,6 @@ label:has(> select#reasoning-effort) select {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
-  text-align: start;
 }
 
 .chat-markdown > :first-child {
@@ -360,8 +378,9 @@ label:has(> select#reasoning-effort) select {
   background: var(--muted);
   padding: 0.1rem 0.35rem;
   color: var(--foreground);
-  font-size: 0.75rem;
+  font-size: 0.9em;
   direction: ltr;
+  unicode-bidi: isolate;
 }
 
 .chat-markdown pre {
@@ -378,13 +397,14 @@ label:has(> select#reasoning-effort) select {
   background: transparent;
   padding: 0;
   line-height: 1.5;
-  font-size: 0.875rem;
+  font-size: 0.95em;
 }
 
 .chat-markdown .chat-markdown-codeblock {
   position: relative;
   margin: 0.65rem 0;
   direction: ltr;
+  unicode-bidi: isolate;
 }
 
 .chat-markdown .chat-markdown-codeblock pre {

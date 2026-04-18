@@ -25,7 +25,7 @@ import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
 import type { DiffsHighlighter, SupportedLanguages } from "@pierre/diffs";
-import { resolveChatTypographyClassName } from "~/lib/chatTypography";
+import { resolveChatReadabilityClassName } from "~/lib/chatReadability";
 import { cn } from "~/lib/utils";
 import { resolveTextDirection } from "~/lib/textDirection";
 
@@ -260,6 +260,7 @@ function SuspenseShikiCodeBlock({
 function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
   const chatFontFamily = useSettings((settings) => settings.chatFontFamily);
+  const chatTextSize = useSettings((settings) => settings.chatTextSize);
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   const textDirection = useMemo(() => resolveTextDirection(text), [text]);
   const markdownUrlTransform = useCallback((href: string) => {
@@ -318,12 +319,12 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
   return (
     <div
       dir={textDirection}
-      lang={textDirection === "rtl" ? "ar" : undefined}
       className={cn(
-        "chat-markdown w-full min-w-0 text-sm leading-relaxed text-foreground/80",
-        resolveChatTypographyClassName({
+        "chat-markdown w-full min-w-0 text-foreground/80",
+        resolveChatReadabilityClassName({
           direction: textDirection,
           fontFamily: chatFontFamily,
+          textSize: chatTextSize,
         }),
       )}
     >

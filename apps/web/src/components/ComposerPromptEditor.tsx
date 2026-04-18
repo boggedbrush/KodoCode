@@ -66,7 +66,7 @@ import {
 import { cn } from "~/lib/utils";
 import { basenameOfPath, getVscodeIconUrlForEntry, inferEntryKindFromPath } from "~/vscode-icons";
 import { useSettings } from "../hooks/useSettings";
-import { resolveChatTypographyClassName } from "~/lib/chatTypography";
+import { resolveChatReadabilityClassName } from "~/lib/chatReadability";
 import { resolveTextDirection } from "~/lib/textDirection";
 import {
   COMPOSER_INLINE_CHIP_CLASS_NAME,
@@ -898,15 +898,16 @@ function ComposerPromptEditorInner({
   const onChangeRef = useRef(onChange);
   const initialCursor = clampCollapsedComposerCursor(value, cursor);
   const chatFontFamily = useSettings((settings) => settings.chatFontFamily);
+  const chatTextSize = useSettings((settings) => settings.chatTextSize);
   const composerDirection = resolveTextDirection(value);
-  const composerTypographyClassName = useMemo(
+  const composerReadabilityClassName = useMemo(
     () =>
-      resolveChatTypographyClassName({
+      resolveChatReadabilityClassName({
         direction: composerDirection,
         fontFamily: chatFontFamily,
-        variant: "composer",
+        textSize: chatTextSize,
       }),
-    [chatFontFamily, composerDirection],
+    [chatFontFamily, chatTextSize, composerDirection],
   );
   const terminalContextsSignature = terminalContextSignature(terminalContexts);
   const terminalContextsSignatureRef = useRef(terminalContextsSignature);
@@ -1107,10 +1108,9 @@ function ComposerPromptEditorInner({
           contentEditable={
             <ContentEditable
               dir={composerDirection}
-              lang={composerDirection === "rtl" ? "ar" : undefined}
               className={cn(
-                "block max-h-[200px] min-h-17.5 w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-[14px] leading-relaxed text-foreground focus:outline-none",
-                composerTypographyClassName,
+                "block max-h-[200px] min-h-17.5 w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-foreground focus:outline-none",
+                composerReadabilityClassName,
                 className,
               )}
               data-testid="composer-editor"
@@ -1123,10 +1123,9 @@ function ComposerPromptEditorInner({
             terminalContexts.length > 0 ? null : (
               <div
                 dir={composerDirection}
-                lang={composerDirection === "rtl" ? "ar" : undefined}
                 className={cn(
-                  "pointer-events-none absolute inset-0 text-[14px] leading-relaxed text-muted-foreground/35",
-                  composerTypographyClassName,
+                  "pointer-events-none absolute inset-0 text-muted-foreground/35",
+                  composerReadabilityClassName,
                 )}
               >
                 {placeholder}

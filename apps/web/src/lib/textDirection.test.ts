@@ -8,6 +8,11 @@ describe("resolveTextDirection", () => {
     expect(isRtlText("تحليل المشروع")).toBe(true);
   });
 
+  it("detects Hebrew text as rtl without assuming Arabic", () => {
+    expect(resolveTextDirection("שלום עולם")).toBe("rtl");
+    expect(isRtlText("בדיקת ממשק")).toBe(true);
+  });
+
   it("treats Latin text as ltr", () => {
     expect(resolveTextDirection("Review the latest diff")).toBe("ltr");
     expect(isRtlText("Run tests")).toBe(false);
