@@ -2,7 +2,6 @@ import {
   ApprovalRequestId,
   type ChatAttachment,
   type OrchestrationEvent,
-  ThreadId,
 } from "@t3tools/contracts";
 import { Effect, FileSystem, Layer, Option, Path, Stream } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
@@ -99,77 +98,6 @@ function isStalePendingApprovalFailureDetail(detail: string | null): boolean {
     detail.includes("unknown pending approval request") ||
     detail.includes("unknown pending permission request")
   );
-}
-
-function derivePendingUserInputCountFromActivities(
-  activities: ReadonlyArray<ProjectionThreadActivity>,
-): number {
-  const openRequestIds = new Set<string>();
-  const ordered = [...activities].toSorted(
-    (left, right) =>
-      left.createdAt.localeCompare(right.createdAt) ||
-      left.activityId.localeCompare(right.activityId),
-  );
-
-  for (const activity of ordered) {
-    const requestId = extractActivityRequestId(activity.payload);
-    if (requestId === null) {
-      continue;
-    }
-    const payload =
-      typeof activity.payload === "object" && activity.payload !== null
-        ? (activity.payload as Record<string, unknown>)
-        : null;
-    const detail = typeof payload?.detail === "string" ? payload.detail.toLowerCase() : null;
-
-    if (activity.kind === "user-input.requested") {
-      openRequestIds.add(requestId);
-      continue;
-    }
-
-    if (activity.kind === "user-input.resolved") {
-      openRequestIds.delete(requestId);
-      continue;
-    }
-
-    if (
-      activity.kind === "provider.user-input.respond.failed" &&
-      detail !== null &&
-      (detail.includes("stale pending user-input request") ||
-        detail.includes("unknown pending user-input request"))
-    ) {
-      openRequestIds.delete(requestId);
-    }
-  }
-
-  return openRequestIds.size;
-}
-
-function deriveHasActionableProposedPlan(input: {
-  readonly latestTurnId: string | null;
-  readonly proposedPlans: ReadonlyArray<ProjectionThreadProposedPlan>;
-}): boolean {
-  const sorted = [...input.proposedPlans].toSorted(
-    (left, right) =>
-      left.updatedAt.localeCompare(right.updatedAt) || left.planId.localeCompare(right.planId),
-  );
-
-  let latestForTurn: ProjectionThreadProposedPlan | null = null;
-  if (input.latestTurnId !== null) {
-    for (let index = sorted.length - 1; index >= 0; index -= 1) {
-      const plan = sorted[index];
-      if (plan?.turnId === input.latestTurnId) {
-        latestForTurn = plan;
-        break;
-      }
-    }
-  }
-  if (latestForTurn !== null) {
-    return latestForTurn.implementedAt === null;
-  }
-
-  const latestPlan = sorted.at(-1) ?? null;
-  return latestPlan !== null && latestPlan.implementedAt === null;
 }
 
 function retainProjectionMessagesAfterRevert(

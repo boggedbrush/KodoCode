@@ -1,4 +1,4 @@
-import { Effect, Layer, Result, Schema, SchemaIssue } from "effect";
+import { Effect, Layer, Result, Schema } from "effect";
 import { TrimmedNonEmptyString } from "@t3tools/contracts";
 
 import { runProcess } from "../../processRunner";

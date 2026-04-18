@@ -1,0 +1,76 @@
+# Upstream Sync Log
+
+## 2026-04-17
+
+- Fork branch: `sync/upstream-2026-04-17`
+- Fork base: `boggedbrush/KodoCode@9eb9c1a9`
+- Upstream range reviewed: `pingdotgg/t3code@e3004ae806d4e9a81e03ff919f50d2d34c37ffe7..b2cca674dfdf93430460fe08e1ce0d857e30bd83`
+- Upstream release window: `v0.0.17..v0.0.20`
+- Fork PR: pending
+
+### Classification
+
+- `a3dadf31` `chore(release): prepare v0.0.17` — `SKIP`: upstream release-prep version churn only.
+- `678f827f` `Remove Claude subscription-based model adjustment (#1899)` — `APPLY`
+- `e2316814` `Fix worktree base branch updates for active draft (#1900)` — `SKIP`: workflow/UI-coupled draft branch behavior.
+- `12c3af78` `feat(desktop): add "Copy Image" to right-click context menu (#1052)` — `SKIP`: desktop UI feature.
+- `5fa09fa2` `[codex] fix composer footer compact layout (#1894)` — `SKIP`: web UI layout.
+- `4ae9de31` `Stabilize auth session cookies per server mode (#1898)` — `MANUAL`: valuable auth hardening, but conflicted with Kodo auth/desktop runtime changes across multiple files.
+- `58e5f714` `Add provider skill discovery (#1905)` — `MANUAL`: backend value exists, but upstream implementation is tightly coupled to composer/menu UI surfaces.
+- `e0e01b4a` `Handle deleted git directories as non-repositories (#1907)` — `APPLY`
+- `b80e8476` `Memoize derived thread reads (#1908)` — `SKIP`: frontend state/render optimization.
+- `97880e88` `fix(web): resolve logical-to-physical key mismatch in project drag reorder (#1904)` — `SKIP`: web UI interaction.
+- `26cc1fff` `Add assistant message copy action and harden related test/storage fallbacks (#1211)` — `SKIP`: chat UI feature.
+- `1f4a3f65` `Fix opening urls wrapped across lines in the terminal (#1913)` — `SKIP`: terminal/web presentation behavior.
+- `5467d119` `fix(web): prevent number-key shortcuts from hijacking input in focused editor (#1810)` — `SKIP`: web editor UX.
+- `934037cb` `feat(web): add extensible command palette (#1103)` — `SKIP`: command-palette UI dominates the mixed change.
+- `f9372a4c` `chore(desktop): separate dev AppUserModelID on Windows (#1934)` — `SKIP`: desktop shell presentation/platform polish.
+- `f9019cd6` `Coalesce status refreshes by remote (#1940)` — `MANUAL`: adapted to keep Kodo non-interactive git hardening while porting the refresh-coalescing fix.
+- `2fce84a1` `fix: quote editor launch args on Windows to support paths with spaces (#1805)` — `APPLY`
+- `f59ee36b` `fix(web): allow concurrent browser tests to retry ports (#1951)` — `SKIP`: browser-test harness only.
+- `7a008461` `fix: Align token usage metrics for both Claude and Codex (#1943)` — `APPLY`
+- `94d13a2b` `Preserve live stream subscriptions across explicit reconnects (#1972)` — `SKIP`: reconnect UX/runtime mix touches frontend behavior.
+- `96c9306d` `Migrate chat scrolling and branch lists to LegendList (#1953)` — `SKIP`: frontend virtualization/list rendering.
+- `dff8784a` `window controls overlay (windows&linux) (#1969)` — `SKIP`: desktop/web presentation.
+- `850c9125` `fix(desktop): increase backend readiness timeout from 10s to 30s (#1979)` — `SKIP`: desktop startup policy change conflicts with Kodo release/runtime path.
+- `57d7746a` `fix(web): replace turn strip overlay gradients with mask-image fade (#1949)` — `SKIP`: styling.
+- `f7fa62aa` `Add shell snapshot queries for orchestration state (#1973)` — `MANUAL`: backend value exists, but not needed for this batch.
+- `1bf048eb` `fix: avoid copy button overlapping long code blocks (#1985)` — `SKIP`: chat UI.
+- `f2205bdc` `Pad composer model picker to prevent ring clipping (#1992)` — `SKIP`: styling/layout.
+- `801b83e9` `Allow empty server threads to bootstrap new worktrees (#1936)` — `SKIP`: mixed commit heavily coupled to branch-toolbar and chat UI.
+- `77fcad35` `Prevent live thread branches from regressing to temp worktree names (#1995)` — `SKIP`: thread/branch presentation coupling.
+- `047a0a69` `fix: add pointer cursor to the permissions mode select trigger (#1997)` — `SKIP`: styling.
+- `9b29be91` `docs: Document environment prep before local development (#1975)` — `SKIP`: docs only.
+- `5f7becf3` `feat: Add Kiro editor support to open picker (#1974)` — `APPLY`
+- `cadd7086` `feat: show full thread title in a tooltip when hovering sidebar thread names (#1994)` — `SKIP`: sidebar UI.
+- `f5ecca44` `Clear tracked RPCs on reconnect (#2000)` — `SKIP`: frontend reconnect behavior.
+- `6f699346` `Use latest user message time for thread timestamps (#1996)` — `SKIP`: thread list UX.
+- `d18e43b6` `fix: lost provider session recovery (#1938)` — `APPLY`
+- `33dadb5a` `Fix thread timeline autoscroll and simplify branch state (#2002)` — `SKIP`: thread timeline UX.
+- `569fea87` `Warm sidebar thread detail subscriptions (#2001)` — `SKIP`: sidebar performance/UI behavior.
+- `5f7ec73a` `Fix new-thread draft reuse for worktree defaults (#2003)` — `SKIP`: new-thread frontend flow.
+- `9dcea68b` `Refresh git status after branch rename and worktree setup (#2005)` — `MANUAL`: runtime fix applied while preserving Kodo server-test scaffolding.
+- `008ac5c3` `Cache provider status and gate desktop startup (#1962)` — `MANUAL`: mixed startup/runtime change deferred because it conflicts with Kodo desktop startup behavior.
+- `2e42f3fd` `Improve shell PATH hydration and fallback detection (#1799)` — `APPLY`
+- `c9b07d66` `Backfill projected shell summaries and stale approval cleanup (#2004)` — `MANUAL`: projection and migration changes merged into Kodo persistence state.
+- `0d280262` `fix(claude): emit plan events for TodoWrite during input streaming (#1541)` — `SKIP`: upstream plan/composer UI coupling.
+- `409ff90a` `Nightly release channel (#2012)` — `SKIP`: release channel/branding flow diverges in Kodo.
+- `9ff31f8c` `Fix nightly desktop product name (#2025)` — `SKIP`: nightly branding.
+- `44afe784` `Add filesystem browse API and command palette project picker (#2024)` — `MANUAL`: backend browse API may be useful later, but the commit is tied to upstream command-palette UI and project-creation flow.
+- `7968f278` `Fix terminal Cmd+Backspace on macOS (#2027)` — `SKIP`: frontend terminal UX.
+- `28cb9db2` `feat(web): add tooltip to composer file mention pill (#1944)` — `SKIP`: UI.
+- `68061af0` `Improve markdown file link UX (#1956)` — `SKIP`: frontend markdown UX.
+- `5e1dd56d` `feat: add Launch Args setting for Claude provider (#1971)` — `SKIP`: settings-surface/UI coupling.
+- `f9580ff0` `Default nightly desktop builds to the nightly update channel (#2049)` — `SKIP`: nightly packaging policy differs in Kodo.
+- `5e13f535` `fix: remove trailing newline from CLAUDE.md symlink (#2052)` — `SKIP`: low-value repo housekeeping outside sync priorities.
+- `d22c6f52` `fix: prevent user-input activities from leaking into pending approvals projection (#2051)` — `APPLY`
+- `3e07f5a6` `feat: add Claude Opus 4.7 to built-in models (#2072)` — `SKIP`: visible provider/model surface change.
+- `19d47408` `fix(web): prevent composer controls overlap on narrow windows (make plan sidebar responsive) (#1198)` — `SKIP`: responsive UI.
+- `7a08fcf2` `fix(server): drop stale text generation options when resetting text-gen model selection (#2076)` — `MANUAL`: skipped because upstream settings model is behind Kodo’s preset/settings evolution.
+- `188a40c3` `feat: configurable project grouping (#2055)` — `SKIP`: project grouping is a user-visible workflow/settings surface.
+- `e0117b27` `Fix Claude Process leak[MEMORY INTENSIVE], archiving, and stale claude session monitoring. (#2042)` — `MANUAL`: large runtime/session rewrite deferred due extensive conflicts.
+- `d90e15d1` `fix(server): extend negative repository identity cache ttl (#2083)` — `APPLY`
+- `6891c77d` `Build for Windows ARM (#2080)` — `SKIP`: release/build pipeline conflicts with Kodo packaging changes.
+- `b7df3dfc` `[codex] Fix Windows release manifest publishing (#2095)` — `SKIP`: release pipeline divergence.
+- `54904386` `fix: guard against missing sidebarProjectGroupingOverrides in client settings (#2099)` — `SKIP`: client settings/frontend behavior.
+- `b2cca674` `ci(release): install deps before finalize version bump (#2100)` — `SKIP`: release workflow divergence.
