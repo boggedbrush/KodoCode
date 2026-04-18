@@ -13,6 +13,7 @@ import {
   orderItemsByPreferredIds,
   resolveProjectRemovalTargets,
   resolveProjectStatusIndicator,
+  resolveSidebarThreadDisplayTimestamp,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
@@ -232,6 +233,35 @@ describe("resolveSidebarNewThreadSeedContext", () => {
     ).toEqual({
       envMode: "worktree",
     });
+  });
+});
+
+describe("resolveSidebarThreadDisplayTimestamp", () => {
+  it("prefers the latest user message time when present", () => {
+    expect(
+      resolveSidebarThreadDisplayTimestamp({
+        createdAt: "2026-03-09T10:00:00.000Z",
+        updatedAt: "2026-03-09T10:04:00.000Z",
+        latestUserMessageAt: "2026-03-09T10:05:00.000Z",
+      }),
+    ).toBe("2026-03-09T10:05:00.000Z");
+  });
+
+  it("falls back to updatedAt and then createdAt", () => {
+    expect(
+      resolveSidebarThreadDisplayTimestamp({
+        createdAt: "2026-03-09T10:00:00.000Z",
+        updatedAt: "2026-03-09T10:04:00.000Z",
+        latestUserMessageAt: null,
+      }),
+    ).toBe("2026-03-09T10:04:00.000Z");
+
+    expect(
+      resolveSidebarThreadDisplayTimestamp({
+        createdAt: "2026-03-09T10:00:00.000Z",
+        latestUserMessageAt: null,
+      }),
+    ).toBe("2026-03-09T10:00:00.000Z");
   });
 });
 

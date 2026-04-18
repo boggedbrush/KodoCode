@@ -250,6 +250,8 @@ function renderMentionChipDom(container: HTMLElement, pathValue: string): void {
   container.textContent = "";
   container.style.setProperty("user-select", "none");
   container.style.setProperty("-webkit-user-select", "none");
+  container.title = pathValue;
+  container.setAttribute("aria-label", pathValue);
 
   const theme = resolvedThemeFromDocument();
   const icon = document.createElement("img");

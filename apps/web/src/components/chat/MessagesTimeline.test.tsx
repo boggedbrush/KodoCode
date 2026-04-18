@@ -1,6 +1,11 @@
 import { MessageId } from "@t3tools/contracts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+
+vi.mock("../../hooks/useTheme", () => ({
+  useTheme: () => ({ resolvedTheme: "light" as const }),
+}));
+
 import { MessagesTimeline } from "./MessagesTimeline";
 
 function matchMedia() {
@@ -142,5 +147,52 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain("Context compacted");
     expect(markup).toContain("Work log");
+  });
+
+  it("renders a copy action for completed assistant messages", () => {
+    const markup = renderToStaticMarkup(
+      <MessagesTimeline
+        hasMessages
+        isWorking={false}
+        activeTurnInProgress={false}
+        activeTurnStartedAt={null}
+        scrollContainer={null}
+        timelineEntries={[
+          {
+            id: "entry-1",
+            kind: "message",
+            createdAt: "2026-03-17T19:12:28.000Z",
+            message: {
+              id: MessageId.makeUnsafe("message-assistant-1"),
+              role: "assistant",
+              text: "Implemented the requested change.",
+              createdAt: "2026-03-17T19:12:28.000Z",
+              completedAt: "2026-03-17T19:12:31.000Z",
+              streaming: false,
+            },
+          },
+        ]}
+        completionDividerBeforeEntryId={null}
+        completionSummary={null}
+        turnDiffSummaryByAssistantMessageId={new Map()}
+        nowIso="2026-03-17T19:12:32.000Z"
+        expandedWorkGroups={{}}
+        onToggleWorkGroup={() => {}}
+        changedFilesExpandedByTurnId={{}}
+        onSetChangedFilesExpanded={() => {}}
+        onOpenTurnDiff={() => {}}
+        revertTurnCountByUserMessageId={new Map()}
+        onRevertUserMessage={() => {}}
+        isRevertingCheckpoint={false}
+        onImageExpand={() => {}}
+        markdownCwd={undefined}
+        resolvedTheme="light"
+        timestampFormat="locale"
+        workspaceRoot={undefined}
+      />,
+    );
+
+    expect(markup).toContain("Copy message");
+    expect(markup).toContain("Implemented the requested change.");
   });
 });

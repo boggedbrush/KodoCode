@@ -526,6 +526,12 @@ function getLatestUserMessageTimestamp(thread: SidebarThreadSortInput): number {
   return toSortableTimestamp(thread.updatedAt ?? thread.createdAt) ?? Number.NEGATIVE_INFINITY;
 }
 
+export function resolveSidebarThreadDisplayTimestamp(
+  thread: Pick<SidebarThreadSummary, "latestUserMessageAt" | "updatedAt" | "createdAt">,
+): string {
+  return thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt;
+}
+
 function getThreadSortTimestamp(
   thread: SidebarThreadSortInput,
   sortOrder: SidebarThreadSortOrder | Exclude<SidebarProjectSortOrder, "manual">,

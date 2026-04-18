@@ -116,6 +116,7 @@ import {
   resolveAdjacentThreadId,
   isContextMenuPointerDown,
   resolveProjectStatusIndicator,
+  resolveSidebarThreadDisplayTimestamp,
   resolveSidebarNewThreadSeedContext,
   resolveSidebarNewThreadEnvMode,
   resolveProjectRemovalTargets,
@@ -459,7 +460,9 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
               onClick={(event) => event.stopPropagation()}
             />
           ) : (
-            <span className="min-w-0 flex-1 truncate text-xs">{thread.title}</span>
+            <span className="min-w-0 flex-1 truncate text-xs" title={thread.title}>
+              {thread.title}
+            </span>
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
@@ -571,7 +574,7 @@ function SidebarThreadRow(props: SidebarThreadRowProps) {
                       : "text-muted-foreground/40"
                   }`}
                 >
-                  {formatRelativeTimeLabel(thread.updatedAt ?? thread.createdAt)}
+                  {formatRelativeTimeLabel(resolveSidebarThreadDisplayTimestamp(thread))}
                 </span>
               )}
             </span>

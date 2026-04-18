@@ -356,6 +356,11 @@ label:has(> select#reasoning-effort) select {
   margin: 0;
 }
 
+.chat-markdown .chat-markdown-codeblock pre,
+.chat-markdown .chat-markdown-codeblock .chat-markdown-shiki .shiki {
+  padding-right: 2.75rem !important;
+}
+
 .chat-markdown .chat-markdown-copy-button {
   position: absolute;
   top: 0.5rem;
