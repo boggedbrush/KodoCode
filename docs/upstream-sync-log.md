@@ -1,5 +1,79 @@
 # Upstream Sync Log
 
+## 2026-04-18
+
+- Fork branch: `sync/upstream-2026-04-17`
+- Fork base: `boggedbrush/KodoCode@be7628c915e6db187efe26328bedc62fedba0c76`
+- Upstream range reviewed: `pingdotgg/t3code@2d87574e62d616d890497d5b7d48201aa06d4dce..9df3c640210fecccb58f7fbc735f81ca0ee011bd`
+- Upstream release window: `v0.0.20..main@2026-04-17`
+- Fork PR: https://github.com/boggedbrush/KodoCode/pull/7
+
+### Classification
+
+- `2d87574e` `chore(release): prepare v0.0.20` — `SKIP`: release version churn only.
+- `505db9f6` `try out blacksmith for releases (#2101)` — `SKIP`: release pipeline divergence.
+- `b991b9b9` `Revert to Github Runner for Windows (#2103)` — `SKIP`: release pipeline divergence.
+- `ed6b7fbf` `fix(server): honor gitignored files in workspace search (#2078)` — `ADAPT`: ported the server-layer wiring and focused regression test without upstream harness churn.
+- `8dba2d64` `Adopt Node-native TypeScript for desktop and server (#2098)` — `MANUAL`: broad tooling/runtime refactor across desktop, server, scripts, and contracts.
+- `54179c86` `Update workflow to use ubuntu-24.04 runner (#2110)` — `SKIP`: release/CI runner policy is out of scope for this sync.
+- `d8d32969` `Show thread status in command palette (#2107)` — `SKIP`: command-palette UI expansion conflicts with Kodo workflow boundaries.
+- `a7a44d06` `Fix Windows PATH hydration and repair (#1729)` — `MANUAL`: valuable runtime hardening, but large shared shell/runtime rewrite on top of prior sync work.
+- `f297e30e` `Clean up invalid pending approval projections (#2106)` — `APPLY`
+- `df9d3400` `Modernize release workflow runners (#2129)` — `SKIP`: release workflow divergence.
+- `40009735` `Extract backend startup readiness coordination (#2133)` — `MANUAL`: desktop startup refactor touches Kodo-specific startup/runtime behavior.
+- `721b6b4c` `Preserve provider bindings when stopping sessions (#2125)` — `ADAPT`: ported the provider-binding persistence fix while keeping Kodo’s current tests and session scaffolding.
+- `52a60678` `Throttle nightly release workflow to every 3 hours (#2134)` — `SKIP`: nightly release policy divergence.
+- `39ca3ee8` `fix(web): bypass xterm for global terminal shortcuts (#1580)` — `SELECTIVE FRONTEND`: safe candidate, but deferred to keep this batch narrow after landing the higher-value terminal toggle fix.
+- `ce94feee` `feat: add opencode provider support (#1758)` — `SKIP`: large new provider/product surface outside bounded sync scope.
+- `60387f67` `fix: show restore defaults only on General settings (#1710)` — `SELECTIVE FRONTEND`: safe candidate, but deferred because it touches Kodo-owned settings surfacing and is lower priority than runtime work.
+- `4e0c003e` `fix(web): allow deleting non-empty projects from the warning toast (#1264)` — `MANUAL`: mixed server/client project-deletion workflow change needs Kodo product judgment.
+- `a3b1df52` `Add Claude Opus 4.5 to built-in Claude models (#2143)` — `SKIP`: visible provider/model surface change.
+- `0f184c28` `fix(web): use capture-phase keydown listener so CTRL+J toggles terminal from terminal focus on Windows (#2113) (#2142)` — `SELECTIVE FRONTEND`
+- `9c64f12e` `Add ACP support with Cursor provider (#1355)` — `SKIP`: major new provider/runtime architecture and package surface.
+- `29cb917a` `Guard release workflow jobs from upstream failures (#2146)` — `SKIP`: release workflow divergence.
+- `8ac57f79` `Guard release workflow jobs on upstream success (#2147)` — `SKIP`: release workflow divergence.
+- `9df3c640` `Use GitHub App token for release uploads (#2149)` — `SKIP`: release workflow divergence.
+
+### Applied changes
+
+- `f297e30e` Added migration `025_CleanupInvalidProjectionPendingApprovals` to scrub invalid persisted pending-approval rows.
+- Restored missing local migration file `023_ProjectionThreadShellSummary` from Kodo history so the sync branch’s migration registry is internally consistent.
+
+### Adapted changes
+
+- `ed6b7fbf` Wired `WorkspaceEntries` through `GitCore` in [`apps/server/src/server.ts`](/mnt/c/Users/Admin/.codex/worktrees/b83f/KodoCode/apps/server/src/server.ts) and added a regression test in [`apps/server/src/server.test.ts`](/mnt/c/Users/Admin/.codex/worktrees/b83f/KodoCode/apps/server/src/server.test.ts) so workspace search respects gitignored paths.
+- `721b6b4c` Updated provider stop-session handling in [`apps/server/src/provider/Layers/ProviderService.ts`](/mnt/c/Users/Admin/.codex/worktrees/b83f/KodoCode/apps/server/src/provider/Layers/ProviderService.ts) and [`apps/server/src/orchestration/Layers/ProviderCommandReactor.ts`](/mnt/c/Users/Admin/.codex/worktrees/b83f/KodoCode/apps/server/src/orchestration/Layers/ProviderCommandReactor.ts) to preserve provider bindings after stop/restart cycles.
+
+### Selective frontend changes ported
+
+- `0f184c28` Updated [`apps/web/src/components/ChatView.tsx`](/mnt/c/Users/Admin/.codex/worktrees/b83f/KodoCode/apps/web/src/components/ChatView.tsx) so the terminal toggle shortcut is captured while terminal focus is inside xterm on Windows, with regression coverage in [`apps/web/src/keybindings.test.ts`](/mnt/c/Users/Admin/.codex/worktrees/b83f/KodoCode/apps/web/src/keybindings.test.ts).
+
+### Manual-review candidates
+
+- `8dba2d64` Node-native TypeScript adoption: too broad for a bounded sync.
+- `a7a44d06` Windows PATH hydration/repair: valuable, but large shared-runtime adaptation.
+- `40009735` Backend startup readiness extraction: overlaps Kodo desktop startup policy.
+- `4e0c003e` Non-empty project deletion flow: mixed server/client workflow needs product review.
+
+### Skipped changes
+
+- Release workflow and packaging changes: `2d87574e`, `505db9f6`, `b991b9b9`, `54179c86`, `df9d3400`, `52a60678`, `29cb917a`, `8ac57f79`, `9df3c640`
+- Product-surface/provider expansions: `ce94feee`, `a3b1df52`, `9c64f12e`
+- Command-palette UI expansion: `d8d32969`
+
+### Deferred selective frontend candidates
+
+- `39ca3ee8` Global terminal shortcuts from focused xterm: deferred after landing the narrower Ctrl+J fix first; looks safe for a future PR.
+- `60387f67` Restore-defaults button limited to General settings: deferred because Kodo’s settings surface is already diverging; likely safe for a future PR with visual review.
+
+### Checks
+
+- `bun fmt` ✅
+- `bun lint` ✅
+- `bun typecheck` ⚠️ fails in pre-existing `apps/web` Base UI / `ButtonProps` typing errors unrelated to this sync batch.
+- `cd apps/web && bun run test src/keybindings.test.ts` ✅
+- `cd apps/server && bun run test ...` ⚠️ blocked by pre-existing server test environment issues: missing `multipasta/node` resolution and missing migration `023` before the local restore commit.
+
 ## 2026-04-17
 
 - Fork branch: `sync/upstream-2026-04-17`
