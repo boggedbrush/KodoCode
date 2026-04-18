@@ -728,15 +728,15 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
 }) {
-  const chatFontFamily = useSettings((settings) => settings.chatFontFamily);
   const chatTextSize = useSettings((settings) => settings.chatTextSize);
   const textDirection = resolveTextDirection(props.text);
   const bodyClassName = cn(
-    "chat-message-inline-body whitespace-pre-wrap text-foreground",
-    textDirection === "ltr" && "font-mono",
+    "chat-message-inline-body whitespace-pre-wrap font-mono text-foreground",
     resolveChatReadabilityClassName({
       direction: textDirection,
-      fontFamily: chatFontFamily,
+      // Terminal-context bubbles stay monospaced even when chat copy uses a
+      // proportional font override.
+      fontFamily: "auto",
       textSize: chatTextSize,
     }),
   );

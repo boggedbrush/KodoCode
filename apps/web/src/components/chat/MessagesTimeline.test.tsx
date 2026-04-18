@@ -1,7 +1,11 @@
 import { MessageId } from "@t3tools/contracts";
+import { ClientSettingsSchema, DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { removeLocalStorageItem, setLocalStorageItem } from "../../hooks/useLocalStorage";
 import { MessagesTimeline } from "./MessagesTimeline";
+
+const CLIENT_SETTINGS_STORAGE_KEY = "t3code:client-settings:v1";
 
 function matchMedia() {
   return {
@@ -41,6 +45,10 @@ beforeAll(() => {
     callback(0);
     return 0;
   });
+});
+
+beforeEach(() => {
+  removeLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY);
 });
 
 describe("MessagesTimeline", () => {
@@ -144,7 +152,17 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Work log");
   });
 
-  it("does not force auto-direction user bubbles into monospace", () => {
+  it("keeps terminal context user bubbles monospace with explicit chat fonts", () => {
+    setLocalStorageItem(
+      CLIENT_SETTINGS_STORAGE_KEY,
+      {
+        ...DEFAULT_CLIENT_SETTINGS,
+        chatFontFamily: "noto-sans",
+        chatTextSize: "default",
+      },
+      ClientSettingsSchema,
+    );
+
     const markup = renderToStaticMarkup(
       <MessagesTimeline
         hasMessages
@@ -196,8 +214,8 @@ describe("MessagesTimeline", () => {
 
     expect(markup).toContain('dir="auto"');
     expect(markup).toContain("chat-readability-direction-auto");
-    expect(markup).not.toContain(
-      "chat-message-inline-body whitespace-pre-wrap text-foreground font-mono",
-    );
+    expect(markup).toContain("chat-message-inline-body");
+    expect(markup).toContain("font-mono");
+    expect(markup).not.toContain("chat-readability-font-noto-sans");
   });
 });
