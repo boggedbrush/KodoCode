@@ -46,6 +46,9 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration";
 import {
+  ProjectCreateSymlinkError,
+  ProjectCreateSymlinkInput,
+  ProjectCreateSymlinkResult,
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
@@ -86,6 +89,7 @@ export const WS_METHODS = {
   projectsRemove: "projects.remove",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
+  projectsCreateSymlink: "projects.createSymlink",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -184,6 +188,12 @@ export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
   error: ProjectWriteFileError,
+});
+
+export const WsProjectsCreateSymlinkRpc = Rpc.make(WS_METHODS.projectsCreateSymlink, {
+  payload: ProjectCreateSymlinkInput,
+  success: ProjectCreateSymlinkResult,
+  error: ProjectCreateSymlinkError,
 });
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -376,6 +386,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerEnhancePromptRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
+  WsProjectsCreateSymlinkRpc,
   WsShellOpenInEditorRpc,
   WsSubscribeGitStatusRpc,
   WsGitPullRpc,

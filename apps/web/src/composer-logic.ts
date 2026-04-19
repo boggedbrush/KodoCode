@@ -9,7 +9,8 @@ export type ComposerSlashCommand =
   | "plan"
   | "code"
   | "review"
-  | "usage";
+  | "usage"
+  | "init";
 export type ComposerStandaloneSlashCommand = Exclude<ComposerSlashCommand, "model" | "presets">;
 
 export interface ComposerTrigger {
@@ -27,6 +28,7 @@ const SLASH_COMMANDS: readonly ComposerSlashCommand[] = [
   "code",
   "review",
   "usage",
+  "init",
 ];
 const isInlineTokenSegment = (
   segment: { type: "text"; text: string } | { type: "mention" } | { type: "terminal-context" },
@@ -274,7 +276,7 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
 export function parseStandaloneComposerSlashCommand(
   text: string,
 ): ComposerStandaloneSlashCommand | null {
-  const match = /^\/(ask|plan|code|review|usage)\s*$/i.exec(text.trim());
+  const match = /^\/(ask|plan|code|review|usage|init)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
   }
@@ -283,6 +285,7 @@ export function parseStandaloneComposerSlashCommand(
   if (command === "plan") return "plan";
   if (command === "code") return "code";
   if (command === "review") return "review";
+  if (command === "init") return "init";
   return "usage";
 }
 
