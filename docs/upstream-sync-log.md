@@ -1,5 +1,52 @@
 # Upstream Sync Log
 
+## 2026-04-19
+
+- Fork branch: `sync/upstream-2026-04-17`
+- Fork base: `boggedbrush/KodoCode@adf75c663ced736d0807242a041f67dc699aecad`
+- Upstream range reviewed: `pingdotgg/t3code@9df3c640210fecccb58f7fbc735f81ca0ee011bd..9df3c640210fecccb58f7fbc735f81ca0ee011bd`
+- Upstream release window: `main unchanged since 2026-04-18 review`
+- Fork PR: https://github.com/boggedbrush/KodoCode/pull/7
+
+### Classification
+
+- No new upstream `main` commits were available after `9df3c640`, so there were no new `APPLY`, `ADAPT`, `SELECTIVE FRONTEND`, `MANUAL REVIEW`, or `SKIP` classifications in this run.
+
+### Applied changes
+
+- None. Upstream `main` had no new commits beyond the previously reviewed boundary.
+- Local branch follow-up: repaired sync-branch typecheck drift caused by Effect cache API and branded-id helper changes so required validation passes cleanly.
+
+### Adapted changes
+
+- None.
+
+### Selective frontend changes ported
+
+- None.
+
+### Manual-review candidates
+
+- `8dba2d64` Node-native TypeScript adoption: still too broad for a bounded sync.
+- `a7a44d06` Windows PATH hydration/repair: still valuable, but remains a large shared-runtime adaptation.
+- `40009735` Backend startup readiness extraction: still overlaps Kodo desktop startup policy.
+- `4e0c003e` Non-empty project deletion flow: still a mixed server/client workflow needing product review.
+
+### Skipped changes
+
+- None newly skipped in this run because there were no new upstream commits to classify.
+
+### Deferred selective frontend candidates
+
+- `39ca3ee8` Global terminal shortcuts from focused xterm: still deferred; looks safe for a future PR.
+- `60387f67` Restore-defaults button limited to General settings: still deferred pending visual review against Kodo settings divergence.
+
+### Checks
+
+- `bun fmt` ✅
+- `bun lint` ✅
+- `bun typecheck` ✅
+
 ## 2026-04-18
 
 - Fork branch: `sync/upstream-2026-04-17`

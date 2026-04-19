@@ -1380,10 +1380,10 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.session.set",
-        commandId: CommandId.make("cmd-session-set-stale"),
-        threadId: ThreadId.make("thread-1"),
+        commandId: CommandId.makeUnsafe("cmd-session-set-stale"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
         session: {
-          threadId: ThreadId.make("thread-1"),
+          threadId: ThreadId.makeUnsafe("thread-1"),
           status: "ready",
           providerName: "codex",
           runtimeMode: "approval-required",
@@ -1398,8 +1398,8 @@ describe("ProviderCommandReactor", () => {
     await Effect.runPromise(
       harness.engine.dispatch({
         type: "thread.turn.start",
-        commandId: CommandId.make("cmd-turn-start-stale"),
-        threadId: ThreadId.make("thread-1"),
+        commandId: CommandId.makeUnsafe("cmd-turn-start-stale"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
         message: {
           messageId: asMessageId("user-message-stale"),
           role: "user",
@@ -1416,7 +1416,7 @@ describe("ProviderCommandReactor", () => {
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
 
     expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
-      threadId: ThreadId.make("thread-1"),
+      threadId: ThreadId.makeUnsafe("thread-1"),
       modelSelection: {
         provider: "codex",
         model: "gpt-5-codex",
@@ -1424,7 +1424,7 @@ describe("ProviderCommandReactor", () => {
       runtimeMode: "approval-required",
     });
     expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
-      threadId: ThreadId.make("thread-1"),
+      threadId: ThreadId.makeUnsafe("thread-1"),
     });
   });
 

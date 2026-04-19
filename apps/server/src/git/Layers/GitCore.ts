@@ -980,8 +980,9 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     return true as const;
   });
 
-  const statusRemoteRefreshCache = yield* Cache.makeWith(refreshStatusRemoteCacheEntry, {
+  const statusRemoteRefreshCache = yield* Cache.makeWith({
     capacity: STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY,
+    lookup: refreshStatusRemoteCacheEntry,
     // Keep successful refreshes warm and briefly back off failed refreshes to avoid retry storms.
     timeToLive: (exit) =>
       Exit.isSuccess(exit)
