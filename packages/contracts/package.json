@@ -22,8 +22,8 @@
     }
   },
   "scripts": {
-    "dev": "tsdown src/index.ts --format esm,cjs --dts --watch --clean",
-    "build": "tsdown src/index.ts --format esm,cjs --dts --clean",
+    "dev": "tsdown src/index.ts --format esm,cjs --watch --clean",
+    "build": "tsdown src/index.ts --format esm,cjs --clean",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
