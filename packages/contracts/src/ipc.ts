@@ -24,6 +24,7 @@ import type {
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project";
+import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem";
 import type {
   ServerConfig,
   ServerProviderUpdatedPayload,
@@ -158,6 +159,9 @@ export interface NativeApi {
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+  };
+  filesystem: {
+    browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
   };
   shell: {
     openInEditor: (cwd: string, editor: EditorId) => Promise<void>;

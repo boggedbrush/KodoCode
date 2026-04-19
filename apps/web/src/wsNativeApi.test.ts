@@ -59,6 +59,9 @@ const {
       searchEntries: vi.fn(),
       writeFile: vi.fn(),
     },
+    filesystem: {
+      browse: vi.fn(),
+    },
     shell: {
       openInEditor: vi.fn(),
     },
@@ -394,6 +397,21 @@ describe("wsNativeApi", () => {
       relativePath: "plan.md",
       contents: "# Plan\n",
     });
+  });
+
+  it("forwards filesystem browse requests to the RPC client", async () => {
+    rpcClientMock.filesystem.browse.mockResolvedValue({
+      parentPath: "/tmp",
+      entries: [{ name: "project", fullPath: "/tmp/project" }],
+    });
+
+    const api = createWsNativeApi();
+    await expect(api.filesystem.browse({ partialPath: "/tmp/" })).resolves.toEqual({
+      parentPath: "/tmp",
+      entries: [{ name: "project", fullPath: "/tmp/project" }],
+    });
+
+    expect(rpcClientMock.filesystem.browse).toHaveBeenCalledWith({ partialPath: "/tmp/" });
   });
 
   it("forwards full-thread diff requests to the orchestration RPC", async () => {

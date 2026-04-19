@@ -11,15 +11,21 @@
 ### Classification
 
 - No new upstream `main` commits were available after `9df3c640`, so there were no new `APPLY`, `ADAPT`, `SELECTIVE FRONTEND`, `MANUAL REVIEW`, or `SKIP` classifications in this run.
+- User-requested follow-up: `44afe784` `Add filesystem browse API and command palette project picker (#2024)` — `ADAPT`: ported the backend filesystem browse API and a focused Sidebar folder browser without importing upstream command-palette or project-flow churn.
 
 ### Applied changes
 
 - None. Upstream `main` had no new commits beyond the previously reviewed boundary.
 - Local branch follow-up: repaired sync-branch typecheck drift caused by Effect cache API and branded-id helper changes so required validation passes cleanly.
+- Added `filesystem.browse` contracts/RPC wiring and server-side directory browsing through `WorkspaceEntries`.
+- Added a Kodo-specific inline folder browser to the Sidebar add-project flow so desktop users are no longer forced through the system folder picker.
 
 ### Adapted changes
 
-- None.
+- `44afe784` selectively adapted:
+- kept the browse backend/API pieces
+- omitted the upstream command palette and project picker architecture
+- wired the feature into Kodo's existing Sidebar add-project UI instead
 
 ### Selective frontend changes ported
 
@@ -46,6 +52,9 @@
 - `bun fmt` ✅
 - `bun lint` ✅
 - `bun typecheck` ✅
+- `cd apps/server && bun run test src/workspace/Layers/WorkspaceEntries.test.ts -t browse` ✅
+- `cd apps/server && bun run test src/server.test.ts -t filesystem.browse` ✅
+- `cd apps/web && bun run test src/wsNativeApi.test.ts src/lib/projectPaths.test.ts` ✅
 
 ## 2026-04-18
 

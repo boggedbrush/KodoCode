@@ -2007,6 +2007,34 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes websocket rpc filesystem.browse", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-ws-filesystem-browse-",
+      });
+      yield* fs.makeDirectory(path.join(workspaceDir, "project-alpha"), { recursive: true });
+      yield* fs.makeDirectory(path.join(workspaceDir, "project-beta"), { recursive: true });
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.filesystemBrowse]({
+            partialPath: `${workspaceDir}/project-`,
+          }),
+        ),
+      );
+
+      assert.deepEqual(response.entries, [
+        { name: "project-alpha", fullPath: path.join(workspaceDir, "project-alpha") },
+        { name: "project-beta", fullPath: path.join(workspaceDir, "project-beta") },
+      ]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc shell.openInEditor errors", () =>
     Effect.gen(function* () {
       const openError = new OpenError({ message: "Editor command not found: cursor" });

@@ -11,6 +11,7 @@ export * from "./keybindings";
 export * from "./server";
 export * from "./settings";
 export * from "./enhance";
+export * from "./filesystem";
 export * from "./git";
 export * from "./orchestration";
 export * from "./editor";
