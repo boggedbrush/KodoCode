@@ -1,9 +1,29 @@
-import { parsePatchFiles } from "@pierre/diffs";
-
 export interface TurnDiffFileSummary {
   readonly path: string;
   readonly additions: number;
   readonly deletions: number;
+}
+
+interface MutableTurnDiffFileSummary {
+  path: string;
+  additions: number;
+  deletions: number;
+}
+
+function normalizeDiffPath(rawPath: string): string {
+  return rawPath.replace(/^b\//, "").trim();
+}
+
+function finalizeFile(
+  summaries: Array<MutableTurnDiffFileSummary>,
+  current: MutableTurnDiffFileSummary | null,
+): MutableTurnDiffFileSummary | null {
+  if (!current || current.path.length === 0) {
+    return null;
+  }
+
+  summaries.push(current);
+  return null;
 }
 
 export function parseTurnDiffFilesFromUnifiedDiff(
@@ -14,14 +34,49 @@ export function parseTurnDiffFilesFromUnifiedDiff(
     return [];
   }
 
-  const parsedPatches = parsePatchFiles(normalized);
-  const files = parsedPatches.flatMap((patch) =>
-    patch.files.map((file) => ({
-      path: file.name,
-      additions: file.hunks.reduce((total, hunk) => total + hunk.additionLines, 0),
-      deletions: file.hunks.reduce((total, hunk) => total + hunk.deletionLines, 0),
-    })),
-  );
+  const summaries: Array<MutableTurnDiffFileSummary> = [];
+  let current: MutableTurnDiffFileSummary | null = null;
 
-  return files.toSorted((left, right) => left.path.localeCompare(right.path));
+  for (const line of normalized.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      current = finalizeFile(summaries, current);
+      const match = /^diff --git a\/.+? b\/(.+)$/.exec(line);
+      current = {
+        path: match ? normalizeDiffPath(match[1] ?? "") : "",
+        additions: 0,
+        deletions: 0,
+      };
+      continue;
+    }
+
+    if (!current) {
+      continue;
+    }
+
+    if (line.startsWith("rename to ")) {
+      current.path = normalizeDiffPath(line.slice("rename to ".length));
+      continue;
+    }
+
+    if (line.startsWith("+++ ")) {
+      const nextPath = line.slice(4).trim();
+      if (nextPath !== "/dev/null") {
+        current.path = normalizeDiffPath(nextPath);
+      }
+      continue;
+    }
+
+    if (line.startsWith("+") && !line.startsWith("+++")) {
+      current.additions += 1;
+      continue;
+    }
+
+    if (line.startsWith("-") && !line.startsWith("---")) {
+      current.deletions += 1;
+    }
+  }
+
+  finalizeFile(summaries, current);
+
+  return summaries.toSorted((left, right) => left.path.localeCompare(right.path));
 }

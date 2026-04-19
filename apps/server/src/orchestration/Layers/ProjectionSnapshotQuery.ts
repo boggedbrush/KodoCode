@@ -38,6 +38,7 @@ import { ProjectionThreadMessage } from "../../persistence/Services/ProjectionTh
 import { ProjectionThreadProposedPlan } from "../../persistence/Services/ProjectionThreadProposedPlans.ts";
 import { ProjectionThreadSession } from "../../persistence/Services/ProjectionThreadSessions.ts";
 import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.ts";
+import { normalizePersistedProviderInteractionMode } from "../../persistence/interactionMode.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
   ProjectionSnapshotQuery,
@@ -60,11 +61,20 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   }),
 );
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
-const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
-  Struct.assign({
-    modelSelection: Schema.fromJsonString(ModelSelection),
-  }),
-);
+const ProjectionThreadDbRowSchema = Schema.Struct({
+  threadId: ProjectionThread.fields.threadId,
+  projectId: ProjectionThread.fields.projectId,
+  title: ProjectionThread.fields.title,
+  modelSelection: Schema.fromJsonString(ModelSelection),
+  runtimeMode: ProjectionThread.fields.runtimeMode,
+  interactionMode: Schema.String,
+  branch: ProjectionThread.fields.branch,
+  worktreePath: ProjectionThread.fields.worktreePath,
+  createdAt: ProjectionThread.fields.createdAt,
+  updatedAt: ProjectionThread.fields.updatedAt,
+  archivedAt: ProjectionThread.fields.archivedAt,
+  deletedAt: ProjectionThread.fields.deletedAt,
+});
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
   Struct.assign({
     payload: Schema.fromJsonString(Schema.Unknown),
@@ -669,7 +679,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             title: row.title,
             modelSelection: row.modelSelection,
             runtimeMode: row.runtimeMode,
-            interactionMode: row.interactionMode,
+            interactionMode: normalizePersistedProviderInteractionMode(row.interactionMode),
             branch: row.branch,
             worktreePath: row.worktreePath,
             latestTurn: latestTurnByThread.get(row.threadId) ?? null,

@@ -76,7 +76,7 @@ import { ServerAuthLive } from "./auth/Layers/ServerAuth";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
-    if (typeof Bun !== "undefined") {
+    if (typeof Bun !== "undefined" && process.platform !== "win32") {
       const BunPTY = yield* Effect.promise(() => import("./terminal/Layers/BunPTY"));
       return BunPTY.layer;
     } else {

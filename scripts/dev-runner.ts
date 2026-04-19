@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -16,6 +19,49 @@ const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
 const DESKTOP_DEV_RUNNER_PID_ENV = "KODOCODE_DEV_RUNNER_PID";
 const DESKTOP_DEV_SHUTDOWN_SIGNAL_ENV = "KODOCODE_DEV_SHUTDOWN_SIGNAL";
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = dirname(SCRIPT_DIR);
+
+function encodeBooleanEnv(value: boolean): string {
+  return value ? "true" : "false";
+}
+
+function resolveTurboCommand(): string {
+  const candidatePaths =
+    process.platform === "win32"
+      ? [
+          join(REPO_ROOT, "node_modules", ".bin", "turbo.exe"),
+          join(REPO_ROOT, "node_modules", ".bin", "turbo.cmd"),
+        ]
+      : [join(REPO_ROOT, "node_modules", ".bin", "turbo")];
+
+  return candidatePaths.find((candidate) => existsSync(candidate)) ?? "turbo";
+}
+
+function resolveBunCommand(): string {
+  const candidate = process.env.BUN_BINARY?.trim();
+  if (candidate && existsSync(candidate)) {
+    return candidate;
+  }
+
+  const candidatePaths =
+    process.platform === "win32"
+      ? [
+          join(process.env.LOCALAPPDATA ?? "", "Microsoft", "WinGet", "Links", "bun.exe"),
+          join(
+            process.env.LOCALAPPDATA ?? "",
+            "Microsoft",
+            "WinGet",
+            "Packages",
+            "Oven-sh.Bun_Microsoft.Winget.Source_8wekyb3d8bbwe",
+            "bun-windows-x64",
+            "bun.exe",
+          ),
+        ]
+      : [join(process.env.HOME ?? "", ".bun", "bin", "bun")];
+
+  return candidatePaths.find((entry) => entry && existsSync(entry)) ?? "bun";
+}
 
 export const DESKTOP_DEV_SHUTDOWN_SIGNAL: NodeJS.Signals =
   process.platform === "win32" ? "SIGTERM" : "SIGUSR2";
@@ -191,19 +237,19 @@ export function createDevRunnerEnv({
     }
 
     if (!isDesktopMode && noBrowser !== undefined) {
-      output.T3CODE_NO_BROWSER = noBrowser ? "1" : "0";
+      output.T3CODE_NO_BROWSER = encodeBooleanEnv(noBrowser);
     } else if (!isDesktopMode) {
       delete output.T3CODE_NO_BROWSER;
     }
 
     if (autoBootstrapProjectFromCwd !== undefined) {
-      output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = autoBootstrapProjectFromCwd ? "1" : "0";
+      output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD = encodeBooleanEnv(autoBootstrapProjectFromCwd);
     } else {
       delete output.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD;
     }
 
     if (logWebSocketEvents !== undefined) {
-      output.T3CODE_LOG_WS_EVENTS = logWebSocketEvents ? "1" : "0";
+      output.T3CODE_LOG_WS_EVENTS = encodeBooleanEnv(logWebSocketEvents);
     } else {
       delete output.T3CODE_LOG_WS_EVENTS;
     }
@@ -568,24 +614,46 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       return;
     }
 
-    const child = yield* ChildProcess.make(
-      "turbo",
-      [...MODE_ARGS[input.mode], ...input.turboArgs],
-      {
+    const command = input.mode === "dev:server" ? resolveBunCommand() : resolveTurboCommand();
+    const args =
+      input.mode === "dev:server"
+        ? ["run", "src/bin.ts"]
+        : [...MODE_ARGS[input.mode], ...input.turboArgs];
+    const cwd = input.mode === "dev:server" ? join(REPO_ROOT, "apps", "server") : undefined;
+
+    if (input.mode === "dev:server") {
+      const contractsBuild = yield* ChildProcess.make(command, ["run", "build"], {
+        cwd: join(REPO_ROOT, "packages", "contracts"),
         stdin: "inherit",
         stdout: "inherit",
         stderr: "inherit",
         env,
         extendEnv: false,
-        // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
-        shell: process.platform === "win32",
-        // Keep turbo in the same process group so terminal signals (Ctrl+C)
-        // reach it directly. Effect defaults to detached: true on non-Windows,
-        // which would put turbo in a new group and require manual forwarding.
+        shell: process.platform === "win32" && !command.includes("\\"),
         detached: false,
         forceKillAfter: "1500 millis",
-      },
-    );
+      });
+      const buildExitCode = yield* contractsBuild.exitCode;
+      if (buildExitCode !== 0) {
+        return yield* new DevRunnerError({
+          message: `contracts build exited with code ${buildExitCode}`,
+        });
+      }
+    }
+
+    const child = yield* ChildProcess.make(command, args, {
+      cwd,
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit",
+      env,
+      extendEnv: false,
+      shell: process.platform === "win32" && !command.includes("\\"),
+      // Keep the child in the same process group so terminal signals (Ctrl+C)
+      // reach it directly.
+      detached: false,
+      forceKillAfter: "1500 millis",
+    });
 
     const childPid = Number(child.pid);
     const signalHandlers: Array<readonly [NodeJS.Signals, () => void]> = [];
@@ -626,7 +694,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       const exitCode = yield* child.exitCode;
       if (exitCode !== 0) {
         return yield* new DevRunnerError({
-          message: `turbo exited with code ${exitCode}`,
+          message: `${input.mode === "dev:server" ? "bun" : "turbo"} exited with code ${exitCode}`,
         });
       }
     } finally {

@@ -11,7 +11,7 @@ import { accessSync, constants, statSync } from "node:fs";
 import { extname, join } from "node:path";
 
 import { EDITORS, OpenError, type EditorId } from "@t3tools/contracts";
-import { ServiceMap, Effect, Layer } from "effect";
+import { ServiceMap, Effect, Layer, Schema } from "effect";
 
 // ==============================
 // Definitions
@@ -329,20 +329,21 @@ export const launchDetached = (launch: EditorLaunch) =>
     });
   });
 
-const make = Effect.gen(function* () {
-  const open = yield* Effect.tryPromise({
-    try: () => import("open"),
-    catch: (cause) => new OpenError({ message: "failed to load browser opener", cause }),
-  });
-
-  return {
-    openBrowser: (target) =>
-      Effect.tryPromise({
-        try: () => open.default(target),
-        catch: (cause) => new OpenError({ message: "Browser auto-open failed", cause }),
-      }),
-    openInEditor: (input) => Effect.flatMap(resolveEditorLaunch(input), launchDetached),
-  } satisfies OpenShape;
-});
+const make = Effect.succeed({
+  openBrowser: (target) =>
+    Effect.tryPromise({
+      try: async () => {
+        const open = await import("open").catch((cause) => {
+          throw new OpenError({ message: "failed to load browser opener", cause });
+        });
+        return open.default(target);
+      },
+      catch: (cause) =>
+        Schema.is(OpenError)(cause)
+          ? cause
+          : new OpenError({ message: "Browser auto-open failed", cause }),
+    }),
+  openInEditor: (input) => Effect.flatMap(resolveEditorLaunch(input), launchDetached),
+} satisfies OpenShape);
 
 export const OpenLive = Layer.effect(Open, make);

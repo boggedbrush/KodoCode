@@ -5,6 +5,7 @@
     "": {
       "name": "@t3tools/monorepo",
       "devDependencies": {
+        "@turbo/windows-64": "2.9.6",
         "@types/node": "catalog:",
         "node-gyp": "^11.2.0",
         "oxfmt": "^0.40.0",

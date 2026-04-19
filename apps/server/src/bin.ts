@@ -1,5 +1,3 @@
-import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { Command } from "effect/unstable/cli";
@@ -8,11 +6,20 @@ import { NetService } from "@t3tools/shared/Net";
 import { cli } from "./cli";
 import { version } from "../package.json" with { type: "json" };
 
-const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
+const isBunRuntime = typeof Bun !== "undefined";
 
-const main = (Command.run(cli, { version }) as any).pipe(
-  Effect.scoped,
-  Effect.provide(CliRuntimeLayer),
-);
+const main = (Command.run(cli, { version }) as any).pipe(Effect.scoped);
 
-NodeRuntime.runMain(main);
+if (isBunRuntime) {
+  const BunRuntime = await import("@effect/platform-bun/BunRuntime");
+  const BunServices = await import("@effect/platform-bun/BunServices");
+  const cliRuntimeLayer = Layer.mergeAll(BunServices.layer, NetService.layer);
+
+  BunRuntime.runMain(main.pipe(Effect.provide(cliRuntimeLayer)));
+} else {
+  const NodeRuntime = await import("@effect/platform-node/NodeRuntime");
+  const NodeServices = await import("@effect/platform-node/NodeServices");
+  const cliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
+
+  NodeRuntime.runMain(main.pipe(Effect.provide(cliRuntimeLayer)));
+}
