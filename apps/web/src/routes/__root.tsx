@@ -18,6 +18,7 @@ import { resolveUtilityModelSelectionDefault } from "@t3tools/shared/model";
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
+import { AppStartupScreen } from "../components/AppStartupScreen";
 import { DesktopWindowFrame } from "../components/DesktopWindowFrame";
 import {
   SlowRpcAckToastCoordinator,
@@ -72,13 +73,7 @@ function RootRouteView() {
   if (!readNativeApi()) {
     return (
       <DesktopWindowFrame>
-        <div className="flex h-screen flex-col bg-background text-foreground">
-          <div className="flex flex-1 items-center justify-center">
-            <p className="text-sm text-muted-foreground">
-              Connecting to {APP_DISPLAY_NAME} server...
-            </p>
-          </div>
-        </div>
+        <AppStartupScreen />
       </DesktopWindowFrame>
     );
   }
