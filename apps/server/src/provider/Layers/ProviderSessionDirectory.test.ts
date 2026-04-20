@@ -122,6 +122,30 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
       }
     }));
 
+  it("removes persisted bindings when a thread is explicitly forgotten", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const runtimeRepository = yield* ProviderSessionRuntimeRepository;
+      const threadId = ThreadId.makeUnsafe("thread-remove");
+
+      yield* directory.upsert({
+        provider: "codex",
+        threadId,
+        status: "running",
+      });
+
+      yield* directory.remove(threadId);
+
+      const binding = yield* directory.getBinding(threadId);
+      assert.equal(Option.isNone(binding), true);
+
+      const runtime = yield* runtimeRepository.getByThreadId({ threadId });
+      assert.equal(Option.isNone(runtime), true);
+
+      const threadIds = yield* directory.listThreadIds();
+      assert.deepEqual(threadIds, []);
+    }));
+
   it("resets adapterKey to the new provider when provider changes without an explicit adapter key", () =>
     Effect.gen(function* () {
       const directory = yield* ProviderSessionDirectory;

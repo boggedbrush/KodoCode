@@ -33,6 +33,14 @@ export interface ProviderSessionDirectoryShape {
     binding: ProviderRuntimeBinding,
   ) => Effect.Effect<void, ProviderSessionDirectoryWriteError>;
 
+  /**
+   * Remove a persisted binding entirely.
+   *
+   * Use this for explicit user stops, where the caller expects the thread to
+   * stop being resumable until a brand new session is started.
+   */
+  readonly remove: (threadId: ThreadId) => Effect.Effect<void, ProviderSessionDirectoryWriteError>;
+
   readonly getProvider: (
     threadId: ThreadId,
   ) => Effect.Effect<ProviderKind, ProviderSessionDirectoryReadError>;

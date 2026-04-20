@@ -116,6 +116,13 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
       .pipe(Effect.mapError(toPersistenceError("ProviderSessionDirectory.upsert:upsert")));
   });
 
+  const remove: ProviderSessionDirectoryShape["remove"] = (threadId) =>
+    repository
+      .deleteByThreadId({ threadId })
+      .pipe(
+        Effect.mapError(toPersistenceError("ProviderSessionDirectory.remove:deleteByThreadId")),
+      );
+
   const getProvider: ProviderSessionDirectoryShape["getProvider"] = (threadId) =>
     getBinding(threadId).pipe(
       Effect.flatMap((binding) =>
@@ -140,6 +147,7 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
 
   return {
     upsert,
+    remove,
     getProvider,
     getBinding,
     listThreadIds,

@@ -65,4 +65,39 @@ describe("parseTurnDiffFilesFromUnifiedDiff", () => {
       { path: "a.txt", additions: 2, deletions: 1 },
     ]);
   });
+
+  it("parses quoted diff headers for paths that need escaping", () => {
+    const diff = [
+      'diff --git "a/src/with space.ts" "b/src/with space.ts"',
+      "index 1111111..2222222 100644",
+      '--- "a/src/with space.ts"',
+      '+++ "b/src/with space.ts"',
+      "@@ -1 +1 @@",
+      "-old",
+      "+new",
+      "",
+    ].join("\n");
+
+    expect(parseTurnDiffFilesFromUnifiedDiff(diff)).toEqual([
+      { path: "src/with space.ts", additions: 1, deletions: 1 },
+    ]);
+  });
+
+  it("does not treat added +++ content as a path header", () => {
+    const diff = [
+      "diff --git a/a.txt b/a.txt",
+      "index 1111111..2222222 100644",
+      "--- a/a.txt",
+      "+++ b/a.txt",
+      "@@ -1 +1,2 @@",
+      " unchanged",
+      "+hello",
+      "+++ counter",
+      "",
+    ].join("\n");
+
+    expect(parseTurnDiffFilesFromUnifiedDiff(diff)).toEqual([
+      { path: "a.txt", additions: 2, deletions: 0 },
+    ]);
+  });
 });

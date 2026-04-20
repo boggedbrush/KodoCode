@@ -582,14 +582,11 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         if (routed.isActive) {
           yield* routed.adapter.stopSession(routed.threadId);
         }
-        yield* directory.upsert({
-          threadId: input.threadId,
-          provider: routed.adapter.provider,
-          status: "stopped",
-          runtimePayload: {
-            activeTurnId: null,
-          },
-        });
+        // An explicit user stop must be terminal. Leaving a persisted binding
+        // behind would let the next routed action auto-recover the session,
+        // which violates the user's intent to stop this thread until they
+        // deliberately start a new provider session.
+        yield* directory.remove(input.threadId);
         yield* analytics.record("provider.session.stopped", {
           provider: routed.adapter.provider,
         });

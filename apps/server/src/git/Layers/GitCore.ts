@@ -81,7 +81,13 @@ type TraceTailState = {
 
 class StatusRemoteRefreshCacheKey extends Data.Class<{
   gitCommonDir: string;
+  // The cache must stay branch-specific. Reusing one remote-level refresh
+  // entry across sibling worktrees can make a fetch for `origin/main` appear
+  // to satisfy `origin/feature/...`, even though only one tracking ref was
+  // updated.
+  upstreamRef: string;
   remoteName: string;
+  upstreamBranch: string;
 }> {}
 
 interface ExecuteGitOptions {
@@ -949,14 +955,19 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
 
   const fetchRemoteForStatus = (
     gitCommonDir: string,
-    remoteName: string,
+    upstream: { upstreamRef: string; remoteName: string; upstreamBranch: string },
   ): Effect.Effect<void, GitCommandError> => {
+    // Status refreshes need to update the exact tracking ref for the current
+    // branch. A bare `git fetch <remote>` can skip that ref in single-branch
+    // clones or repos with custom remote.<name>.fetch rules, which leaves
+    // ahead/behind counts stale even though we just "refreshed".
+    const refspec = `+refs/heads/${upstream.upstreamBranch}:refs/remotes/${upstream.upstreamRef}`;
     const fetchCwd =
       path.basename(gitCommonDir) === ".git" ? path.dirname(gitCommonDir) : gitCommonDir;
     return executeGit(
       "GitCore.fetchRemoteForStatus",
       fetchCwd,
-      ["--git-dir", gitCommonDir, "fetch", "--quiet", "--no-tags", remoteName],
+      ["--git-dir", gitCommonDir, "fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
       {
         allowNonZeroExit: true,
         timeoutMs: Duration.toMillis(STATUS_UPSTREAM_REFRESH_TIMEOUT),
@@ -976,7 +987,11 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   const refreshStatusRemoteCacheEntry = Effect.fn("refreshStatusRemoteCacheEntry")(function* (
     cacheKey: StatusRemoteRefreshCacheKey,
   ) {
-    yield* fetchRemoteForStatus(cacheKey.gitCommonDir, cacheKey.remoteName);
+    yield* fetchRemoteForStatus(cacheKey.gitCommonDir, {
+      upstreamRef: cacheKey.upstreamRef,
+      remoteName: cacheKey.remoteName,
+      upstreamBranch: cacheKey.upstreamBranch,
+    });
     return true as const;
   });
 
@@ -1006,7 +1021,13 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       statusRemoteRefreshCache,
       new StatusRemoteRefreshCacheKey({
         gitCommonDir,
+        // Keep the cache scoped to the exact upstream ref. Sibling worktrees on
+        // the same remote can track different branches, and sharing one remote-
+        // keyed entry would let a refresh for `origin/main` incorrectly satisfy
+        // a later `origin/feature/...` status request.
+        upstreamRef: upstream.upstreamRef,
         remoteName: upstream.remoteName,
+        upstreamBranch: upstream.upstreamBranch,
       }),
     );
   });
