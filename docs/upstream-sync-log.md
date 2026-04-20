@@ -1,5 +1,64 @@
 # Upstream Sync Log
 
+## 2026-04-20
+
+- Fork branch: `sync/upstream-2026-04-17`
+- Fork base: `boggedbrush/KodoCode@f7c93dba7c10a045cb07a097a467fba88597b711`
+- Upstream range reviewed: `pingdotgg/t3code@9df3c640210fecccb58f7fbc735f81ca0ee011bd..f6978db60553716a9974b9e85f855bae8124905d`
+- Upstream release window: `v0.0.21-nightly.20260420.77`
+- Fork PR: https://github.com/boggedbrush/KodoCode/pull/7
+
+### Classification
+
+- `c83bc5d4` `fix(release): use v<semver> tag format for nightly releases (#2186)` — `SKIP`: release workflow divergence.
+- `20f346d8` `Expand leading ~ in Codex home paths before exporting CODEX_HOME (#2210)` — `ADAPT`: ported into Kodo's current Codex runtime files and consolidated duplicate `~` path expansion helpers behind a shared server utility.
+- `57b59b5b` `Devcontainer / IDE updates (#2208)` — `SKIP`: devcontainer/editor housekeeping outside sync priorities.
+- `37965da0` `fix(server): handle OpenCode text response format in commit message generation (#2202)` — `SKIP`: current sync branch does not carry the upstream OpenCode text-generation layer shape this fix targets, so importing it would reintroduce divergent provider code.
+- `8dbcf92a` `fix(server): prevent probeClaudeCapabilities from wasting API requests (#2192)` — `ADAPT`: kept Kodo's subscription-only Claude probe but switched it to the no-prompt initialization pattern so it no longer burns Anthropic requests.
+- `66c326b8` `Redesign model picker with favorites and search (#2153)` — `SKIP`: broad model-picker UX rewrite conflicts with Kodo-specific composer and settings behavior.
+- `3b98fe35` ``effect-codex-app-server` (#1942)` — `MANUAL REVIEW`: very large Codex runtime/package refactor across server, provider layers, and generated schema surfaces.
+- `306ec4bb` `Refactor OpenCode lifecycle and structured output handling (#2218)` — `MANUAL REVIEW`: wide provider/runtime rewrite spanning server and web integration, too large for this bounded sync.
+- `6d1505c9` `fix: Change right panel sheet to be below title bar / action bar (#2224)` — `SELECTIVE FRONTEND`: localized layout correction on an existing surface, but deferred pending visual review against Kodo's desktop/title-bar divergence.
+- `de05b0c9` `fix(web): restore manual sort drag and keep per-group expand state (#2221)` — `MANUAL REVIEW`: touches sidebar grouping and project/worktree state behavior that Kodo intentionally owns.
+- `f6978db6` `chore(turbo): pass through PATHEXT (#2184)` — `APPLY`
+
+### Applied changes
+
+- `f6978db6` Added `PATHEXT` to Turbo passthrough env so Windows command resolution survives task execution without dropping Kodo's existing dev-runner passthrough vars.
+
+### Adapted changes
+
+- `20f346d8` Added [`apps/server/src/pathExpansion.ts`](/mnt/c/Users/Admin/.codex/worktrees/9b98/KodoCode/apps/server/src/pathExpansion.ts) and [`apps/server/src/pathExpansion.test.ts`](/mnt/c/Users/Admin/.codex/worktrees/9b98/KodoCode/apps/server/src/pathExpansion.test.ts), then wired Codex session startup, Codex CLI version checks, Codex git text generation, and Codex provider probes through expanded `CODEX_HOME` values.
+- `20f346d8` follow-up cleanup: repointed [`apps/server/src/os-jank.ts`](/mnt/c/Users/Admin/.codex/worktrees/9b98/KodoCode/apps/server/src/os-jank.ts) and [`apps/server/src/workspace/Layers/WorkspacePaths.ts`](/mnt/c/Users/Admin/.codex/worktrees/9b98/KodoCode/apps/server/src/workspace/Layers/WorkspacePaths.ts) at the same helper to avoid carrying three separate `~` expansion implementations.
+- `8dbcf92a` Updated [`apps/server/src/provider/Layers/ClaudeProvider.ts`](/mnt/c/Users/Admin/.codex/worktrees/9b98/KodoCode/apps/server/src/provider/Layers/ClaudeProvider.ts) so the Claude capability probe uses a never-yielding async prompt and abort-driven initialization instead of a real prompt/API request.
+
+### Selective frontend changes ported
+
+- None.
+
+### Manual-review candidates
+
+- `3b98fe35` `effect-codex-app-server`: large server/provider/generated-schema refactor that needs its own focused sync.
+- `306ec4bb` OpenCode lifecycle and structured output handling: large provider/runtime rewrite beyond this run's budget.
+- `de05b0c9` Sidebar manual-sort and per-group expand-state repair: mixed workflow/state change that needs Kodo product review.
+
+### Skipped changes
+
+- Release / packaging / dev-only changes: `c83bc5d4`, `57b59b5b`
+- Upstream-only or currently inapplicable provider-layer fix: `37965da0`
+- Kodo-divergent product-surface rewrite: `66c326b8`
+
+### Deferred selective frontend candidates
+
+- `6d1505c9` Right panel sheet below title bar/action bar: deferred because Kodo's desktop/title-bar behavior already diverges; likely safe for a future PR after visual review.
+
+### Checks
+
+- `bun fmt` ⚠️ not runnable in this automation environment because `bun` is not installed.
+- `bun lint` ⚠️ not runnable in this automation environment because `bun` is not installed.
+- `bun typecheck` ⚠️ not runnable in this automation environment because `bun` is not installed.
+- Focused runtime validation was also blocked because `node` is not installed in this automation environment.
+
 ## 2026-04-19
 
 - Fork branch: `sync/upstream-2026-04-17`
