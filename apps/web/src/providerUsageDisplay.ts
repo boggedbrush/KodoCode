@@ -14,6 +14,8 @@ export function toRemainingUsagePercent(percentUsed: number | null): number | nu
   return Math.max(0, Math.min(100, 100 - percentUsed));
 }
 
+const FIVE_HOUR_WINDOW_MS = 5 * 60 * 60 * 1000;
+
 function normalizeUsageWindowToken(value: string): string {
   return value.trim().replaceAll(/\s+/g, " ").toLowerCase();
 }
@@ -99,4 +101,30 @@ export function selectPrimaryUsageWindows(input: {
   });
 
   return { sessionWindow, weeklyWindow };
+}
+
+export function deriveSessionResetFromWeeklyReset(input: {
+  readonly weeklyResetAt: string | null;
+  readonly now?: Date;
+}): string | null {
+  if (!input.weeklyResetAt) {
+    return null;
+  }
+
+  const weeklyResetMs = Date.parse(input.weeklyResetAt);
+  if (Number.isNaN(weeklyResetMs)) {
+    return null;
+  }
+
+  const nowMs = (input.now ?? new Date()).getTime();
+  if (nowMs >= weeklyResetMs) {
+    return new Date(weeklyResetMs).toISOString();
+  }
+
+  const remainingMs = weeklyResetMs - nowMs;
+  const nextSessionResetOffset = remainingMs % FIVE_HOUR_WINDOW_MS;
+  const derivedResetMs =
+    nextSessionResetOffset === 0 ? weeklyResetMs : nowMs + nextSessionResetOffset;
+
+  return new Date(derivedResetMs).toISOString();
 }

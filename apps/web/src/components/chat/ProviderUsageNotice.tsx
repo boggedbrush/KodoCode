@@ -1,8 +1,4 @@
-import {
-  PROVIDER_DISPLAY_NAMES,
-  type ProviderKind,
-  type ServerProviderUsage,
-} from "@t3tools/contracts";
+import { type ProviderKind, type ServerProviderUsage } from "@t3tools/contracts";
 import { PROVIDER_USAGE_METADATA } from "@t3tools/shared/provider-usage";
 import { memo } from "react";
 import { XIcon } from "lucide-react";
@@ -14,37 +10,6 @@ import {
   toRemainingUsagePercent,
 } from "../../providerUsageDisplay";
 import { cn } from "~/lib/utils";
-
-function statusLabel(status: ServerProviderUsage["status"]): string {
-  switch (status) {
-    case "ready":
-      return "Healthy";
-    case "limited":
-      return "Limited";
-    case "exhausted":
-      return "Exhausted";
-    case "error":
-      return "Error";
-    case "unknown":
-    default:
-      return "Unknown";
-  }
-}
-
-function statusBadgeClass(status: ServerProviderUsage["status"]): string {
-  switch (status) {
-    case "ready":
-      return "bg-success/18 text-success";
-    case "limited":
-      return "bg-warning/18 text-warning";
-    case "exhausted":
-    case "error":
-      return "bg-destructive/18 text-destructive";
-    case "unknown":
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
 
 function usageBarClass(percentRemaining: number | null): string {
   if (percentRemaining === null) {
@@ -71,19 +36,15 @@ export const ProviderUsageNotice = memo(function ProviderUsageNotice({
   usage,
   visible,
   onDismiss,
+  className,
 }: {
   provider: ProviderKind;
   usage: ServerProviderUsage | null;
   visible: boolean;
   onDismiss?: () => void;
+  className?: string;
 }) {
-  if (!visible) {
-    return null;
-  }
-
   const metadata = PROVIDER_USAGE_METADATA[provider];
-  const providerLabel = PROVIDER_DISPLAY_NAMES[provider] ?? provider;
-  const usageMessage = usage?.detail ?? usage?.summary ?? null;
   const usageWindows = usage?.windows ?? [];
   const { sessionWindow, weeklyWindow } = selectPrimaryUsageWindows({
     windows: usageWindows,
@@ -105,50 +66,41 @@ export const ProviderUsageNotice = memo(function ProviderUsageNotice({
   ];
 
   return (
-    <div className="pointer-events-none fixed right-4 top-[calc(var(--desktop-window-safe-inset)+52px+8.75rem)] z-40 w-[min(22.5rem,calc(100vw-2rem))] sm:right-8 sm:w-[min(22.5rem,calc(100vw-4rem))]">
-      <div className="rounded-md border border-border/70 bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-medium text-foreground/90">{providerLabel} usage</span>
-          {usage ? (
-            <span
-              className={cn("rounded px-1.5 py-0.5 font-medium", statusBadgeClass(usage.status))}
-            >
-              {statusLabel(usage.status)}
-            </span>
-          ) : null}
-          {usage?.stale ? (
-            <span className="rounded bg-warning/20 px-1.5 py-0.5 text-warning">Stale</span>
-          ) : null}
-          {usage?.identity.planName ? <span>Plan: {usage.identity.planName}</span> : null}
-          {onDismiss ? (
-            <button
-              type="button"
-              aria-label="Hide usage panel"
-              className="pointer-events-auto ml-auto inline-flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:text-foreground"
-              onClick={onDismiss}
-            >
-              <XIcon className="size-3.5" />
-            </button>
-          ) : null}
-        </div>
-        {usageMessage ? (
-          <p className="mt-1 line-clamp-2 text-muted-foreground" title={usageMessage}>
-            {usageMessage}
-          </p>
-        ) : !usage ? (
-          <p className="mt-1 text-muted-foreground">
+    <div
+      className={cn(
+        "w-full origin-bottom overflow-hidden transition-[max-height,opacity,transform] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[max-height,opacity,transform] motion-reduce:transition-none",
+        visible
+          ? "max-h-64 translate-y-0 opacity-100"
+          : "pointer-events-none max-h-0 translate-y-1 opacity-0",
+        className,
+      )}
+      aria-hidden={!visible}
+    >
+      <div className="relative rounded-[18px] border border-border/60 bg-card/95 px-3 py-2 shadow-[0_10px_30px_rgba(0,0,0,0.16)] backdrop-blur-sm text-[11px] text-muted-foreground">
+        {onDismiss ? (
+          <button
+            type="button"
+            aria-label="Hide usage panel"
+            className="absolute top-2 right-2 inline-flex size-5 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:text-foreground"
+            onClick={onDismiss}
+          >
+            <XIcon className="size-3.5" />
+          </button>
+        ) : null}
+        {!usage ? (
+          <p className="px-7 text-muted-foreground">
             No usage snapshot available yet for this provider.
           </p>
         ) : null}
         {usage ? (
-          <div className="mt-1.5 grid gap-1.5 sm:grid-cols-2">
+          <div className="flex flex-wrap gap-2 px-7">
             {rows.map((row) => {
               const percentUsed = clampUsagePercentUsed(row.window?.percentUsed ?? null);
               const percentRemaining = toRemainingUsagePercent(percentUsed);
               return (
                 <div
                   key={row.key}
-                  className="rounded border border-border/60 bg-background/20 px-2 py-1.5"
+                  className="min-w-0 flex-1 rounded-xl border border-border/50 bg-background/35 px-2.5 py-1.5"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium text-foreground/90">{row.label}</span>
@@ -171,30 +123,6 @@ export const ProviderUsageNotice = memo(function ProviderUsageNotice({
                 </div>
               );
             })}
-          </div>
-        ) : null}
-        {metadata.usageUrl || metadata.dashboardUrl ? (
-          <div className="mt-1.5 flex flex-wrap items-center gap-x-2">
-            {metadata.usageUrl ? (
-              <a
-                href={metadata.usageUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="pointer-events-auto text-primary hover:underline"
-              >
-                Usage
-              </a>
-            ) : null}
-            {metadata.dashboardUrl ? (
-              <a
-                href={metadata.dashboardUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="pointer-events-auto text-primary hover:underline"
-              >
-                {metadata.dashboardLabel ?? "Dashboard"}
-              </a>
-            ) : null}
           </div>
         ) : null}
       </div>

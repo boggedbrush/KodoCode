@@ -4,6 +4,7 @@ import {
   ArrowLeftIcon,
   CircleDashedIcon,
   GitBranchIcon,
+  GaugeIcon,
   MonitorCogIcon,
   PaletteIcon,
   Settings2Icon,
@@ -31,6 +32,7 @@ export type SettingsSectionPath =
   | "/settings/enhance"
   | "/settings/models"
   | "/settings/providers"
+  | "/settings/usage"
   | "/settings/advanced"
   | "/settings/about"
   | "/settings/archived";
@@ -52,6 +54,7 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   },
   { label: "Models", to: "/settings/models", icon: SlidersHorizontalIcon },
   { label: "Providers", to: "/settings/providers", icon: CircleDashedIcon },
+  { label: "Usage", to: "/settings/usage", icon: GaugeIcon },
   { label: "Advanced", to: "/settings/advanced", icon: WrenchIcon },
   { label: "About", to: "/settings/about", icon: MonitorCogIcon },
   { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
