@@ -203,6 +203,27 @@ export function buildLegacyClientSettingsMigrationPatch(
     patch.diffWordWrap = legacySettings.diffWordWrap;
   }
 
+  if (Array.isArray(legacySettings.favorites)) {
+    const favorites = legacySettings.favorites.flatMap((favorite) => {
+      if (!Predicate.isObject(favorite)) {
+        return [];
+      }
+      const provider = favorite.provider;
+      const model = favorite.model;
+      if (
+        (provider === "codex" || provider === "claudeAgent") &&
+        typeof model === "string" &&
+        model.trim().length > 0
+      ) {
+        return [{ provider, model: model.trim() }] as const;
+      }
+      return [];
+    });
+    if (favorites.length > 0) {
+      patch.favorites = favorites;
+    }
+  }
+
   if (Schema.is(ProjectPickerMode)(legacySettings.projectPickerMode)) {
     patch.projectPickerMode = legacySettings.projectPickerMode;
   }

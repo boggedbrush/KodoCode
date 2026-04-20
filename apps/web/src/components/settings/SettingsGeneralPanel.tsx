@@ -53,6 +53,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.projectPickerMode !== DEFAULT_UNIFIED_SETTINGS.projectPickerMode
         ? ["Project picker"]
         : []),
+      ...(settings.favorites.length > 0 ? ["Favorite models"] : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
@@ -97,6 +98,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.defaultThreadEnvMode,
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
+      settings.favorites.length,
       settings.planModelSelection,
       settings.projectPickerMode,
       settings.promptEnhancePreset,

@@ -28,4 +28,22 @@ describe("buildLegacyClientSettingsMigrationPatch", () => {
       projectPickerMode: "sidebar",
     });
   });
+
+  it("migrates favorite models from legacy local settings", () => {
+    expect(
+      buildLegacyClientSettingsMigrationPatch({
+        favorites: [
+          { provider: "codex", model: "gpt-5.4" },
+          { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+          { provider: "cursor", model: "ignore-me" },
+          { provider: "codex", model: "" },
+        ],
+      }),
+    ).toEqual({
+      favorites: [
+        { provider: "codex", model: "gpt-5.4" },
+        { provider: "claudeAgent", model: "claude-sonnet-4-6" },
+      ],
+    });
+  });
 });

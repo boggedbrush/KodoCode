@@ -25,6 +25,12 @@ export const ProjectPickerMode = Schema.Literals(["fullscreen", "sidebar"]);
 export type ProjectPickerMode = typeof ProjectPickerMode.Type;
 export const DEFAULT_PROJECT_PICKER_MODE: ProjectPickerMode = "fullscreen";
 
+export const FavoriteModelSchema = Schema.Struct({
+  provider: ProviderKind,
+  model: TrimmedNonEmptyString,
+});
+export type FavoriteModel = typeof FavoriteModelSchema.Type;
+
 export const SidebarProjectSortOrder = Schema.Literals(["updated_at", "created_at", "manual"]);
 export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
 export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
@@ -37,6 +43,7 @@ export const ClientSettingsSchema = Schema.Struct({
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  favorites: Schema.Array(FavoriteModelSchema).pipe(Schema.withDecodingDefault(() => [])),
   projectPickerMode: ProjectPickerMode.pipe(
     Schema.withDecodingDefault(() => DEFAULT_PROJECT_PICKER_MODE),
   ),

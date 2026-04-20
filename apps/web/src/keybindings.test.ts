@@ -11,6 +11,8 @@ import {
   isChatNewShortcut,
   isChatNewLocalShortcut,
   isDiffToggleShortcut,
+  modelPickerJumpCommandForIndex,
+  modelPickerJumpIndexFromCommand,
   isOpenFavoriteEditorShortcut,
   isTerminalClearShortcut,
   isTerminalCloseShortcut,
@@ -107,12 +109,32 @@ const DEFAULT_BINDINGS = compile([
   },
   { shortcut: modShortcut("o", { shiftKey: true }), command: "chat.new" },
   { shortcut: modShortcut("n", { shiftKey: true }), command: "chat.newLocal" },
+  {
+    shortcut: modShortcut("m", { shiftKey: true }),
+    command: "modelPicker.toggle",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
   { shortcut: modShortcut("o"), command: "editor.openFavorite" },
   { shortcut: modShortcut("[", { shiftKey: true }), command: "thread.previous" },
   { shortcut: modShortcut("]", { shiftKey: true }), command: "thread.next" },
   { shortcut: modShortcut("1"), command: "thread.jump.1" },
   { shortcut: modShortcut("2"), command: "thread.jump.2" },
   { shortcut: modShortcut("3"), command: "thread.jump.3" },
+  {
+    shortcut: modShortcut("1"),
+    command: "modelPicker.jump.1",
+    whenAst: whenIdentifier("modelPickerOpen"),
+  },
+  {
+    shortcut: modShortcut("2"),
+    command: "modelPicker.jump.2",
+    whenAst: whenIdentifier("modelPickerOpen"),
+  },
+  {
+    shortcut: modShortcut("3"),
+    command: "modelPicker.jump.3",
+    whenAst: whenIdentifier("modelPickerOpen"),
+  },
 ]);
 
 describe("isTerminalToggleShortcut", () => {
@@ -165,6 +187,35 @@ describe("sidebar toggle shortcut", () => {
         context: { terminalFocus: true },
       }),
       "sidebar.toggle",
+    );
+  });
+});
+
+describe("model picker shortcuts", () => {
+  it("resolves the toggle binding when the terminal is not focused", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "m", metaKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+      "modelPicker.toggle",
+    );
+  });
+
+  it("prefers model jump bindings over thread jumps while the picker is open", () => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "1", ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Win32",
+        context: { modelPickerOpen: true },
+      }),
+      "modelPicker.jump.1",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "1", ctrlKey: true }), DEFAULT_BINDINGS, {
+        platform: "Win32",
+        context: { modelPickerOpen: false },
+      }),
+      "thread.jump.1",
     );
   });
 });
@@ -307,6 +358,13 @@ describe("shortcutLabelForCommand", () => {
       shortcutLabelForCommand(DEFAULT_BINDINGS, "thread.previous", "Linux"),
       "Ctrl+Shift+[",
     );
+    assert.strictEqual(
+      shortcutLabelForCommand(DEFAULT_BINDINGS, "modelPicker.jump.1", {
+        platform: "Linux",
+        context: { modelPickerOpen: true },
+      }),
+      "Ctrl+1",
+    );
   });
 
   it("returns null for commands shadowed by a later conflicting shortcut", () => {
@@ -360,6 +418,15 @@ describe("thread navigation helpers", () => {
     assert.strictEqual(threadJumpIndexFromCommand("thread.jump.1"), 0);
     assert.strictEqual(threadJumpIndexFromCommand("thread.jump.3"), 2);
     assert.isNull(threadJumpIndexFromCommand("thread.next"));
+  });
+
+  it("maps model jump commands to visible picker indices", () => {
+    assert.strictEqual(modelPickerJumpCommandForIndex(0), "modelPicker.jump.1");
+    assert.strictEqual(modelPickerJumpCommandForIndex(2), "modelPicker.jump.3");
+    assert.isNull(modelPickerJumpCommandForIndex(9));
+    assert.strictEqual(modelPickerJumpIndexFromCommand("modelPicker.jump.1"), 0);
+    assert.strictEqual(modelPickerJumpIndexFromCommand("modelPicker.jump.3"), 2);
+    assert.isNull(modelPickerJumpIndexFromCommand("thread.jump.1"));
   });
 
   it("maps traversal commands to directions", () => {
