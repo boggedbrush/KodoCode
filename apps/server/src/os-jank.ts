@@ -6,6 +6,7 @@ import {
   readPathFromLaunchctl,
   readPathFromLoginShell,
 } from "@t3tools/shared/shell";
+import { expandHomePath as expandHomePathValue } from "./pathExpansion";
 
 function logPathHydrationWarning(message: string, error?: unknown): void {
   console.warn(`[server] ${message}`, error instanceof Error ? error.message : (error ?? ""));
@@ -56,14 +57,7 @@ export function fixPath(
 }
 
 export const expandHomePath = Effect.fn(function* (input: string) {
-  const { join } = yield* Path.Path;
-  if (input === "~") {
-    return OS.homedir();
-  }
-  if (input.startsWith("~/") || input.startsWith("~\\")) {
-    return join(OS.homedir(), input.slice(2));
-  }
-  return input;
+  return expandHomePathValue(input);
 });
 
 export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {

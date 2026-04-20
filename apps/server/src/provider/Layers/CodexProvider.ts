@@ -47,6 +47,7 @@ import {
 import { probeCodexAccount } from "../codexAppServer";
 import { CodexProvider } from "../Services/CodexProvider";
 import { ServerSettingsService } from "../../serverSettings";
+import { expandHomePath } from "../../pathExpansion";
 import { ServerSettingsError } from "@t3tools/contracts";
 
 const DEFAULT_CODEX_MODEL_CAPABILITIES: ModelCapabilities = {
@@ -323,7 +324,7 @@ const runCodexCommand = Effect.fn("runCodexCommand")(function* (args: ReadonlyAr
     shell: process.platform === "win32",
     env: {
       ...process.env,
-      ...(codexSettings.homePath ? { CODEX_HOME: codexSettings.homePath } : {}),
+      ...(codexSettings.homePath ? { CODEX_HOME: expandHomePath(codexSettings.homePath) } : {}),
     },
   });
   return yield* spawnAndCollect(codexSettings.binaryPath, command);
