@@ -233,7 +233,7 @@ export class BrowserUsePipeServer {
         return "pong";
       case "getInfo":
         return {
-          name: "DP Code In-app Browser",
+          name: "Kōdō Code In-app Browser",
           version: "0.1.0",
           type: "iab",
         };
@@ -318,7 +318,7 @@ export class BrowserUsePipeServer {
   }> {
     const snapshot = this.getActiveBrowserHostState();
     if (!snapshot) {
-      throw new Error("No active DP Code browser pane available");
+      throw new Error("No active Kōdō Code browser pane available");
     }
     const nextState = this.browserManager.newTab({
       threadId: snapshot.threadId,

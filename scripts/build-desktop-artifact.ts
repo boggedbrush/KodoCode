@@ -17,14 +17,14 @@ import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { APP_BASE_NAME } from "@t3tools/shared/product";
 import { Config, Data, Effect, FileSystem, Layer, Logger, Option, Path, Schema } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
 const BuildArch = Schema.Literals(["arm64", "x64", "universal"]);
-const MICROPHONE_USAGE_DESCRIPTION =
-  "DP Code needs microphone access so you can record voice notes and transcribe them into the chat composer.";
+const MICROPHONE_USAGE_DESCRIPTION = `${APP_BASE_NAME} needs microphone access so you can record voice notes and transcribe them into the chat composer.`;
 
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("..", import.meta.url))),
@@ -752,13 +752,13 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     buildVersion: appVersion,
     t3codeCommitHash: commitHash,
     private: true,
-    description: "Kodo Code desktop build",
+    description: "Kōdō Code desktop build",
     author: "Emanuele Di Pietro",
     main: "apps/desktop/dist-electron/main.js",
     build: yield* createBuildConfig(
       options.platform,
       options.target,
-      desktopPackageJson.productName ?? "Kodo Code",
+      desktopPackageJson.productName ?? "Kōdō Code",
       options.signed,
       options.mockUpdates,
       options.mockUpdateServerPort,
@@ -911,7 +911,7 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
     Flag.optional,
   ),
 }).pipe(
-  Command.withDescription("Build a desktop artifact for Kodo Code."),
+  Command.withDescription("Build a desktop artifact for Kōdō Code."),
   Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
 );
 

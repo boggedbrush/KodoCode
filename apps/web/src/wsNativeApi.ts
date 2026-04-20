@@ -380,6 +380,8 @@ export function createWsNativeApi(): NativeApi {
     server: {
       getConfig: () => transport.request(WS_METHODS.serverGetConfig),
       refreshProviders: () => transport.request(WS_METHODS.serverRefreshProviders),
+      getUsageStatus: (input) => transport.request(WS_METHODS.serverGetUsageStatus, input),
+      refreshUsageStatus: (input) => transport.request(WS_METHODS.serverRefreshUsageStatus, input),
       listWorktrees: () => transport.request(WS_METHODS.serverListWorktrees),
       transcribeVoice: (input) => {
         if (window.desktopBridge?.server?.transcribeVoice) {

@@ -137,5 +137,5 @@ export function isCodexCliVersionSupported(version: string): boolean {
 
 export function formatCodexCliUpgradeMessage(version: string | null): string {
   const versionLabel = version ? `v${version}` : "the installed version";
-  return `Codex CLI ${versionLabel} is too old for Kodo Code. Upgrade to v${MINIMUM_CODEX_CLI_VERSION} or newer and restart Kodo Code.`;
+  return `Codex CLI ${versionLabel} is too old for Kōdō Code. Upgrade to v${MINIMUM_CODEX_CLI_VERSION} or newer and restart Kōdō Code.`;
 }

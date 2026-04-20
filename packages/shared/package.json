@@ -64,9 +64,17 @@
       "types": "./src/agentMentions.ts",
       "import": "./src/agentMentions.ts"
     },
+    "./provider-usage": {
+      "types": "./src/provider-usage.ts",
+      "import": "./src/provider-usage.ts"
+    },
     "./worktreeHandoff": {
       "types": "./src/worktreeHandoff.ts",
       "import": "./src/worktreeHandoff.ts"
+    },
+    "./product": {
+      "types": "./src/product.ts",
+      "import": "./src/product.ts"
     }
   },
   "scripts": {

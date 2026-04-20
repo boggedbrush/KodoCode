@@ -13,6 +13,7 @@ import {
   SettingsIcon,
   WrenchIcon,
   WorktreeIcon,
+  ZapIcon,
 } from "./lib/icons";
 
 export const SETTINGS_SECTION_IDS = [
@@ -22,6 +23,7 @@ export const SETTINGS_SECTION_IDS = [
   "behavior",
   "worktrees",
   "archived",
+  "usage",
   "models",
   "advanced",
 ] as const;
@@ -83,7 +85,7 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
     id: "worktrees",
     group: "app",
     label: "Worktrees",
-    description: "Review and clean up the worktrees created by Kodo Code.",
+    description: "Review and clean up the worktrees created by Kōdō Code.",
     icon: WorktreeIcon,
     eyebrow: "Workspace management",
   },
@@ -94,6 +96,14 @@ export const SETTINGS_NAV_ITEMS: readonly SettingsNavItem[] = [
     description: "View and restore archived threads.",
     icon: ArchiveIcon,
     eyebrow: "Thread management",
+  },
+  {
+    id: "usage",
+    group: "kodo",
+    label: "Usage",
+    description: "Refresh provider account status and active usage windows.",
+    icon: ZapIcon,
+    eyebrow: "Provider limits",
   },
   {
     id: "models",

@@ -72,6 +72,7 @@ import { ProviderService } from "./provider/Services/ProviderService";
 import { ProviderDiscoveryService } from "./provider/Services/ProviderDiscoveryService";
 import { ProviderAdapterRegistry } from "./provider/Services/ProviderAdapterRegistry";
 import { ProviderHealth } from "./provider/Services/ProviderHealth";
+import { ProviderUsageRegistry } from "./provider/Services/ProviderUsageRegistry";
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
 import { clamp } from "effect/Number";
 import { Open, resolveAvailableEditors } from "./open";
@@ -494,7 +495,8 @@ export type ServerCoreRuntimeServices =
   | ProviderService
   | ProviderDiscoveryService
   | ProviderAdapterRegistry
-  | ProviderHealth;
+  | ProviderHealth
+  | ProviderUsageRegistry;
 
 export type ServerRuntimeServices =
   | ServerCoreRuntimeServices
@@ -604,6 +606,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const providerHealth = yield* ProviderHealth;
   const providerDiscoveryService = yield* ProviderDiscoveryService;
   const providerAdapterRegistry = yield* ProviderAdapterRegistry;
+  const providerUsageRegistry = yield* ProviderUsageRegistry;
   const git = yield* GitCore;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -1917,6 +1920,16 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return {
           providers: yield* providerHealth.refresh,
         };
+
+      case WS_METHODS.serverGetUsageStatus: {
+        const body = stripRequestTag(request.body);
+        return yield* providerUsageRegistry.getUsages(body.providerOptions);
+      }
+
+      case WS_METHODS.serverRefreshUsageStatus: {
+        const body = stripRequestTag(request.body);
+        return yield* providerUsageRegistry.refresh(body.providerOptions);
+      }
 
       case WS_METHODS.serverListWorktrees:
         return {

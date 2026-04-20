@@ -27,6 +27,7 @@ import { TbExchange } from "react-icons/tb";
 
 import ChatView from "../components/ChatView";
 import BrowserPanel from "../components/BrowserPanel";
+import { useDesktopWindowFrame } from "../components/desktopWindowFrameState";
 import { ClaudeAI, Gemini, OpenAI } from "../components/Icons";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import {
@@ -614,6 +615,7 @@ function SplitPaneSurface(props: {
 }
 
 function SplitChatSurface(props: { splitViewId: SplitViewId; routeThreadId: ThreadIdType }) {
+  const { hasCustomTitlebar } = useDesktopWindowFrame();
   const navigate = useNavigate();
   const { handleNewChat } = useHandleNewChat();
   const selectAllThreads = useMemo(() => createAllThreadsSelector(), []);
@@ -894,7 +896,10 @@ function SplitChatSurface(props: { splitViewId: SplitViewId; routeThreadId: Thre
     <>
       <div
         ref={rootRef}
-        className="flex h-dvh min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+        className={cn(
+          "flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background",
+          hasCustomTitlebar ? "h-full" : "h-dvh",
+        )}
       >
         <div
           className="flex min-h-0 min-w-0"
@@ -1018,6 +1023,7 @@ function SingleChatSurface(props: {
   search: DiffRouteSearch;
   projectId: ProjectId | null;
 }) {
+  const { hasCustomTitlebar } = useDesktopWindowFrame();
   const navigate = useNavigate();
   const shouldUseDiffSheet = useMediaQuery(DIFF_INLINE_LAYOUT_MEDIA_QUERY);
   const createSplitView = useSplitViewStore((store) => store.createFromThread);
@@ -1131,8 +1137,18 @@ function SingleChatSurface(props: {
 
   if (!shouldUseDiffSheet) {
     return (
-      <div className="flex h-dvh min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-        <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <div
+        className={cn(
+          "flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background",
+          hasCustomTitlebar ? "h-full" : "h-dvh",
+        )}
+      >
+        <SidebarInset
+          className={cn(
+            "min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground",
+            hasCustomTitlebar ? "h-full" : "h-dvh",
+          )}
+        >
           <ChatView
             key={props.threadId}
             threadId={props.threadId}
@@ -1169,7 +1185,12 @@ function SingleChatSurface(props: {
 
   return (
     <>
-      <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <SidebarInset
+        className={cn(
+          "min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground",
+          hasCustomTitlebar ? "h-full" : "h-dvh",
+        )}
+      >
         <ChatView
           key={props.threadId}
           threadId={props.threadId}

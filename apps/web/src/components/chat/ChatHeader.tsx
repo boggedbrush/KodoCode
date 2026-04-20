@@ -17,6 +17,7 @@ import { BsLayoutSplit, BsTerminal } from "react-icons/bs";
 import { FiGitBranch } from "react-icons/fi";
 import { HiMiniArrowsPointingOut } from "react-icons/hi2";
 import { TbLayoutSidebarRight } from "react-icons/tb";
+import { DesktopTitleBarActionsPortal, DesktopTitleBarTitlePortal } from "../DesktopTitleBar";
 import GitActionsControl from "../GitActionsControl";
 import { AppsIcon, ArrowRightIcon, GlobeIcon, PlusIcon } from "~/lib/icons";
 import { Button } from "../ui/button";
@@ -25,13 +26,14 @@ import { Menu, MenuItem, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/men
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
-import { SidebarHeaderTrigger, useSidebar } from "../ui/sidebar";
+import { SidebarTrigger, useSidebar } from "../ui/sidebar";
 import { isElectron } from "~/env";
 import { cn } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import { resolveEditorIcon } from "../../editorMetadata";
 import { usePreferredEditor } from "../../editorPreferences";
 import { useIsDisposableThread } from "~/hooks/useIsDisposableThread";
+import { useDesktopWindowFrame } from "../desktopWindowFrameState";
 import { ClaudeAI, Gemini, OpenAI } from "../Icons";
 import { gitStatusQueryOptions } from "~/lib/gitReactQuery";
 
@@ -130,8 +132,10 @@ export const ChatHeader = memo(function ChatHeader({
   onRenameThread,
 }: ChatHeaderProps) {
   const { isMobile, state } = useSidebar();
+  const { hasCustomTitlebar } = useDesktopWindowFrame();
+  const isSplitPane = surfaceMode === "split";
   const headerRef = useRef<HTMLDivElement>(null);
-  const [compact, setCompact] = useState(false);
+  const [compact, setCompact] = useState(isSplitPane);
   const [openAddActionNonce, setOpenAddActionNonce] = useState(0);
   const [preferredEditor] = usePreferredEditor(availableEditors);
   const EditorIcon = preferredEditor ? resolveEditorIcon(preferredEditor) : null;
@@ -142,9 +146,12 @@ export const ChatHeader = memo(function ChatHeader({
   const showDiffTotals = (diffTotals?.insertions ?? 0) > 0 || (diffTotals?.deletions ?? 0) > 0;
   const isDisposableThread = useIsDisposableThread(activeThreadId);
 
-  const isSplitPane = surfaceMode === "split";
-
   useEffect(() => {
+    if (hasCustomTitlebar) {
+      setCompact(isSplitPane);
+      return;
+    }
+
     const el = headerRef.current;
     if (!el) return;
     const measure = () => setCompact(isSplitPane || el.clientWidth < HEADER_COMPACT_BREAKPOINT);
@@ -152,7 +159,7 @@ export const ChatHeader = memo(function ChatHeader({
     const observer = new ResizeObserver(() => measure());
     observer.observe(el);
     return () => observer.disconnect();
-  }, [isSplitPane]);
+  }, [hasCustomTitlebar, isSplitPane]);
 
   const renderProviderIcon = (provider: ProviderKind | null, className: string) => {
     if (provider === "claudeAgent") {
@@ -167,250 +174,279 @@ export const ChatHeader = memo(function ChatHeader({
     return <FiGitBranch className={className} />;
   };
 
-  return (
-    <div ref={headerRef} className="flex min-w-0 flex-1 items-center gap-2">
-      <div
-        className={cn(
-          "flex min-w-0 flex-1 items-center overflow-hidden",
-          !isMobile && state === "collapsed" ? "gap-4" : "gap-2 sm:gap-3",
-        )}
-      >
-        <SidebarHeaderTrigger className="size-7 shrink-0" />
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <div className="flex min-w-0 flex-1 flex-col">
-            {threadBreadcrumbs.length > 0 ? (
-              <div className="flex min-w-0 items-center gap-1 overflow-hidden text-[11px] text-muted-foreground/55">
-                {threadBreadcrumbs.map((breadcrumb, index) => (
-                  <React.Fragment key={breadcrumb.threadId}>
-                    {index > 0 ? (
-                      <span className="shrink-0 text-muted-foreground/35">/</span>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="min-w-0 truncate transition-colors hover:text-foreground/80"
-                      title={breadcrumb.title}
-                      onClick={() => onNavigateToThread(breadcrumb.threadId)}
-                    >
-                      {breadcrumb.title}
-                    </button>
-                  </React.Fragment>
-                ))}
-              </div>
-            ) : null}
-            <div className="flex min-w-0 items-center gap-2">
-              <h2
-                className="max-w-[clamp(16rem,50vw,40rem)] truncate text-sm font-medium text-foreground"
-                title={activeThreadTitle}
-                onDoubleClick={() => onRenameThread()}
-              >
-                {activeThreadTitle}
-              </h2>
-              {!hideHandoffControls && handoffBadgeLabel ? (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Badge
-                        variant="outline"
-                        className="hidden !h-6 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 text-[10px] sm:inline-flex"
-                      >
-                        <span className="inline-flex size-4 shrink-0 items-center justify-center">
-                          {renderProviderIcon(handoffBadgeSourceProvider, "size-3")}
-                        </span>
-                        <ArrowRightIcon className="size-2.5 shrink-0 opacity-45" />
-                        <span className="inline-flex size-4 shrink-0 items-center justify-center">
-                          {renderProviderIcon(handoffBadgeTargetProvider, "size-3")}
-                        </span>
-                      </Badge>
-                    }
-                  />
-                  <TooltipPopup side="bottom">{handoffBadgeLabel}</TooltipPopup>
-                </Tooltip>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      </div>
-      <div className="flex shrink-0 items-center gap-2 [-webkit-app-region:no-drag]">
-        {!isDisposableThread && !hideHandoffControls ? (
-          <Menu modal={false}>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <MenuTrigger
-                    render={
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        className={compact ? "shrink-0 gap-1" : "shrink-0 gap-1.5"}
-                        aria-label={handoffActionLabel}
-                        disabled={handoffDisabled || handoffActionTargetProviders.length === 0}
-                      />
-                    }
-                  >
-                    <FiGitBranch className="size-3.5 shrink-0" />
-                    {!compact ? <span className="truncate font-normal">Hand off</span> : null}
-                  </MenuTrigger>
-                }
-              />
-              <TooltipPopup side="bottom">{handoffActionLabel}</TooltipPopup>
-            </Tooltip>
-            <MenuPopup align="end" side="bottom" className="w-48">
-              {handoffActionTargetProviders.map((provider) => (
-                <MenuItem key={provider} onClick={() => onCreateHandoff(provider)}>
-                  {renderProviderIcon(provider, "size-3.5 shrink-0")}
-                  <span>Handoff to {PROVIDER_DISPLAY_NAMES[provider]}</span>
-                </MenuItem>
-              ))}
-            </MenuPopup>
-          </Menu>
-        ) : null}
-        {/* Keep one shared project-actions controller mounted so both inline and
-            compact header menus open the same dialog/state machine. */}
-        {!isDisposableThread && activeProjectScripts ? (
-          <ProjectScriptsControl
-            scripts={activeProjectScripts}
-            keybindings={keybindings}
-            preferredScriptId={preferredScriptId}
-            showInlineControls={!compact}
-            openAddActionNonce={openAddActionNonce}
-            onRunScript={onRunProjectScript}
-            onAddScript={onAddProjectScript}
-            onUpdateScript={onUpdateProjectScript}
-            onDeleteScript={onDeleteProjectScript}
-          />
-        ) : null}
-
-        {/* Panel toggles menu — editor, terminal, browser, split chat. */}
-        {!isDisposableThread &&
-        (terminalAvailable || activeProjectName || chatLayoutAction || isElectron) ? (
-          <Menu modal={false}>
-            <MenuTrigger
+  const actionControls = (
+    <div className="flex shrink-0 items-center gap-2 [-webkit-app-region:no-drag]">
+      {!isDisposableThread && !hideHandoffControls ? (
+        <Menu modal={false}>
+          <Tooltip>
+            <TooltipTrigger
               render={
-                <Button
-                  size="icon-xs"
-                  variant="outline"
-                  className="shrink-0"
-                  aria-label="Panel toggles"
-                />
-              }
-            >
-              <AppsIcon className="size-3.5" />
-            </MenuTrigger>
-            <MenuPopup
-              align="end"
-              side="bottom"
-              className="w-50 rounded-lg border-border bg-popover shadow-lg"
-            >
-              {activeProjectName ? (
-                <MenuItem
-                  onClick={() => {
-                    const api = readNativeApi();
-                    if (api && openInCwd && preferredEditor) {
-                      void api.shell.openInEditor(openInCwd, preferredEditor);
-                    }
-                  }}
-                  disabled={!preferredEditor || !openInCwd}
+                <MenuTrigger
+                  render={
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      className={compact ? "shrink-0 gap-1" : "shrink-0 gap-1.5"}
+                      aria-label={handoffActionLabel}
+                      disabled={handoffDisabled || handoffActionTargetProviders.length === 0}
+                    />
+                  }
                 >
-                  {EditorIcon ? (
-                    <EditorIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                  ) : null}
-                  <span>Open in editor</span>
-                </MenuItem>
-              ) : null}
-              <MenuItem onClick={onToggleTerminal} disabled={!terminalAvailable}>
-                <BsTerminal className="size-3.5 shrink-0" />
-                <span>{terminalOpen ? "Hide terminal" : "Show terminal"}</span>
-                {terminalToggleShortcutLabel && (
+                  <FiGitBranch className="size-3.5 shrink-0" />
+                  {!compact ? <span className="truncate font-normal">Hand off</span> : null}
+                </MenuTrigger>
+              }
+            />
+            <TooltipPopup side="bottom">{handoffActionLabel}</TooltipPopup>
+          </Tooltip>
+          <MenuPopup align="end" side="bottom" className="w-48">
+            {handoffActionTargetProviders.map((provider) => (
+              <MenuItem key={provider} onClick={() => onCreateHandoff(provider)}>
+                {renderProviderIcon(provider, "size-3.5 shrink-0")}
+                <span>Handoff to {PROVIDER_DISPLAY_NAMES[provider]}</span>
+              </MenuItem>
+            ))}
+          </MenuPopup>
+        </Menu>
+      ) : null}
+      {/* Keep one shared project-actions controller mounted so both inline and
+            compact header menus open the same dialog/state machine. */}
+      {!isDisposableThread && activeProjectScripts ? (
+        <ProjectScriptsControl
+          scripts={activeProjectScripts}
+          keybindings={keybindings}
+          preferredScriptId={preferredScriptId}
+          showInlineControls={!compact}
+          openAddActionNonce={openAddActionNonce}
+          onRunScript={onRunProjectScript}
+          onAddScript={onAddProjectScript}
+          onUpdateScript={onUpdateProjectScript}
+          onDeleteScript={onDeleteProjectScript}
+        />
+      ) : null}
+
+      {/* Panel toggles menu — editor, terminal, browser, split chat. */}
+      {!isDisposableThread &&
+      (terminalAvailable || activeProjectName || chatLayoutAction || isElectron) ? (
+        <Menu modal={false}>
+          <MenuTrigger
+            render={
+              <Button
+                size="icon-xs"
+                variant="outline"
+                className="shrink-0"
+                aria-label="Panel toggles"
+              />
+            }
+          >
+            <AppsIcon className="size-3.5" />
+          </MenuTrigger>
+          <MenuPopup
+            align="end"
+            side="bottom"
+            className="w-50 rounded-lg border-border bg-popover shadow-lg"
+          >
+            {activeProjectName ? (
+              <MenuItem
+                onClick={() => {
+                  const api = readNativeApi();
+                  if (api && openInCwd && preferredEditor) {
+                    void api.shell.openInEditor(openInCwd, preferredEditor);
+                  }
+                }}
+                disabled={!preferredEditor || !openInCwd}
+              >
+                {EditorIcon ? (
+                  <EditorIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                ) : null}
+                <span>Open in editor</span>
+              </MenuItem>
+            ) : null}
+            <MenuItem onClick={onToggleTerminal} disabled={!terminalAvailable}>
+              <BsTerminal className="size-3.5 shrink-0" />
+              <span>{terminalOpen ? "Hide terminal" : "Show terminal"}</span>
+              {terminalToggleShortcutLabel && (
+                <span className="ml-auto text-[11px] opacity-60">
+                  {terminalToggleShortcutLabel}
+                </span>
+              )}
+            </MenuItem>
+            {isElectron ? (
+              <MenuItem onClick={onToggleBrowser}>
+                <GlobeIcon className="size-3.5 shrink-0" />
+                <span>{browserOpen ? "Hide browser" : "Show browser"}</span>
+                {browserToggleShortcutLabel && (
                   <span className="ml-auto text-[11px] opacity-60">
-                    {terminalToggleShortcutLabel}
+                    {browserToggleShortcutLabel}
                   </span>
                 )}
               </MenuItem>
-              {isElectron ? (
-                <MenuItem onClick={onToggleBrowser}>
-                  <GlobeIcon className="size-3.5 shrink-0" />
-                  <span>{browserOpen ? "Hide browser" : "Show browser"}</span>
-                  {browserToggleShortcutLabel && (
-                    <span className="ml-auto text-[11px] opacity-60">
-                      {browserToggleShortcutLabel}
-                    </span>
-                  )}
-                </MenuItem>
-              ) : null}
-              {chatLayoutAction ? (
-                <MenuItem onClick={chatLayoutAction.onClick}>
-                  {chatLayoutAction.kind === "split" ? (
-                    <BsLayoutSplit className="size-3.5 shrink-0" />
-                  ) : (
-                    <HiMiniArrowsPointingOut className="size-3.5 shrink-0" />
-                  )}
-                  <span>{chatLayoutAction.label}</span>
-                  {chatLayoutAction.shortcutLabel && (
-                    <span className="ml-auto text-[11px] opacity-60">
-                      {chatLayoutAction.shortcutLabel}
-                    </span>
-                  )}
-                </MenuItem>
-              ) : null}
-              {activeProjectScripts ? (
-                <>
-                  <MenuSeparator className="mx-1" />
-                  <MenuItem onClick={() => setOpenAddActionNonce((current) => current + 1)}>
-                    <PlusIcon className="size-3.5 shrink-0" />
-                    <span>Add action</span>
-                  </MenuItem>
-                </>
-              ) : null}
-            </MenuPopup>
-          </Menu>
-        ) : null}
-
-        {!isDisposableThread && activeProjectName && showGitActions ? (
-          <GitActionsControl gitCwd={gitCwd} activeThreadId={activeThreadId} />
-        ) : null}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Toggle
-                className={cn(
-                  "shrink-0 border-0",
-                  showDiffTotals
-                    ? "gap-2 px-1.5 text-[length:var(--app-font-size-ui-sm,11px)]"
-                    : "",
+            ) : null}
+            {chatLayoutAction ? (
+              <MenuItem onClick={chatLayoutAction.onClick}>
+                {chatLayoutAction.kind === "split" ? (
+                  <BsLayoutSplit className="size-3.5 shrink-0" />
+                ) : (
+                  <HiMiniArrowsPointingOut className="size-3.5 shrink-0" />
                 )}
-                pressed={diffOpen}
-                onPressedChange={onToggleDiff}
-                aria-label="Toggle diff panel"
-                variant="default"
-                size="xs"
-                disabled={!isGitRepo || (diffDisabledReason !== null && !diffOpen)}
-              >
-                {showDiffTotals ? (
-                  <span className="inline-flex items-center gap-1">
-                    <span className="font-chat-code text-[length:var(--app-font-size-ui-sm,11px)] sm:text-[length:var(--app-font-size-ui-xs,10px)] font-normal tracking-normal tabular-nums text-success">
-                      +{diffTotals?.insertions ?? 0}
-                    </span>
-                    <span className="font-chat-code text-[length:var(--app-font-size-ui-sm,11px)] sm:text-[length:var(--app-font-size-ui-xs,10px)] font-normal tracking-normal tabular-nums text-destructive">
-                      -{diffTotals?.deletions ?? 0}
-                    </span>
+                <span>{chatLayoutAction.label}</span>
+                {chatLayoutAction.shortcutLabel && (
+                  <span className="ml-auto text-[11px] opacity-60">
+                    {chatLayoutAction.shortcutLabel}
                   </span>
-                ) : null}
-                <TbLayoutSidebarRight className="size-3.5" />
-              </Toggle>
-            }
-          />
-          <TooltipPopup side="bottom">
-            {!isGitRepo
-              ? "Diff panel is unavailable because this project is not a git repository."
-              : diffDisabledReason && !diffOpen
-                ? diffDisabledReason
-                : diffToggleShortcutLabel
-                  ? `Toggle diff panel (${diffToggleShortcutLabel})`
-                  : "Toggle diff panel"}
-          </TooltipPopup>
-        </Tooltip>
+                )}
+              </MenuItem>
+            ) : null}
+            {activeProjectScripts ? (
+              <>
+                <MenuSeparator className="mx-1" />
+                <MenuItem onClick={() => setOpenAddActionNonce((current) => current + 1)}>
+                  <PlusIcon className="size-3.5 shrink-0" />
+                  <span>Add action</span>
+                </MenuItem>
+              </>
+            ) : null}
+          </MenuPopup>
+        </Menu>
+      ) : null}
+
+      {!isDisposableThread && activeProjectName && showGitActions ? (
+        <GitActionsControl gitCwd={gitCwd} activeThreadId={activeThreadId} />
+      ) : null}
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Toggle
+              className={cn(
+                "shrink-0 border-0",
+                showDiffTotals ? "gap-2 px-1.5 text-[length:var(--app-font-size-ui-sm,11px)]" : "",
+              )}
+              pressed={diffOpen}
+              onPressedChange={onToggleDiff}
+              aria-label="Toggle diff panel"
+              variant="default"
+              size="xs"
+              disabled={!isGitRepo || (diffDisabledReason !== null && !diffOpen)}
+            >
+              {showDiffTotals ? (
+                <span className="inline-flex items-center gap-1">
+                  <span className="font-chat-code text-[length:var(--app-font-size-ui-sm,11px)] sm:text-[length:var(--app-font-size-ui-xs,10px)] font-normal tracking-normal tabular-nums text-success">
+                    +{diffTotals?.insertions ?? 0}
+                  </span>
+                  <span className="font-chat-code text-[length:var(--app-font-size-ui-sm,11px)] sm:text-[length:var(--app-font-size-ui-xs,10px)] font-normal tracking-normal tabular-nums text-destructive">
+                    -{diffTotals?.deletions ?? 0}
+                  </span>
+                </span>
+              ) : null}
+              <TbLayoutSidebarRight className="size-3.5" />
+            </Toggle>
+          }
+        />
+        <TooltipPopup side="bottom">
+          {!isGitRepo
+            ? "Diff panel is unavailable because this project is not a git repository."
+            : diffDisabledReason && !diffOpen
+              ? diffDisabledReason
+              : diffToggleShortcutLabel
+                ? `Toggle diff panel (${diffToggleShortcutLabel})`
+                : "Toggle diff panel"}
+        </TooltipPopup>
+      </Tooltip>
+    </div>
+  );
+
+  const titleContent = (
+    <div
+      className={cn(
+        "flex min-w-0 flex-1 items-center overflow-hidden",
+        hasCustomTitlebar ? "pl-2 sm:pl-3" : "",
+        !isMobile && state === "collapsed" ? "gap-4" : "gap-2 sm:gap-3",
+      )}
+    >
+      {!hasCustomTitlebar ? <SidebarTrigger className="size-7 shrink-0" /> : null}
+      <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="flex min-w-0 flex-1 flex-col">
+          {threadBreadcrumbs.length > 0 ? (
+            <div className="flex min-w-0 items-center gap-1 overflow-hidden text-[11px] text-muted-foreground/55">
+              {threadBreadcrumbs.map((breadcrumb, index) => (
+                <React.Fragment key={breadcrumb.threadId}>
+                  {index > 0 ? <span className="shrink-0 text-muted-foreground/35">/</span> : null}
+                  <button
+                    type="button"
+                    className={cn(
+                      "min-w-0 truncate transition-colors hover:text-foreground/80",
+                      hasCustomTitlebar && "[-webkit-app-region:no-drag]",
+                    )}
+                    title={breadcrumb.title}
+                    onClick={() => onNavigateToThread(breadcrumb.threadId)}
+                  >
+                    {breadcrumb.title}
+                  </button>
+                </React.Fragment>
+              ))}
+            </div>
+          ) : null}
+          <div className="flex min-w-0 items-center gap-2">
+            <h2
+              className="max-w-[clamp(16rem,50vw,40rem)] truncate text-sm font-medium text-foreground"
+              title={activeThreadTitle}
+              onDoubleClick={() => onRenameThread()}
+            >
+              {activeThreadTitle}
+            </h2>
+            {activeProjectName ? (
+              <Badge
+                variant="outline"
+                className={cn(
+                  "min-w-0 shrink overflow-hidden",
+                  hasCustomTitlebar && "[-webkit-app-region:no-drag]",
+                )}
+                title={activeProjectName}
+              >
+                <span className="min-w-0 truncate">{activeProjectName}</span>
+              </Badge>
+            ) : null}
+            {!hideHandoffControls && handoffBadgeLabel ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Badge
+                      variant="outline"
+                      className="hidden !h-6 shrink-0 items-center justify-center gap-1 rounded-md px-1.5 text-[10px] sm:inline-flex"
+                    >
+                      <span className="inline-flex size-4 shrink-0 items-center justify-center">
+                        {renderProviderIcon(handoffBadgeSourceProvider, "size-3")}
+                      </span>
+                      <ArrowRightIcon className="size-2.5 shrink-0 opacity-45" />
+                      <span className="inline-flex size-4 shrink-0 items-center justify-center">
+                        {renderProviderIcon(handoffBadgeTargetProvider, "size-3")}
+                      </span>
+                    </Badge>
+                  }
+                />
+                <TooltipPopup side="bottom">{handoffBadgeLabel}</TooltipPopup>
+              </Tooltip>
+            ) : null}
+          </div>
+        </div>
       </div>
+    </div>
+  );
+
+  if (hasCustomTitlebar) {
+    return (
+      <>
+        <DesktopTitleBarTitlePortal>{titleContent}</DesktopTitleBarTitlePortal>
+        <DesktopTitleBarActionsPortal>{actionControls}</DesktopTitleBarActionsPortal>
+      </>
+    );
+  }
+
+  return (
+    <div ref={headerRef} className="flex min-w-0 flex-1 items-center gap-2">
+      {titleContent}
+      {actionControls}
     </div>
   );
 });

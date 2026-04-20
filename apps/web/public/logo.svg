@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="100%" height="100%" role="img" aria-label="Kōdo Code Emblem">
+  <defs>
+    <style>
+      .oct {
+        fill: #141418;
+        stroke: #2a2a2e;
+        stroke-width: 1.5;
+        stroke-linejoin: miter;
+      }
+      .oct-inner {
+        fill: none;
+        stroke: #3a3a40;
+        stroke-width: 0.5;
+        stroke-linejoin: miter;
+      }
+      .kanji {
+        font-family: 'Noto Sans CJK JP', 'Noto Sans CJK SC', 'Noto Sans', sans-serif;
+        font-size: 72px;
+        font-weight: 500;
+        fill: #c4bba8;
+        text-anchor: middle;
+      }
+    </style>
+  </defs>
+  <polygon
+    class="oct"
+    points="91.4,45 208.6,45 255,91.4 255,208.6 208.6,255 91.4,255 45,208.6 45,91.4"
+  />
+  <polygon
+    class="oct-inner"
+    points="98,54 202,54 246,98 246,202 202,246 98,246 54,202 54,98"
+  />
+  <text x="150" y="138" class="kanji">香</text>
+  <text x="150" y="218" class="kanji">道</text>
+</svg>

@@ -17,6 +17,10 @@ import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serve
 import { ProviderAdapterRegistry } from "./provider/Services/ProviderAdapterRegistry";
 import { ProviderUnsupportedError } from "./provider/Errors";
 import { ProviderDiscoveryService } from "./provider/Services/ProviderDiscoveryService";
+import {
+  ProviderUsageRegistry,
+  type ProviderUsageRegistryShape,
+} from "./provider/Services/ProviderUsageRegistry";
 
 import {
   DEFAULT_TERMINAL_ID,
@@ -94,6 +98,11 @@ const defaultProviderHealthService: ProviderHealthShape = {
   getStatuses: Effect.succeed(defaultProviderStatuses),
   refresh: Effect.succeed(defaultProviderStatuses),
   streamChanges: Stream.empty,
+};
+
+const defaultProviderUsageRegistry: ProviderUsageRegistryShape = {
+  getUsages: () => Effect.succeed([]),
+  refresh: () => Effect.succeed([]),
 };
 
 class MockTerminalManager implements TerminalManagerShape {
@@ -510,8 +519,9 @@ describe("WebSocket Server", () => {
       staticDir?: string;
       providerLayer?: Layer.Layer<
         ProviderService | ProviderDiscoveryService | ProviderAdapterRegistry,
-        never
+        ProviderUnsupportedError
       >;
+      providerUsageRegistry?: ProviderUsageRegistryShape;
       providerHealth?: ProviderHealthShape;
       open?: OpenShape;
       gitManager?: GitManagerShape;
@@ -532,6 +542,10 @@ describe("WebSocket Server", () => {
     const providerHealthLayer = Layer.succeed(
       ProviderHealth,
       options.providerHealth ?? defaultProviderHealthService,
+    );
+    const providerUsageRegistryLayer = Layer.succeed(
+      ProviderUsageRegistry,
+      options.providerUsageRegistry ?? defaultProviderUsageRegistry,
     );
     const openLayer = Layer.succeed(Open, options.open ?? defaultOpenService);
     const serverConfigLayer = Layer.succeed(ServerConfig, {
@@ -570,6 +584,7 @@ describe("WebSocket Server", () => {
     const dependenciesLayer = Layer.empty.pipe(
       Layer.provideMerge(runtimeLayer),
       Layer.provideMerge(providerHealthLayer),
+      Layer.provideMerge(providerUsageRegistryLayer),
       Layer.provideMerge(openLayer),
       Layer.provideMerge(serverConfigLayer),
       Layer.provideMerge(AnalyticsService.layerTest),

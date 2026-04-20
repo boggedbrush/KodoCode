@@ -25,6 +25,7 @@ import type {
   DesktopUpdateActionResult,
   DesktopUpdateState,
 } from "@t3tools/contracts";
+import { APP_BASE_NAME, formatAppDisplayName, resolveAppStageLabel } from "@t3tools/shared/product";
 import { autoUpdater } from "electron-updater";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
@@ -76,6 +77,11 @@ const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
+const WINDOW_MINIMIZE_CHANNEL = "desktop:window-minimize";
+const WINDOW_TOGGLE_MAXIMIZE_CHANNEL = "desktop:window-toggle-maximize";
+const WINDOW_CLOSE_CHANNEL = "desktop:window-close";
+const WINDOW_IS_MAXIMIZED_CHANNEL = "desktop:window-is-maximized";
+const WINDOW_MAXIMIZED_CHANGE_CHANNEL = "desktop:window-maximized-change";
 const NOTIFICATIONS_IS_SUPPORTED_CHANNEL = "desktop:notifications-is-supported";
 const NOTIFICATIONS_SHOW_CHANNEL = "desktop:notifications-show";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".dpcode");
@@ -83,9 +89,11 @@ const STATE_DIR = Path.join(BASE_DIR, "userdata");
 const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
-const APP_DISPLAY_NAME = isDevelopment ? "DP Code (Dev)" : "DP Code (Alpha)";
+const APP_STAGE_LABEL = resolveAppStageLabel(isDevelopment);
+const APP_DISPLAY_NAME = formatAppDisplayName(APP_STAGE_LABEL);
 const APP_USER_MODEL_ID = isDevelopment ? "com.t3tools.dpcode.dev" : "com.t3tools.dpcode";
 const USER_DATA_DIR_NAME = isDevelopment ? "t3code-dev" : "t3code";
+// Preserve the legacy branded directory name to avoid breaking existing installs.
 const LEGACY_USER_DATA_DIR_NAME = isDevelopment ? "DP Code (Dev)" : "DP Code (Alpha)";
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
@@ -239,6 +247,10 @@ function getSafeTheme(rawTheme: unknown): DesktopTheme | null {
   }
 
   return null;
+}
+
+function shouldUseCustomTitlebar(): boolean {
+  return process.platform === "linux" || process.platform === "win32";
 }
 
 // Wait until the desktop backend exposes its health route so packaged startup
@@ -581,7 +593,7 @@ function handleFatalStartupError(stage: string, error: unknown): void {
   console.error(`[desktop] fatal startup error (${stage})`, error);
   if (!isQuitting) {
     isQuitting = true;
-    dialog.showErrorBox("DP Code failed to start", `Stage: ${stage}\n${message}${detail}`);
+    dialog.showErrorBox(`${APP_BASE_NAME} failed to start`, `Stage: ${stage}\n${message}${detail}`);
   }
   stopBackend();
   restoreStdIoCapture?.();
@@ -689,7 +701,7 @@ async function checkForUpdatesFromMenu(): Promise<void> {
     void dialog.showMessageBox({
       type: "info",
       title: "You're up to date!",
-      message: `DP Code ${updateState.currentVersion} is currently the newest version available.`,
+      message: `${APP_BASE_NAME} ${updateState.currentVersion} is currently the newest version available.`,
       buttons: ["OK"],
     });
   } else if (updateState.status === "error") {
@@ -830,9 +842,9 @@ function resolveNotificationIconPath(): string | null {
     return null;
   }
   if (process.platform === "win32") {
-    return resolveResourcePath("dpcode.png") ?? resolveIconPath("ico");
+    return resolveResourcePath("icon.png") ?? resolveIconPath("ico");
   }
-  return resolveResourcePath("dpcode.png") ?? resolveIconPath("png");
+  return resolveResourcePath("icon.png") ?? resolveIconPath("png");
 }
 
 // Keep the app badge aligned with desktop notifications that arrive off-focus.
@@ -912,7 +924,7 @@ function showDesktopNotification(input: {
  *
  * Electron derives the default userData path from `productName` in
  * package.json, which currently produces directories with spaces and
- * parentheses (e.g. `~/.config/DP Code (Alpha)` on Linux). This is
+ * parentheses (e.g. `~/.config/Kōdō Code (Alpha)` on Linux). This is
  * unfriendly for shell usage and violates Linux naming conventions.
  *
  * We override it to a clean lowercase name (`t3code`). If the legacy
@@ -1620,6 +1632,36 @@ function registerIpcHandlers(): void {
       }),
   );
   registerDesktopVoiceTranscriptionHandler();
+  ipcMain.removeAllListeners(WINDOW_MINIMIZE_CHANNEL);
+  ipcMain.on(WINDOW_MINIMIZE_CHANNEL, () => {
+    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    window?.minimize();
+  });
+
+  ipcMain.removeAllListeners(WINDOW_TOGGLE_MAXIMIZE_CHANNEL);
+  ipcMain.on(WINDOW_TOGGLE_MAXIMIZE_CHANNEL, () => {
+    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    if (!window) return;
+
+    if (window.isMaximized()) {
+      window.unmaximize();
+    } else {
+      window.maximize();
+    }
+  });
+
+  ipcMain.removeAllListeners(WINDOW_CLOSE_CHANNEL);
+  ipcMain.on(WINDOW_CLOSE_CHANNEL, () => {
+    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    window?.close();
+  });
+
+  ipcMain.removeHandler(WINDOW_IS_MAXIMIZED_CHANNEL);
+  ipcMain.handle(WINDOW_IS_MAXIMIZED_CHANNEL, () => {
+    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    return window?.isMaximized() ?? false;
+  });
+
   startBrowserPerformanceLogging();
   void ensureBrowserUsePipeServer().catch((error) => {
     console.warn("[DPCODE browser] Failed to start browser-use native pipe", error);
@@ -1636,6 +1678,7 @@ function getIconOption(): { icon: string } | Record<string, never> {
 }
 
 function createWindow(): BrowserWindow {
+  const customTitlebarEnabled = shouldUseCustomTitlebar();
   const window = new BrowserWindow({
     width: 1100,
     height: 780,
@@ -1645,8 +1688,13 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: true,
     ...getIconOption(),
     title: APP_DISPLAY_NAME,
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 18 },
+    ...(customTitlebarEnabled ? { frame: false } : {}),
+    ...(process.platform === "darwin"
+      ? {
+          titleBarStyle: "hiddenInset" as const,
+          trafficLightPosition: { x: 16, y: 18 },
+        }
+      : {}),
     vibrancy: "under-window",
     visualEffectState: "active",
     backgroundColor: "#00000000",
@@ -1713,6 +1761,12 @@ function createWindow(): BrowserWindow {
   });
   window.once("ready-to-show", () => {
     window.show();
+  });
+  window.on("maximize", () => {
+    window.webContents.send(WINDOW_MAXIMIZED_CHANGE_CHANNEL, true);
+  });
+  window.on("unmaximize", () => {
+    window.webContents.send(WINDOW_MAXIMIZED_CHANGE_CHANNEL, false);
   });
 
   if (isDevelopment) {

@@ -3,13 +3,16 @@
 // Layer: Marketing util
 // Exports: repo/release URLs plus the latest-release fetch helper.
 
-const REPO = "Emanuele-web04/dpcode";
-export const REPO_URL = `https://github.com/${REPO}`;
+import {
+  APP_BASE_NAME,
+  LATEST_RELEASE_CACHE_KEY,
+  RELEASE_REPO_URL,
+  RELEASES_API_URL,
+  RELEASES_URL,
+} from "./product";
 
-export const RELEASES_URL = `https://github.com/${REPO}/releases`;
-
-const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
-const CACHE_KEY = "dpcode-latest-release";
+export const REPO_URL = RELEASE_REPO_URL;
+export { APP_BASE_NAME, RELEASES_URL };
 
 export interface ReleaseAsset {
   name: string;
@@ -23,13 +26,13 @@ export interface Release {
 }
 
 export async function fetchLatestRelease(): Promise<Release> {
-  const cached = sessionStorage.getItem(CACHE_KEY);
+  const cached = sessionStorage.getItem(LATEST_RELEASE_CACHE_KEY);
   if (cached) return JSON.parse(cached);
 
-  const data = await fetch(API_URL).then((r) => r.json());
+  const data = await fetch(RELEASES_API_URL).then((r) => r.json());
 
   if (data?.assets) {
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    sessionStorage.setItem(LATEST_RELEASE_CACHE_KEY, JSON.stringify(data));
   }
 
   return data;

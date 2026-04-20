@@ -1,10 +1,14 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import { RELEASES_URL } from "../lib/releases";
+import { APP_BASE_NAME } from "../lib/product";
 ---
 
-<Layout title="Download — DP Code" description="Download DP Code for macOS, Windows, or Linux.">
-  <h1 class="heading">Download DP Code</h1>
+<Layout
+  title={`Download — ${APP_BASE_NAME}`}
+  description={`Download ${APP_BASE_NAME} for macOS, Windows, or Linux.`}
+>
+  <h1 class="heading">Download {APP_BASE_NAME}</h1>
   <p class="subheading">
     <span id="version-label">Loading latest release&hellip;</span>
     <a id="changelog-link" class="changelog-link" href="#" target="_blank" rel="noopener noreferrer" style="display:none">View changelog<span aria-hidden="true"> &#8599;</span></a>

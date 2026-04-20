@@ -10,6 +10,7 @@ import OS from "node:os";
 import { Config, Data, Effect, FileSystem, Layer, Option, Path, Schema, ServiceMap } from "effect";
 import { Command, Flag } from "effect/unstable/cli";
 import { NetService } from "@t3tools/shared/Net";
+import { APP_BASE_NAME } from "@t3tools/shared/product";
 import {
   DEFAULT_PORT,
   deriveServerPaths,
@@ -273,7 +274,7 @@ const makeServerProgram = (input: CliInput) =>
         ? `http://${formatHostForUrl(config.host)}:${config.port}`
         : localUrl;
     const { authToken, devUrl, ...safeConfig } = config;
-    yield* Effect.logInfo("DP Code running", {
+    yield* Effect.logInfo(`${APP_BASE_NAME} running`, {
       ...safeConfig,
       devUrl: devUrl?.toString(),
       authEnabled: Boolean(authToken),
@@ -311,7 +312,7 @@ const hostFlag = Flag.string("host").pipe(
   Flag.optional,
 );
 const t3HomeFlag = Flag.string("home-dir").pipe(
-  Flag.withDescription("Base directory for all DP Code data (equivalent to T3CODE_HOME)."),
+  Flag.withDescription("Base directory for all Kōdō Code data (equivalent to T3CODE_HOME)."),
   Flag.optional,
 );
 const devUrlFlag = Flag.string("dev-url").pipe(
@@ -353,6 +354,6 @@ export const t3Cli = Command.make("t3", {
   autoBootstrapProjectFromCwd: autoBootstrapProjectFromCwdFlag,
   logWebSocketEvents: logWebSocketEventsFlag,
 }).pipe(
-  Command.withDescription("Run the DP Code server."),
+  Command.withDescription("Run the Kōdō Code server."),
   Command.withHandler((input) => Effect.scoped(makeServerProgram(input))),
 );

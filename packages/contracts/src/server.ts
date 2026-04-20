@@ -3,6 +3,7 @@ import { IsoDateTime, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
 import { ProviderKind } from "./orchestration";
+import { ServerProviderUsages, ProviderUsageStatusInput } from "./providerUsage";
 
 const SERVER_VOICE_TRANSCRIPTION_MAX_AUDIO_BASE64_CHARS = 14_000_000;
 
@@ -90,6 +91,11 @@ export const ServerVoiceTranscriptionResult = Schema.Struct({
   text: TrimmedNonEmptyString,
 });
 export type ServerVoiceTranscriptionResult = typeof ServerVoiceTranscriptionResult.Type;
+
+export const ServerUsageStatusInput = ProviderUsageStatusInput;
+export type ServerUsageStatusInput = typeof ProviderUsageStatusInput.Type;
+export const ServerUsageStatusResult = ServerProviderUsages;
+export type ServerUsageStatusResult = typeof ServerUsageStatusResult.Type;
 
 export const ServerUpsertKeybindingInput = KeybindingRule;
 export type ServerUpsertKeybindingInput = typeof ServerUpsertKeybindingInput.Type;

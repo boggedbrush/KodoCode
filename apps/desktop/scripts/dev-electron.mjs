@@ -2,9 +2,13 @@ import { spawn, spawnSync } from "node:child_process";
 import { watch } from "node:fs";
 import { join } from "node:path";
 import waitOn from "wait-on";
+import product from "../../../product.json" with { type: "json" };
 
 import { desktopDir, resolveElectronPath } from "./electron-launcher.mjs";
 
+const APP_BASE_NAME = product.appBaseName;
+const APP_DEV_NAME = `${APP_BASE_NAME} (Dev)`;
+const APP_ALPHA_NAME = `${APP_BASE_NAME} (Alpha)`;
 const port = Number(process.env.ELECTRON_RENDERER_PORT ?? 5733);
 const devServerUrl = `http://localhost:${port}`;
 const requiredFiles = [
@@ -57,7 +61,7 @@ function warnIfAlphaAppRunning() {
 
   const result = spawnSync(
     "pgrep",
-    ["-fal", "/Applications/DP Code \\(Alpha\\)\\.app/Contents/MacOS/DP Code \\(Alpha\\)"],
+    ["-fal", `/Applications/${APP_BASE_NAME} \\(Alpha\\)\\.app/Contents/MacOS/${APP_ALPHA_NAME}`],
     { encoding: "utf8" },
   );
   const output = typeof result.stdout === "string" ? result.stdout.trim() : "";
@@ -66,7 +70,7 @@ function warnIfAlphaAppRunning() {
   }
 
   console.error(
-    "[desktop-dev] DP Code (Alpha) is still running. Close it before testing voice in DP Code (Dev), or you may be looking at the wrong app/runtime.",
+    `[desktop-dev] ${APP_ALPHA_NAME} is still running. Close it before testing voice in ${APP_DEV_NAME}, or you may be looking at the wrong app/runtime.`,
   );
   console.error(output);
 }

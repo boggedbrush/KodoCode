@@ -70,7 +70,7 @@ import {
   useAppSettings,
 } from "../appSettings";
 import { isElectron } from "../env";
-import { APP_VERSION } from "../branding";
+import { APP_BASE_NAME, APP_SIDEBAR_SRC, APP_VERSION } from "../branding";
 import { showConfirmDialogFallback } from "../confirmDialogFallback";
 import { isMacPlatform, newCommandId, newProjectId, newThreadId, randomUUID } from "../lib/utils";
 import { persistAppStateNow, useStore } from "../store";
@@ -154,6 +154,7 @@ import {
   SidebarMenuSubItem,
   SidebarSeparator,
   SidebarTrigger,
+  useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
@@ -219,6 +220,40 @@ import { useFocusedChatContext } from "../focusedChatContext";
 import { showContextMenuFallback } from "../contextMenuFallback";
 
 const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
+
+function SidebarExpandedIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3.5">
+      <rect
+        x="2.5"
+        y="3"
+        width="11"
+        height="10"
+        rx="1.75"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <path d="M6 3v10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SidebarCollapsedIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" aria-hidden="true" className="size-3.5">
+      <rect
+        x="2.5"
+        y="3"
+        width="11"
+        height="10"
+        rx="1.75"
+        stroke="currentColor"
+        strokeWidth="1.2"
+      />
+      <path d="M5.5 3v10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
 const THREAD_PREVIEW_LIMIT = 5;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -733,17 +768,6 @@ function prStatusIndicator(pr: ThreadPr): PrStatusIndicator | null {
   return null;
 }
 
-function T3Wordmark() {
-  return (
-    <span
-      aria-label="DP"
-      className="shrink-0 text-[14px] font-semibold tracking-tight text-foreground"
-    >
-      DP
-    </span>
-  );
-}
-
 type SortableProjectHandleProps = Pick<
   ReturnType<typeof useSortable>,
   "attributes" | "listeners" | "setActivatorNodeRef"
@@ -1020,6 +1044,7 @@ function SortableWorkspaceItem({
 }
 
 export default function Sidebar() {
+  const { open: sidebarOpen, toggleSidebar } = useSidebar();
   const projects = useStore((store) => store.projects);
   const threadsHydrated = useStore((store) => store.threadsHydrated);
   const sidebarThreadSummaryById = useStore((store) => store.sidebarThreadSummaryById);
@@ -4871,7 +4896,7 @@ export default function Sidebar() {
             toastManager.add({
               type: "info",
               title: "You're up to date",
-              description: `DP Code ${nextState.currentVersion} is already the newest version.`,
+              description: `Kōdō Code ${nextState.currentVersion} is already the newest version.`,
             });
             return;
           }
@@ -4983,31 +5008,54 @@ export default function Sidebar() {
     }
     setAllProjectsExpanded(true);
   }, [allProjectsExpanded, collapseProjectsExcept, focusedProjectId, setAllProjectsExpanded]);
+  const sidebarToggleLabel = sidebarOpen ? "Hide thread sidebar" : "Show thread sidebar";
 
   const wordmark = (
     <div className="flex w-full items-center gap-1.5">
       <SidebarTrigger className="shrink-0 md:hidden" />
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <div className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 font-system-ui">
-              <div className="flex min-w-0 items-center gap-1">
-                <T3Wordmark />
-                <span className="truncate text-[14px] font-normal tracking-tight text-foreground/82">
-                  Code
+      <div className="flex min-w-0 flex-1 items-center gap-2 font-system-ui">
+        <div className="flex min-w-0 items-center gap-1">
+          <button
+            type="button"
+            className="group/sidebar-logo relative hidden h-7 shrink-0 items-center justify-center rounded-md px-1.5 outline-hidden transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring md:inline-flex"
+            onClick={toggleSidebar}
+            aria-label={sidebarToggleLabel}
+            title={sidebarToggleLabel}
+          >
+            <span className="relative flex min-w-0 items-center justify-center">
+              <span className="flex min-w-0 items-center gap-1 transition-opacity duration-150 group-hover/sidebar-logo:opacity-0">
+                <img
+                  src={APP_SIDEBAR_SRC}
+                  alt=""
+                  aria-hidden="true"
+                  className="size-6 shrink-0 rounded-md object-contain"
+                />
+              </span>
+              <span className="pointer-events-none absolute opacity-0 transition-opacity duration-150 group-hover/sidebar-logo:opacity-100">
+                {sidebarOpen ? <SidebarExpandedIcon /> : <SidebarCollapsedIcon />}
+              </span>
+            </span>
+          </button>
+          <img
+            src={APP_SIDEBAR_SRC}
+            alt=""
+            aria-hidden="true"
+            className="size-6 shrink-0 rounded-md object-contain md:hidden"
+          />
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <span className="truncate rounded-md px-1 py-0.5 text-[14px] font-medium tracking-tight text-foreground/82 outline-hidden transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring">
+                  {APP_BASE_NAME}
                 </span>
-              </div>
-            </div>
-          }
-        />
-        <TooltipPopup side="bottom" sideOffset={2}>
-          Version {APP_VERSION}
-        </TooltipPopup>
-      </Tooltip>
-      <SidebarTrigger
-        className="hidden size-7 shrink-0 text-muted-foreground/75 hover:text-foreground md:inline-flex ml-auto"
-        aria-label="Toggle thread sidebar"
-      />
+              }
+            />
+            <TooltipPopup side="bottom" sideOffset={2}>
+              Version {APP_VERSION}
+            </TooltipPopup>
+          </Tooltip>
+        </div>
+      </div>
     </div>
   );
 
@@ -5018,7 +5066,7 @@ export default function Sidebar() {
           <SidebarHeader
             className={cn(
               "drag-region h-[48px] flex-row items-center gap-2 px-4 py-0 font-system-ui",
-              appSettings.sidebarSide === "left" && "pl-[90px]",
+              appSettings.sidebarSide === "left" && "pl-4",
             )}
           >
             {wordmark}

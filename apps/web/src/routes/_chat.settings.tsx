@@ -28,7 +28,9 @@ import {
   useAppSettings,
 } from "../appSettings";
 import { APP_VERSION } from "../branding";
+import { DesktopTitleBarActionsPortal } from "../components/DesktopTitleBar";
 import { ClaudeAI, Gemini, OpenAI } from "../components/Icons";
+import { SettingsUsagePanel } from "../components/settings/SettingsUsagePanel";
 import { Button } from "../components/ui/button";
 import { Collapsible, CollapsibleContent } from "../components/ui/collapsible";
 import { Input } from "../components/ui/input";
@@ -41,7 +43,7 @@ import {
 } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
 import { toastManager } from "../components/ui/toast";
-import { SidebarHeaderTrigger, SidebarInset } from "../components/ui/sidebar";
+import { SidebarInset, SidebarTrigger } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
 import { isElectron } from "../env";
@@ -75,6 +77,7 @@ import { useStore } from "../store";
 import ReleaseHistoryDialog from "../components/ReleaseHistoryDialog";
 import { createAllThreadsSelector } from "../storeSelectors";
 import { formatRelativeTime } from "../components/Sidebar";
+import { useDesktopWindowFrame } from "../components/desktopWindowFrameState";
 import { formatWorktreePathForDisplay } from "../worktreeCleanup";
 
 // ── Settings taxonomy ──────────────────────────────────────────────────────
@@ -305,6 +308,7 @@ function SettingsRouteView() {
 
   const { theme, setTheme } = useTheme();
   const { settings, defaults, updateSettings, resetSettings } = useAppSettings();
+  const { hasCustomTitlebar } = useDesktopWindowFrame();
   const queryClient = useQueryClient();
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const serverWorktreesQuery = useQuery(serverWorktreesQueryOptions());
@@ -1132,7 +1136,7 @@ function SettingsRouteView() {
         <div className="space-y-2">
           <SettingsRow
             title="Theme"
-            description="Choose how DP Code looks across the app."
+            description="Choose how Kōdō Code looks across the app."
             resetAction={
               theme !== "system" ? (
                 <SettingResetButton label="theme" onClick={() => setTheme("system")} />
@@ -2287,6 +2291,8 @@ function SettingsRouteView() {
         return renderWorktreesPanel();
       case "archived":
         return renderArchivedPanel();
+      case "usage":
+        return <SettingsUsagePanel />;
       case "models":
         return renderModelsPanel();
       case "advanced":
@@ -2295,6 +2301,20 @@ function SettingsRouteView() {
         return null;
     }
   };
+
+  const restoreDefaultsAction = (
+    <div className="flex items-center gap-2 [-webkit-app-region:no-drag]">
+      <Button
+        size="xs"
+        variant="outline"
+        disabled={changedSettingLabels.length === 0}
+        onClick={() => void restoreDefaults()}
+      >
+        <RotateCcwIcon className="size-3.5" />
+        Restore defaults
+      </Button>
+    </div>
+  );
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -2307,38 +2327,22 @@ function SettingsRouteView() {
               settings.sidebarSide === "right" && "pl-[90px]",
             )}
           >
-            <SidebarHeaderTrigger className="size-7 shrink-0" />
+            {!hasCustomTitlebar ? <SidebarTrigger className="size-7 shrink-0" /> : null}
             <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
               Settings
             </span>
-            <div className="ms-auto flex items-center gap-2">
-              <Button
-                size="xs"
-                variant="outline"
-                disabled={changedSettingLabels.length === 0}
-                onClick={() => void restoreDefaults()}
-              >
-                <RotateCcwIcon className="size-3.5" />
-                Restore defaults
-              </Button>
-            </div>
+            {hasCustomTitlebar ? (
+              <DesktopTitleBarActionsPortal>{restoreDefaultsAction}</DesktopTitleBarActionsPortal>
+            ) : (
+              <div className="ms-auto flex items-center gap-2">{restoreDefaultsAction}</div>
+            )}
           </div>
         ) : (
           <header className="border-b border-border/70 px-3 py-2 sm:px-5">
             <div className="flex items-center gap-2">
-              <SidebarHeaderTrigger className="size-7 shrink-0" />
+              <SidebarTrigger className="size-7 shrink-0" />
               <span className="text-sm font-medium text-foreground">Settings</span>
-              <div className="ms-auto flex items-center gap-2">
-                <Button
-                  size="xs"
-                  variant="outline"
-                  disabled={changedSettingLabels.length === 0}
-                  onClick={() => void restoreDefaults()}
-                >
-                  <RotateCcwIcon className="size-3.5" />
-                  Restore defaults
-                </Button>
-              </div>
+              <div className="ms-auto flex items-center gap-2">{restoreDefaultsAction}</div>
             </div>
           </header>
         )}

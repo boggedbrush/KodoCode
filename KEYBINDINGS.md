@@ -1,6 +1,6 @@
 # Keybindings
 
-DP Code reads keybindings from:
+Kodo Code reads keybindings from:
 
 - `~/.dpcode/userdata/keybindings.json`
 

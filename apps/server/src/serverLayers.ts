@@ -21,12 +21,14 @@ import { makeClaudeAdapterLive } from "./provider/Layers/ClaudeAdapter";
 import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter";
 import { makeGeminiAdapterLive } from "./provider/Layers/GeminiAdapter";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry";
+import { ProviderUsageRegistryLive } from "./provider/Layers/ProviderUsageRegistry";
 import { makeProviderServiceLive } from "./provider/Layers/ProviderService";
 import { ProviderDiscoveryServiceLive } from "./provider/Layers/ProviderDiscoveryService";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory";
 import { ProviderAdapterRegistry } from "./provider/Services/ProviderAdapterRegistry";
 import { ProviderDiscoveryService } from "./provider/Services/ProviderDiscoveryService";
 import { ProviderService } from "./provider/Services/ProviderService";
+import { ProviderUsageRegistry } from "./provider/Services/ProviderUsageRegistry";
 import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger";
 
 import { TerminalManagerLive } from "./terminal/Layers/Manager";
@@ -56,7 +58,7 @@ const makeRuntimePtyAdapterLayer = () =>
   }).pipe(Layer.unwrap);
 
 export function makeServerProviderLayer(): Layer.Layer<
-  ProviderService | ProviderDiscoveryService | ProviderAdapterRegistry,
+  ProviderService | ProviderDiscoveryService | ProviderAdapterRegistry | ProviderUsageRegistry,
   ProviderUnsupportedError,
   SqlClient.SqlClient | ServerConfig | FileSystem.FileSystem | AnalyticsService
 > {
@@ -92,7 +94,13 @@ export function makeServerProviderLayer(): Layer.Layer<
     const providerDiscoveryLayer = ProviderDiscoveryServiceLive.pipe(
       Layer.provide(adapterRegistryLayer),
     );
-    return Layer.mergeAll(providerServiceLayer, providerDiscoveryLayer, adapterRegistryLayer);
+    const providerUsageLayer = ProviderUsageRegistryLive.pipe(Layer.provide(providerServiceLayer));
+    return Layer.mergeAll(
+      providerServiceLayer,
+      providerDiscoveryLayer,
+      adapterRegistryLayer,
+      providerUsageLayer,
+    );
   }).pipe(Layer.unwrap);
 }
 

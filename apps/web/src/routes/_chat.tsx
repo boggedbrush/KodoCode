@@ -4,6 +4,7 @@ import { Outlet, createFileRoute, useLocation, useNavigate } from "@tanstack/rea
 import { useEffect, useState } from "react";
 
 import ShortcutsDialog from "../components/ShortcutsDialog";
+import { DesktopWindowFrame } from "../components/DesktopWindowFrame";
 import { shouldRenderTerminalWorkspace } from "../components/ChatView.logic";
 import ThreadSidebar from "../components/Sidebar";
 import { isElectron } from "../env";
@@ -345,10 +346,12 @@ function ChatRouteLayout() {
 
   return (
     <SidebarProvider defaultOpen>
-      <ChatRouteGlobalShortcuts />
-      {side === "left" ? sidebarElement : null}
-      <Outlet />
-      {side === "right" ? sidebarElement : null}
+      <DesktopWindowFrame>
+        <ChatRouteGlobalShortcuts />
+        {side === "left" ? sidebarElement : null}
+        <Outlet />
+        {side === "right" ? sidebarElement : null}
+      </DesktopWindowFrame>
     </SidebarProvider>
   );
 }

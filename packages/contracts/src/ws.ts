@@ -56,6 +56,8 @@ import { OpenInEditorInput } from "./editor";
 import {
   ServerConfigUpdatedPayload,
   ServerProviderStatusesUpdatedPayload,
+  ServerUsageStatusInput,
+  ServerUsageStatusResult,
   ServerVoiceTranscriptionInput,
 } from "./server";
 import {
@@ -111,6 +113,8 @@ export const WS_METHODS = {
   // Server meta
   serverGetConfig: "server.getConfig",
   serverRefreshProviders: "server.refreshProviders",
+  serverGetUsageStatus: "server.getUsageStatus",
+  serverRefreshUsageStatus: "server.refreshUsageStatus",
   serverListWorktrees: "server.listWorktrees",
   serverTranscribeVoice: "server.transcribeVoice",
   serverUpsertKeybinding: "server.upsertKeybinding",
@@ -201,6 +205,8 @@ const WebSocketRequestBody = Schema.Union([
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverRefreshProviders, Schema.Struct({})),
+  tagRequestBody(WS_METHODS.serverGetUsageStatus, ServerUsageStatusInput),
+  tagRequestBody(WS_METHODS.serverRefreshUsageStatus, ServerUsageStatusInput),
   tagRequestBody(WS_METHODS.serverListWorktrees, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverTranscribeVoice, ServerVoiceTranscriptionInput),
   tagRequestBody(WS_METHODS.serverUpsertKeybinding, KeybindingRule),

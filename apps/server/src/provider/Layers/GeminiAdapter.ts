@@ -39,6 +39,7 @@ import {
   hasEffortLevel,
   resolveGeminiApiModelId,
 } from "@t3tools/shared/model";
+import { APP_BASE_NAME } from "@t3tools/shared/product";
 import { Effect, FileSystem, Layer, Queue, Stream } from "effect";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -1853,7 +1854,7 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* (
         protocolVersion: 1,
         clientInfo: {
           name: "dpcode",
-          title: "DP Code",
+          title: APP_BASE_NAME,
           version: "0.1.0",
         },
         clientCapabilities: {

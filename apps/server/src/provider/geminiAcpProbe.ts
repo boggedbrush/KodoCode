@@ -13,6 +13,7 @@ import {
   GEMINI_3_MODEL_CAPABILITIES,
   geminiCapabilitiesForModel,
 } from "@t3tools/shared/model";
+import { APP_BASE_NAME } from "@t3tools/shared/product";
 import { Effect } from "effect";
 import { asNumber, asRecord, trimToUndefined } from "./geminiValue.ts";
 
@@ -57,7 +58,7 @@ function pushLogLine(target: string[], line: string): void {
 }
 
 function formatGeminiDiscoveryWarning(detail: string): string {
-  return `Gemini CLI is installed, but DP Code could not verify authentication or discover models. ${detail}`;
+  return `Gemini CLI is installed, but ${APP_BASE_NAME} could not verify authentication or discover models. ${detail}`;
 }
 
 function formatGeminiAuthMessage(detail: string): string {
@@ -65,7 +66,7 @@ function formatGeminiAuthMessage(detail: string): string {
 }
 
 function formatGeminiModelDiscoveryFallbackMessage(): string {
-  return "Gemini CLI is installed and authenticated, but it did not report any available models. DP Code will use its built-in Gemini model list.";
+  return `Gemini CLI is installed and authenticated, but it did not report any available models. ${APP_BASE_NAME} will use its built-in Gemini model list.`;
 }
 
 function detailFromProbeLogs(
@@ -384,7 +385,7 @@ export const probeGeminiCapabilities = (input: {
           protocolVersion: 1,
           clientInfo: {
             name: "dpcode",
-            title: "DP Code",
+            title: APP_BASE_NAME,
             version: "0.1.0",
           },
           clientCapabilities: {

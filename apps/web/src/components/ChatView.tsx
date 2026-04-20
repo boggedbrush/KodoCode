@@ -134,6 +134,8 @@ import { useStore } from "../store";
 import { RenameThreadDialog } from "./RenameThreadDialog";
 import { getThreadFromState } from "../threadDerivation";
 import { useWorkspaceStore } from "../workspaceStore";
+import { DesktopTitleBarTitlePortal } from "./DesktopTitleBar";
+import { useDesktopWindowFrame } from "./desktopWindowFrameState";
 import {
   buildPlanImplementationThreadTitle,
   buildPlanImplementationPrompt,
@@ -189,7 +191,7 @@ import {
   projectScriptIdFromCommand,
   setupProjectScript,
 } from "~/projectScripts";
-import { SidebarHeaderTrigger } from "./ui/sidebar";
+import { SidebarTrigger } from "./ui/sidebar";
 import { newCommandId, newMessageId, newProjectId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import {
@@ -203,6 +205,7 @@ import {
   resolveAppModelSelection,
   useAppSettings,
 } from "../appSettings";
+import { APP_HERO_SRC } from "../branding";
 import { resolveModeModelSelection } from "../modeModelSelection";
 import { resolveTerminalNewAction } from "../lib/terminalNewAction";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -6121,6 +6124,7 @@ export default function ChatView({
     if (!activeThread) return;
     setThreadError(activeThread.id, null);
   }, [activeThread, setThreadError]);
+  const { hasCustomTitlebar } = useDesktopWindowFrame();
 
   // Empty state: no active thread
   if (!activeThread) {
@@ -6129,22 +6133,29 @@ export default function ChatView({
         {!isElectron && (
           <header className="border-b border-border px-3 py-2 md:hidden">
             <div className="flex items-center gap-2">
-              <SidebarHeaderTrigger className="size-7 shrink-0" />
+              <SidebarTrigger className="size-7 shrink-0" />
               <span className="text-sm font-medium text-foreground">Threads</span>
             </div>
           </header>
         )}
-        {isElectron && (
-          <div
-            className={cn(
-              "drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5",
-              settings.sidebarSide === "right" && "pl-[90px]",
-            )}
-          >
-            <SidebarHeaderTrigger className="size-7 shrink-0" />
-            <span className="text-xs text-muted-foreground/50">No active thread</span>
-          </div>
-        )}
+        {isElectron &&
+          (hasCustomTitlebar ? (
+            <DesktopTitleBarTitlePortal>
+              <div className="flex min-w-0 flex-1 items-center gap-3 px-3">
+                <span className="truncate text-xs text-muted-foreground/50">No active thread</span>
+              </div>
+            </DesktopTitleBarTitlePortal>
+          ) : (
+            <div
+              className={cn(
+                "drag-region flex h-[52px] shrink-0 items-center border-b border-border px-5",
+                settings.sidebarSide === "right" && "pl-[90px]",
+              )}
+            >
+              <SidebarTrigger className="size-7 shrink-0" />
+              <span className="text-xs text-muted-foreground/50">No active thread</span>
+            </div>
+          ))}
         <div className="flex flex-1 items-center justify-center">
           <div className="text-center">
             <p className="text-sm">Select a thread or create a new one to get started.</p>
@@ -6741,14 +6752,7 @@ export default function ChatView({
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
-      {/* Top bar */}
-      <header
-        className={cn(
-          "border-b border-border px-3 sm:px-5",
-          isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
-          isElectron && settings.sidebarSide === "right" && "pl-[90px] sm:pl-[90px]",
-        )}
-      >
+      {hasCustomTitlebar ? (
         <ChatHeader
           activeThreadId={activeThread.id}
           activeThreadTitle={activeThreadDisplayTitle}
@@ -6808,7 +6812,75 @@ export default function ChatView({
           onNavigateToThread={onNavigateToThread}
           onRenameThread={() => setRenameDialogOpen(true)}
         />
-      </header>
+      ) : (
+        <header
+          className={cn(
+            "border-b border-border px-3 sm:px-5",
+            isElectron ? "drag-region flex h-[52px] items-center" : "py-2 sm:py-3",
+            isElectron && settings.sidebarSide === "right" && "pl-[90px] sm:pl-[90px]",
+          )}
+        >
+          <ChatHeader
+            activeThreadId={activeThread.id}
+            activeThreadTitle={activeThreadDisplayTitle}
+            activeProjectName={activeProjectDisplayName}
+            threadBreadcrumbs={threadBreadcrumbs}
+            hideHandoffControls={terminalWorkspaceTerminalTabActive}
+            isGitRepo={isGitRepo}
+            openInCwd={threadWorkspaceCwd}
+            activeProjectScripts={activeProjectScripts}
+            preferredScriptId={
+              activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
+            }
+            keybindings={keybindings}
+            availableEditors={availableEditors}
+            terminalAvailable={activeProject !== undefined}
+            terminalOpen={terminalState.terminalOpen}
+            terminalToggleShortcutLabel={terminalToggleShortcutLabel}
+            browserToggleShortcutLabel={browserPanelShortcutLabel}
+            diffToggleShortcutLabel={diffPanelShortcutLabel}
+            handoffBadgeLabel={handoffBadgeLabel}
+            handoffActionLabel={handoffActionLabel}
+            handoffDisabled={handoffDisabled}
+            handoffActionTargetProviders={handoffTargetProviders}
+            handoffBadgeSourceProvider={handoffBadgeSourceProvider}
+            handoffBadgeTargetProvider={handoffBadgeTargetProvider}
+            browserOpen={resolvedBrowserOpen}
+            gitCwd={threadWorkspaceCwd}
+            showGitActions={showGitActions}
+            diffOpen={resolvedDiffOpen}
+            diffDisabledReason={diffDisabledReason}
+            surfaceMode={surfaceMode}
+            chatLayoutAction={
+              surfaceMode === "single" && onSplitSurface
+                ? {
+                    kind: "split",
+                    label: "Split chat",
+                    shortcutLabel: chatSplitShortcutLabel,
+                    onClick: onSplitSurface,
+                  }
+                : surfaceMode === "split" && isFocusedPane && onMaximizeSurface
+                  ? {
+                      kind: "maximize",
+                      label: "Expand this chat",
+                      shortcutLabel: null,
+                      onClick: onMaximizeSurface,
+                    }
+                  : null
+            }
+            onRunProjectScript={onRunProjectScriptFromHeader}
+            onAddProjectScript={saveProjectScript}
+            onUpdateProjectScript={updateProjectScript}
+            onDeleteProjectScript={deleteProjectScript}
+            onToggleTerminal={toggleTerminalVisibility}
+            onToggleDiff={onToggleDiff}
+            onToggleBrowser={onToggleBrowser}
+            onCreateHandoff={onCreateHandoffThread}
+            onNavigateToThread={onNavigateToThread}
+            onRenameThread={() => setRenameDialogOpen(true)}
+          />
+        </header>
+      )}
 
       <RenameThreadDialog
         open={renameDialogOpen}
@@ -6847,11 +6919,11 @@ export default function ChatView({
                 <div className="flex w-full max-w-3xl flex-col justify-center">
                   <div className="flex flex-col items-center gap-4 px-6 pb-5 text-center select-none">
                     <img
-                      alt="DP Code logo"
+                      alt="Kōdō Code logo"
                       className="size-12 rounded-lg object-contain"
                       draggable={false}
                       height={96}
-                      src="/dpcode-hero.png"
+                      src={APP_HERO_SRC}
                       width={96}
                     />
                     <h2 className="text-[26px] font-normal leading-[1.15] tracking-[-0.015em] text-foreground/95 sm:text-[30px]">

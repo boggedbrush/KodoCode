@@ -11,6 +11,7 @@ import type {
   ServerVoiceTranscriptionInput,
   ServerVoiceTranscriptionResult,
 } from "@t3tools/contracts";
+import { APP_BASE_NAME } from "@t3tools/shared/product";
 
 export const SERVER_TRANSCRIBE_VOICE_CHANNEL = "desktop:server-transcribe-voice";
 
@@ -178,7 +179,7 @@ async function resolveDesktopVoiceAuth(
         params: {
           clientInfo: {
             name: "dp-code-desktop",
-            title: "DP Code Desktop",
+            title: `${APP_BASE_NAME} Desktop`,
             version: app.getVersion(),
           },
           capabilities: { experimentalApi: true },

@@ -1,10 +1,11 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import { RELEASES_URL } from "../lib/releases";
+import { APP_BASE_NAME } from "../lib/product";
 ---
 
 <Layout>
-  <h1 class="tagline">DP Code is the best way to code with AI.</h1>
+  <h1 class="tagline">{APP_BASE_NAME} is a minimal GUI for coding agents.</h1>
 
   <a
     id="download-btn"
@@ -20,7 +21,7 @@ import { RELEASES_URL } from "../lib/releases";
   <a href="/download" class="other-platforms">Other platforms</a>
 
   <div class="screenshot-wrap">
-    <img src="/screenshot.jpeg" alt="DP Code" class="screenshot" />
+    <img src="/screenshot.jpeg" alt={APP_BASE_NAME} class="screenshot" />
   </div>
 </Layout>
 

@@ -39,6 +39,8 @@ import type {
   ServerConfig,
   ServerListWorktreesResult,
   ServerRefreshProvidersResult,
+  ServerUsageStatusInput,
+  ServerUsageStatusResult,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
   ServerVoiceTranscriptionInput,
@@ -234,6 +236,13 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  windowControls?: {
+    minimize: () => void;
+    toggleMaximize: () => void;
+    close: () => void;
+    isMaximized: () => Promise<boolean>;
+    onMaximizedChange: (listener: (isMaximized: boolean) => void) => () => void;
+  };
   notifications: {
     isSupported: () => Promise<boolean>;
     show: (input: DesktopNotificationInput) => Promise<boolean>;
@@ -323,6 +332,8 @@ export interface NativeApi {
   server: {
     getConfig: () => Promise<ServerConfig>;
     refreshProviders: () => Promise<ServerRefreshProvidersResult>;
+    getUsageStatus: (input: ServerUsageStatusInput) => Promise<ServerUsageStatusResult>;
+    refreshUsageStatus: (input: ServerUsageStatusInput) => Promise<ServerUsageStatusResult>;
     listWorktrees: () => Promise<ServerListWorktreesResult>;
     transcribeVoice: (
       input: ServerVoiceTranscriptionInput,

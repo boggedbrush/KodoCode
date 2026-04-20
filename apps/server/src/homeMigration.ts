@@ -131,7 +131,7 @@ const snapshotSqliteDatabase = (sourcePath: string, targetPath: string) =>
     },
     catch: (cause) =>
       new HomeMigrationError({
-        message: `Failed to snapshot legacy sqlite database from ${sourcePath} to ${targetPath}. Close other DP Code processes and retry.`,
+        message: `Failed to snapshot legacy sqlite database from ${sourcePath} to ${targetPath}. Close other Kōdō Code processes and retry.`,
         cause,
       }),
   });
@@ -327,7 +327,7 @@ export const migrateLegacyHomeIfNeeded = Effect.fn(function* (input: LegacyHomeM
       ],
     });
 
-    yield* Effect.logInfo("imported legacy T3 state into DP Code home", {
+    yield* Effect.logInfo("imported legacy T3 state into Kōdō Code home", {
       sourceStateDir: sourcePaths.stateDir,
       targetStateDir: targetPaths.stateDir,
       importedArtifacts,

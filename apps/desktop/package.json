@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/desktop",
-  "version": "0.0.32",
+  "version": "0.0.2",
   "private": true,
   "main": "dist-electron/main.js",
   "scripts": {
@@ -27,5 +27,5 @@
     "vitest": "catalog:",
     "wait-on": "^8.0.2"
   },
-  "productName": "Kodo Code (Alpha)"
+  "productName": "Kōdō Code (Alpha)"
 }

@@ -5,6 +5,7 @@
 // Depends on: release repo metadata from ../lib/releases.
 
 import { REPO_URL } from "../lib/releases";
+import { APP_BASE_NAME } from "../lib/product";
 
 interface Props {
   title?: string;
@@ -12,8 +13,8 @@ interface Props {
 }
 
 const {
-  title = "DP Code",
-  description = "DP Code — The best way to code with AI.",
+  title = APP_BASE_NAME,
+  description = `${APP_BASE_NAME} — A minimal GUI for coding agents.`,
 } = Astro.props;
 ---
 
@@ -38,7 +39,7 @@ const {
     <div class="page">
       <nav class="nav">
         <a href="/" class="nav-brand">
-          <img src="/icon.png" alt="DP" class="nav-icon" />
+          <img src="/icon.png" alt={APP_BASE_NAME} class="nav-icon" />
         </a>
         <a
           href={REPO_URL}
