@@ -1,39 +1,84 @@
-import * as React from "react";
-import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
-import type { SidebarThreadSummary, Thread } from "../types";
+// FILE: Sidebar.logic.ts
+// Purpose: Shared sidebar sorting and status helpers used by the thread list UI.
+// Exports: Sidebar row state derivation, add-project error helpers, sort utilities, and visibility helpers.
+
+import type { KeybindingCommand, ProjectId, ThreadId } from "@t3tools/contracts";
+import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "../appSettings";
+import type { ChatMessage, Project, SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
-import { isLatestTurnSettled } from "../session-logic";
+import { isDuplicateProjectCreateError } from "../lib/projectCreateRecovery";
+import { workspaceRootsEqual } from "@t3tools/shared/threadWorkspace";
 import {
-  PLAN_READY_THREAD_STATUS_COLOR_CLASSES,
-  WORKING_THREAD_STATUS_COLOR_CLASSES,
-} from "../modeColors";
+  hasLiveLatestTurn,
+  findLatestProposedPlan,
+  hasActionableProposedPlan,
+  isLatestTurnSettled,
+} from "../session-logic";
+import type { SplitView } from "../splitViewStore";
+
+export {
+  extractDuplicateProjectCreateProjectId,
+  isDuplicateProjectCreateError,
+} from "../lib/projectCreateRecovery";
 
 export const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
-export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100;
+export const SIDEBAR_THREAD_PREWARM_LIMIT = 10;
 export type SidebarNewThreadEnvMode = "local" | "worktree";
+export type SidebarLastThreadRoute = {
+  threadId: string;
+  splitViewId?: string | undefined;
+};
 type SidebarProject = {
   id: string;
   name: string;
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
 };
-type SidebarThreadSortInput = Pick<Thread, "createdAt" | "updatedAt"> & {
-  latestUserMessageAt?: string | null;
-  messages?: Pick<Thread["messages"][number], "createdAt" | "role">[];
+type SidebarThreadSortInput = {
+  createdAt: string;
+  updatedAt?: string | undefined;
+  latestUserMessageAt?: string | null | undefined;
+  messages?: ReadonlyArray<Pick<ChatMessage, "role" | "createdAt">> | undefined;
 };
 
-type SidebarProjectThreadInput = Pick<Thread, "id" | "archivedAt">;
-type ProjectRemovalProjectInput<TProjectId> = {
-  id: TProjectId;
-  workspaceRoot: string;
-  deletedAt: string | null;
-};
-type ProjectRemovalThreadInput<TProjectId> = {
-  projectId: TProjectId;
-  deletedAt: string | null;
+export type SidebarProjectEntry =
+  | {
+      kind: "thread";
+      rowId: ThreadId;
+      rootRowId: ThreadId;
+      thread: SidebarThreadSummary;
+      depth: number;
+      childCount: number;
+      isExpanded: boolean;
+    }
+  | {
+      kind: "split";
+      rowId: ThreadId;
+      rootRowId: ThreadId;
+      splitView: SplitView;
+    };
+
+export type SidebarDerivedProjectData = {
+  projectThreads: SidebarThreadSummary[];
+  orderedProjectThreadIds: ThreadId[];
+  visibleEntries: SidebarProjectEntry[];
+  hasHiddenThreads: boolean;
+  isThreadListExpanded: boolean;
+  activeEntryId: ThreadId | null;
+  projectStatus: ReturnType<typeof resolveProjectStatusIndicator>;
 };
 
-export type ThreadTraversalDirection = "previous" | "next";
+const THREAD_JUMP_COMMANDS = [
+  "thread.jump.1",
+  "thread.jump.2",
+  "thread.jump.3",
+  "thread.jump.4",
+  "thread.jump.5",
+  "thread.jump.6",
+  "thread.jump.7",
+  "thread.jump.8",
+  "thread.jump.9",
+] as const satisfies readonly KeybindingCommand[];
 
 export interface ThreadStatusPill {
   label:
@@ -58,101 +103,13 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
 };
 
 type ThreadStatusInput = Pick<
-  SidebarThreadSummary,
-  | "hasActionableProposedPlan"
-  | "hasPendingApprovals"
-  | "hasPendingUserInput"
-  | "interactionMode"
-  | "latestTurn"
-  | "session"
+  Thread,
+  "interactionMode" | "latestTurn" | "lastVisitedAt" | "session"
 > & {
-  lastVisitedAt?: string | undefined;
+  proposedPlans?: Thread["proposedPlans"] | undefined;
+  hasActionableProposedPlan?: boolean | undefined;
+  hasLiveTailWork?: boolean | undefined;
 };
-
-export interface ThreadJumpHintVisibilityController {
-  sync: (shouldShow: boolean) => void;
-  dispose: () => void;
-}
-
-export function createThreadJumpHintVisibilityController(input: {
-  delayMs: number;
-  onVisibilityChange: (visible: boolean) => void;
-  setTimeoutFn?: typeof globalThis.setTimeout;
-  clearTimeoutFn?: typeof globalThis.clearTimeout;
-}): ThreadJumpHintVisibilityController {
-  const setTimeoutFn = input.setTimeoutFn ?? globalThis.setTimeout;
-  const clearTimeoutFn = input.clearTimeoutFn ?? globalThis.clearTimeout;
-  let isVisible = false;
-  let timeoutId: NodeJS.Timeout | null = null;
-
-  const clearPendingShow = () => {
-    if (timeoutId === null) {
-      return;
-    }
-    clearTimeoutFn(timeoutId);
-    timeoutId = null;
-  };
-
-  return {
-    sync: (shouldShow) => {
-      if (!shouldShow) {
-        clearPendingShow();
-        if (isVisible) {
-          isVisible = false;
-          input.onVisibilityChange(false);
-        }
-        return;
-      }
-
-      if (isVisible || timeoutId !== null) {
-        return;
-      }
-
-      timeoutId = setTimeoutFn(() => {
-        timeoutId = null;
-        isVisible = true;
-        input.onVisibilityChange(true);
-      }, input.delayMs);
-    },
-    dispose: () => {
-      clearPendingShow();
-    },
-  };
-}
-
-export function useThreadJumpHintVisibility(): {
-  showThreadJumpHints: boolean;
-  updateThreadJumpHintsVisibility: (shouldShow: boolean) => void;
-} {
-  const [showThreadJumpHints, setShowThreadJumpHints] = React.useState(false);
-  const controllerRef = React.useRef<ThreadJumpHintVisibilityController | null>(null);
-
-  React.useEffect(() => {
-    const controller = createThreadJumpHintVisibilityController({
-      delayMs: THREAD_JUMP_HINT_SHOW_DELAY_MS,
-      onVisibilityChange: (visible) => {
-        setShowThreadJumpHints(visible);
-      },
-      setTimeoutFn: window.setTimeout.bind(window),
-      clearTimeoutFn: window.clearTimeout.bind(window),
-    });
-    controllerRef.current = controller;
-
-    return () => {
-      controller.dispose();
-      controllerRef.current = null;
-    };
-  }, []);
-
-  const updateThreadJumpHintsVisibility = React.useCallback((shouldShow: boolean) => {
-    controllerRef.current?.sync(shouldShow);
-  }, []);
-
-  return {
-    showThreadJumpHints,
-    updateThreadJumpHintsVisibility,
-  };
-}
 
 export function hasUnseenCompletion(thread: ThreadStatusInput): boolean {
   if (!thread.latestTurn?.completedAt) return false;
@@ -177,119 +134,50 @@ export function resolveSidebarNewThreadEnvMode(input: {
   return input.requestedEnvMode ?? input.defaultEnvMode;
 }
 
-export function resolveSidebarNewThreadSeedContext(input: {
-  projectId: string;
-  defaultEnvMode: SidebarNewThreadEnvMode;
-  activeThread?: {
-    projectId: string;
-    branch: string | null;
-    worktreePath: string | null;
-  } | null;
-  activeDraftThread?: {
-    projectId: string;
-    branch: string | null;
-    worktreePath: string | null;
-    envMode: SidebarNewThreadEnvMode;
-  } | null;
-}): {
-  branch?: string | null;
-  worktreePath?: string | null;
-  envMode: SidebarNewThreadEnvMode;
-} {
-  if (input.activeDraftThread?.projectId === input.projectId) {
-    return {
-      branch: input.activeDraftThread.branch,
-      worktreePath: input.activeDraftThread.worktreePath,
-      envMode: input.activeDraftThread.envMode,
-    };
+// Reuses the last visited thread route when leaving special views like settings.
+export function resolveSidebarRestorableThreadRoute(input: {
+  lastThreadRoute: SidebarLastThreadRoute | null;
+  availableThreadIds: ReadonlySet<string>;
+}): SidebarLastThreadRoute | null {
+  const { lastThreadRoute, availableThreadIds } = input;
+  if (!lastThreadRoute) {
+    return null;
   }
 
-  if (input.activeThread?.projectId === input.projectId) {
-    return {
-      branch: input.activeThread.branch,
-      worktreePath: input.activeThread.worktreePath,
-      envMode: input.activeThread.worktreePath ? "worktree" : "local",
-    };
-  }
-
-  return {
-    envMode: input.defaultEnvMode,
-  };
+  return availableThreadIds.has(lastThreadRoute.threadId) ? lastThreadRoute : null;
 }
 
-export function orderItemsByPreferredIds<TItem, TId>(input: {
-  items: readonly TItem[];
-  preferredIds: readonly TId[];
-  getId: (item: TItem) => TId;
-}): TItem[] {
-  const { getId, items, preferredIds } = input;
-  if (preferredIds.length === 0) {
-    return [...items];
-  }
-
-  const itemsById = new Map(items.map((item) => [getId(item), item] as const));
-  const preferredIdSet = new Set(preferredIds);
-  const emittedPreferredIds = new Set<TId>();
-  const ordered = preferredIds.flatMap((id) => {
-    if (emittedPreferredIds.has(id)) {
-      return [];
-    }
-    const item = itemsById.get(id);
-    if (!item) {
-      return [];
-    }
-    emittedPreferredIds.add(id);
-    return [item];
-  });
-  const remaining = items.filter((item) => !preferredIdSet.has(getId(item)));
-  return [...ordered, ...remaining];
-}
-
-export function getVisibleSidebarThreadIds<TThreadId>(
-  renderedProjects: readonly {
-    shouldShowThreadPanel?: boolean;
-    renderedThreadIds: readonly TThreadId[];
-  }[],
-): TThreadId[] {
-  return renderedProjects.flatMap((renderedProject) =>
-    renderedProject.shouldShowThreadPanel === false ? [] : renderedProject.renderedThreadIds,
+// Drops remembered "show more" state for projects that are currently collapsed.
+export function pruneExpandedProjectThreadListsForCollapsedProjects<
+  T extends Pick<Project, "cwd" | "expanded">,
+>(input: {
+  expandedProjectThreadListCwds: ReadonlySet<string>;
+  projects: readonly T[];
+  normalizeProjectCwd: (cwd: string) => string;
+}): ReadonlySet<string> {
+  const { expandedProjectThreadListCwds, normalizeProjectCwd, projects } = input;
+  const collapsedProjectCwds = new Set(
+    projects
+      .filter((project) => !project.expanded)
+      .map((project) => normalizeProjectCwd(project.cwd))
+      .filter((cwd) => cwd.length > 0),
   );
-}
 
-export function resolveAdjacentThreadId<T>(input: {
-  threadIds: readonly T[];
-  currentThreadId: T | null;
-  direction: ThreadTraversalDirection;
-}): T | null {
-  const { currentThreadId, direction, threadIds } = input;
-
-  if (threadIds.length === 0) {
-    return null;
+  if (collapsedProjectCwds.size === 0) {
+    return expandedProjectThreadListCwds;
   }
 
-  if (currentThreadId === null) {
-    return direction === "previous" ? (threadIds.at(-1) ?? null) : (threadIds[0] ?? null);
+  let changed = false;
+  const nextExpandedProjectThreadListCwds = new Set<string>();
+  for (const cwd of expandedProjectThreadListCwds) {
+    if (collapsedProjectCwds.has(cwd)) {
+      changed = true;
+      continue;
+    }
+    nextExpandedProjectThreadListCwds.add(cwd);
   }
 
-  const currentIndex = threadIds.indexOf(currentThreadId);
-  if (currentIndex === -1) {
-    return null;
-  }
-
-  if (direction === "previous") {
-    return currentIndex > 0 ? (threadIds[currentIndex - 1] ?? null) : null;
-  }
-
-  return currentIndex < threadIds.length - 1 ? (threadIds[currentIndex + 1] ?? null) : null;
-}
-
-export function isContextMenuPointerDown(input: {
-  button: number;
-  ctrlKey: boolean;
-  isMac: boolean;
-}): boolean {
-  if (input.button === 2) return true;
-  return input.isMac && input.button === 0 && input.ctrlKey;
+  return changed ? nextExpandedProjectThreadListCwds : expandedProjectThreadListCwds;
 }
 
 export function resolveThreadRowClassName(input: {
@@ -297,38 +185,40 @@ export function resolveThreadRowClassName(input: {
   isSelected: boolean;
 }): string {
   const baseClassName =
-    "h-7 w-full translate-x-0 cursor-pointer justify-start px-2 text-left select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
+    "h-8 w-full translate-x-0 cursor-pointer justify-start rounded-md pr-9 pl-8 text-left text-[13px] select-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring";
 
   if (input.isSelected && input.isActive) {
     return cn(
       baseClassName,
-      "bg-primary/22 text-foreground font-medium hover:bg-primary/26 hover:text-foreground dark:bg-primary/30 dark:hover:bg-primary/36",
+      "bg-primary/16 text-foreground/90 hover:bg-primary/20 hover:text-foreground dark:bg-primary/22 dark:hover:bg-primary/28",
     );
   }
 
   if (input.isSelected) {
     return cn(
       baseClassName,
-      "bg-primary/15 text-foreground hover:bg-primary/19 hover:text-foreground dark:bg-primary/22 dark:hover:bg-primary/28",
+      "bg-primary/12 text-foreground/88 hover:bg-primary/16 hover:text-foreground dark:bg-primary/18 dark:hover:bg-primary/24",
     );
   }
 
   if (input.isActive) {
     return cn(
       baseClassName,
-      "bg-accent/85 text-foreground font-medium hover:bg-accent hover:text-foreground dark:bg-accent/55 dark:hover:bg-accent/70",
+      "bg-accent/62 text-foreground/90 hover:bg-accent/72 hover:text-foreground dark:bg-accent/42 dark:hover:bg-accent/56",
     );
   }
 
-  return cn(baseClassName, "text-muted-foreground hover:bg-accent hover:text-foreground");
+  return cn(baseClassName, "text-foreground/78 hover:bg-accent/45 hover:text-foreground");
 }
 
 export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
+  hasPendingApprovals: boolean;
+  hasPendingUserInput: boolean;
 }): ThreadStatusPill | null {
-  const { thread } = input;
+  const { hasPendingApprovals, hasPendingUserInput, thread } = input;
 
-  if (thread.hasPendingApprovals) {
+  if (hasPendingApprovals) {
     return {
       label: "Pending Approval",
       colorClass: "text-amber-600 dark:text-amber-300/90",
@@ -337,7 +227,7 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (thread.hasPendingUserInput) {
+  if (hasPendingUserInput) {
     return {
       label: "Awaiting Input",
       colorClass: "text-indigo-600 dark:text-indigo-300/90",
@@ -346,11 +236,23 @@ export function resolveThreadStatusPill(input: {
     };
   }
 
-  if (thread.session?.status === "running") {
+  if (thread.hasLiveTailWork) {
     return {
       label: "Working",
-      colorClass: WORKING_THREAD_STATUS_COLOR_CLASSES.colorClass,
-      dotClass: WORKING_THREAD_STATUS_COLOR_CLASSES.dotClass,
+      colorClass: "text-sky-600 dark:text-sky-300/80",
+      dotClass: "bg-sky-500 dark:bg-sky-300/80",
+      pulse: true,
+    };
+  }
+
+  if (
+    thread.session?.status === "running" &&
+    (thread.latestTurn === null || hasLiveLatestTurn(thread.latestTurn, thread.session))
+  ) {
+    return {
+      label: "Working",
+      colorClass: "text-sky-600 dark:text-sky-300/80",
+      dotClass: "bg-sky-500 dark:bg-sky-300/80",
       pulse: true,
     };
   }
@@ -365,20 +267,24 @@ export function resolveThreadStatusPill(input: {
   }
 
   const hasPlanReadyPrompt =
-    !thread.hasPendingUserInput &&
+    !hasPendingUserInput &&
+    !thread.hasLiveTailWork &&
     thread.interactionMode === "plan" &&
     isLatestTurnSettled(thread.latestTurn, thread.session) &&
-    thread.hasActionableProposedPlan;
+    (thread.hasActionableProposedPlan ??
+      hasActionableProposedPlan(
+        findLatestProposedPlan(thread.proposedPlans ?? [], thread.latestTurn?.turnId ?? null),
+      ));
   if (hasPlanReadyPrompt) {
     return {
       label: "Plan Ready",
-      colorClass: PLAN_READY_THREAD_STATUS_COLOR_CLASSES.colorClass,
-      dotClass: PLAN_READY_THREAD_STATUS_COLOR_CLASSES.dotClass,
+      colorClass: "text-violet-600 dark:text-violet-300/90",
+      dotClass: "bg-violet-500 dark:bg-violet-300/90",
       pulse: false,
     };
   }
 
-  if (hasUnseenCompletion(thread)) {
+  if (!thread.hasLiveTailWork && hasUnseenCompletion(thread)) {
     return {
       label: "Completed",
       colorClass: "text-emerald-600 dark:text-emerald-300/90",
@@ -408,55 +314,32 @@ export function resolveProjectStatusIndicator(
   return highestPriorityStatus;
 }
 
-export function getProjectThreadsForSidebar<T extends SidebarProjectThreadInput>(input: {
-  threadIds: readonly string[];
-  threadsById: Readonly<Record<string, T | undefined>>;
-}): T[] {
-  return input.threadIds
-    .map((threadId) => input.threadsById[threadId])
-    .filter((thread): thread is T => thread !== undefined && thread.archivedAt === null);
+export function findWorkspaceRootMatch<T>(
+  items: readonly T[],
+  targetWorkspaceRoot: string,
+  getWorkspaceRoot: (item: T) => string,
+): T | undefined {
+  return items.find((item) => workspaceRootsEqual(getWorkspaceRoot(item), targetWorkspaceRoot));
 }
 
-export function resolveProjectRemovalTargets<TProjectId>(input: {
-  projectId: TProjectId;
-  projectCwd: string;
-  projects: readonly ProjectRemovalProjectInput<TProjectId>[];
-  threads: readonly ProjectRemovalThreadInput<TProjectId>[];
-}): {
-  matchingProjectIds: TProjectId[];
-  activeThreadCount: number;
-} {
-  const matchingProjectIds = input.projects
-    .filter(
-      (project) =>
-        project.deletedAt === null &&
-        (project.id === input.projectId || project.workspaceRoot === input.projectCwd),
-    )
-    .map((project) => project.id)
-    .filter(
-      (projectId, index, ids) => ids.findIndex((candidate) => candidate === projectId) === index,
-    );
+// Translates low-level add-project failures into a short explanation without
+// hiding the original error text that developers may need for diagnosis.
+export function describeAddProjectError(message: string): string | null {
+  if (isDuplicateProjectCreateError(message)) {
+    return "This usually means the folder is already linked to an existing project. On Windows, the same folder can arrive with a different path format, so it looks new even when it is not.";
+  }
 
-  const matchingProjectIdSet = new Set(matchingProjectIds);
-  const activeThreadCount = input.threads.filter(
-    (thread) => thread.deletedAt === null && matchingProjectIdSet.has(thread.projectId),
-  ).length;
-
-  return {
-    matchingProjectIds,
-    activeThreadCount,
-  };
+  return null;
 }
 
-export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input: {
+export function getVisibleThreadsForProject<T extends Pick<SidebarThreadSummary, "id">>(input: {
   threads: readonly T[];
-  activeThreadId: T["id"] | undefined;
+  activeThreadId: Thread["id"] | undefined;
   isThreadListExpanded: boolean;
   previewLimit: number;
 }): {
   hasHiddenThreads: boolean;
   visibleThreads: T[];
-  hiddenThreads: T[];
 } {
   const { activeThreadId, isThreadListExpanded, previewLimit, threads } = input;
   const hasHiddenThreads = threads.length > previewLimit;
@@ -464,7 +347,6 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
   if (!hasHiddenThreads || isThreadListExpanded) {
     return {
       hasHiddenThreads,
-      hiddenThreads: [],
       visibleThreads: [...threads],
     };
   }
@@ -473,7 +355,6 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
   if (!activeThreadId || previewThreads.some((thread) => thread.id === activeThreadId)) {
     return {
       hasHiddenThreads: true,
-      hiddenThreads: threads.slice(previewLimit),
       visibleThreads: previewThreads,
     };
   }
@@ -482,7 +363,6 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
   if (!activeThread) {
     return {
       hasHiddenThreads: true,
-      hiddenThreads: threads.slice(previewLimit),
       visibleThreads: previewThreads,
     };
   }
@@ -491,9 +371,330 @@ export function getVisibleThreadsForProject<T extends Pick<Thread, "id">>(input:
 
   return {
     hasHiddenThreads: true,
-    hiddenThreads: threads.filter((thread) => !visibleThreadIds.has(thread.id)),
     visibleThreads: threads.filter((thread) => visibleThreadIds.has(thread.id)),
   };
+}
+
+export interface SidebarThreadTreeRow<
+  T extends Pick<SidebarThreadSummary, "id" | "parentThreadId">,
+> {
+  thread: T;
+  depth: number;
+  rootThreadId: T["id"];
+  childCount: number;
+  isExpanded: boolean;
+}
+
+function collectForcedExpandedParentIds<
+  T extends Pick<SidebarThreadSummary, "id" | "parentThreadId">,
+>(threadById: Map<T["id"], T>, forceVisibleThreadId: T["id"] | undefined): Set<T["id"]> {
+  const forcedParentIds = new Set<T["id"]>();
+  let currentThreadId = forceVisibleThreadId;
+
+  while (currentThreadId) {
+    const parentThreadId = threadById.get(currentThreadId)?.parentThreadId ?? undefined;
+    if (!parentThreadId) {
+      break;
+    }
+    forcedParentIds.add(parentThreadId);
+    currentThreadId = parentThreadId;
+  }
+
+  return forcedParentIds;
+}
+
+// Build the project-local parent/child thread tree while preserving sort order from the input list.
+export function buildProjectThreadTree<
+  T extends Pick<SidebarThreadSummary, "id" | "parentThreadId">,
+>(input: {
+  threads: readonly T[];
+  expandedParentThreadIds?: ReadonlySet<T["id"]> | undefined;
+  forceVisibleThreadId?: T["id"] | undefined;
+}): SidebarThreadTreeRow<T>[] {
+  const { expandedParentThreadIds, forceVisibleThreadId, threads } = input;
+  const threadById = new Map(threads.map((thread) => [thread.id, thread] as const));
+  const childrenByParentId = new Map<T["id"], T[]>();
+  const roots: T[] = [];
+
+  for (const thread of threads) {
+    const parentThreadId = thread.parentThreadId ?? null;
+    if (!parentThreadId || !threadById.has(parentThreadId)) {
+      roots.push(thread);
+      continue;
+    }
+    const siblings = childrenByParentId.get(parentThreadId) ?? [];
+    siblings.push(thread);
+    childrenByParentId.set(parentThreadId, siblings);
+  }
+
+  const forcedExpandedParentIds = collectForcedExpandedParentIds(threadById, forceVisibleThreadId);
+  const orderedRows: SidebarThreadTreeRow<T>[] = [];
+
+  const visit = (thread: T, depth: number, rootThreadId: T["id"]) => {
+    const childThreads = childrenByParentId.get(thread.id) ?? [];
+    const isExpanded =
+      childThreads.length > 0 &&
+      (expandedParentThreadIds?.has(thread.id) === true || forcedExpandedParentIds.has(thread.id));
+
+    orderedRows.push({
+      thread,
+      depth,
+      rootThreadId,
+      childCount: childThreads.length,
+      isExpanded,
+    });
+
+    if (!isExpanded) {
+      return;
+    }
+
+    for (const child of childThreads) {
+      visit(child, depth + 1, rootThreadId);
+    }
+  };
+
+  for (const root of roots) {
+    visit(root, 0, root.id);
+  }
+
+  return orderedRows;
+}
+
+export function getVisibleSidebarEntriesForPreview<
+  T extends {
+    rowId: Thread["id"];
+    rootRowId: Thread["id"];
+  },
+>(input: {
+  entries: readonly T[];
+  activeEntryId: Thread["id"] | undefined;
+  isExpanded: boolean;
+  previewLimit: number;
+}): {
+  hasHiddenEntries: boolean;
+  visibleEntries: T[];
+} {
+  const { activeEntryId, entries, isExpanded, previewLimit } = input;
+  const orderedRootRowIds: Thread["id"][] = [];
+  const seenRootRowIds = new Set<Thread["id"]>();
+
+  for (const entry of entries) {
+    if (seenRootRowIds.has(entry.rootRowId)) {
+      continue;
+    }
+    seenRootRowIds.add(entry.rootRowId);
+    orderedRootRowIds.push(entry.rootRowId);
+  }
+
+  const hasHiddenEntries = orderedRootRowIds.length > previewLimit;
+  if (!hasHiddenEntries || isExpanded) {
+    return {
+      hasHiddenEntries,
+      visibleEntries: [...entries],
+    };
+  }
+
+  const visibleRootRowIds = new Set(orderedRootRowIds.slice(0, previewLimit));
+  const activeRootRowId =
+    activeEntryId !== undefined
+      ? (entries.find((entry) => entry.rowId === activeEntryId)?.rootRowId ?? null)
+      : null;
+
+  if (activeRootRowId) {
+    visibleRootRowIds.add(activeRootRowId);
+  }
+
+  return {
+    hasHiddenEntries: true,
+    visibleEntries: entries.filter((entry) => visibleRootRowIds.has(entry.rootRowId)),
+  };
+}
+
+// Preserve the persisted pin order while discarding ids that no longer exist locally.
+export function getPinnedThreadsForSidebar<T extends Pick<Thread, "id">>(
+  threads: readonly T[],
+  pinnedThreadIds: readonly T["id"][],
+): T[] {
+  const threadById = new Map(threads.map((thread) => [thread.id, thread] as const));
+  const seen = new Set<T["id"]>();
+  const pinnedThreads: T[] = [];
+
+  for (const threadId of pinnedThreadIds) {
+    if (seen.has(threadId)) continue;
+    seen.add(threadId);
+    const thread = threadById.get(threadId);
+    if (thread) {
+      pinnedThreads.push(thread);
+    }
+  }
+
+  return pinnedThreads;
+}
+
+// Hide globally pinned rows from the per-project lists so the sidebar doesn't duplicate chats.
+export function getUnpinnedThreadsForSidebar<T extends Pick<Thread, "id">>(
+  threads: readonly T[],
+  pinnedThreadIds: readonly T["id"][],
+): T[] {
+  if (pinnedThreadIds.length === 0) {
+    return [...threads];
+  }
+
+  const pinnedThreadIdSet = new Set(pinnedThreadIds);
+  return threads.filter((thread) => !pinnedThreadIdSet.has(thread.id));
+}
+
+// Only prune persisted pins after the thread snapshot has hydrated.
+export function shouldPrunePinnedThreads(input: { threadsHydrated: boolean }): boolean {
+  return input.threadsHydrated;
+}
+
+// Match the exact rows the sidebar renders for one project, including folded previews.
+export function getRenderedThreadsForSidebarProject<
+  T extends Pick<SidebarThreadSummary, "id"> & SidebarThreadSortInput,
+>(input: {
+  project: Pick<Project, "expanded">;
+  threads: readonly T[];
+  activeThreadId: Thread["id"] | undefined;
+  isThreadListExpanded: boolean;
+  previewLimit: number;
+}): {
+  hasHiddenThreads: boolean;
+  renderedThreads: T[];
+} {
+  const { activeThreadId, isThreadListExpanded, previewLimit, project, threads } = input;
+  const pinnedCollapsedThread =
+    !project.expanded && activeThreadId
+      ? (threads.find((thread) => thread.id === activeThreadId) ?? null)
+      : null;
+  const { hasHiddenThreads, visibleThreads } = getVisibleThreadsForProject({
+    threads,
+    activeThreadId,
+    isThreadListExpanded,
+    previewLimit,
+  });
+
+  return {
+    hasHiddenThreads,
+    renderedThreads: pinnedCollapsedThread ? [pinnedCollapsedThread] : visibleThreads,
+  };
+}
+
+// Flatten the sidebar's current project/thread visibility into the same order the user sees.
+export function getVisibleSidebarThreadIds(input: {
+  projects: readonly Pick<Project, "id" | "expanded">[];
+  threads: readonly (Pick<SidebarThreadSummary, "id" | "projectId" | "parentThreadId"> &
+    SidebarThreadSortInput)[];
+  activeThreadId: Thread["id"] | undefined;
+  expandedThreadListsByProject: ReadonlySet<Project["id"]>;
+  expandedSubagentParentIds?: ReadonlySet<Thread["id"]>;
+  previewLimit: number;
+  threadSortOrder: SidebarThreadSortOrder;
+}): Thread["id"][] {
+  const {
+    activeThreadId,
+    expandedSubagentParentIds,
+    expandedThreadListsByProject,
+    previewLimit,
+    projects,
+    threadSortOrder,
+    threads,
+  } = input;
+  const visibleThreadIds: Thread["id"][] = [];
+
+  for (const project of projects) {
+    const projectThreads = sortThreadsForSidebar(
+      threads.filter((thread) => thread.projectId === project.id),
+      threadSortOrder,
+    );
+    const projectThreadTree = buildProjectThreadTree({
+      threads: projectThreads,
+      expandedParentThreadIds: expandedSubagentParentIds,
+    });
+    const { visibleEntries } = getVisibleSidebarEntriesForPreview({
+      entries: projectThreadTree.map((row) => ({
+        rowId: row.thread.id,
+        rootRowId: row.rootThreadId,
+        threadId: row.thread.id,
+      })),
+      activeEntryId: activeThreadId,
+      isExpanded: expandedThreadListsByProject.has(project.id),
+      previewLimit,
+    });
+    const pinnedCollapsedThread =
+      !project.expanded && activeThreadId
+        ? (projectThreads.find((thread) => thread.id === activeThreadId) ?? null)
+        : null;
+
+    if (pinnedCollapsedThread) {
+      visibleThreadIds.push(pinnedCollapsedThread.id);
+      continue;
+    }
+
+    for (const entry of visibleEntries) {
+      visibleThreadIds.push(entry.threadId);
+    }
+  }
+
+  return visibleThreadIds;
+}
+
+// Resolve the next sidebar-visible thread for keyboard cycling with wraparound.
+export function getNextVisibleSidebarThreadId(input: {
+  visibleThreadIds: readonly Thread["id"][];
+  activeThreadId: Thread["id"] | undefined;
+  direction: "forward" | "backward";
+}): Thread["id"] | null {
+  const { activeThreadId, direction, visibleThreadIds } = input;
+  if (visibleThreadIds.length === 0) {
+    return null;
+  }
+
+  if (!activeThreadId) {
+    return direction === "forward"
+      ? (visibleThreadIds[0] ?? null)
+      : (visibleThreadIds.at(-1) ?? null);
+  }
+
+  const activeIndex = visibleThreadIds.findIndex((threadId) => threadId === activeThreadId);
+  if (activeIndex === -1) {
+    return direction === "forward"
+      ? (visibleThreadIds[0] ?? null)
+      : (visibleThreadIds.at(-1) ?? null);
+  }
+
+  const nextIndex =
+    direction === "forward"
+      ? (activeIndex + 1) % visibleThreadIds.length
+      : (activeIndex - 1 + visibleThreadIds.length) % visibleThreadIds.length;
+
+  return visibleThreadIds[nextIndex] ?? null;
+}
+
+export function getSidebarThreadIdForJumpCommand(input: {
+  visibleThreadIds: readonly Thread["id"][];
+  command: string | null;
+}): Thread["id"] | null {
+  if (!input.command) {
+    return null;
+  }
+
+  const jumpIndex = THREAD_JUMP_COMMANDS.indexOf(
+    input.command as (typeof THREAD_JUMP_COMMANDS)[number],
+  );
+  if (jumpIndex === -1) {
+    return null;
+  }
+
+  return input.visibleThreadIds[jumpIndex] ?? null;
+}
+
+export function getSidebarThreadIdsToPrewarm(input: {
+  visibleThreadIds: readonly Thread["id"][];
+  limit?: number;
+}): Thread["id"][] {
+  const limit = Math.max(0, input.limit ?? SIDEBAR_THREAD_PREWARM_LIMIT);
+  return input.visibleThreadIds.slice(0, limit);
 }
 
 function toSortableTimestamp(iso: string | undefined): number | null {
@@ -503,8 +704,9 @@ function toSortableTimestamp(iso: string | undefined): number | null {
 }
 
 function getLatestUserMessageTimestamp(thread: SidebarThreadSortInput): number {
-  if (thread.latestUserMessageAt) {
-    return toSortableTimestamp(thread.latestUserMessageAt) ?? Number.NEGATIVE_INFINITY;
+  const latestUserMessageAt = toSortableTimestamp(thread.latestUserMessageAt ?? undefined);
+  if (latestUserMessageAt !== null) {
+    return latestUserMessageAt;
   }
 
   let latestUserMessageTimestamp: number | null = null;
@@ -536,9 +738,10 @@ function getThreadSortTimestamp(
   return getLatestUserMessageTimestamp(thread);
 }
 
-export function sortThreadsForSidebar<
-  T extends Pick<Thread, "id" | "createdAt" | "updatedAt"> & SidebarThreadSortInput,
->(threads: readonly T[], sortOrder: SidebarThreadSortOrder): T[] {
+export function sortThreadsForSidebar<T extends { id: Thread["id"] } & SidebarThreadSortInput>(
+  threads: readonly T[],
+  sortOrder: SidebarThreadSortOrder,
+): T[] {
   return threads.toSorted((left, right) => {
     const rightTimestamp = getThreadSortTimestamp(right, sortOrder);
     const leftTimestamp = getThreadSortTimestamp(left, sortOrder);
@@ -550,7 +753,7 @@ export function sortThreadsForSidebar<
 }
 
 export function getFallbackThreadIdAfterDelete<
-  T extends Pick<Thread, "id" | "projectId" | "createdAt" | "updatedAt"> & SidebarThreadSortInput,
+  T extends { id: Thread["id"]; projectId: Thread["projectId"] } & SidebarThreadSortInput,
 >(input: {
   threads: readonly T[];
   deletedThreadId: T["id"];
@@ -596,7 +799,7 @@ export function getProjectSortTimestamp(
 
 export function sortProjectsForSidebar<
   TProject extends SidebarProject,
-  TThread extends Pick<Thread, "projectId" | "createdAt" | "updatedAt"> & SidebarThreadSortInput,
+  TThread extends { projectId: Thread["projectId"] } & SidebarThreadSortInput,
 >(
   projects: readonly TProject[],
   threads: readonly TThread[],
@@ -629,4 +832,136 @@ export function sortProjectsForSidebar<
     if (byTimestamp !== 0) return byTimestamp;
     return left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
   });
+}
+
+// Groups thread summaries once so project-specific sidebar derivations can reuse the same slices.
+export function groupSidebarThreadsByProjectId(
+  threads: readonly SidebarThreadSummary[],
+): ReadonlyMap<ProjectId, SidebarThreadSummary[]> {
+  const byProjectId = new Map<ProjectId, SidebarThreadSummary[]>();
+  for (const thread of threads) {
+    const existing = byProjectId.get(thread.projectId);
+    if (existing) {
+      existing.push(thread);
+    } else {
+      byProjectId.set(thread.projectId, [thread]);
+    }
+  }
+  return byProjectId;
+}
+
+// Groups split views once so project renderers do not rescan the full split list every render.
+export function groupSplitViewsByProjectId(
+  splitViews: readonly SplitView[],
+): ReadonlyMap<ProjectId, SplitView[]> {
+  const byProjectId = new Map<ProjectId, SplitView[]>();
+  for (const splitView of splitViews) {
+    const existing = byProjectId.get(splitView.ownerProjectId);
+    if (existing) {
+      existing.push(splitView);
+    } else {
+      byProjectId.set(splitView.ownerProjectId, [splitView]);
+    }
+  }
+  return byProjectId;
+}
+
+// Centralizes the expensive per-project row derivation so Sidebar.tsx can mostly orchestrate UI state.
+export function deriveSidebarProjectData(input: {
+  projects: readonly Pick<Project, "id" | "cwd" | "expanded">[];
+  sortedSidebarThreadsByProjectId: ReadonlyMap<ProjectId, SidebarThreadSummary[]>;
+  splitViewsByProjectId: ReadonlyMap<ProjectId, SplitView[]>;
+  splitViewBySourceThreadId: ReadonlyMap<ThreadId, SplitView>;
+  pinnedThreadIds: readonly ThreadId[];
+  pinnedThreadIdSet: ReadonlySet<ThreadId>;
+  expandedParentThreadIds: ReadonlySet<ThreadId>;
+  expandedThreadListProjectCwds: ReadonlySet<string>;
+  normalizeProjectCwd: (cwd: string) => string;
+  activeSidebarThreadId: ThreadId | undefined;
+  previewLimit: number;
+}): ReadonlyMap<ProjectId, SidebarDerivedProjectData> {
+  const byProjectId = new Map<ProjectId, SidebarDerivedProjectData>();
+
+  for (const project of input.projects) {
+    const allProjectThreads = input.sortedSidebarThreadsByProjectId.get(project.id) ?? [];
+    const projectThreads = getUnpinnedThreadsForSidebar(allProjectThreads, input.pinnedThreadIds);
+    const projectThreadTree = buildProjectThreadTree({
+      threads: projectThreads,
+      expandedParentThreadIds: input.expandedParentThreadIds,
+    });
+    const projectSplitViews = (input.splitViewsByProjectId.get(project.id) ?? []).filter(
+      (splitView) => !input.pinnedThreadIdSet.has(splitView.sourceThreadId),
+    );
+    const projectStatus = resolveProjectStatusIndicator(
+      allProjectThreads.map((thread) =>
+        resolveThreadStatusPill({
+          thread,
+          hasPendingApprovals: thread.hasPendingApprovals,
+          hasPendingUserInput: thread.hasPendingUserInput,
+        }),
+      ),
+    );
+    const isThreadListExpanded = input.expandedThreadListProjectCwds.has(
+      input.normalizeProjectCwd(project.cwd),
+    );
+    const replacedThreadIds = new Set(
+      projectSplitViews.map((splitView) => splitView.sourceThreadId),
+    );
+    const orderedEntries: SidebarProjectEntry[] = projectThreadTree.map(
+      ({ thread, depth, rootThreadId, childCount, isExpanded }) => {
+        const splitView = input.splitViewBySourceThreadId.get(thread.id);
+        if (!splitView) {
+          return {
+            kind: "thread",
+            rowId: thread.id,
+            rootRowId: rootThreadId,
+            thread,
+            depth,
+            childCount,
+            isExpanded,
+          };
+        }
+        return {
+          kind: "split",
+          rowId: splitView.sourceThreadId,
+          rootRowId: rootThreadId,
+          splitView,
+        };
+      },
+    );
+
+    for (const splitView of projectSplitViews) {
+      if (replacedThreadIds.has(splitView.sourceThreadId)) continue;
+      orderedEntries.push({
+        kind: "split",
+        rowId: splitView.sourceThreadId,
+        rootRowId: splitView.sourceThreadId,
+        splitView,
+      });
+    }
+
+    const activeEntry =
+      input.activeSidebarThreadId === undefined
+        ? null
+        : (orderedEntries.find((entry) => entry.rowId === input.activeSidebarThreadId) ?? null);
+    const { visibleEntries: renderedEntries } = getVisibleSidebarEntriesForPreview({
+      entries: orderedEntries,
+      activeEntryId: activeEntry?.rowId,
+      isExpanded: isThreadListExpanded,
+      previewLimit: input.previewLimit,
+    });
+    const pinnedCollapsedEntry = !project.expanded && activeEntry ? activeEntry : null;
+
+    byProjectId.set(project.id, {
+      projectThreads,
+      orderedProjectThreadIds: projectThreads.map((thread) => thread.id),
+      visibleEntries: pinnedCollapsedEntry ? [pinnedCollapsedEntry] : renderedEntries,
+      hasHiddenThreads: renderedEntries.length < orderedEntries.length,
+      isThreadListExpanded,
+      activeEntryId: activeEntry?.rowId ?? null,
+      projectStatus,
+    });
+  }
+
+  return byProjectId;
 }

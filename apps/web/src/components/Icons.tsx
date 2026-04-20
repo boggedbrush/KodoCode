@@ -1,4 +1,5 @@
 import { type SVGProps, useId } from "react";
+import { SiAnthropic } from "react-icons/si";
 
 export type Icon = React.FC<SVGProps<SVGSVGElement>>;
 
@@ -17,20 +18,6 @@ export const GitHubIcon: Icon = (props) => (
 export const CursorIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 466.73 532.09" fill="currentColor">
     <path d="M457.43,125.94L244.42,2.96c-6.84-3.95-15.28-3.95-22.12,0L9.3,125.94c-5.75,3.32-9.3,9.46-9.3,16.11v247.99c0,6.65,3.55,12.79,9.3,16.11l213.01,122.98c6.84,3.95,15.28,3.95,22.12,0l213.01-122.98c5.75-3.32,9.3-9.46,9.3-16.11v-247.99c0-6.65-3.55-12.79-9.3-16.11h-.01ZM444.05,151.99l-205.63,356.16c-1.39,2.4-5.06,1.42-5.06-1.36v-233.21c0-4.66-2.49-8.97-6.53-11.31L24.87,145.67c-2.4-1.39-1.42-5.06,1.36-5.06h411.26c5.84,0,9.49,6.33,6.57,11.39h-.01Z" />
-  </svg>
-);
-
-export const TraeIcon: Icon = (props) => (
-  <svg {...props} viewBox="0 0 24 24" fill="currentColor">
-    {/* Back rectangle: left strip + bottom strip drawn separately — empty bottom-left corner is the gap between them */}
-    <rect x="1" y="4" width="3" height="14" />
-    <rect x="4" y="18" width="18" height="3" />
-    {/* Front frame: top bar + right bar only — left and bottom are replaced by the back strips above */}
-    <rect x="4" y="4" width="18" height="3" />
-    <rect x="19" y="7" width="3" height="11" />
-    {/* Two diamonds, offset slightly to the right within the open area */}
-    <path d="M11 10L13 12L11 14L9 12Z" />
-    <path d="M16 10L18 12L16 14L14 12Z" />
   </svg>
 );
 
@@ -157,14 +144,11 @@ export const OpenAI: Icon = (props) => (
   </svg>
 );
 
-export const ClaudeAI: Icon = (props) => (
-  <svg {...props} preserveAspectRatio="xMidYMid" viewBox="0 0 256 257">
-    <path
-      fill="currentColor"
-      d="m50.228 170.321 50.357-28.257.843-2.463-.843-1.361h-2.462l-8.426-.518-28.775-.778-24.952-1.037-24.175-1.296-6.092-1.297L0 125.796l.583-3.759 5.12-3.434 7.324.648 16.202 1.101 24.304 1.685 17.629 1.037 26.118 2.722h4.148l.583-1.685-1.426-1.037-1.101-1.037-25.147-17.045-27.22-18.017-14.258-10.37-7.713-5.25-3.888-4.925-1.685-10.758 7-7.713 9.397.649 2.398.648 9.527 7.323 20.35 15.75L94.817 91.9l3.889 3.24 1.555-1.102.195-.777-1.75-2.917-14.453-26.118-15.425-26.572-6.87-11.018-1.814-6.61c-.648-2.723-1.102-4.991-1.102-7.778l7.972-10.823L71.42 0 82.05 1.426l4.472 3.888 6.61 15.101 10.694 23.786 16.591 32.34 4.861 9.592 2.592 8.879.973 2.722h1.685v-1.556l1.36-18.211 2.528-22.36 2.463-28.776.843-8.1 4.018-9.722 7.971-5.25 6.222 2.981 5.12 7.324-.713 4.73-3.046 19.768-5.962 30.98-3.889 20.739h2.268l2.593-2.593 10.499-13.934 17.628-22.036 7.778-8.749 9.073-9.657 5.833-4.601h11.018l8.1 12.055-3.628 12.443-11.342 14.388-9.398 12.184-13.48 18.147-8.426 14.518.778 1.166 2.01-.194 30.46-6.481 16.462-2.982 19.637-3.37 8.88 4.148.971 4.213-3.5 8.62-20.998 5.184-24.628 4.926-36.682 8.685-.454.324.519.648 16.526 1.555 7.065.389h17.304l32.21 2.398 8.426 5.574 5.055 6.805-.843 5.184-12.962 6.611-17.498-4.148-40.83-9.721-14-3.5h-1.944v1.167l11.666 11.406 21.387 19.314 26.767 24.887 1.36 6.157-3.434 4.86-3.63-.518-23.526-17.693-9.073-7.972-20.545-17.304h-1.36v1.814l4.73 6.935 25.017 37.59 1.296 11.536-1.814 3.76-6.481 2.268-7.13-1.297-14.647-20.544-15.1-23.138-12.185-20.739-1.49.843-7.194 77.448-3.37 3.953-7.778 2.981-6.48-4.925-3.436-7.972 3.435-15.749 4.148-20.544 3.37-16.333 3.046-20.285 1.815-6.74-.13-.454-1.49.194-15.295 20.999-23.267 31.433-18.406 19.702-4.407 1.75-7.648-3.954.713-7.064 4.277-6.286 25.47-32.405 15.36-20.092 9.917-11.6-.065-1.686h-.583L44.07 198.125l-12.055 1.555-5.185-4.86.648-7.972 2.463-2.593 20.35-13.999-.064.065Z"
-    />
-  </svg>
-);
+export const ClaudeAI: Icon = ({ color, ...props }) => {
+  const iconProps = props as Omit<SVGProps<SVGElement>, "color">;
+
+  return <SiAnthropic {...iconProps} {...(typeof color === "string" ? { color } : {})} />;
+};
 
 export const Gemini: Icon = (props) => (
   <svg {...props} viewBox="0 0 296 298" fill="none">
@@ -309,107 +293,6 @@ export const AntigravityIcon: Icon = (props) => (
     <image href={ANTIGRAVITY_ICON_DATA_URL} width="128" height="128" />
   </svg>
 );
-
-export const IntelliJIdeaIcon: Icon = (props) => {
-  const id = useId();
-  const gradientAId = `${id}-idea-a`;
-  const gradientBId = `${id}-idea-b`;
-  const gradientCId = `${id}-idea-c`;
-  const gradientDId = `${id}-idea-d`;
-
-  return (
-    <svg {...props} viewBox="0 0 70 70" fill="none">
-      <defs>
-        <linearGradient
-          id={gradientAId}
-          x1="0.7898"
-          y1="40.0893"
-          x2="33.3172"
-          y2="40.0893"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop offset="0.2581" stopColor="#F97A12" />
-          <stop offset="0.4591" stopColor="#B07B58" />
-          <stop offset="0.7241" stopColor="#577BAE" />
-          <stop offset="0.9105" stopColor="#1E7CE5" />
-          <stop offset="1" stopColor="#087CFA" />
-        </linearGradient>
-        <linearGradient
-          id={gradientBId}
-          x1="25.7674"
-          y1="24.88"
-          x2="79.424"
-          y2="54.57"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#F97A12" />
-          <stop offset="0.07179946" stopColor="#CB7A3E" />
-          <stop offset="0.1541" stopColor="#9E7B6A" />
-          <stop offset="0.242" stopColor="#757B91" />
-          <stop offset="0.3344" stopColor="#537BB1" />
-          <stop offset="0.4324" stopColor="#387CCC" />
-          <stop offset="0.5381" stopColor="#237CE0" />
-          <stop offset="0.6552" stopColor="#147CEF" />
-          <stop offset="0.7925" stopColor="#0B7CF7" />
-          <stop offset="1" stopColor="#087CFA" />
-        </linearGradient>
-        <linearGradient
-          id={gradientCId}
-          x1="63.2277"
-          y1="42.9153"
-          x2="48.2903"
-          y2="-1.7191"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#FE315D" />
-          <stop offset="0.07840246" stopColor="#CB417E" />
-          <stop offset="0.1601" stopColor="#9E4E9B" />
-          <stop offset="0.2474" stopColor="#755BB4" />
-          <stop offset="0.3392" stopColor="#5365CA" />
-          <stop offset="0.4365" stopColor="#386DDB" />
-          <stop offset="0.5414" stopColor="#2374E9" />
-          <stop offset="0.6576" stopColor="#1478F3" />
-          <stop offset="0.794" stopColor="#0B7BF8" />
-          <stop offset="1" stopColor="#087CFA" />
-        </linearGradient>
-        <linearGradient
-          id={gradientDId}
-          x1="10.7204"
-          y1="16.473"
-          x2="55.5237"
-          y2="90.58"
-          gradientUnits="userSpaceOnUse"
-        >
-          <stop stopColor="#FE315D" />
-          <stop offset="0.04023279" stopColor="#F63462" />
-          <stop offset="0.1037" stopColor="#DF3A71" />
-          <stop offset="0.1667" stopColor="#C24383" />
-          <stop offset="0.2912" stopColor="#AD4A91" />
-          <stop offset="0.5498" stopColor="#755BB4" />
-          <stop offset="0.9175" stopColor="#1D76ED" />
-          <stop offset="1" stopColor="#087CFA" />
-        </linearGradient>
-      </defs>
-      <polygon points="17.7,54.6 0.8,41.2 9.2,25.6 33.3,35" fill={`url(#${gradientAId})`} />
-      <path
-        d="M70 18.7 68.7 59.2 41.8 70 25.6 59.6 49.3 35 38.9 12.3 48.2 1.1Z"
-        fill={`url(#${gradientBId})`}
-      />
-      <polygon points="70,18.7 48.7,43.9 38.9,12.3 48.2,1.1" fill={`url(#${gradientCId})`} />
-      <path
-        d="M33.7 58.1 5.6 68.3 10.1 52.5 16 33.1 0 27.7 10.1 0 32.1 2.7 53.7 27.4Z"
-        fill={`url(#${gradientDId})`}
-      />
-      <rect x="13.7" y="13.5" width="43.2" height="43.2" fill="#000" />
-      <rect x="17.7" y="48.6" width="16.2" height="2.7" fill="#fff" />
-      <path d="M29.4 22.4v-3.3h-9v3.3h2.6v11.3h-2.6V37h9v-3.3h-2.5V22.4h2.5Z" fill="#fff" />
-      <path
-        d="M38 37.3c-1.4 0-2.6-.3-3.5-.8-.9-.5-1.7-1.2-2.3-1.9l2.5-2.8c.5.6 1 1 1.5 1.3.5.3 1.1.5 1.7.5.7 0 1.3-.2 1.8-.7.4-.5.6-1.2.6-2.3V19.1h4v11.7c0 1.1-.1 2-.4 2.8-.3.8-.7 1.4-1.3 2-.5.5-1.2 1-2 1.2-.8.3-1.6.5-2.6.5Z"
-        fill="#fff"
-      />
-    </svg>
-  );
-};
 
 export const OpenCodeIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 32 40" fill="none" xmlns="http://www.w3.org/2000/svg">

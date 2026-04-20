@@ -9,6 +9,7 @@ interface TerminalRetentionThread {
 interface CollectActiveTerminalThreadIdsInput {
   snapshotThreads: readonly TerminalRetentionThread[];
   draftThreadIds: Iterable<ThreadId>;
+  retainedThreadIds?: Iterable<ThreadId>;
 }
 
 export function collectActiveTerminalThreadIds(
@@ -30,6 +31,9 @@ export function collectActiveTerminalThreadIds(
       continue;
     }
     activeThreadIds.add(draftThreadId);
+  }
+  for (const retainedThreadId of input.retainedThreadIds ?? []) {
+    activeThreadIds.add(retainedThreadId);
   }
   return activeThreadIds;
 }

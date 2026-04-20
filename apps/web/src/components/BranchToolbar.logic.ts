@@ -1,9 +1,5 @@
 import type { GitBranch } from "@t3tools/contracts";
 import { Schema } from "effect";
-export {
-  dedupeRemoteBranchesWithLocalMatches,
-  deriveLocalBranchNameFromRemoteRef,
-} from "@t3tools/shared/git";
 
 export const EnvMode = Schema.Literals(["local", "worktree"]);
 export type EnvMode = typeof EnvMode.Type;
@@ -12,9 +8,12 @@ export function resolveEffectiveEnvMode(input: {
   activeWorktreePath: string | null;
   hasServerThread: boolean;
   draftThreadEnvMode: EnvMode | undefined;
+  serverThreadEnvMode?: EnvMode | undefined;
 }): EnvMode {
-  const { activeWorktreePath, hasServerThread, draftThreadEnvMode } = input;
-  return activeWorktreePath || (!hasServerThread && draftThreadEnvMode === "worktree")
+  const { activeWorktreePath, hasServerThread, draftThreadEnvMode, serverThreadEnvMode } = input;
+  return activeWorktreePath ||
+    serverThreadEnvMode === "worktree" ||
+    (!hasServerThread && draftThreadEnvMode === "worktree")
     ? "worktree"
     : "local";
 }
@@ -47,6 +46,58 @@ export function resolveBranchToolbarValue(input: {
   return currentGitBranch ?? activeThreadBranch;
 }
 
+export function deriveLocalBranchNameFromRemoteRef(branchName: string): string {
+  const firstSeparatorIndex = branchName.indexOf("/");
+  if (firstSeparatorIndex <= 0 || firstSeparatorIndex === branchName.length - 1) {
+    return branchName;
+  }
+  return branchName.slice(firstSeparatorIndex + 1);
+}
+
+function deriveLocalBranchNameCandidatesFromRemoteRef(
+  branchName: string,
+  remoteName?: string,
+): ReadonlyArray<string> {
+  const candidates = new Set<string>();
+  const firstSlashCandidate = deriveLocalBranchNameFromRemoteRef(branchName);
+  if (firstSlashCandidate.length > 0) {
+    candidates.add(firstSlashCandidate);
+  }
+
+  if (remoteName) {
+    const remotePrefix = `${remoteName}/`;
+    if (branchName.startsWith(remotePrefix) && branchName.length > remotePrefix.length) {
+      candidates.add(branchName.slice(remotePrefix.length));
+    }
+  }
+
+  return [...candidates];
+}
+
+export function dedupeRemoteBranchesWithLocalMatches(
+  branches: ReadonlyArray<GitBranch>,
+): ReadonlyArray<GitBranch> {
+  const localBranchNames = new Set(
+    branches.filter((branch) => !branch.isRemote).map((branch) => branch.name),
+  );
+
+  return branches.filter((branch) => {
+    if (!branch.isRemote) {
+      return true;
+    }
+
+    if (branch.remoteName !== "origin") {
+      return true;
+    }
+
+    const localBranchCandidates = deriveLocalBranchNameCandidatesFromRemoteRef(
+      branch.name,
+      branch.remoteName,
+    );
+    return !localBranchCandidates.some((candidate) => localBranchNames.has(candidate));
+  });
+}
+
 export function resolveBranchSelectionTarget(input: {
   activeProjectCwd: string;
   activeWorktreePath: string | null;
@@ -74,27 +125,4 @@ export function resolveBranchSelectionTarget(input: {
     nextWorktreePath,
     reuseExistingWorktree: false,
   };
-}
-
-export function shouldIncludeBranchPickerItem(input: {
-  itemValue: string;
-  normalizedQuery: string;
-  createBranchItemValue: string | null;
-  checkoutPullRequestItemValue: string | null;
-}): boolean {
-  const { itemValue, normalizedQuery, createBranchItemValue, checkoutPullRequestItemValue } = input;
-
-  if (normalizedQuery.length === 0) {
-    return true;
-  }
-
-  if (createBranchItemValue && itemValue === createBranchItemValue) {
-    return true;
-  }
-
-  if (checkoutPullRequestItemValue && itemValue === checkoutPullRequestItemValue) {
-    return true;
-  }
-
-  return itemValue.toLowerCase().includes(normalizedQuery);
 }

@@ -4,6 +4,7 @@
 
 @theme inline {
   --animate-skeleton: skeleton 2s -1s infinite linear;
+  --font-mono: var(--font-mono-family);
   --color-warning-foreground: var(--warning-foreground);
   --color-warning: var(--warning);
   --color-success-foreground: var(--success-foreground);
@@ -29,6 +30,7 @@
   --color-card: var(--card);
   --color-foreground: var(--foreground);
   --color-background: var(--background);
+  --color-claude: var(--claude);
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -45,10 +47,61 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring/30;
   }
   body {
-    @apply bg-background text-foreground relative;
+    @apply bg-transparent text-foreground relative;
+  }
+}
+
+@layer components {
+  .sidebar-icon-button {
+    @apply items-center justify-center rounded-sm p-0.5 text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground/82 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring;
+  }
+
+  /* Animate terminal run state in CSS so many open terminals don't schedule JS timers. */
+  .terminal-running-indicator__dot {
+    animation: terminal-running-indicator-pulse 640ms ease-in-out infinite;
+    opacity: 0.24;
+    transform: scale(0.7);
+    will-change: opacity, transform;
+  }
+}
+
+@keyframes terminal-running-indicator-pulse {
+  0%,
+  100% {
+    opacity: 0.24;
+    transform: scale(0.7);
+  }
+
+  35% {
+    opacity: 0.92;
+    transform: scale(1);
+  }
+}
+
+/* Smooth entry for chat pane swaps (empty landing <-> transcript+bottom composer). */
+@keyframes chat-pane-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.chat-pane-enter {
+  animation: chat-pane-enter 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-pane-enter {
+    animation: none;
   }
 }
 
@@ -63,27 +116,20 @@
 
 :root {
   color-scheme: light;
-  --desktop-window-safe-inset: 0px;
-  --desktop-window-corner-radius: 0px;
-  --radius: 0.625rem;
-  --font-sans-ui:
-    "DM Sans", "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari",
-    "Noto Sans Thai", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-sans-chat-dm-sans:
-    "DM Sans", "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari",
-    "Noto Sans Thai", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-sans-chat-noto:
-    "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --font-sans-chat-multiscript:
-    "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari", "Noto Sans Thai",
-    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
-  --background: var(--color-white);
+  --radius: 0.75rem;
+  --font-ui-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-mono-family:
+    "JetBrains Mono Variable", "JetBrains Mono", "SF Mono", "SFMono-Regular", Consolas,
+    "Liberation Mono", Menlo, monospace;
+  --font-chat-code-family: var(--font-mono-family);
+  --terminal-font-family: "JetBrainsMono NFM", "JetBrainsMono NF", "JetBrains Mono", monospace;
+  --background: #fcfcfc;
   --foreground: var(--color-neutral-800);
   --card: var(--color-white);
   --card-foreground: var(--color-neutral-800);
   --popover: var(--color-white);
   --popover-foreground: var(--color-neutral-800);
-  --primary: oklch(0.488 0.217 264);
+  --primary: var(--color-neutral-900);
   --primary-foreground: var(--color-white);
   --secondary: --alpha(var(--color-black) / 4%);
   --secondary-foreground: var(--color-neutral-800);
@@ -92,27 +138,28 @@
   --accent: --alpha(var(--color-black) / 4%);
   --accent-foreground: var(--color-neutral-800);
   --destructive: var(--color-red-500);
-  --border: --alpha(var(--color-black) / 8%);
-  --input: --alpha(var(--color-black) / 10%);
-  --ring: oklch(0.488 0.217 264);
+  --border: --alpha(var(--color-black) / 5%);
+  --input: --alpha(var(--color-black) / 6%);
+  --ring: var(--color-neutral-400);
   --destructive-foreground: var(--color-red-700);
   --info: var(--color-blue-500);
-  --info-foreground: var(--color-blue-700);
+  --info-foreground: #526fff;
   --success: var(--color-emerald-500);
   --success-foreground: var(--color-emerald-700);
   --warning: var(--color-amber-500);
   --warning-foreground: var(--color-amber-700);
+  --claude: #d97757;
 
   @variant dark {
     color-scheme: dark;
-    --background: color-mix(in srgb, var(--color-neutral-950) 95%, var(--color-white));
+    --background: #0e0e0e;
     --foreground: var(--color-neutral-100);
-    --card: color-mix(in srgb, var(--background) 98%, var(--color-white));
+    --card: color-mix(in srgb, var(--background) 99%, var(--color-white));
     --card-foreground: var(--color-neutral-100);
-    --popover: color-mix(in srgb, var(--background) 98%, var(--color-white));
+    --popover: color-mix(in srgb, var(--background) 99%, var(--color-white));
     --popover-foreground: var(--color-neutral-100);
-    --primary: oklch(0.588 0.217 264);
-    --primary-foreground: var(--color-white);
+    --primary: var(--color-neutral-100);
+    --primary-foreground: var(--color-neutral-900);
     --secondary: --alpha(var(--color-white) / 4%);
     --secondary-foreground: var(--color-neutral-100);
     --muted: --alpha(var(--color-white) / 4%);
@@ -120,12 +167,12 @@
     --accent: --alpha(var(--color-white) / 4%);
     --accent-foreground: var(--color-neutral-100);
     --destructive: color-mix(in srgb, var(--color-red-500) 90%, var(--color-white));
-    --border: --alpha(var(--color-white) / 6%);
-    --input: --alpha(var(--color-white) / 8%);
-    --ring: oklch(0.588 0.217 264);
+    --border: --alpha(var(--color-white) / 4%);
+    --input: --alpha(var(--color-white) / 5%);
+    --ring: var(--color-neutral-500);
     --destructive-foreground: var(--color-red-400);
     --info: var(--color-blue-500);
-    --info-foreground: var(--color-blue-400);
+    --info-foreground: #6073cc;
     --success: var(--color-emerald-500);
     --success-foreground: var(--color-emerald-400);
     --warning: var(--color-amber-500);
@@ -134,16 +181,22 @@
 }
 
 body {
-  font-family: var(--font-sans-ui);
+  font-family: var(--font-ui-family);
+  letter-spacing: -0.015em;
   margin: 0;
   padding: 0;
   min-height: 100vh;
 }
 
-html[data-desktop-window-frame="linux-rounded"],
-html[data-desktop-window-frame="linux-rounded"] body,
-html[data-desktop-window-frame="linux-rounded"] #root {
-  background: transparent !important;
+/* Reuse the OS UI stack on chat surfaces that should feel native and utilitarian. */
+.font-system-ui {
+  font-family: var(--font-ui-family);
+  letter-spacing: -0.015em;
+}
+
+/* Keep transcript-only code surfaces on the chat-specific coding font stack. */
+.font-chat-code {
+  font-family: var(--font-chat-code-family);
 }
 
 html,
@@ -158,26 +211,27 @@ body,
   overscroll-behavior-y: none;
 }
 
-body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.035;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  background-size: 256px 256px;
+/* Rounded left edge on the content surface when a left sidebar is expanded */
+[data-slot="sidebar"][data-state="expanded"][data-side="left"]
+  ~ [data-slot="sidebar-inset"]
+  > [data-slot="sidebar-inset-surface"] {
+  border-top-left-radius: var(--radius-xl);
+  border-bottom-left-radius: var(--radius-xl);
+  overflow: hidden;
 }
 
-html[data-desktop-window-frame="linux-rounded"] body::after {
-  display: none;
+/* Preserve inset variant rounding (inherits from the main element) */
+[data-slot="sidebar"][data-variant="inset"]
+  ~ [data-slot="sidebar-inset"]
+  > [data-slot="sidebar-inset-surface"] {
+  border-radius: inherit;
 }
 
 pre,
 code,
 textarea,
 input {
-  font-family: "SF Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-family: var(--font-mono-family);
 }
 
 /* Window drag region (frameless titlebar) */
@@ -256,53 +310,7 @@ label:has(> select#reasoning-effort) select {
   height: 100%;
 }
 
-/* Chat readability */
-.chat-readability-surface {
-  text-align: start;
-  unicode-bidi: isolate;
-}
-
-.chat-readability-direction-rtl {
-  direction: rtl;
-}
-
-.chat-readability-direction-ltr {
-  direction: ltr;
-}
-
-.chat-readability-font-dm-sans {
-  font-family: var(--font-sans-chat-dm-sans);
-}
-
-.chat-readability-font-noto-sans {
-  font-family: var(--font-sans-chat-noto);
-}
-
-.chat-readability-font-noto-sans-multiscript {
-  font-family: var(--font-sans-chat-multiscript);
-}
-
-.chat-readability-text-small {
-  font-size: 0.8125rem;
-  line-height: 1.55;
-}
-
-.chat-readability-text-default {
-  font-size: 0.875rem;
-  line-height: 1.625;
-}
-
-.chat-readability-text-large {
-  font-size: 0.9375rem;
-  line-height: 1.7;
-}
-
-.chat-message-inline-body {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
+/* Chat markdown rendering */
 .chat-markdown {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -327,12 +335,12 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown ul {
-  padding-inline-start: 1.25rem;
+  padding-left: 1.25rem;
   list-style-type: disc;
 }
 
 .chat-markdown ol {
-  padding-inline-start: 1.25rem;
+  padding-left: 1.25rem;
   list-style-type: decimal;
 }
 
@@ -358,8 +366,7 @@ label:has(> select#reasoning-effort) select {
 
 .chat-markdown a {
   color: var(--info-foreground);
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--info-foreground) 40%, transparent);
+  text-decoration: none;
 }
 
 .chat-markdown a:hover {
@@ -367,20 +374,18 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown blockquote {
-  border-inline-start: 2px solid var(--border);
-  padding-inline-start: 0.8rem;
+  border-left: 2px solid var(--border);
+  padding-left: 0.8rem;
   color: var(--muted-foreground);
 }
 
 .chat-markdown :not(pre) > code {
-  border: 1px solid var(--border);
-  border-radius: 0.375rem;
+  border-radius: 0.4rem;
   background: var(--muted);
   padding: 0.1rem 0.35rem;
   color: var(--foreground);
-  font-size: 0.9em;
-  direction: ltr;
-  unicode-bidi: isolate;
+  font-size: calc(var(--app-font-size-chat-code) - 1px);
+  font-family: var(--font-chat-code-family);
 }
 
 .chat-markdown pre {
@@ -390,6 +395,7 @@ label:has(> select#reasoning-effort) select {
   border-radius: 0.75rem;
   background: var(--muted);
   padding: 0.8rem 0.9rem;
+  font-family: var(--font-chat-code-family);
 }
 
 .chat-markdown pre code {
@@ -397,24 +403,25 @@ label:has(> select#reasoning-effort) select {
   background: transparent;
   padding: 0;
   line-height: 1.5;
-  font-size: 0.95em;
+  font-size: 13px;
+  font-family: inherit;
 }
 
 .chat-markdown .chat-markdown-codeblock {
+  --chat-markdown-codeblock-copy-button-space: 1.5rem;
   position: relative;
   margin: 0.65rem 0;
-  direction: ltr;
-  unicode-bidi: isolate;
 }
 
 .chat-markdown .chat-markdown-codeblock pre {
   margin: 0;
+  padding-right: calc(0.9rem + var(--chat-markdown-codeblock-copy-button-space));
 }
 
 .chat-markdown .chat-markdown-copy-button {
   position: absolute;
   top: 0.5rem;
-  inset-inline-end: 0.5rem;
+  right: 0.5rem;
   z-index: 1;
   display: inline-flex;
   align-items: center;
@@ -425,6 +432,7 @@ label:has(> select#reasoning-effort) select {
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--background) 82%, transparent);
   color: var(--muted-foreground);
+  cursor: pointer;
   opacity: 0;
   pointer-events: none;
   transition:
@@ -446,6 +454,11 @@ label:has(> select#reasoning-effort) select {
 
 .chat-markdown .chat-markdown-shiki .shiki {
   background: color-mix(in srgb, var(--muted) 78%, var(--background)) !important;
+  font-family: var(--font-chat-code-family) !important;
+}
+
+.chat-markdown .chat-markdown-shiki .shiki * {
+  font-family: inherit !important;
 }
 
 .chat-markdown table {
@@ -457,11 +470,19 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown td {
   border: 1px solid var(--border);
   padding: 0.35rem 0.45rem;
-  text-align: start;
+  text-align: left;
+}
+
+/* Keep diff chrome aligned with the user-configured code font, not the base mono fallback. */
+diffs-container {
+  --diffs-font-family: var(--font-chat-code-family);
+  --diffs-header-font-family: var(--font-chat-code-family);
 }
 
 /* Diffs theme bridge (match diff surfaces to app palette) */
 .diff-panel-viewport {
+  /* Keep raw patch fallback and any unthemed diff chrome on the coding font stack. */
+  font-family: var(--font-chat-code-family);
   background: color-mix(in srgb, var(--background) 94%, var(--card));
 }
 
@@ -470,6 +491,11 @@ label:has(> select#reasoning-effort) select {
   border-radius: 0.5rem;
   overflow: clip;
   background: color-mix(in srgb, var(--card) 92%, var(--background));
+}
+
+/* Match composer input background to code block in dark mode (solid color to avoid grain bleed-through) */
+.dark .chat-composer-surface {
+  background: color-mix(in srgb, var(--background) 96%, var(--foreground));
 }
 
 @keyframes ultrathink-rainbow {

@@ -3,19 +3,28 @@ import type {
   OrchestrationEvent,
   OrchestrationReadModel,
 } from "@t3tools/contracts";
+import {
+  deriveAssociatedWorktreeMetadata,
+  deriveAssociatedWorktreeMetadataPatch,
+} from "@t3tools/shared/threadWorkspace";
 import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
+import { hasNativeHandoffMessages } from "./handoff.ts";
 import {
   requireProject,
   requireProjectAbsent,
+  requireProjectHasNoThreads,
+  requireProjectWorkspaceRootAvailable,
   requireThread,
-  requireThreadArchived,
   requireThreadAbsent,
+  requireThreadArchived,
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
 
 const nowIso = () => new Date().toISOString();
+const DEFAULT_ASSISTANT_DELIVERY_MODE = "buffered" as const;
+
 const defaultMetadata: Omit<OrchestrationEvent, "sequence" | "type" | "payload"> = {
   eventId: crypto.randomUUID() as OrchestrationEvent["eventId"],
   aggregateKind: "thread",
@@ -47,6 +56,50 @@ function withEventBase(
   };
 }
 
+function deriveCommandAssociatedWorktreeMetadata(input: {
+  readonly branch: string | null;
+  readonly worktreePath: string | null;
+  readonly associatedWorktreePath?: string | null;
+  readonly associatedWorktreeBranch?: string | null;
+  readonly associatedWorktreeRef?: string | null;
+}) {
+  return deriveAssociatedWorktreeMetadata({
+    branch: input.branch,
+    worktreePath: input.worktreePath,
+    ...(input.associatedWorktreePath !== undefined
+      ? { associatedWorktreePath: input.associatedWorktreePath }
+      : {}),
+    ...(input.associatedWorktreeBranch !== undefined
+      ? { associatedWorktreeBranch: input.associatedWorktreeBranch }
+      : {}),
+    ...(input.associatedWorktreeRef !== undefined
+      ? { associatedWorktreeRef: input.associatedWorktreeRef }
+      : {}),
+  });
+}
+
+function deriveCommandAssociatedWorktreeMetadataPatch(input: {
+  readonly branch?: string | null;
+  readonly worktreePath?: string | null;
+  readonly associatedWorktreePath?: string | null;
+  readonly associatedWorktreeBranch?: string | null;
+  readonly associatedWorktreeRef?: string | null;
+}) {
+  return deriveAssociatedWorktreeMetadataPatch({
+    ...(input.branch !== undefined ? { branch: input.branch } : {}),
+    ...(input.worktreePath !== undefined ? { worktreePath: input.worktreePath } : {}),
+    ...(input.associatedWorktreePath !== undefined
+      ? { associatedWorktreePath: input.associatedWorktreePath }
+      : {}),
+    ...(input.associatedWorktreeBranch !== undefined
+      ? { associatedWorktreeBranch: input.associatedWorktreeBranch }
+      : {}),
+    ...(input.associatedWorktreeRef !== undefined
+      ? { associatedWorktreeRef: input.associatedWorktreeRef }
+      : {}),
+  });
+}
+
 export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand")(function* ({
   command,
   readModel,
@@ -64,6 +117,13 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
+      if ((command.kind ?? "project") === "project") {
+        yield* requireProjectWorkspaceRootAvailable({
+          readModel,
+          command,
+          workspaceRoot: command.workspaceRoot,
+        });
+      }
 
       return {
         ...withEventBase({
@@ -75,6 +135,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "project.created",
         payload: {
           projectId: command.projectId,
+          kind: command.kind ?? "project",
           title: command.title,
           workspaceRoot: command.workspaceRoot,
           defaultModelSelection: command.defaultModelSelection ?? null,
@@ -91,6 +152,14 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         projectId: command.projectId,
       });
+      if (command.workspaceRoot !== undefined && command.kind !== "chat") {
+        yield* requireProjectWorkspaceRootAvailable({
+          readModel,
+          command,
+          workspaceRoot: command.workspaceRoot,
+          excludeProjectId: command.projectId,
+        });
+      }
       const occurredAt = nowIso();
       return {
         ...withEventBase({
@@ -102,6 +171,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         type: "project.meta-updated",
         payload: {
           projectId: command.projectId,
+          ...(command.kind !== undefined ? { kind: command.kind } : {}),
           ...(command.title !== undefined ? { title: command.title } : {}),
           ...(command.workspaceRoot !== undefined ? { workspaceRoot: command.workspaceRoot } : {}),
           ...(command.defaultModelSelection !== undefined
@@ -115,6 +185,11 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
 
     case "project.delete": {
       yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      yield* requireProjectHasNoThreads({
         readModel,
         command,
         projectId: command.projectId,
@@ -161,12 +236,238 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           modelSelection: command.modelSelection,
           runtimeMode: command.runtimeMode,
           interactionMode: command.interactionMode,
+          envMode: command.envMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          ...deriveCommandAssociatedWorktreeMetadata({
+            branch: command.branch,
+            worktreePath: command.worktreePath,
+            ...(command.associatedWorktreePath !== undefined
+              ? { associatedWorktreePath: command.associatedWorktreePath }
+              : {}),
+            ...(command.associatedWorktreeBranch !== undefined
+              ? { associatedWorktreeBranch: command.associatedWorktreeBranch }
+              : {}),
+            ...(command.associatedWorktreeRef !== undefined
+              ? { associatedWorktreeRef: command.associatedWorktreeRef }
+              : {}),
+          }),
+          parentThreadId: command.parentThreadId,
+          subagentAgentId: command.subagentAgentId,
+          subagentNickname: command.subagentNickname,
+          subagentRole: command.subagentRole,
+          forkSourceThreadId: null,
+          lastKnownPr: command.lastKnownPr,
+          handoff: null,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
       };
+    }
+
+    case "thread.handoff.create": {
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.sourceThreadId,
+      });
+      yield* requireThreadAbsent({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+
+      const sourceThread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.sourceThreadId,
+      });
+      if (sourceThread.projectId !== command.projectId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Source thread '${command.sourceThreadId}' belongs to a different project.`,
+        });
+      }
+      if (sourceThread.handoff !== null && !hasNativeHandoffMessages(sourceThread)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Source thread '${command.sourceThreadId}' must contain at least one native chat message after handoff before it can be handed off again.`,
+        });
+      }
+
+      const createdEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.created",
+        payload: {
+          threadId: command.threadId,
+          projectId: command.projectId,
+          title: command.title,
+          modelSelection: command.modelSelection,
+          runtimeMode: command.runtimeMode,
+          interactionMode: command.interactionMode,
+          envMode: command.envMode,
+          branch: command.branch,
+          worktreePath: command.worktreePath,
+          ...deriveCommandAssociatedWorktreeMetadata({
+            branch: command.branch,
+            worktreePath: command.worktreePath,
+            ...(command.associatedWorktreePath !== undefined
+              ? { associatedWorktreePath: command.associatedWorktreePath }
+              : {}),
+            ...(command.associatedWorktreeBranch !== undefined
+              ? { associatedWorktreeBranch: command.associatedWorktreeBranch }
+              : {}),
+            ...(command.associatedWorktreeRef !== undefined
+              ? { associatedWorktreeRef: command.associatedWorktreeRef }
+              : {}),
+          }),
+          parentThreadId: null,
+          subagentAgentId: null,
+          subagentNickname: null,
+          subagentRole: null,
+          forkSourceThreadId: null,
+          handoff: {
+            sourceThreadId: command.sourceThreadId,
+            sourceProvider: sourceThread.modelSelection.provider,
+            importedAt: command.createdAt,
+            bootstrapStatus: "pending",
+          },
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+
+      const importedMessageEvents: ReadonlyArray<Omit<OrchestrationEvent, "sequence">> =
+        command.importedMessages.map((message) => ({
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.message-sent",
+          payload: {
+            threadId: command.threadId,
+            messageId: message.messageId,
+            role: message.role,
+            text: message.text,
+            ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+            turnId: null,
+            streaming: false,
+            source: "handoff-import",
+            createdAt: message.createdAt,
+            updatedAt: message.updatedAt,
+          },
+        }));
+
+      return [createdEvent, ...importedMessageEvents];
+    }
+
+    case "thread.fork.create": {
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.sourceThreadId,
+      });
+      yield* requireThreadAbsent({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+
+      const sourceThread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.sourceThreadId,
+      });
+      if (sourceThread.projectId !== command.projectId) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Source thread '${command.sourceThreadId}' belongs to a different project.`,
+        });
+      }
+
+      const createdEvent: Omit<OrchestrationEvent, "sequence"> = {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.created",
+        payload: {
+          threadId: command.threadId,
+          projectId: command.projectId,
+          title: command.title,
+          modelSelection: command.modelSelection,
+          runtimeMode: command.runtimeMode,
+          interactionMode: command.interactionMode,
+          envMode: command.envMode,
+          branch: command.branch,
+          worktreePath: command.worktreePath,
+          ...deriveCommandAssociatedWorktreeMetadata({
+            branch: command.branch,
+            worktreePath: command.worktreePath,
+            ...(command.associatedWorktreePath !== undefined
+              ? { associatedWorktreePath: command.associatedWorktreePath }
+              : {}),
+            ...(command.associatedWorktreeBranch !== undefined
+              ? { associatedWorktreeBranch: command.associatedWorktreeBranch }
+              : {}),
+            ...(command.associatedWorktreeRef !== undefined
+              ? { associatedWorktreeRef: command.associatedWorktreeRef }
+              : {}),
+          }),
+          parentThreadId: null,
+          subagentAgentId: null,
+          subagentNickname: null,
+          subagentRole: null,
+          forkSourceThreadId: command.sourceThreadId,
+          handoff: null,
+          createdAt: command.createdAt,
+          updatedAt: command.createdAt,
+        },
+      };
+
+      const importedMessageEvents: ReadonlyArray<Omit<OrchestrationEvent, "sequence">> =
+        command.importedMessages.map((message) => ({
+          ...withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          }),
+          type: "thread.message-sent",
+          payload: {
+            threadId: command.threadId,
+            messageId: message.messageId,
+            role: message.role,
+            text: message.text,
+            ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+            turnId: null,
+            streaming: false,
+            source: "fork-import",
+            createdAt: message.createdAt,
+            updatedAt: message.updatedAt,
+          },
+        }));
+
+      return [createdEvent, ...importedMessageEvents];
     }
 
     case "thread.delete": {
@@ -257,8 +558,34 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.modelSelection !== undefined
             ? { modelSelection: command.modelSelection }
             : {}),
+          ...(command.envMode !== undefined ? { envMode: command.envMode } : {}),
           ...(command.branch !== undefined ? { branch: command.branch } : {}),
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
+          ...deriveCommandAssociatedWorktreeMetadataPatch({
+            ...(command.branch !== undefined ? { branch: command.branch } : {}),
+            ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
+            ...(command.associatedWorktreePath !== undefined
+              ? { associatedWorktreePath: command.associatedWorktreePath }
+              : {}),
+            ...(command.associatedWorktreeBranch !== undefined
+              ? { associatedWorktreeBranch: command.associatedWorktreeBranch }
+              : {}),
+            ...(command.associatedWorktreeRef !== undefined
+              ? { associatedWorktreeRef: command.associatedWorktreeRef }
+              : {}),
+          }),
+          ...(command.parentThreadId !== undefined
+            ? { parentThreadId: command.parentThreadId }
+            : {}),
+          ...(command.subagentAgentId !== undefined
+            ? { subagentAgentId: command.subagentAgentId }
+            : {}),
+          ...(command.subagentNickname !== undefined
+            ? { subagentNickname: command.subagentNickname }
+            : {}),
+          ...(command.subagentRole !== undefined ? { subagentRole: command.subagentRole } : {}),
+          ...(command.handoff !== undefined ? { handoff: command.handoff } : {}),
+          ...(command.lastKnownPr !== undefined ? { lastKnownPr: command.lastKnownPr } : {}),
           updatedAt: occurredAt,
         },
       };
@@ -328,6 +655,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         sourceProposedPlan && sourceThread
           ? sourceThread.proposedPlans.find((entry) => entry.id === sourceProposedPlan.planId)
           : null;
+      const dispatchMode = command.dispatchMode ?? "queue";
       if (sourceProposedPlan && !sourcePlan) {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
@@ -354,13 +682,38 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           role: "user",
           text: command.message.text,
           attachments: command.message.attachments,
+          ...(command.message.skills !== undefined ? { skills: command.message.skills } : {}),
+          ...(command.message.mentions !== undefined ? { mentions: command.message.mentions } : {}),
+          dispatchMode,
           turnId: null,
           streaming: false,
+          source: "native",
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
       };
-      const turnStartRequestedEvent: Omit<OrchestrationEvent, "sequence"> = {
+      const turnRequestPayload = {
+        threadId: command.threadId,
+        messageId: command.message.messageId,
+        ...(command.modelSelection !== undefined ? { modelSelection: command.modelSelection } : {}),
+        ...(command.providerOptions !== undefined
+          ? { providerOptions: command.providerOptions }
+          : {}),
+        ...(command.reviewTarget !== undefined ? { reviewTarget: command.reviewTarget } : {}),
+        assistantDeliveryMode: command.assistantDeliveryMode ?? DEFAULT_ASSISTANT_DELIVERY_MODE,
+        dispatchMode,
+        runtimeMode: targetThread.runtimeMode,
+        interactionMode: targetThread.interactionMode,
+        ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
+        createdAt: command.createdAt,
+      } as const;
+      const activeProvider =
+        targetThread.session?.providerName ?? targetThread.modelSelection.provider;
+      const isThreadRunning =
+        targetThread.session?.status === "running" && targetThread.session.activeTurnId !== null;
+      const shouldQueue =
+        isThreadRunning && (dispatchMode === "queue" || activeProvider !== "codex");
+      const queuedEvent: Omit<OrchestrationEvent, "sequence"> = {
         ...withEventBase({
           aggregateKind: "thread",
           aggregateId: command.threadId,
@@ -368,21 +721,67 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           commandId: command.commandId,
         }),
         causationEventId: userMessageEvent.eventId,
+        type: shouldQueue ? "thread.turn-queued" : "thread.turn-start-requested",
+        payload: turnRequestPayload,
+      };
+      if (shouldQueue && dispatchMode === "steer") {
+        return [
+          userMessageEvent,
+          queuedEvent,
+          {
+            ...withEventBase({
+              aggregateKind: "thread",
+              aggregateId: command.threadId,
+              occurredAt: command.createdAt,
+              commandId: command.commandId,
+            }),
+            causationEventId: queuedEvent.eventId,
+            type: "thread.turn-interrupt-requested",
+            payload: {
+              threadId: command.threadId,
+              turnId: targetThread.session?.activeTurnId ?? undefined,
+              createdAt: command.createdAt,
+            },
+          },
+        ];
+      }
+      return [userMessageEvent, queuedEvent];
+    }
+
+    case "thread.turn.dispatch-queued": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
         type: "thread.turn-start-requested",
         payload: {
           threadId: command.threadId,
-          messageId: command.message.messageId,
+          messageId: command.messageId,
           ...(command.modelSelection !== undefined
             ? { modelSelection: command.modelSelection }
             : {}),
-          ...(command.titleSeed !== undefined ? { titleSeed: command.titleSeed } : {}),
-          runtimeMode: targetThread.runtimeMode,
-          interactionMode: targetThread.interactionMode,
-          ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
+          ...(command.providerOptions !== undefined
+            ? { providerOptions: command.providerOptions }
+            : {}),
+          ...(command.reviewTarget !== undefined ? { reviewTarget: command.reviewTarget } : {}),
+          assistantDeliveryMode: command.assistantDeliveryMode ?? DEFAULT_ASSISTANT_DELIVERY_MODE,
+          dispatchMode: command.dispatchMode ?? "queue",
+          runtimeMode: command.runtimeMode,
+          interactionMode: command.interactionMode,
+          ...(command.sourceProposedPlan !== undefined
+            ? { sourceProposedPlan: command.sourceProposedPlan }
+            : {}),
           createdAt: command.createdAt,
         },
       };
-      return [userMessageEvent, turnStartRequestedEvent];
     }
 
     case "thread.turn.interrupt": {
@@ -522,6 +921,35 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           session: command.session,
         },
       };
+    }
+
+    case "thread.messages.import": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return command.messages.map((message) => ({
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.message-sent" as const,
+        payload: {
+          threadId: command.threadId,
+          messageId: message.messageId,
+          role: message.role,
+          text: message.text,
+          ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+          turnId: null,
+          streaming: false,
+          source: "native" as const,
+          createdAt: message.createdAt,
+          updatedAt: message.updatedAt,
+        },
+      }));
     }
 
     case "thread.message.assistant.delta": {

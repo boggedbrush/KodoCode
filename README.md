@@ -423,6 +423,7 @@ You'll like Kōdō Code if you:
 ## Acknowledgement
 
 Kōdō Code is a fork of [t3code](https://github.com/pingdotgg/t3code) and will continue syncing with upstream regularly.
+We also track [DP Code](https://github.com/Emanuele-web04/dpcode) as a first-class UI and workflow upstream for selectively cherry-picking improvements that align with Kōdō Code.
 
 Huge appreciation to [Theo Browne](https://github.com/t3dotgg) and [Julius Marminge](https://github.com/juliusmarminge) for creating a strong foundation for an agentic coding harness. Their work made this project possible. ❤️
 

@@ -10,37 +10,31 @@ import {
   TerminalClearInput,
   TerminalCloseInput,
   TerminalEvent,
-  TerminalCwdError,
-  TerminalError,
-  TerminalHistoryError,
-  TerminalNotRunningError,
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalSessionSnapshot,
-  TerminalSessionLookupError,
   TerminalSessionStatus,
   TerminalWriteInput,
 } from "@t3tools/contracts";
+import type { TerminalActivityState, TerminalCliKind } from "@t3tools/shared/terminalThreads";
 import { PtyProcess } from "./PTY";
-import { Effect, ServiceMap } from "effect";
+import { Effect, Schema, ServiceMap } from "effect";
 
-export {
-  TerminalCwdError,
-  TerminalError,
-  TerminalHistoryError,
-  TerminalNotRunningError,
-  TerminalSessionLookupError,
-};
+export class TerminalError extends Schema.TaggedErrorClass<TerminalError>()("TerminalError", {
+  message: Schema.String,
+  cause: Schema.optional(Schema.Defect),
+}) {}
 
 export interface TerminalSessionState {
   threadId: string;
   terminalId: string;
   cwd: string;
-  worktreePath: string | null;
   status: TerminalSessionStatus;
   pid: number | null;
   history: string;
+  historyLineBreakCount: number;
+  historyEndsWithNewline: boolean;
   pendingHistoryControlSequence: string;
   exitCode: number | null;
   exitSignal: number | null;
@@ -51,7 +45,28 @@ export interface TerminalSessionState {
   unsubscribeData: (() => void) | null;
   unsubscribeExit: (() => void) | null;
   hasRunningSubprocess: boolean;
+  detectedCliKind: TerminalCliKind | null;
+  managedAgentRunning: boolean;
+  managedAgentState: TerminalActivityState | null;
+  /** True once at least one hook event (Start/Stop/PermissionRequest) has been observed. */
+  managedAgentObserved: boolean;
   runtimeEnv: Record<string, string> | null;
+  /** Buffered shell input used to detect canonical CLI commands at submit time. */
+  pendingInputBuffer: string;
+  /** Buffered output chunks awaiting flush (output batching). */
+  pendingOutputChunks: string[];
+  /** Total code-unit length of buffered output chunks. */
+  pendingOutputLength: number;
+  /** Timer handle for the next scheduled output flush. */
+  outputFlushTimer: ReturnType<typeof setTimeout> | null;
+  /** Whether PTY reading has been paused due to backpressure. */
+  outputPaused: boolean;
+  /** Latest wall-clock timestamp when the user wrote to this PTY. */
+  lastInputAt: number | null;
+  /** Latest wall-clock timestamp when the PTY emitted output. */
+  lastOutputAt: number | null;
+  /** Normalized visible output used to ignore redraw-only PTY noise. */
+  lastOutputSignature: string | null;
 }
 
 export interface ShellCandidate {
@@ -110,18 +125,19 @@ export interface TerminalManagerShape {
   readonly close: (input: TerminalCloseInput) => Effect.Effect<void, TerminalError>;
 
   /**
-   * Subscribe to terminal runtime events with a direct callback.
-   *
-   * Returns an unsubscribe function.
+   * Subscribe to terminal runtime events.
    */
-  readonly subscribe: (
-    listener: (event: TerminalEvent) => Effect.Effect<void>,
-  ) => Effect.Effect<() => void>;
+  readonly subscribe: (listener: (event: TerminalEvent) => void) => Effect.Effect<() => void>;
+
+  /**
+   * Dispose all managed terminal resources.
+   */
+  readonly dispose: Effect.Effect<void>;
 }
 
 /**
  * TerminalManager - Service tag for terminal session orchestration.
  */
 export class TerminalManager extends ServiceMap.Service<TerminalManager, TerminalManagerShape>()(
-  "t3/terminal/Services/Manager/TerminalManager",
+  "kodo/terminal/Services/Manager/TerminalManager",
 ) {}

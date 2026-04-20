@@ -5,9 +5,7 @@ import {
   ClaudeModelOptions,
   CodexModelOptions,
   DEFAULT_MODEL_BY_PROVIDER,
-  DEFAULT_SERVER_SETTINGS,
   ProjectId,
-  type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
 import { page } from "vitest/browser";
@@ -23,115 +21,23 @@ import {
   useComposerThreadDraft,
   useEffectiveComposerModelState,
 } from "../../composerDraftStore";
-import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
 // ── Claude TraitsPicker tests ─────────────────────────────────────────
 
 const CLAUDE_THREAD_ID = ThreadId.makeUnsafe("thread-claude-traits");
-const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
-  {
-    provider: "codex",
-    enabled: true,
-    installed: true,
-    version: "0.1.0",
-    status: "ready",
-    auth: { status: "authenticated" },
-    checkedAt: "2026-01-01T00:00:00.000Z",
-    models: [
-      {
-        slug: "gpt-5.4",
-        name: "GPT-5.4",
-        isCustom: false,
-        capabilities: {
-          reasoningEffortLevels: [
-            { value: "xhigh", label: "Extra High" },
-            { value: "high", label: "High", isDefault: true },
-          ],
-          supportsFastMode: true,
-          supportsThinkingToggle: false,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
-        },
-      },
-    ],
-  },
-  {
-    provider: "claudeAgent",
-    enabled: true,
-    installed: true,
-    version: "0.1.0",
-    status: "ready",
-    auth: { status: "authenticated" },
-    checkedAt: "2026-01-01T00:00:00.000Z",
-    models: [
-      {
-        slug: "claude-opus-4-6",
-        name: "Claude Opus 4.6",
-        isCustom: false,
-        capabilities: {
-          reasoningEffortLevels: [
-            { value: "low", label: "Low" },
-            { value: "medium", label: "Medium" },
-            { value: "high", label: "High", isDefault: true },
-            { value: "max", label: "Max" },
-            { value: "ultrathink", label: "Ultrathink" },
-          ],
-          supportsFastMode: true,
-          supportsThinkingToggle: false,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: ["ultrathink"],
-        },
-      },
-      {
-        slug: "claude-sonnet-4-6",
-        name: "Claude Sonnet 4.6",
-        isCustom: false,
-        capabilities: {
-          reasoningEffortLevels: [
-            { value: "low", label: "Low" },
-            { value: "medium", label: "Medium" },
-            { value: "high", label: "High", isDefault: true },
-            { value: "ultrathink", label: "Ultrathink" },
-          ],
-          supportsFastMode: false,
-          supportsThinkingToggle: false,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: ["ultrathink"],
-        },
-      },
-      {
-        slug: "claude-haiku-4-5",
-        name: "Claude Haiku 4.5",
-        isCustom: false,
-        capabilities: {
-          reasoningEffortLevels: [],
-          supportsFastMode: false,
-          supportsThinkingToggle: true,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
-        },
-      },
-    ],
-  },
-];
 
 function ClaudeTraitsPickerHarness(props: {
   model: string;
   fallbackModelSelection: ModelSelection | null;
-  triggerVariant?: "ghost" | "outline";
 }) {
   const prompt = useComposerThreadDraft(CLAUDE_THREAD_ID).prompt;
   const setPrompt = useComposerDraftStore((store) => store.setPrompt);
   const { modelOptions, selectedModel } = useEffectiveComposerModelState({
     threadId: CLAUDE_THREAD_ID,
-    providers: TEST_PROVIDERS,
     selectedProvider: "claudeAgent",
     threadModelSelection: props.fallbackModelSelection,
     projectModelSelection: null,
-    settings: {
-      ...DEFAULT_SERVER_SETTINGS,
-      ...DEFAULT_CLIENT_SETTINGS,
-    },
+    customModelsByProvider: { codex: [], claudeAgent: [], gemini: [] },
   });
   const handlePromptChange = useCallback(
     (nextPrompt: string) => {
@@ -143,13 +49,11 @@ function ClaudeTraitsPickerHarness(props: {
   return (
     <TraitsPicker
       provider="claudeAgent"
-      models={TEST_PROVIDERS[1]!.models}
       threadId={CLAUDE_THREAD_ID}
       model={selectedModel ?? props.model}
       prompt={prompt}
       modelOptions={modelOptions?.claudeAgent}
       onPromptChange={handlePromptChange}
-      triggerVariant={props.triggerVariant}
     />
   );
 }
@@ -159,12 +63,12 @@ async function mountClaudePicker(props?: {
   prompt?: string;
   options?: ClaudeModelOptions;
   fallbackModelOptions?: {
-    effort?: "low" | "medium" | "high" | "max" | "ultrathink";
+    effort?: "low" | "medium" | "high" | "xhigh" | "max" | "ultrathink";
     thinking?: boolean;
     fastMode?: boolean;
+    contextWindow?: string;
   } | null;
   skipDraftModelOptions?: boolean;
-  triggerVariant?: "ghost" | "outline";
 }) {
   const model = props?.model ?? "claude-opus-4-6";
   const claudeOptions = !props?.skipDraftModelOptions ? props?.options : undefined;
@@ -174,7 +78,9 @@ async function mountClaudePicker(props?: {
       images: [],
       nonPersistedImageIds: [],
       persistedAttachments: [],
+      assistantSelections: [],
       terminalContexts: [],
+      queuedTurns: [],
       modelSelectionByProvider: props?.skipDraftModelOptions
         ? {}
         : {
@@ -203,15 +109,11 @@ async function mountClaudePicker(props?: {
       ? ({
           provider: "claudeAgent",
           model,
-          ...(props.fallbackModelOptions ? { options: props.fallbackModelOptions } : {}),
+          options: props.fallbackModelOptions ?? undefined,
         } satisfies ModelSelection)
       : null;
   const screen = await render(
-    <ClaudeTraitsPickerHarness
-      model={model}
-      fallbackModelSelection={fallbackModelSelection}
-      {...(props?.triggerVariant ? { triggerVariant: props.triggerVariant } : {})}
-    />,
+    <ClaudeTraitsPickerHarness model={model} fallbackModelSelection={fallbackModelSelection} />,
     { container: host },
   );
 
@@ -250,16 +152,16 @@ describe("TraitsPicker (Claude)", () => {
     });
   });
 
-  it("shows Auto when no explicit Claude effort is set", async () => {
+  it("shows context window controls for Opus models", async () => {
     await using _ = await mountClaudePicker();
 
-    await vi.waitFor(() => {
-      expect(document.body.textContent ?? "").toContain("Auto");
-    });
-    await page.getByRole("button", { name: /auto/i }).click();
+    await page.getByRole("button").click();
 
     await vi.waitFor(() => {
-      expect(page.getByRole("menuitemradio", { name: "Auto" })).toBeChecked();
+      const text = document.body.textContent ?? "";
+      expect(text).toContain("Context Window");
+      expect(text).toContain("200k");
+      expect(text).toContain("1M");
     });
   });
 
@@ -285,8 +187,22 @@ describe("TraitsPicker (Claude)", () => {
       expect(text).toContain("Low");
       expect(text).toContain("Medium");
       expect(text).toContain("High");
-      expect(text).not.toContain("Max");
+      expect(text).toContain("Max");
       expect(text).toContain("Ultrathink");
+    });
+  });
+
+  it("shows Extra High for Claude Opus 4.7", async () => {
+    await using _ = await mountClaudePicker({
+      model: "claude-opus-4-7",
+    });
+
+    await page.getByRole("button").click();
+
+    await vi.waitFor(() => {
+      const text = document.body.textContent ?? "";
+      expect(text).toContain("Extra High");
+      expect(text).toContain("Max");
     });
   });
 
@@ -309,7 +225,7 @@ describe("TraitsPicker (Claude)", () => {
     });
   });
 
-  it("shows prompt-controlled Ultrathink state with selectable effort controls", async () => {
+  it("shows prompt-controlled Ultrathink state with disabled effort controls", async () => {
     await using _ = await mountClaudePicker({
       model: "claude-opus-4-6",
       options: { effort: "high" },
@@ -325,24 +241,8 @@ describe("TraitsPicker (Claude)", () => {
     await vi.waitFor(() => {
       const text = document.body.textContent ?? "";
       expect(text).toContain("Effort");
-      expect(text).not.toContain("ultrathink");
-    });
-  });
-
-  it("warns when ultrathink appears in prompt body text", async () => {
-    await using _ = await mountClaudePicker({
-      model: "claude-opus-4-6",
-      options: { effort: "high" },
-      prompt: "Ultrathink:\nplease ultrathink about this problem",
-    });
-
-    await page.getByRole("button").click();
-
-    await vi.waitFor(() => {
-      const text = document.body.textContent ?? "";
-      expect(text).toContain(
-        'Your prompt contains "ultrathink" in the text. Remove it to change effort.',
-      );
+      expect(text).toContain("Remove Ultrathink from the prompt to change effort.");
+      expect(text).not.toContain("Fallback Effort");
     });
   });
 
@@ -365,17 +265,34 @@ describe("TraitsPicker (Claude)", () => {
     });
   });
 
-  it("accepts outline trigger styling", async () => {
+  it("shows the non-default context window in the trigger label", async () => {
     await using _ = await mountClaudePicker({
-      triggerVariant: "outline",
+      model: "claude-opus-4-6",
+      options: { contextWindow: "1m" },
     });
 
-    const button = document.querySelector("button");
-    if (!(button instanceof HTMLButtonElement)) {
-      throw new Error("Expected traits trigger button to be rendered.");
-    }
-    expect(button.className).toContain("border-input");
-    expect(button.className).toContain("bg-popover");
+    await vi.waitFor(() => {
+      expect(document.body.textContent ?? "").toContain("1M");
+    });
+  });
+
+  it("persists sticky claude context window when changed", async () => {
+    await using _ = await mountClaudePicker({
+      model: "claude-opus-4-6",
+      options: { contextWindow: "200k" },
+    });
+
+    await page.getByRole("button").click();
+    await page.getByRole("menuitemradio", { name: "1M" }).click();
+
+    expect(
+      useComposerDraftStore.getState().stickyModelSelectionByProvider.claudeAgent,
+    ).toMatchObject({
+      provider: "claudeAgent",
+      options: {
+        contextWindow: "1m",
+      },
+    });
   });
 });
 
@@ -390,7 +307,9 @@ async function mountCodexPicker(props: { model?: string; options?: CodexModelOpt
       images: [],
       nonPersistedImageIds: [],
       persistedAttachments: [],
+      assistantSelections: [],
       terminalContexts: [],
+      queuedTurns: [],
       modelSelectionByProvider: {
         codex: {
           provider: "codex",
@@ -416,7 +335,6 @@ async function mountCodexPicker(props: { model?: string; options?: CodexModelOpt
   const screen = await render(
     <TraitsPicker
       provider="codex"
-      models={TEST_PROVIDERS[0]!.models}
       threadId={threadId}
       model={props.model ?? DEFAULT_MODEL_BY_PROVIDER.codex}
       prompt=""
@@ -464,26 +382,13 @@ describe("TraitsPicker (Codex)", () => {
     });
   });
 
-  it("shows Auto when no explicit Codex effort is set", async () => {
-    await using _ = await mountCodexPicker({});
-
-    await vi.waitFor(() => {
-      expect(document.body.textContent ?? "").toContain("Auto");
-    });
-    await page.getByRole("button", { name: /auto/i }).click();
-
-    await vi.waitFor(() => {
-      expect(page.getByRole("menuitemradio", { name: "Auto" })).toBeChecked();
-    });
-  });
-
   it("shows Fast in the trigger label when fast mode is active", async () => {
     await using _ = await mountCodexPicker({
       options: { fastMode: true },
     });
 
     await vi.waitFor(() => {
-      expect(document.body.textContent ?? "").toContain("Auto · Fast");
+      expect(document.body.textContent ?? "").toMatch(/High\s*·\s*Fast/u);
     });
   });
 
@@ -496,10 +401,28 @@ describe("TraitsPicker (Codex)", () => {
 
     await vi.waitFor(() => {
       const text = document.body.textContent ?? "";
-      expect(text).toContain("Extra High");
+      expect(text).toContain("Low");
+      expect(text).toContain("Medium");
       expect(text).toContain("High");
-      expect(text).not.toContain("Low");
-      expect(text).not.toContain("Medium");
+      expect(text).toContain("Extra High");
+    });
+  });
+
+  it("closes after clicking the already-selected effort", async () => {
+    await using _ = await mountCodexPicker({
+      options: { reasoningEffort: "medium", fastMode: false },
+    });
+
+    await page.getByRole("button").click();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent ?? "").toContain("Effort");
+    });
+
+    await page.getByRole("menuitemradio", { name: "Medium" }).click();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent ?? "").not.toContain("Effort");
     });
   });
 

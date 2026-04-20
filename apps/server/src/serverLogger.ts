@@ -1,13 +1,20 @@
-import { Effect, Logger, References, Layer } from "effect";
+import fs from "node:fs";
+
+import { Effect, Logger } from "effect";
+import * as Layer from "effect/Layer";
 
 import { ServerConfig } from "./config";
 
 export const ServerLoggerLive = Effect.gen(function* () {
-  const config = yield* ServerConfig;
-  const minimumLogLevelLayer = Layer.succeed(References.MinimumLogLevel, config.logLevel);
-  const loggerLayer = Logger.layer([Logger.consolePretty(), Logger.tracerLogger], {
-    mergeWithExisting: false,
+  const { logsDir, serverLogPath } = yield* ServerConfig;
+
+  yield* Effect.sync(() => {
+    fs.mkdirSync(logsDir, { recursive: true });
   });
 
-  return Layer.mergeAll(loggerLayer, minimumLogLevelLayer);
+  const fileLogger = Logger.formatSimple.pipe(Logger.toFile(serverLogPath));
+
+  return Logger.layer([Logger.defaultLogger, fileLogger], {
+    mergeWithExisting: false,
+  });
 }).pipe(Layer.unwrap);

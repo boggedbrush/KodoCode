@@ -1,62 +1,56 @@
 import {
-  OrchestrationEvent,
-  type ServerLifecycleWelcomePayload,
-  type ThreadId,
+  ThreadId,
+  type OrchestrationEvent,
+  type OrchestrationShellStreamEvent,
+  type ServerConfig,
 } from "@t3tools/contracts";
+import { defaultTerminalTitleForCliKind } from "@t3tools/shared/terminalThreads";
 import {
   Outlet,
   createRootRouteWithContext,
   type ErrorComponentProps,
   useNavigate,
-  useLocation,
+  useParams,
+  useRouterState,
+  useSearch,
 } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef } from "react";
-import { QueryClient, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Throttler } from "@tanstack/react-pacer";
-import { Equal } from "effect";
-import { resolveUtilityModelSelectionDefault } from "@t3tools/shared/model";
 
 import { APP_DISPLAY_NAME } from "../branding";
-import { AppSidebarLayout } from "../components/AppSidebarLayout";
-import { DesktopWindowFrame } from "../components/DesktopWindowFrame";
-import {
-  SlowRpcAckToastCoordinator,
-  WebSocketConnectionCoordinator,
-  WebSocketConnectionSurface,
-} from "../components/WebSocketConnectionSurface";
+import ShortcutsDialog from "../components/ShortcutsDialog";
+import WhatsNewDialog from "../components/WhatsNewDialog";
+import { useWhatsNew } from "../whatsNew/useWhatsNew";
+import { WhatsNewPopoutCard } from "../whatsNew/WhatsNewPopoutCard";
+import { shouldRenderTerminalWorkspace } from "../components/ChatView.logic";
 import { Button } from "../components/ui/button";
 import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
 import { resolveAndPersistPreferredEditor } from "../editorPreferences";
+import { isElectron } from "../env";
+import { useFocusedChatContext } from "../focusedChatContext";
+import { isTerminalFocused } from "../lib/terminalFocus";
+import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
-import { resolveShortcutCommand } from "../keybindings";
-import {
-  getServerConfigUpdatedNotification,
-  ServerConfigUpdatedNotification,
-  startServerStateSync,
-  useServerConfig,
-  useServerConfigUpdatedSubscription,
-  useServerProviders,
-  useServerWelcomeSubscription,
-} from "../rpc/serverState";
-import { startProviderUsageSync } from "../rpc/providerUsageState";
-import {
-  clearPromotedDraftThread,
-  clearPromotedDraftThreads,
-  useComposerDraftStore,
-} from "../composerDraftStore";
+import { clearPromotedDraftThreads, useComposerDraftStore } from "../composerDraftStore";
 import { useStore } from "../store";
-import { useUiStateStore } from "../uiStateStore";
-import { useTerminalStateStore } from "../terminalStateStore";
-import { migrateLocalSettingsToServer } from "../hooks/useSettings";
-import { useSettings, useUpdateSettings } from "../hooks/useSettings";
+import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import { terminalActivityFromEvent } from "../terminalActivity";
+import {
+  onServerConfigUpdated,
+  onServerProviderStatusesUpdated,
+  onServerWelcome,
+} from "../wsNativeApi";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { projectQueryKeys } from "../lib/projectReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
-import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
-import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
-import { deriveReplayRetryDecision } from "../orchestrationRecovery";
-import { getWsRpcClient } from "~/wsRpcClient";
-import { useServerKeybindings } from "~/rpc/serverState";
+import { TaskCompletionNotifications } from "../notifications/taskCompletion";
+import { useWorkspaceStore, workspaceThreadId } from "../workspaceStore";
+import { useRetainedThreadDetailIds } from "../threadDetailSubscriptionRetention";
+import { useAppTypography } from "../hooks/useAppTypography";
+import { invalidateGitQueries } from "../lib/gitReactQuery";
+import { parseDiffRouteSearch } from "../diffRouteSearch";
+import { resolveSplitViewThreadIds, selectSplitView, useSplitViewStore } from "../splitViewStore";
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -69,39 +63,124 @@ export const Route = createRootRouteWithContext<{
 });
 
 function RootRouteView() {
+  useAppTypography();
+
   if (!readNativeApi()) {
     return (
-      <DesktopWindowFrame>
-        <div className="flex h-screen flex-col bg-background text-foreground">
-          <div className="flex flex-1 items-center justify-center">
-            <p className="text-sm text-muted-foreground">
-              Connecting to {APP_DISPLAY_NAME} server...
-            </p>
-          </div>
+      <div className="flex h-screen flex-col bg-background text-foreground">
+        <div className="flex flex-1 items-center justify-center">
+          <p className="text-sm text-muted-foreground">
+            Connecting to {APP_DISPLAY_NAME} server...
+          </p>
         </div>
-      </DesktopWindowFrame>
+      </div>
     );
   }
 
   return (
-    <DesktopWindowFrame>
-      <ToastProvider>
-        <AnchoredToastProvider>
-          <ServerStateBootstrap />
-          <ProviderUsageStateBootstrap />
-          <UtilityModelDefaultBootstrap />
-          <GlobalAppShortcuts />
-          <EventRouter />
-          <WebSocketConnectionCoordinator />
-          <SlowRpcAckToastCoordinator />
-          <WebSocketConnectionSurface>
-            <AppSidebarLayout>
-              <Outlet />
-            </AppSidebarLayout>
-          </WebSocketConnectionSurface>
-        </AnchoredToastProvider>
-      </ToastProvider>
-    </DesktopWindowFrame>
+    <ToastProvider>
+      <AnchoredToastProvider>
+        <EventRouter />
+        <GlobalShortcutsDialog />
+        <GlobalWhatsNewSurface />
+        <TaskCompletionNotifications />
+        <DesktopProjectBootstrap />
+        <Outlet />
+      </AnchoredToastProvider>
+    </ToastProvider>
+  );
+}
+
+function GlobalShortcutsDialog() {
+  const [open, setOpen] = useState(false);
+  const { focusedThreadId, activeProject } = useFocusedChatContext();
+  const serverConfigQuery = useQuery(serverConfigQueryOptions());
+  const keybindings = serverConfigQuery.data?.keybindings ?? [];
+  const platform = typeof navigator === "undefined" ? "" : navigator.platform;
+  const activeThreadTerminalState = useTerminalStateStore((state) =>
+    focusedThreadId
+      ? selectThreadTerminalState(state.terminalStateByThreadId, focusedThreadId)
+      : null,
+  );
+  const terminalOpen = activeThreadTerminalState?.terminalOpen ?? false;
+  const terminalWorkspaceOpen = shouldRenderTerminalWorkspace({
+    activeProjectExists: activeProject !== null,
+    presentationMode: activeThreadTerminalState?.presentationMode ?? "drawer",
+    terminalOpen,
+  });
+
+  useEffect(() => {
+    const onMenuAction = window.desktopBridge?.onMenuAction;
+    if (typeof onMenuAction !== "function") {
+      return;
+    }
+
+    const unsubscribe = onMenuAction((action) => {
+      if (action === "show-shortcuts") {
+        setOpen(true);
+      }
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
+
+  return (
+    <ShortcutsDialog
+      open={open}
+      onOpenChange={setOpen}
+      keybindings={keybindings}
+      projectScripts={activeProject?.kind === "project" ? activeProject.scripts : []}
+      platform={platform}
+      context={{
+        terminalFocus: isTerminalFocused(),
+        terminalOpen,
+        terminalWorkspaceOpen,
+      }}
+      isElectron={isElectron}
+    />
+  );
+}
+
+function GlobalWhatsNewSurface() {
+  // Single mount point per app session. The hook owns the "popout visible" and
+  // "dialog open" booleans and the seen-marker persistence; this component is
+  // just the plumbing that renders them together so they share one entry.
+  const {
+    currentEntry,
+    allEntries,
+    currentVersion,
+    isPopoutVisible,
+    isDialogOpen,
+    openDialog,
+    dismissPopout,
+    onDialogOpenChange,
+  } = useWhatsNew();
+
+  if (!currentEntry) {
+    // Silent-bootstrap or noop — nothing to render on either surface.
+    return null;
+  }
+
+  return (
+    <>
+      {isPopoutVisible && (
+        <WhatsNewPopoutCard
+          entry={currentEntry}
+          currentVersion={currentVersion}
+          onOpen={openDialog}
+          onDismiss={dismissPopout}
+        />
+      )}
+      <WhatsNewDialog
+        open={isDialogOpen}
+        onOpenChange={onDialogOpenChange}
+        currentEntry={currentEntry}
+        allEntries={allEntries}
+        currentVersion={currentVersion}
+      />
+    </>
   );
 }
 
@@ -110,43 +189,41 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
   const details = errorDetails(error);
 
   return (
-    <DesktopWindowFrame>
-      <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
-        <div className="pointer-events-none absolute inset-0 opacity-80">
-          <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-red-500)_16%,transparent),transparent)]" />
-          <div className="absolute inset-0 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--background)_90%,var(--color-black))_0%,var(--background)_55%)]" />
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
+      <div className="pointer-events-none absolute inset-0 opacity-80">
+        <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-red-500)_16%,transparent),transparent)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--background)_90%,var(--color-black))_0%,var(--background)_55%)]" />
+      </div>
+
+      <section className="relative w-full max-w-xl rounded-2xl border border-border/80 bg-card/90 p-6 shadow-2xl shadow-black/20 backdrop-blur-md sm:p-8">
+        <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
+          {APP_DISPLAY_NAME}
+        </p>
+        <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
+          Something went wrong.
+        </h1>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{message}</p>
+
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => reset()}>
+            Try again
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
+            Reload app
+          </Button>
         </div>
 
-        <section className="relative mx-auto w-full max-w-xl rounded-2xl border border-border/80 bg-card/90 p-6 shadow-2xl shadow-black/20 backdrop-blur-md sm:p-8">
-          <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-            {APP_DISPLAY_NAME}
-          </p>
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-            Something went wrong.
-          </h1>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{message}</p>
-
-          <div className="mt-5 flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => reset()}>
-              Try again
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
-              Reload app
-            </Button>
-          </div>
-
-          <details className="group mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
-            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground">
-              <span className="group-open:hidden">Show error details</span>
-              <span className="hidden group-open:inline">Hide error details</span>
-            </summary>
-            <pre className="max-h-56 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs text-foreground/85">
-              {details}
-            </pre>
-          </details>
-        </section>
-      </div>
-    </DesktopWindowFrame>
+        <details className="group mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
+          <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground">
+            <span className="group-open:hidden">Show error details</span>
+            <span className="hidden group-open:inline">Hide error details</span>
+          </summary>
+          <pre className="max-h-56 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs text-foreground/85">
+            {details}
+          </pre>
+        </details>
+      </section>
+    </div>
   );
 }
 
@@ -215,160 +292,370 @@ function coalesceOrchestrationUiEvents(
   return coalesced;
 }
 
-const REPLAY_RECOVERY_RETRY_DELAY_MS = 100;
-const MAX_NO_PROGRESS_REPLAY_RETRIES = 3;
+function shouldFlushDomainEventImmediately(
+  event: OrchestrationEvent,
+  immediatelyFlushedAssistantMessageIds: Set<string>,
+): boolean {
+  if (event.type !== "thread.message-sent" || event.payload.role !== "assistant") {
+    return false;
+  }
 
-function ServerStateBootstrap() {
-  useEffect(() => startServerStateSync(getWsRpcClient().server), []);
+  if (!event.payload.streaming) {
+    immediatelyFlushedAssistantMessageIds.delete(event.payload.messageId);
+    return false;
+  }
 
-  return null;
-}
+  if (immediatelyFlushedAssistantMessageIds.has(event.payload.messageId)) {
+    return false;
+  }
 
-function ProviderUsageStateBootstrap() {
-  useEffect(() => startProviderUsageSync(getWsRpcClient().server), []);
-
-  return null;
-}
-
-function UtilityModelDefaultBootstrap() {
-  const settings = useSettings();
-  const { updateSettings } = useUpdateSettings();
-  const providers = useServerProviders();
-
-  useEffect(() => {
-    const textGenerationModelSelection = resolveUtilityModelSelectionDefault(
-      settings.textGenerationModelSelection,
-      providers,
-    );
-    const promptEnhanceModelSelection = resolveUtilityModelSelectionDefault(
-      settings.promptEnhanceModelSelection,
-      providers,
-    );
-
-    if (
-      Equal.equals(textGenerationModelSelection, settings.textGenerationModelSelection) &&
-      Equal.equals(promptEnhanceModelSelection, settings.promptEnhanceModelSelection)
-    ) {
-      return;
-    }
-
-    updateSettings({
-      ...(Equal.equals(textGenerationModelSelection, settings.textGenerationModelSelection)
-        ? {}
-        : { textGenerationModelSelection }),
-      ...(Equal.equals(promptEnhanceModelSelection, settings.promptEnhanceModelSelection)
-        ? {}
-        : { promptEnhanceModelSelection }),
-    });
-  }, [
-    providers,
-    settings.promptEnhanceModelSelection,
-    settings.textGenerationModelSelection,
-    updateSettings,
-  ]);
-
-  return null;
-}
-
-function GlobalAppShortcuts() {
-  const keybindings = useServerKeybindings();
-
-  useEffect(() => {
-    const onWindowKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-
-      const command = resolveShortcutCommand(event, keybindings);
-      const isBrowserHardRefreshChord =
-        (event.key.toLowerCase() === "r" || event.code === "KeyR") &&
-        event.shiftKey &&
-        !event.altKey &&
-        (event.metaKey || event.ctrlKey);
-
-      if (command !== "app.reload" && !(isBrowserHardRefreshChord && command === null)) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      if (command === "app.reload") {
-        window.location.reload();
-      }
-    };
-
-    window.addEventListener("keydown", onWindowKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onWindowKeyDown);
-    };
-  }, [keybindings]);
-
-  return null;
+  immediatelyFlushedAssistantMessageIds.add(event.payload.messageId);
+  return true;
 }
 
 function EventRouter() {
-  const applyOrchestrationEvents = useStore((store) => store.applyOrchestrationEvents);
-  const syncServerReadModel = useStore((store) => store.syncServerReadModel);
-  const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
-  const syncProjects = useUiStateStore((store) => store.syncProjects);
-  const syncThreads = useUiStateStore((store) => store.syncThreads);
-  const clearThreadUi = useUiStateStore((store) => store.clearThreadUi);
-  const removeTerminalState = useTerminalStateStore((store) => store.removeTerminalState);
+  const syncServerShellSnapshot = useStore((store) => store.syncServerShellSnapshot);
+  const syncServerThreadDetailHotPath = useStore((store) => store.syncServerThreadDetailHotPath);
+  const applyShellEvent = useStore((store) => store.applyShellEvent);
+  const applyOrchestrationEventsHotPath = useStore(
+    (store) => store.applyOrchestrationEventsHotPath,
+  );
+  const setProjectExpanded = useStore((store) => store.setProjectExpanded);
   const removeOrphanedTerminalStates = useTerminalStateStore(
     (store) => store.removeOrphanedTerminalStates,
   );
-  const applyTerminalEvent = useTerminalStateStore((store) => store.applyTerminalEvent);
+  const setWorkspaceHomeDir = useWorkspaceStore((store) => store.setHomeDir);
+  const workspacePages = useWorkspaceStore((store) => store.workspacePages);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const pathname = useLocation({ select: (loc) => loc.pathname });
-  const readPathname = useEffectEvent(() => pathname);
-  const handledBootstrapThreadIdRef = useRef<string | null>(null);
-  const seenServerConfigUpdateIdRef = useRef(getServerConfigUpdatedNotification()?.id ?? 0);
-  const disposedRef = useRef(false);
-  const bootstrapFromSnapshotRef = useRef<() => Promise<void>>(async () => undefined);
-  const serverConfig = useServerConfig();
-
-  const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
-    if (!payload) return;
-
-    migrateLocalSettingsToServer();
-    void (async () => {
-      await bootstrapFromSnapshotRef.current();
-      if (disposedRef.current) {
-        return;
-      }
-
-      if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
-        return;
-      }
-      setProjectExpanded(payload.bootstrapProjectId, true);
-
-      if (readPathname() !== "/") {
-        return;
-      }
-      if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
-        return;
-      }
-      await navigate({
-        to: "/$threadId",
-        params: { threadId: payload.bootstrapThreadId },
-        replace: true,
-      });
-      handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
-    })().catch(() => undefined);
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const routeThreadId = useParams({
+    strict: false,
+    select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
   });
+  const routeSearch = useSearch({
+    strict: false,
+    select: (search) => parseDiffRouteSearch(search),
+  });
+  const activeSplitView = useSplitViewStore(selectSplitView(routeSearch.splitViewId ?? null));
+  const visibleThreadIds = useMemo(() => {
+    if (activeSplitView) {
+      return resolveSplitViewThreadIds(activeSplitView);
+    }
+    return routeThreadId ? [routeThreadId] : [];
+  }, [activeSplitView, routeThreadId]);
+  const retainedThreadIds = useRetainedThreadDetailIds();
+  const subscribedThreadIds = useMemo(() => {
+    const nextThreadIds = new Set<ThreadId>(visibleThreadIds);
+    for (const threadId of retainedThreadIds) {
+      nextThreadIds.add(threadId);
+    }
+    return [...nextThreadIds];
+  }, [retainedThreadIds, visibleThreadIds]);
+  const pathnameRef = useRef(pathname);
+  const handledBootstrapThreadIdRef = useRef<string | null>(null);
+  const visibleThreadIdsRef = useRef(subscribedThreadIds);
+  const reconcileThreadSubscriptionsRef = useRef<
+    ((threadIds: readonly ThreadId[]) => Promise<void>) | null
+  >(null);
 
-  const handleServerConfigUpdated = useEffectEvent(
-    (notification: ServerConfigUpdatedNotification | null) => {
-      if (!notification) return;
+  pathnameRef.current = pathname;
+  visibleThreadIdsRef.current = subscribedThreadIds;
 
-      const { id, payload, source } = notification;
-      if (id <= seenServerConfigUpdateIdRef.current) {
+  useEffect(() => {
+    const api = readNativeApi();
+    if (!api) return;
+    let disposed = false;
+    let needsProviderInvalidation = false;
+    let needsGitInvalidation = false;
+    let pendingDomainEvents: OrchestrationEvent[] = [];
+    const immediatelyFlushedAssistantMessageIds = new Set<string>();
+    let shellSnapshotSequence = -1;
+    let pendingShellEvents: OrchestrationShellStreamEvent[] = [];
+    const subscribedThreadIds = new Set<ThreadId>();
+    const threadSnapshotSequenceById = new Map<ThreadId, number>();
+    const pendingThreadEventsById = new Map<ThreadId, OrchestrationEvent[]>();
+    const threadSnapshotRequestInFlight = new Set<ThreadId>();
+    let reconcileThreadSubscriptionsChain = Promise.resolve();
+
+    const beginThreadSubscription = (threadId: ThreadId) => {
+      threadSnapshotSequenceById.delete(threadId);
+      pendingThreadEventsById.set(threadId, []);
+      threadSnapshotRequestInFlight.delete(threadId);
+    };
+
+    // Draft routes can subscribe before the server thread exists. Once the shell
+    // row appears, explicitly request the first thread snapshot so buffered detail
+    // events can flush instead of waiting forever.
+    const requestThreadSnapshot = async (threadId: ThreadId) => {
+      if (threadSnapshotSequenceById.has(threadId) || threadSnapshotRequestInFlight.has(threadId)) {
         return;
       }
-      seenServerConfigUpdateIdRef.current = id;
-      if (source !== "keybindingsUpdated") {
+      threadSnapshotRequestInFlight.add(threadId);
+      try {
+        await api.orchestration.subscribeThread({ threadId });
+      } catch {
+        // Keep the pending buffer intact and retry on the next shell/detail update.
+      } finally {
+        threadSnapshotRequestInFlight.delete(threadId);
+      }
+    };
+
+    const flushThreadBuffer = (threadId: ThreadId, snapshotSequence: number) => {
+      const pendingEvents = pendingThreadEventsById.get(threadId) ?? [];
+      pendingThreadEventsById.delete(threadId);
+      let latestThreadSequence = threadSnapshotSequenceById.get(threadId) ?? snapshotSequence;
+      for (const event of pendingEvents.toSorted((left, right) => left.sequence - right.sequence)) {
+        if (event.sequence > latestThreadSequence) {
+          latestThreadSequence = event.sequence;
+          threadSnapshotSequenceById.set(threadId, latestThreadSequence);
+          queueDomainEvent(event);
+        }
+      }
+    };
+
+    const flushShellBuffer = (snapshotSequence: number) => {
+      const nextPending = pendingShellEvents
+        .filter((event) => event.sequence > snapshotSequence)
+        .toSorted((left, right) => left.sequence - right.sequence);
+      pendingShellEvents = [];
+      for (const event of nextPending) {
+        shellSnapshotSequence = Math.max(shellSnapshotSequence, event.sequence);
+        applyShellEvent(event);
+      }
+    };
+
+    const reconcileThreadSubscriptions = async (threadIds: readonly ThreadId[]) => {
+      const nextThreadIds = new Set(threadIds);
+      const removals = [...subscribedThreadIds].filter((threadId) => !nextThreadIds.has(threadId));
+      const additions = [...nextThreadIds].filter((threadId) => !subscribedThreadIds.has(threadId));
+
+      for (const threadId of removals) {
+        threadSnapshotSequenceById.delete(threadId);
+        pendingThreadEventsById.delete(threadId);
+        threadSnapshotRequestInFlight.delete(threadId);
+      }
+      await Promise.all(
+        removals.map((threadId) =>
+          api.orchestration.unsubscribeThread({ threadId }).catch(() => undefined),
+        ),
+      );
+      for (const threadId of additions) {
+        beginThreadSubscription(threadId);
+      }
+      await Promise.all(
+        additions.map((threadId) =>
+          api.orchestration.subscribeThread({ threadId }).catch(() => undefined),
+        ),
+      );
+
+      subscribedThreadIds.clear();
+      for (const threadId of nextThreadIds) {
+        subscribedThreadIds.add(threadId);
+      }
+    };
+
+    const enqueueThreadSubscriptionReconcile = (threadIds: readonly ThreadId[]) => {
+      const nextThreadIds = [...threadIds];
+      reconcileThreadSubscriptionsChain = reconcileThreadSubscriptionsChain
+        .catch(() => undefined)
+        .then(() => reconcileThreadSubscriptions(nextThreadIds));
+      return reconcileThreadSubscriptionsChain;
+    };
+
+    const ensureScopedSubscriptions = async () => {
+      shellSnapshotSequence = -1;
+      pendingShellEvents = [];
+      subscribedThreadIds.clear();
+      threadSnapshotSequenceById.clear();
+      pendingThreadEventsById.clear();
+      await api.orchestration.subscribeShell().catch(() => undefined);
+      await enqueueThreadSubscriptionReconcile(visibleThreadIdsRef.current);
+    };
+
+    const removeOrphanedTerminalsForCurrentState = () => {
+      const draftThreadIds = Object.keys(
+        useComposerDraftStore.getState().draftThreadsByThreadId,
+      ) as ThreadId[];
+      const activeThreadIds = collectActiveTerminalThreadIds({
+        snapshotThreads: useStore.getState().threads.map((thread) => ({
+          id: thread.id,
+          deletedAt: null,
+          archivedAt: thread.archivedAt ?? null,
+        })),
+        draftThreadIds,
+        retainedThreadIds: workspacePages.map((workspace) => workspaceThreadId(workspace.id)),
+      });
+      removeOrphanedTerminalStates(activeThreadIds);
+    };
+
+    const flushPendingDomainEvents = () => {
+      if (pendingDomainEvents.length > 0) {
+        applyOrchestrationEventsHotPath(coalesceOrchestrationUiEvents(pendingDomainEvents));
+        pendingDomainEvents = [];
+      }
+      if (needsProviderInvalidation) {
+        needsProviderInvalidation = false;
+        void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
+        // Invalidate workspace entry queries so the @-mention file picker
+        // reflects files created, deleted, or restored during this turn.
+        void queryClient.invalidateQueries({ queryKey: projectQueryKeys.all });
+      }
+      if (needsGitInvalidation) {
+        needsGitInvalidation = false;
+        void invalidateGitQueries(queryClient);
+      }
+    };
+
+    const queueDomainEvent = (event: OrchestrationEvent) => {
+      pendingDomainEvents.push(event);
+      if (event.type === "thread.turn-diff-completed" || event.type === "thread.reverted") {
+        needsProviderInvalidation = true;
+      }
+      if (
+        event.type === "thread.meta-updated" &&
+        (event.payload.branch !== undefined ||
+          event.payload.envMode !== undefined ||
+          event.payload.worktreePath !== undefined ||
+          event.payload.associatedWorktreePath !== undefined ||
+          event.payload.associatedWorktreeBranch !== undefined ||
+          event.payload.associatedWorktreeRef !== undefined)
+      ) {
+        needsGitInvalidation = true;
+      }
+      if (shouldFlushDomainEventImmediately(event, immediatelyFlushedAssistantMessageIds)) {
+        domainEventFlushThrottler.cancel();
+        flushPendingDomainEvents();
+        return;
+      }
+      domainEventFlushThrottler.maybeExecute();
+    };
+
+    const domainEventFlushThrottler = new Throttler(
+      () => {
+        flushPendingDomainEvents();
+      },
+      {
+        wait: 100,
+        leading: false,
+        trailing: true,
+      },
+    );
+
+    reconcileThreadSubscriptionsRef.current = (threadIds) =>
+      enqueueThreadSubscriptionReconcile(threadIds);
+
+    const unsubShellEvent = api.orchestration.onShellEvent((item) => {
+      if (item.kind === "snapshot") {
+        shellSnapshotSequence = item.snapshot.snapshotSequence;
+        syncServerShellSnapshot(item.snapshot);
+        clearPromotedDraftThreads(new Set(item.snapshot.threads.map((thread) => thread.id)));
+        removeOrphanedTerminalsForCurrentState();
+        flushShellBuffer(item.snapshot.snapshotSequence);
         return;
       }
 
+      if (shellSnapshotSequence < 0) {
+        pendingShellEvents.push(item);
+        return;
+      }
+      if (item.sequence <= shellSnapshotSequence) {
+        return;
+      }
+      shellSnapshotSequence = item.sequence;
+      applyShellEvent(item);
+      if (item.kind === "thread-upserted") {
+        clearPromotedDraftThreads(new Set([item.thread.id]));
+      }
+      if (
+        item.kind === "thread-upserted" &&
+        subscribedThreadIds.has(item.thread.id) &&
+        !threadSnapshotSequenceById.has(item.thread.id)
+      ) {
+        void requestThreadSnapshot(item.thread.id);
+      }
+    });
+    const unsubThreadEvent = api.orchestration.onThreadEvent((item) => {
+      if (item.kind === "snapshot") {
+        const threadId = item.snapshot.thread.id;
+        threadSnapshotSequenceById.set(threadId, item.snapshot.snapshotSequence);
+        threadSnapshotRequestInFlight.delete(threadId);
+        syncServerThreadDetailHotPath(item.snapshot.thread);
+        clearPromotedDraftThreads(new Set([threadId]));
+        flushThreadBuffer(threadId, item.snapshot.snapshotSequence);
+        return;
+      }
+
+      const threadId = ThreadId.makeUnsafe(String(item.event.aggregateId));
+      const latestThreadSequence = threadSnapshotSequenceById.get(threadId);
+      if (latestThreadSequence === undefined) {
+        const pendingThreadEvents = pendingThreadEventsById.get(threadId) ?? [];
+        pendingThreadEvents.push(item.event);
+        pendingThreadEventsById.set(threadId, pendingThreadEvents);
+        if (subscribedThreadIds.has(threadId)) {
+          void requestThreadSnapshot(threadId);
+        }
+        return;
+      }
+      if (item.event.sequence <= latestThreadSequence) {
+        return;
+      }
+      threadSnapshotSequenceById.set(threadId, item.event.sequence);
+      queueDomainEvent(item.event);
+    });
+    const unsubTerminalEvent = api.terminal.onEvent((event) => {
+      const terminalThreadId = ThreadId.makeUnsafe(event.threadId);
+      if (event.type === "activity") {
+        if (event.cliKind) {
+          useTerminalStateStore.getState().setTerminalMetadata(terminalThreadId, event.terminalId, {
+            cliKind: event.cliKind,
+            label: defaultTerminalTitleForCliKind(event.cliKind),
+          });
+        }
+      }
+      const activity = terminalActivityFromEvent(event);
+      if (activity === null) {
+        return;
+      }
+      useTerminalStateStore.getState().setTerminalActivity(terminalThreadId, event.terminalId, {
+        hasRunningSubprocess: activity.hasRunningSubprocess,
+        agentState: activity.agentState,
+      });
+    });
+    const unsubWelcome = onServerWelcome((payload) => {
+      void (async () => {
+        setWorkspaceHomeDir(payload.homeDir);
+        await ensureScopedSubscriptions();
+        if (disposed) {
+          return;
+        }
+
+        if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
+          return;
+        }
+        setProjectExpanded(payload.bootstrapProjectId, true);
+
+        if (pathnameRef.current !== "/") {
+          return;
+        }
+        if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
+          return;
+        }
+        await navigate({
+          to: "/$threadId",
+          params: { threadId: payload.bootstrapThreadId },
+          replace: true,
+        });
+        handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
+      })().catch(() => undefined);
+    });
+    // onServerConfigUpdated replays the latest cached value synchronously
+    // during subscribe. Skip the toast for that replay so effect re-runs
+    // don't produce duplicate toasts.
+    let subscribed = false;
+    const unsubServerConfigUpdated = onServerConfigUpdated((payload) => {
+      void queryClient.invalidateQueries({ queryKey: serverQueryKeys.config() });
+      if (!subscribed) return;
       const issue = payload.issues.find((entry) => entry.kind.startsWith("keybindings."));
       if (!issue) {
         toastManager.add({
@@ -386,12 +673,8 @@ function EventRouter() {
         actionProps: {
           children: "Open keybindings.json",
           onClick: () => {
-            const api = readNativeApi();
-            if (!api) {
-              return;
-            }
-
-            void Promise.resolve(serverConfig ?? api.server.getConfig())
+            void queryClient
+              .ensureQueryData(serverConfigQueryOptions())
               .then((config) => {
                 const editor = resolveAndPersistPreferredEditor(config.availableEditors);
                 if (!editor) {
@@ -410,280 +693,65 @@ function EventRouter() {
           },
         },
       });
-    },
-  );
-
-  useEffect(() => {
-    const api = readNativeApi();
-    if (!api) return;
-    let disposed = false;
-    disposedRef.current = false;
-    const recovery = createOrchestrationRecoveryCoordinator();
-    let replayRetryTracker: import("../orchestrationRecovery").ReplayRetryTracker | null = null;
-    let needsProviderInvalidation = false;
-    const pendingDomainEvents: OrchestrationEvent[] = [];
-    let flushPendingDomainEventsScheduled = false;
-
-    const reconcileSnapshotDerivedState = () => {
-      const threads = useStore.getState().threads;
-      const projects = useStore.getState().projects;
-      syncProjects(projects.map((project) => ({ id: project.id, cwd: project.cwd })));
-      syncThreads(
-        threads.map((thread) => ({
-          id: thread.id,
-          seedVisitedAt: thread.updatedAt ?? thread.createdAt,
-        })),
-      );
-      clearPromotedDraftThreads(threads.map((thread) => thread.id));
-      const draftThreadIds = Object.keys(
-        useComposerDraftStore.getState().draftThreadsByThreadId,
-      ) as ThreadId[];
-      const activeThreadIds = collectActiveTerminalThreadIds({
-        snapshotThreads: threads.map((thread) => ({
-          id: thread.id,
-          deletedAt: null,
-          archivedAt: thread.archivedAt,
-        })),
-        draftThreadIds,
-      });
-      removeOrphanedTerminalStates(activeThreadIds);
-    };
-
-    const queryInvalidationThrottler = new Throttler(
-      () => {
-        if (!needsProviderInvalidation) {
-          return;
-        }
-        needsProviderInvalidation = false;
-        void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
-        // Invalidate workspace entry queries so the @-mention file picker
-        // reflects files created, deleted, or restored during this turn.
-        void queryClient.invalidateQueries({ queryKey: projectQueryKeys.all });
-      },
-      {
-        wait: 100,
-        leading: false,
-        trailing: true,
-      },
-    );
-
-    const applyEventBatch = (events: ReadonlyArray<OrchestrationEvent>) => {
-      const nextEvents = recovery.markEventBatchApplied(events);
-      if (nextEvents.length === 0) {
-        return;
-      }
-
-      const batchEffects = deriveOrchestrationBatchEffects(nextEvents);
-      const uiEvents = coalesceOrchestrationUiEvents(nextEvents);
-      const needsProjectUiSync = nextEvents.some(
-        (event) =>
-          event.type === "project.created" ||
-          event.type === "project.meta-updated" ||
-          event.type === "project.deleted",
-      );
-
-      if (batchEffects.needsProviderInvalidation) {
-        needsProviderInvalidation = true;
-        void queryInvalidationThrottler.maybeExecute();
-      }
-
-      applyOrchestrationEvents(uiEvents);
-      if (needsProjectUiSync) {
-        const projects = useStore.getState().projects;
-        syncProjects(projects.map((project) => ({ id: project.id, cwd: project.cwd })));
-      }
-      const needsThreadUiSync = nextEvents.some(
-        (event) => event.type === "thread.created" || event.type === "thread.deleted",
-      );
-      if (needsThreadUiSync) {
-        const threads = useStore.getState().threads;
-        syncThreads(
-          threads.map((thread) => ({
-            id: thread.id,
-            seedVisitedAt: thread.updatedAt ?? thread.createdAt,
-          })),
-        );
-      }
-      const draftStore = useComposerDraftStore.getState();
-      for (const threadId of batchEffects.clearPromotedDraftThreadIds) {
-        clearPromotedDraftThread(threadId);
-      }
-      for (const threadId of batchEffects.clearDeletedThreadIds) {
-        draftStore.clearDraftThread(threadId);
-        clearThreadUi(threadId);
-      }
-      for (const threadId of batchEffects.removeTerminalStateThreadIds) {
-        removeTerminalState(threadId);
-      }
-    };
-    const flushPendingDomainEvents = () => {
-      flushPendingDomainEventsScheduled = false;
-      if (disposed || pendingDomainEvents.length === 0) {
-        return;
-      }
-
-      const events = pendingDomainEvents.splice(0, pendingDomainEvents.length);
-      applyEventBatch(events);
-    };
-    const schedulePendingDomainEventFlush = () => {
-      if (flushPendingDomainEventsScheduled) {
-        return;
-      }
-
-      flushPendingDomainEventsScheduled = true;
-      queueMicrotask(flushPendingDomainEvents);
-    };
-
-    const runReplayRecovery = async (reason: "sequence-gap" | "resubscribe"): Promise<void> => {
-      if (!recovery.beginReplayRecovery(reason)) {
-        return;
-      }
-
-      const fromSequenceExclusive = recovery.getState().latestSequence;
-      try {
-        const events = await api.orchestration.replayEvents(fromSequenceExclusive);
-        if (!disposed) {
-          applyEventBatch(events);
-        }
-      } catch {
-        replayRetryTracker = null;
-        recovery.failReplayRecovery();
-        void fallbackToSnapshotRecovery();
-        return;
-      }
-
-      if (!disposed) {
-        const replayCompletion = recovery.completeReplayRecovery();
-        const retryDecision = deriveReplayRetryDecision({
-          previousTracker: replayRetryTracker,
-          completion: replayCompletion,
-          recoveryState: recovery.getState(),
-          baseDelayMs: REPLAY_RECOVERY_RETRY_DELAY_MS,
-          maxNoProgressRetries: MAX_NO_PROGRESS_REPLAY_RETRIES,
-        });
-        replayRetryTracker = retryDecision.tracker;
-
-        if (retryDecision.shouldRetry) {
-          if (retryDecision.delayMs > 0) {
-            await new Promise<void>((resolve) => {
-              setTimeout(resolve, retryDecision.delayMs);
-            });
-            if (disposed) {
-              return;
-            }
-          }
-          void runReplayRecovery(reason);
-        } else if (replayCompletion.shouldReplay && import.meta.env.MODE !== "test") {
-          console.warn(
-            "[orchestration-recovery]",
-            "Stopping replay recovery after no-progress retries.",
-            {
-              state: recovery.getState(),
-            },
-          );
-        }
-      }
-    };
-
-    const runSnapshotRecovery = async (reason: "bootstrap" | "replay-failed"): Promise<void> => {
-      const started = recovery.beginSnapshotRecovery(reason);
-      if (import.meta.env.MODE !== "test") {
-        const state = recovery.getState();
-        console.info("[orchestration-recovery]", "Snapshot recovery requested.", {
-          reason,
-          skipped: !started,
-          ...(started
-            ? {}
-            : {
-                blockedBy: state.inFlight?.kind ?? null,
-                blockedByReason: state.inFlight?.reason ?? null,
-              }),
-          state,
-        });
-      }
-      if (!started) {
-        return;
-      }
-
-      try {
-        const snapshot = await api.orchestration.getSnapshot();
-        if (!disposed) {
-          syncServerReadModel(snapshot);
-          reconcileSnapshotDerivedState();
-          if (recovery.completeSnapshotRecovery(snapshot.snapshotSequence)) {
-            void runReplayRecovery("sequence-gap");
-          }
-        }
-      } catch {
-        // Keep prior state and wait for welcome or a later replay attempt.
-        recovery.failSnapshotRecovery();
-      }
-    };
-
-    const bootstrapFromSnapshot = async (): Promise<void> => {
-      await runSnapshotRecovery("bootstrap");
-    };
-    bootstrapFromSnapshotRef.current = bootstrapFromSnapshot;
-
-    const fallbackToSnapshotRecovery = async (): Promise<void> => {
-      await runSnapshotRecovery("replay-failed");
-    };
-    const unsubDomainEvent = api.orchestration.onDomainEvent(
-      (event) => {
-        const action = recovery.classifyDomainEvent(event.sequence);
-        if (action === "apply") {
-          pendingDomainEvents.push(event);
-          schedulePendingDomainEventFlush();
-          return;
-        }
-        if (action === "recover") {
-          flushPendingDomainEvents();
-          void runReplayRecovery("sequence-gap");
-        }
-      },
-      {
-        onResubscribe: () => {
-          if (disposed) {
-            return;
-          }
-          flushPendingDomainEvents();
-          void runReplayRecovery("resubscribe");
-        },
-      },
-    );
-    const unsubTerminalEvent = api.terminal.onEvent((event) => {
-      const thread = useStore.getState().threads.find((entry) => entry.id === event.threadId);
-      if (thread && thread.archivedAt !== null) {
-        return;
-      }
-      applyTerminalEvent(event);
     });
+    const unsubProviderStatusesUpdated = onServerProviderStatusesUpdated((payload) => {
+      const currentConfig = queryClient.getQueryData<ServerConfig>(serverQueryKeys.config());
+      if (!currentConfig) {
+        void queryClient.fetchQuery(serverConfigQueryOptions()).catch(() => undefined);
+        return;
+      }
+      queryClient.setQueryData(serverQueryKeys.config(), {
+        ...currentConfig,
+        providers: payload.providers,
+      });
+    });
+    subscribed = true;
+    void ensureScopedSubscriptions();
+
     return () => {
+      flushPendingDomainEvents();
       disposed = true;
-      disposedRef.current = true;
       needsProviderInvalidation = false;
-      flushPendingDomainEventsScheduled = false;
-      pendingDomainEvents.length = 0;
-      queryInvalidationThrottler.cancel();
-      unsubDomainEvent();
+      domainEventFlushThrottler.cancel();
+      reconcileThreadSubscriptionsRef.current = null;
+      void api.orchestration.unsubscribeShell().catch(() => undefined);
+      void Promise.all(
+        [...subscribedThreadIds].map((threadId) =>
+          api.orchestration.unsubscribeThread({ threadId }).catch(() => undefined),
+        ),
+      );
+      unsubShellEvent();
+      unsubThreadEvent();
       unsubTerminalEvent();
+      unsubWelcome();
+      unsubServerConfigUpdated();
+      unsubProviderStatusesUpdated();
     };
   }, [
-    applyOrchestrationEvents,
+    applyOrchestrationEventsHotPath,
+    applyShellEvent,
     navigate,
     queryClient,
-    removeTerminalState,
     removeOrphanedTerminalStates,
-    applyTerminalEvent,
-    clearThreadUi,
     setProjectExpanded,
-    syncProjects,
-    syncServerReadModel,
-    syncThreads,
+    setWorkspaceHomeDir,
+    syncServerShellSnapshot,
+    syncServerThreadDetailHotPath,
+    workspacePages,
   ]);
 
-  useServerWelcomeSubscription(handleWelcome);
-  useServerConfigUpdatedSubscription(handleServerConfigUpdated);
+  useEffect(() => {
+    const reconcile = reconcileThreadSubscriptionsRef.current;
+    if (!reconcile) {
+      return;
+    }
+    void reconcile(subscribedThreadIds);
+  }, [subscribedThreadIds]);
 
+  return null;
+}
+
+function DesktopProjectBootstrap() {
+  // Desktop hydration runs through EventRouter project + orchestration sync.
   return null;
 }

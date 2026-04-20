@@ -8,7 +8,7 @@ import {
   TurnId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
-import { Effect, Layer, ManagedRuntime, Metric, Option, Queue, Stream } from "effect";
+import { Effect, Layer, ManagedRuntime, Queue, Stream } from "effect";
 import { describe, expect, it } from "vitest";
 
 import { PersistenceSqlError } from "../../persistence/Errors.ts";
@@ -21,13 +21,11 @@ import {
 } from "../../persistence/Services/OrchestrationEventStore.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
 } from "../Services/ProjectionPipeline.ts";
-import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../config.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 
@@ -41,7 +39,6 @@ async function createOrchestrationSystem() {
     prefix: "t3-orchestration-engine-test-",
   });
   const orchestrationLayer = OrchestrationEngineLive.pipe(
-    Layer.provide(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
@@ -62,117 +59,7 @@ function now() {
   return new Date().toISOString();
 }
 
-const hasMetricSnapshot = (
-  snapshots: ReadonlyArray<Metric.Metric.Snapshot>,
-  id: string,
-  attributes: Readonly<Record<string, string>>,
-) =>
-  snapshots.some(
-    (snapshot) =>
-      snapshot.id === id &&
-      Object.entries(attributes).every(([key, value]) => snapshot.attributes?.[key] === value),
-  );
-
 describe("OrchestrationEngine", () => {
-  it("bootstraps the in-memory read model from persisted projections", async () => {
-    const failOnHistoricalReplayStore: OrchestrationEventStoreShape = {
-      append: () =>
-        Effect.fail(
-          new PersistenceSqlError({
-            operation: "test.append",
-            detail: "append should not be called during bootstrap",
-          }),
-        ),
-      readFromSequence: () => Stream.empty,
-      readAll: () =>
-        Stream.fail(
-          new PersistenceSqlError({
-            operation: "test.readAll",
-            detail: "historical replay should not be used during bootstrap",
-          }),
-        ),
-    };
-
-    const projectionSnapshot = {
-      snapshotSequence: 7,
-      updatedAt: "2026-03-03T00:00:04.000Z",
-      projects: [
-        {
-          id: asProjectId("project-bootstrap"),
-          title: "Bootstrap Project",
-          workspaceRoot: "/tmp/project-bootstrap",
-          defaultModelSelection: {
-            provider: "codex" as const,
-            model: "gpt-5-codex",
-          },
-          scripts: [],
-          createdAt: "2026-03-03T00:00:00.000Z",
-          updatedAt: "2026-03-03T00:00:01.000Z",
-          deletedAt: null,
-        },
-      ],
-      threads: [
-        {
-          id: ThreadId.makeUnsafe("thread-bootstrap"),
-          projectId: asProjectId("project-bootstrap"),
-          title: "Bootstrap Thread",
-          modelSelection: {
-            provider: "codex" as const,
-            model: "gpt-5-codex",
-          },
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "full-access" as const,
-          branch: null,
-          worktreePath: null,
-          latestTurn: null,
-          createdAt: "2026-03-03T00:00:02.000Z",
-          updatedAt: "2026-03-03T00:00:03.000Z",
-          archivedAt: null,
-          deletedAt: null,
-          messages: [],
-          proposedPlans: [],
-          activities: [],
-          checkpoints: [],
-          session: null,
-        },
-      ],
-    };
-
-    const layer = OrchestrationEngineLive.pipe(
-      Layer.provide(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getSnapshot: () => Effect.succeed(projectionSnapshot),
-          getCounts: () => Effect.succeed({ projectCount: 1, threadCount: 1 }),
-          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-          getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-          getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-        }),
-      ),
-      Layer.provide(
-        Layer.succeed(OrchestrationProjectionPipeline, {
-          bootstrap: Effect.void,
-          projectEvent: () => Effect.void,
-        } satisfies OrchestrationProjectionPipelineShape),
-      ),
-      Layer.provide(Layer.succeed(OrchestrationEventStore, failOnHistoricalReplayStore)),
-      Layer.provide(OrchestrationCommandReceiptRepositoryLive),
-      Layer.provide(SqlitePersistenceMemory),
-    );
-
-    const runtime = ManagedRuntime.make(layer);
-
-    const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
-    const readModel = await runtime.runPromise(engine.getReadModel());
-
-    expect(readModel.snapshotSequence).toBe(7);
-    expect(readModel.projects).toHaveLength(1);
-    expect(readModel.projects[0]?.title).toBe("Bootstrap Project");
-    expect(readModel.threads).toHaveLength(1);
-    expect(readModel.threads[0]?.title).toBe("Bootstrap Thread");
-
-    await runtime.dispose();
-  });
-
   it("returns deterministic read models for repeated reads", async () => {
     const createdAt = now();
     const system = await createOrchestrationSystem();
@@ -230,73 +117,6 @@ describe("OrchestrationEngine", () => {
     const readModelA = await system.run(engine.getReadModel());
     const readModelB = await system.run(engine.getReadModel());
     expect(readModelB).toEqual(readModelA);
-    await system.dispose();
-  });
-
-  it("archives and unarchives threads through orchestration commands", async () => {
-    const system = await createOrchestrationSystem();
-    const { engine } = system;
-    const createdAt = now();
-
-    await system.run(
-      engine.dispatch({
-        type: "project.create",
-        commandId: CommandId.makeUnsafe("cmd-project-archive-create"),
-        projectId: asProjectId("project-archive"),
-        title: "Project Archive",
-        workspaceRoot: "/tmp/project-archive",
-        defaultModelSelection: {
-          provider: "codex",
-          model: "gpt-5-codex",
-        },
-        createdAt,
-      }),
-    );
-    await system.run(
-      engine.dispatch({
-        type: "thread.create",
-        commandId: CommandId.makeUnsafe("cmd-thread-archive-create"),
-        threadId: ThreadId.makeUnsafe("thread-archive"),
-        projectId: asProjectId("project-archive"),
-        title: "Archive me",
-        modelSelection: {
-          provider: "codex",
-          model: "gpt-5-codex",
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "full-access",
-        branch: null,
-        worktreePath: null,
-        createdAt,
-      }),
-    );
-
-    await system.run(
-      engine.dispatch({
-        type: "thread.archive",
-        commandId: CommandId.makeUnsafe("cmd-thread-archive"),
-        threadId: ThreadId.makeUnsafe("thread-archive"),
-      }),
-    );
-    expect(
-      (await system.run(engine.getReadModel())).threads.find(
-        (thread) => thread.id === "thread-archive",
-      )?.archivedAt,
-    ).not.toBeNull();
-
-    await system.run(
-      engine.dispatch({
-        type: "thread.unarchive",
-        commandId: CommandId.makeUnsafe("cmd-thread-unarchive"),
-        threadId: ThreadId.makeUnsafe("thread-archive"),
-      }),
-    );
-    expect(
-      (await system.run(engine.getReadModel())).threads.find(
-        (thread) => thread.id === "thread-archive",
-      )?.archivedAt,
-    ).toBeNull();
-
     await system.dispose();
   });
 
@@ -419,95 +239,6 @@ describe("OrchestrationEngine", () => {
     await system.dispose();
   });
 
-  it("records command ack duration using the first committed event type", async () => {
-    const system = await createOrchestrationSystem();
-    const { engine } = system;
-    const createdAt = now();
-
-    await system.run(
-      engine.dispatch({
-        type: "project.create",
-        commandId: CommandId.makeUnsafe("cmd-project-ack-create"),
-        projectId: asProjectId("project-ack"),
-        title: "Ack Project",
-        workspaceRoot: "/tmp/project-ack",
-        defaultModelSelection: {
-          provider: "codex",
-          model: "gpt-5-codex",
-        },
-        createdAt,
-      }),
-    );
-
-    await system.run(
-      engine.dispatch({
-        type: "thread.create",
-        commandId: CommandId.makeUnsafe("cmd-thread-ack-create"),
-        threadId: ThreadId.makeUnsafe("thread-ack"),
-        projectId: asProjectId("project-ack"),
-        title: "Ack Thread",
-        modelSelection: {
-          provider: "codex",
-          model: "gpt-5-codex",
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: "full-access",
-        branch: null,
-        worktreePath: null,
-        createdAt,
-      }),
-    );
-
-    const snapshots = await system.run(Metric.snapshot);
-    expect(
-      hasMetricSnapshot(snapshots, "t3_orchestration_command_ack_duration", {
-        commandType: "thread.create",
-        aggregateKind: "thread",
-        ackEventType: "thread.created",
-      }),
-    ).toBe(true);
-
-    await system.dispose();
-  });
-
-  it("records failed command dispatches as metric failures", async () => {
-    const system = await createOrchestrationSystem();
-    const { engine } = system;
-    const createdAt = now();
-
-    await expect(
-      system.run(
-        engine.dispatch({
-          type: "thread.create",
-          commandId: CommandId.makeUnsafe("cmd-thread-missing-project"),
-          threadId: ThreadId.makeUnsafe("thread-missing-project"),
-          projectId: asProjectId("project-missing"),
-          title: "Missing Project Thread",
-          modelSelection: {
-            provider: "codex",
-            model: "gpt-5-codex",
-          },
-          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-          runtimeMode: "full-access",
-          branch: null,
-          worktreePath: null,
-          createdAt,
-        }),
-      ),
-    ).rejects.toThrow("does not exist");
-
-    const snapshots = await system.run(Metric.snapshot);
-    expect(
-      hasMetricSnapshot(snapshots, "t3_orchestration_commands_total", {
-        commandType: "thread.create",
-        aggregateKind: "thread",
-        outcome: "failure",
-      }),
-    ).toBe(true);
-
-    await system.dispose();
-  });
-
   it("stores completed checkpoint summaries even when no files changed", async () => {
     const system = await createOrchestrationSystem();
     const { engine } = system;
@@ -619,7 +350,6 @@ describe("OrchestrationEngine", () => {
 
     const runtime = ManagedRuntime.make(
       OrchestrationEngineLive.pipe(
-        Layer.provide(OrchestrationProjectionSnapshotQueryLive),
         Layer.provide(OrchestrationProjectionPipelineLive),
         Layer.provide(Layer.succeed(OrchestrationEventStore, flakyStore)),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
@@ -665,7 +395,7 @@ describe("OrchestrationEngine", () => {
           createdAt,
         }),
       ),
-    ).rejects.toThrow("append failed");
+    ).rejects.toThrow("failed unexpectedly");
 
     const result = await runtime.runPromise(
       engine.dispatch({
@@ -695,6 +425,7 @@ describe("OrchestrationEngine", () => {
     let shouldFailRequestedProjection = true;
     const flakyProjectionPipeline: OrchestrationProjectionPipelineShape = {
       bootstrap: Effect.void,
+      projectMetadataEvent: () => Effect.void,
       projectEvent: (event) => {
         if (
           shouldFailRequestedProjection &&
@@ -715,7 +446,6 @@ describe("OrchestrationEngine", () => {
 
     const runtime = ManagedRuntime.make(
       OrchestrationEngineLive.pipe(
-        Layer.provide(OrchestrationProjectionSnapshotQueryLive),
         Layer.provide(Layer.succeed(OrchestrationProjectionPipeline, flakyProjectionPipeline)),
         Layer.provide(OrchestrationEventStoreLive),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
@@ -774,7 +504,7 @@ describe("OrchestrationEngine", () => {
     };
 
     await expect(runtime.runPromise(engine.dispatch(turnStartCommand))).rejects.toThrow(
-      "projection failed",
+      "failed unexpectedly",
     );
 
     const eventsAfterFailure = await runtime.runPromise(
@@ -809,6 +539,111 @@ describe("OrchestrationEngine", () => {
     await runtime.dispose();
   });
 
+  it("keeps processing later commands after an unexpected worker defect", async () => {
+    type StoredEvent =
+      ReturnType<OrchestrationEventStoreShape["append"]> extends Effect.Effect<infer A, any, any>
+        ? A
+        : never;
+    const events: StoredEvent[] = [];
+    let nextSequence = 1;
+
+    const nonTransactionalStore: OrchestrationEventStoreShape = {
+      append(event) {
+        const savedEvent = {
+          ...event,
+          sequence: nextSequence,
+        } as StoredEvent;
+        nextSequence += 1;
+        events.push(savedEvent);
+        return Effect.succeed(savedEvent);
+      },
+      readFromSequence(sequenceExclusive) {
+        return Stream.fromIterable(events.filter((event) => event.sequence > sequenceExclusive));
+      },
+      readAll() {
+        return Stream.fromIterable(events);
+      },
+    };
+
+    let shouldDieProjection = true;
+    const defectiveProjectionPipeline: OrchestrationProjectionPipelineShape = {
+      bootstrap: Effect.void,
+      projectMetadataEvent: (event) => {
+        if (
+          shouldDieProjection &&
+          event.commandId === CommandId.makeUnsafe("cmd-project-defect-1")
+        ) {
+          shouldDieProjection = false;
+          return Effect.die("projection defect");
+        }
+        return Effect.void;
+      },
+      projectEvent: () => Effect.void,
+    };
+
+    const runtime = ManagedRuntime.make(
+      OrchestrationEngineLive.pipe(
+        Layer.provide(Layer.succeed(OrchestrationProjectionPipeline, defectiveProjectionPipeline)),
+        Layer.provide(Layer.succeed(OrchestrationEventStore, nonTransactionalStore)),
+        Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+        Layer.provide(SqlitePersistenceMemory),
+      ),
+    );
+    const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
+    const createdAt = now();
+
+    await expect(
+      runtime.runPromise(
+        engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("cmd-project-defect-1"),
+          projectId: asProjectId("project-defect-1"),
+          title: "Defective Project",
+          workspaceRoot: "/tmp/project-defect-1",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          createdAt,
+        }),
+      ),
+    ).rejects.toThrow("failed unexpectedly");
+
+    await expect(
+      runtime.runPromise(
+        engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.makeUnsafe("cmd-project-defect-2"),
+          projectId: asProjectId("project-defect-2"),
+          title: "Recovered Project",
+          workspaceRoot: "/tmp/project-defect-2",
+          defaultModelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          createdAt,
+        }),
+      ),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        sequence: expect.any(Number),
+      }),
+    );
+
+    const eventsAfterRecovery = await runtime.runPromise(
+      Stream.runCollect(engine.readEvents(0)).pipe(
+        Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
+      ),
+    );
+    expect(eventsAfterRecovery.map((event) => event.commandId)).toEqual([
+      CommandId.makeUnsafe("cmd-project-defect-1"),
+      CommandId.makeUnsafe("cmd-project-defect-2"),
+    ]);
+    expect(eventsAfterRecovery.every((event) => event.type === "project.created")).toBe(true);
+
+    await runtime.dispose();
+  });
+
   it("reconciles in-memory state when append persists but projection fails", async () => {
     type StoredEvent =
       ReturnType<OrchestrationEventStoreShape["append"]> extends Effect.Effect<infer A, any, any>
@@ -838,6 +673,7 @@ describe("OrchestrationEngine", () => {
     let shouldFailProjection = true;
     const flakyProjectionPipeline: OrchestrationProjectionPipelineShape = {
       bootstrap: Effect.void,
+      projectMetadataEvent: () => Effect.void,
       projectEvent: (event) => {
         if (
           shouldFailProjection &&
@@ -857,7 +693,6 @@ describe("OrchestrationEngine", () => {
 
     const runtime = ManagedRuntime.make(
       OrchestrationEngineLive.pipe(
-        Layer.provide(OrchestrationProjectionSnapshotQueryLive),
         Layer.provide(Layer.succeed(OrchestrationProjectionPipeline, flakyProjectionPipeline)),
         Layer.provide(Layer.succeed(OrchestrationEventStore, nonTransactionalStore)),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
@@ -909,7 +744,7 @@ describe("OrchestrationEngine", () => {
           title: "sync-after-failed-projection",
         }),
       ),
-    ).rejects.toThrow("projection failed");
+    ).rejects.toThrow("failed unexpectedly");
 
     const readModelAfterFailure = await runtime.runPromise(engine.getReadModel());
     const updatedThread = readModelAfterFailure.threads.find(

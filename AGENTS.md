@@ -49,5 +49,6 @@ Docs:
 
 - Open-source Codex repo: https://github.com/openai/codex
 - Codex-Monitor (Tauri, feature-complete, strong reference implementation): https://github.com/Dimillian/CodexMonitor
+- DP Code (first-class UI and workflow upstream for cherry-picking improvements): https://github.com/Emanuele-web04/dpcode
 
 Use these as implementation references when designing protocol handling, UX flows, and operational safeguards.

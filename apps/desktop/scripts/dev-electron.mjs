@@ -1,33 +1,27 @@
 import { spawn, spawnSync } from "node:child_process";
 import { watch } from "node:fs";
 import { join } from "node:path";
+import waitOn from "wait-on";
 
 import { desktopDir, resolveElectronPath } from "./electron-launcher.mjs";
-import { waitForResources } from "./wait-for-resources.mjs";
 
 const port = Number(process.env.ELECTRON_RENDERER_PORT ?? 5733);
 const devServerUrl = `http://localhost:${port}`;
 const requiredFiles = [
   "dist-electron/main.js",
   "dist-electron/preload.js",
-  "../server/dist/bin.mjs",
+  "../server/dist/index.mjs",
 ];
 const watchedDirectories = [
   { directory: "dist-electron", files: new Set(["main.js", "preload.js"]) },
-  { directory: "../server/dist", files: new Set(["bin.mjs"]) },
+  { directory: "../server/dist", files: new Set(["index.mjs"]) },
 ];
 const forcedShutdownTimeoutMs = 1_500;
 const restartDebounceMs = 120;
 const childTreeGracePeriodMs = 1_200;
-const DEVTOOLS_ARG = "--devtools";
-const DEV_RUNNER_PID_ENV = "KODOCODE_DEV_RUNNER_PID";
-const DEV_RUNNER_SHUTDOWN_SIGNAL_ENV = "KODOCODE_DEV_SHUTDOWN_SIGNAL";
-const forwardDevtools = process.argv.includes(DEVTOOLS_ARG);
 
-await waitForResources({
-  baseDir: desktopDir,
-  files: requiredFiles,
-  tcpPort: port,
+await waitOn({
+  resources: [`tcp:${port}`, ...requiredFiles.map((filePath) => `file:${filePath}`)],
 });
 
 const childEnv = { ...process.env };
@@ -40,18 +34,8 @@ let restartQueue = Promise.resolve();
 const expectedExits = new WeakSet();
 const watchers = [];
 
-function terminatePidTree(pid, signal) {
-  if (typeof pid !== "number") {
-    return;
-  }
-
-  if (process.platform === "win32") {
-    const taskkillArgs = ["/PID", String(pid), "/T"];
-    if (signal === "KILL") {
-      taskkillArgs.push("/F");
-    }
-
-    spawnSync("taskkill", taskkillArgs, { stdio: "ignore", windowsHide: true });
+function killChildTreeByPid(pid, signal) {
+  if (process.platform === "win32" || typeof pid !== "number") {
     return;
   }
 
@@ -63,24 +47,28 @@ function cleanupStaleDevApps() {
     return;
   }
 
-  spawnSync("pkill", ["-f", "--", `--kodo-code-dev-root=${desktopDir}`], { stdio: "ignore" });
+  spawnSync("pkill", ["-f", "--", `--t3code-dev-root=${desktopDir}`], { stdio: "ignore" });
 }
 
-function requestRootDevRunnerShutdown() {
-  const runnerPid = Number(process.env[DEV_RUNNER_PID_ENV]);
-  if (!Number.isInteger(runnerPid) || runnerPid <= 0 || runnerPid === process.pid) {
+function warnIfAlphaAppRunning() {
+  if (process.platform === "win32") {
     return;
   }
 
-  const signal =
-    process.env[DEV_RUNNER_SHUTDOWN_SIGNAL_ENV] ??
-    (process.platform === "win32" ? "SIGTERM" : "SIGUSR2");
-
-  try {
-    process.kill(runnerPid, signal);
-  } catch {
-    // Best-effort handoff. The parent may already be exiting.
+  const result = spawnSync(
+    "pgrep",
+    ["-fal", "/Applications/DP Code \\(Alpha\\)\\.app/Contents/MacOS/DP Code \\(Alpha\\)"],
+    { encoding: "utf8" },
+  );
+  const output = typeof result.stdout === "string" ? result.stdout.trim() : "";
+  if (!output) {
+    return;
   }
+
+  console.error(
+    "[desktop-dev] DP Code (Alpha) is still running. Close it before testing voice in DP Code (Dev), or you may be looking at the wrong app/runtime.",
+  );
+  console.error(output);
 }
 
 function startApp() {
@@ -90,11 +78,7 @@ function startApp() {
 
   const app = spawn(
     resolveElectronPath(),
-    [
-      `--kodo-code-dev-root=${desktopDir}`,
-      "dist-electron/main.js",
-      ...(forwardDevtools ? [DEVTOOLS_ARG] : []),
-    ],
+    [`--t3code-dev-root=${desktopDir}`, "dist-electron/main.js"],
     {
       cwd: desktopDir,
       env: {
@@ -122,17 +106,9 @@ function startApp() {
       currentApp = null;
     }
 
-    const wasExpected = expectedExits.has(app);
-    const exitedCleanly = signal === null && code === 0;
     const exitedAbnormally = signal !== null || code !== 0;
-    if (!shuttingDown && !wasExpected && exitedAbnormally) {
+    if (!shuttingDown && !expectedExits.has(app) && exitedAbnormally) {
       scheduleRestart();
-      return;
-    }
-
-    if (!shuttingDown && !wasExpected && exitedCleanly) {
-      requestRootDevRunnerShutdown();
-      void shutdown(0);
     }
   });
 }
@@ -160,7 +136,7 @@ async function stopApp() {
 
     app.once("exit", finish);
     app.kill("SIGTERM");
-    terminatePidTree(app.pid, "TERM");
+    killChildTreeByPid(app.pid, "TERM");
 
     setTimeout(() => {
       if (settled) {
@@ -168,7 +144,7 @@ async function stopApp() {
       }
 
       app.kill("SIGKILL");
-      terminatePidTree(app.pid, "KILL");
+      killChildTreeByPid(app.pid, "KILL");
       finish();
     }, forcedShutdownTimeoutMs).unref();
   });
@@ -248,6 +224,7 @@ async function shutdown(exitCode) {
 
 startWatchers();
 cleanupStaleDevApps();
+warnIfAlphaAppRunning();
 startApp();
 
 process.once("SIGINT", () => {

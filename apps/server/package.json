@@ -1,6 +1,6 @@
 {
   "name": "kodo",
-  "version": "0.0.1",
+  "version": "0.0.32",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -8,30 +8,30 @@
     "directory": "apps/server"
   },
   "bin": {
-    "kodo": "kodo"
+    "kodo": "./dist/index.mjs"
   },
   "files": [
-    "dist",
-    "kodo"
+    "dist"
   ],
   "type": "module",
   "scripts": {
-    "dev": "bun run src/bin.ts",
+    "dev": "bun run src/index.ts",
     "build": "node scripts/cli.ts build",
-    "start": "node dist/bin.mjs",
+    "start": "node dist/index.mjs",
     "prepare": "effect-language-service patch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.2.77",
-    "@effect/platform-bun": "catalog:",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.111",
     "@effect/platform-node": "catalog:",
     "@effect/sql-sqlite-bun": "catalog:",
     "@pierre/diffs": "^1.1.0-beta.16",
     "effect": "catalog:",
     "node-pty": "^1.1.0",
-    "open": "^10.1.0"
+    "open": "^10.1.0",
+    "tree-kill": "^1.2.2",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@effect/language-service": "catalog:",
@@ -41,14 +41,12 @@
     "@t3tools/web": "workspace:*",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",
+    "@types/ws": "^8.5.13",
     "tsdown": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
   "engines": {
     "node": "^22.16 || ^23.11 || >=24.10"
-  },
-  "kodoRelease": {
-    "publishPackageName": "@boggedbrush/kodo"
   }
 }

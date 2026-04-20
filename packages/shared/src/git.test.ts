@@ -1,78 +1,53 @@
-import type { GitStatusRemoteResult, GitStatusResult } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
-import { applyGitStatusStreamEvent, normalizeGitRemoteUrl } from "./git";
+import {
+  WORKTREE_BRANCH_PREFIX,
+  buildTemporaryWorktreeBranchName,
+  isTemporaryWorktreeBranch,
+  resolveThreadBranchRegressionGuard,
+} from "./git";
 
-describe("applyGitStatusStreamEvent", () => {
-  it("treats a remote-only update as a repository when local state is missing", () => {
-    const remote: GitStatusRemoteResult = {
-      hasUpstream: true,
-      aheadCount: 2,
-      behindCount: 1,
-      pr: null,
-    };
-
-    expect(applyGitStatusStreamEvent(null, { _tag: "remoteUpdated", remote })).toEqual({
-      isRepo: true,
-      hasOriginRemote: false,
-      isDefaultBranch: false,
-      branch: null,
-      hasWorkingTreeChanges: false,
-      workingTree: { files: [], insertions: 0, deletions: 0 },
-      hasUpstream: true,
-      aheadCount: 2,
-      behindCount: 1,
-      pr: null,
-    });
+describe("isTemporaryWorktreeBranch", () => {
+  it("matches generated temporary worktree branches", () => {
+    expect(isTemporaryWorktreeBranch(buildTemporaryWorktreeBranchName())).toBe(true);
   });
 
-  it("preserves local-only fields when applying a remote update", () => {
-    const current: GitStatusResult = {
-      isRepo: true,
-      hostingProvider: {
-        kind: "github",
-        name: "GitHub",
-        baseUrl: "https://github.com",
-      },
-      hasOriginRemote: true,
-      isDefaultBranch: false,
-      branch: "feature/demo",
-      hasWorkingTreeChanges: true,
-      workingTree: {
-        files: [{ path: "src/demo.ts", insertions: 1, deletions: 0 }],
-        insertions: 1,
-        deletions: 0,
-      },
-      hasUpstream: false,
-      aheadCount: 0,
-      behindCount: 0,
-      pr: null,
-    };
+  it("matches generated temporary worktree branches", () => {
+    expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/deadbeef`)).toBe(true);
+    expect(isTemporaryWorktreeBranch(` ${WORKTREE_BRANCH_PREFIX}/DEADBEEF `)).toBe(true);
+  });
 
-    const remote: GitStatusRemoteResult = {
-      hasUpstream: true,
-      aheadCount: 2,
-      behindCount: 1,
-      pr: null,
-    };
-
-    expect(applyGitStatusStreamEvent(current, { _tag: "remoteUpdated", remote })).toEqual({
-      ...current,
-      hasUpstream: true,
-      aheadCount: 2,
-      behindCount: 1,
-      pr: null,
-    });
+  it("rejects semantic branch names", () => {
+    expect(isTemporaryWorktreeBranch(`${WORKTREE_BRANCH_PREFIX}/feature/demo`)).toBe(false);
+    expect(isTemporaryWorktreeBranch("feature/demo")).toBe(false);
   });
 });
 
-describe("normalizeGitRemoteUrl", () => {
-  it("preserves repository path casing for case-sensitive remotes", () => {
-    expect(normalizeGitRemoteUrl("https://git.example.com/Team/Repo.git")).toBe(
-      "git.example.com/Team/Repo",
-    );
-    expect(normalizeGitRemoteUrl("deploy@git.example.com:Team/Repo.git")).toBe(
-      "git.example.com/Team/Repo",
-    );
+describe("resolveThreadBranchRegressionGuard", () => {
+  it("keeps a semantic branch when the next branch is only a temporary worktree placeholder", () => {
+    expect(
+      resolveThreadBranchRegressionGuard({
+        currentBranch: "feature/semantic-branch",
+        nextBranch: `${WORKTREE_BRANCH_PREFIX}/deadbeef`,
+      }),
+    ).toBe("feature/semantic-branch");
+  });
+
+  it("accepts real branch changes", () => {
+    expect(
+      resolveThreadBranchRegressionGuard({
+        currentBranch: "feature/old",
+        nextBranch: "feature/new",
+      }),
+    ).toBe("feature/new");
+  });
+
+  it("allows clearing the branch", () => {
+    expect(
+      resolveThreadBranchRegressionGuard({
+        currentBranch: "feature/old",
+        nextBranch: null,
+      }),
+    ).toBeNull();
   });
 });

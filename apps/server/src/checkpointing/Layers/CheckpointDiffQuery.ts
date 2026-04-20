@@ -8,7 +8,7 @@ import { Effect, Layer, Option, Schema } from "effect";
 
 import { ProjectionSnapshotQuery } from "../../orchestration/Services/ProjectionSnapshotQuery.ts";
 import { CheckpointInvariantError, CheckpointUnavailableError } from "../Errors.ts";
-import { checkpointRefForThreadTurn } from "../Utils.ts";
+import { checkpointRefForThreadTurn, resolveThreadWorkspaceCwd } from "../Utils.ts";
 import { CheckpointStore } from "../Services/CheckpointStore.ts";
 import {
   CheckpointDiffQuery,
@@ -21,8 +21,8 @@ const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const checkpointStore = yield* CheckpointStore;
 
-  const getTurnDiff: CheckpointDiffQueryShape["getTurnDiff"] = Effect.fn("getTurnDiff")(
-    function* (input) {
+  const getTurnDiff: CheckpointDiffQueryShape["getTurnDiff"] = (input) =>
+    Effect.gen(function* () {
       const operation = "CheckpointDiffQuery.getTurnDiff";
 
       if (input.fromTurnCount === input.toTurnCount) {
@@ -63,7 +63,19 @@ const make = Effect.gen(function* () {
         });
       }
 
-      const workspaceCwd = threadContext.value.worktreePath ?? threadContext.value.workspaceRoot;
+      const workspaceCwd = resolveThreadWorkspaceCwd({
+        thread: {
+          projectId: threadContext.value.projectId,
+          envMode: threadContext.value.envMode,
+          worktreePath: threadContext.value.worktreePath,
+        },
+        projects: [
+          {
+            id: threadContext.value.projectId,
+            workspaceRoot: threadContext.value.workspaceRoot,
+          },
+        ],
+      });
       if (!workspaceCwd) {
         return yield* new CheckpointInvariantError({
           operation,
@@ -147,8 +159,7 @@ const make = Effect.gen(function* () {
       }
 
       return turnDiff;
-    },
-  );
+    });
 
   const getFullThreadDiff: CheckpointDiffQueryShape["getFullThreadDiff"] = (
     input: OrchestrationGetFullThreadDiffInput,

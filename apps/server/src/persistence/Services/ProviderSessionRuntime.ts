@@ -78,4 +78,4 @@ export interface ProviderSessionRuntimeRepositoryShape {
 export class ProviderSessionRuntimeRepository extends ServiceMap.Service<
   ProviderSessionRuntimeRepository,
   ProviderSessionRuntimeRepositoryShape
->()("t3/persistence/Services/ProviderSessionRuntime/ProviderSessionRuntimeRepository") {}
+>()("kodo/persistence/Services/ProviderSessionRuntime/ProviderSessionRuntimeRepository") {}

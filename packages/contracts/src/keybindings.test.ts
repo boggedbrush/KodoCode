@@ -24,10 +24,28 @@ const decodeResolvedRule = Schema.decodeUnknownEffect(ResolvedKeybindingRule as 
 it.effect("parses keybinding rules", () =>
   Effect.gen(function* () {
     const parsed = yield* decode(KeybindingRule, {
+      key: "mod+b",
+      command: "sidebar.toggle",
+    });
+    assert.strictEqual(parsed.command, "sidebar.toggle");
+
+    const parsedSearch = yield* decode(KeybindingRule, {
+      key: "mod+k",
+      command: "sidebar.search",
+    });
+    assert.strictEqual(parsedSearch.command, "sidebar.search");
+
+    const parsedAddProject = yield* decode(KeybindingRule, {
+      key: "mod+shift+o",
+      command: "sidebar.addProject",
+    });
+    assert.strictEqual(parsedAddProject.command, "sidebar.addProject");
+
+    const parsedTerminalToggle = yield* decode(KeybindingRule, {
       key: "mod+j",
       command: "terminal.toggle",
     });
-    assert.strictEqual(parsed.command, "terminal.toggle");
+    assert.strictEqual(parsedTerminalToggle.command, "terminal.toggle");
 
     const parsedClose = yield* decode(KeybindingRule, {
       key: "mod+w",
@@ -35,41 +53,83 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedClose.command, "terminal.close");
 
+    const parsedWorkspaceNew = yield* decode(KeybindingRule, {
+      key: "mod+shift+j",
+      command: "terminal.workspace.newFullWidth",
+    });
+    assert.strictEqual(parsedWorkspaceNew.command, "terminal.workspace.newFullWidth");
+
+    const parsedWorkspaceClose = yield* decode(KeybindingRule, {
+      key: "mod+w",
+      command: "terminal.workspace.closeActive",
+    });
+    assert.strictEqual(parsedWorkspaceClose.command, "terminal.workspace.closeActive");
+
+    const parsedWorkspaceTerminal = yield* decode(KeybindingRule, {
+      key: "mod+1",
+      command: "terminal.workspace.terminal",
+    });
+    assert.strictEqual(parsedWorkspaceTerminal.command, "terminal.workspace.terminal");
+
+    const parsedWorkspaceChat = yield* decode(KeybindingRule, {
+      key: "mod+2",
+      command: "terminal.workspace.chat",
+    });
+    assert.strictEqual(parsedWorkspaceChat.command, "terminal.workspace.chat");
+
     const parsedDiffToggle = yield* decode(KeybindingRule, {
       key: "mod+d",
       command: "diff.toggle",
     });
     assert.strictEqual(parsedDiffToggle.command, "diff.toggle");
 
-    const parsedSidebarToggle = yield* decode(KeybindingRule, {
-      key: "mod+b",
-      command: "sidebar.toggle",
+    const parsedBrowserToggle = yield* decode(KeybindingRule, {
+      key: "mod+shift+b",
+      command: "browser.toggle",
     });
-    assert.strictEqual(parsedSidebarToggle.command, "sidebar.toggle");
+    assert.strictEqual(parsedBrowserToggle.command, "browser.toggle");
 
-    const parsedLocal = yield* decode(KeybindingRule, {
+    const parsedNewChat = yield* decode(KeybindingRule, {
+      key: "mod+alt+n",
+      command: "chat.newChat",
+    });
+    assert.strictEqual(parsedNewChat.command, "chat.newChat");
+
+    const parsedLatestProject = yield* decode(KeybindingRule, {
+      key: "mod+shift+n",
+      command: "chat.newLatestProject",
+    });
+    assert.strictEqual(parsedLatestProject.command, "chat.newLatestProject");
+
+    const parsedLegacyLocal = yield* decode(KeybindingRule, {
       key: "mod+shift+n",
       command: "chat.newLocal",
     });
-    assert.strictEqual(parsedLocal.command, "chat.newLocal");
+    assert.strictEqual(parsedLegacyLocal.command, "chat.newLocal");
 
-    const parsedReviewMode = yield* decode(KeybindingRule, {
-      key: "mod+shift+r",
-      command: "composer.mode.review",
+    const parsedTerminal = yield* decode(KeybindingRule, {
+      key: "mod+shift+t",
+      command: "chat.newTerminal",
     });
-    assert.strictEqual(parsedReviewMode.command, "composer.mode.review");
+    assert.strictEqual(parsedTerminal.command, "chat.newTerminal");
 
-    const parsedThreadPrevious = yield* decode(KeybindingRule, {
+    const parsedThreadJump = yield* decode(KeybindingRule, {
+      key: "mod+3",
+      command: "thread.jump.3",
+    });
+    assert.strictEqual(parsedThreadJump.command, "thread.jump.3");
+
+    const parsedVisibleNext = yield* decode(KeybindingRule, {
+      key: "mod+shift+]",
+      command: "chat.visible.next",
+    });
+    assert.strictEqual(parsedVisibleNext.command, "chat.visible.next");
+
+    const parsedVisiblePrevious = yield* decode(KeybindingRule, {
       key: "mod+shift+[",
-      command: "thread.previous",
+      command: "chat.visible.previous",
     });
-    assert.strictEqual(parsedThreadPrevious.command, "thread.previous");
-
-    const parsedReload = yield* decode(KeybindingRule, {
-      key: "f5",
-      command: "app.reload",
-    });
-    assert.strictEqual(parsedReload.command, "app.reload");
+    assert.strictEqual(parsedVisiblePrevious.command, "chat.visible.previous");
   }),
 );
 
@@ -144,19 +204,8 @@ it.effect("parses resolved keybindings arrays", () =>
           modKey: true,
         },
       },
-      {
-        command: "thread.jump.3",
-        shortcut: {
-          key: "3",
-          metaKey: false,
-          ctrlKey: false,
-          shiftKey: false,
-          altKey: false,
-          modKey: true,
-        },
-      },
     ]);
-    assert.lengthOf(parsed, 2);
+    assert.lengthOf(parsed, 1);
   }),
 );
 

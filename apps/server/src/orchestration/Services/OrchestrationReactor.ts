@@ -19,7 +19,7 @@ export interface OrchestrationReactorShape {
    * The returned effect must be run in a scope so all worker fibers can be
    * finalized on shutdown.
    */
-  readonly start: () => Effect.Effect<void, never, Scope.Scope>;
+  readonly start: Effect.Effect<void, never, Scope.Scope>;
 }
 
 /**
@@ -28,4 +28,4 @@ export interface OrchestrationReactorShape {
 export class OrchestrationReactor extends ServiceMap.Service<
   OrchestrationReactor,
   OrchestrationReactorShape
->()("t3/orchestration/Services/OrchestrationReactor") {}
+>()("kodo/orchestration/Services/OrchestrationReactor") {}

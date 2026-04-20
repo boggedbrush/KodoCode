@@ -6,10 +6,7 @@ import { Effect } from "effect";
 
 import {
   createDevRunnerEnv,
-  DESKTOP_DEV_SHUTDOWN_SIGNAL,
   findFirstAvailableOffset,
-  getWindowsTaskkillArgs,
-  isInheritedDesktopDevUrl,
   resolveModePortOffsets,
   resolveOffset,
 } from "./dev-runner.ts";
@@ -49,7 +46,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
   });
 
   describe("createDevRunnerEnv", () => {
-    it.effect("defaults T3CODE_HOME to ~/.kodo-code when not provided", () =>
+    it.effect("defaults T3CODE_HOME to ~/.dpcode when not provided", () =>
       Effect.gen(function* () {
         const env = yield* createDevRunnerEnv({
           mode: "dev",
@@ -66,7 +63,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_HOME, resolve(homedir(), ".kodo-code"));
+        assert.equal(env.T3CODE_HOME, resolve(homedir(), ".dpcode"));
       }),
     );
 
@@ -161,47 +158,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         });
 
         assert.equal(env.T3CODE_HOME, resolve("/tmp/my-t3"));
-      }),
-    );
-
-    it.effect("does not export backend bootstrap env for dev:desktop", () =>
-      Effect.gen(function* () {
-        const env = yield* createDevRunnerEnv({
-          mode: "dev:desktop",
-          baseEnv: {
-            T3CODE_PORT: "3773",
-            T3CODE_AUTH_TOKEN: "stale-token",
-            T3CODE_MODE: "web",
-            T3CODE_NO_BROWSER: "0",
-            T3CODE_HOST: "0.0.0.0",
-            VITE_WS_URL: "ws://localhost:3773",
-          },
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: "/tmp/my-t3",
-          authToken: "fresh-token",
-          noBrowser: true,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: "127.0.0.1",
-          port: 4222,
-          devUrl: undefined,
-          desktopDevRunnerPid: 4242,
-          desktopDevShutdownSignal: DESKTOP_DEV_SHUTDOWN_SIGNAL,
-        });
-
-        assert.equal(env.T3CODE_HOME, resolve("/tmp/my-t3"));
-        assert.equal(env.PORT, "5733");
-        assert.equal(env.ELECTRON_RENDERER_PORT, "5733");
-        assert.equal(env.VITE_DEV_SERVER_URL, "http://localhost:5733");
-        assert.equal(env.T3CODE_PORT, undefined);
-        assert.equal(env.T3CODE_AUTH_TOKEN, undefined);
-        assert.equal(env.T3CODE_MODE, undefined);
-        assert.equal(env.T3CODE_NO_BROWSER, undefined);
-        assert.equal(env.T3CODE_HOST, undefined);
-        assert.equal(env.VITE_WS_URL, undefined);
-        assert.equal(env.KODOCODE_DEV_RUNNER_PID, "4242");
-        assert.equal(env.KODOCODE_DEV_SHUTDOWN_SIGNAL, DESKTOP_DEV_SHUTDOWN_SIGNAL);
       }),
     );
   });
@@ -319,62 +275,6 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         });
 
         assert.deepStrictEqual(offsets, { serverOffset: 0, webOffset: 0 });
-      }),
-    );
-  });
-
-  describe("isInheritedDesktopDevUrl", () => {
-    it.effect("matches renderer env that came from a previous desktop dev run", () =>
-      Effect.sync(() => {
-        const inherited = isInheritedDesktopDevUrl(
-          {
-            PORT: "5733",
-            ELECTRON_RENDERER_PORT: "5733",
-            VITE_DEV_SERVER_URL: "http://localhost:5733",
-          },
-          new URL("http://localhost:5733"),
-        );
-
-        assert.equal(inherited, true);
-      }),
-    );
-
-    it.effect("ignores unrelated or incomplete env values", () =>
-      Effect.sync(() => {
-        const inherited = isInheritedDesktopDevUrl(
-          {
-            PORT: "5733",
-            VITE_DEV_SERVER_URL: "http://localhost:5733",
-          },
-          new URL("http://localhost:5733"),
-        );
-
-        assert.equal(inherited, false);
-      }),
-    );
-  });
-
-  describe("getWindowsTaskkillArgs", () => {
-    it.effect("uses taskkill tree shutdown for graceful Windows termination", () =>
-      Effect.sync(() => {
-        assert.deepStrictEqual(getWindowsTaskkillArgs(4242, "SIGTERM"), ["/PID", "4242", "/T"]);
-      }),
-    );
-
-    it.effect("adds /F for forced Windows termination", () =>
-      Effect.sync(() => {
-        assert.deepStrictEqual(getWindowsTaskkillArgs(4242, "SIGKILL"), [
-          "/PID",
-          "4242",
-          "/T",
-          "/F",
-        ]);
-      }),
-    );
-
-    it.effect("ignores invalid pids", () =>
-      Effect.sync(() => {
-        assert.equal(getWindowsTaskkillArgs(0, "SIGTERM"), null);
       }),
     );
   });

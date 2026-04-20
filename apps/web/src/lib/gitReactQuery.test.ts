@@ -1,38 +1,11 @@
 import { QueryClient } from "@tanstack/react-query";
-import { describe, expect, it, vi } from "vitest";
-
-vi.mock("../nativeApi", () => ({
-  ensureNativeApi: vi.fn(),
-}));
-
-vi.mock("../wsRpcClient", () => ({
-  getWsRpcClient: vi.fn(),
-}));
-
-import type { InfiniteData } from "@tanstack/react-query";
-import type { GitListBranchesResult } from "@t3tools/contracts";
-
+import { describe, expect, it } from "vitest";
 import {
-  gitBranchSearchInfiniteQueryOptions,
   gitMutationKeys,
   gitPreparePullRequestThreadMutationOptions,
   gitPullMutationOptions,
   gitRunStackedActionMutationOptions,
-  invalidateGitQueries,
 } from "./gitReactQuery";
-
-const BRANCH_QUERY_RESULT: GitListBranchesResult = {
-  branches: [],
-  isRepo: true,
-  hasOriginRemote: true,
-  nextCursor: null,
-  totalCount: 0,
-};
-
-const BRANCH_SEARCH_RESULT: InfiniteData<GitListBranchesResult, number> = {
-  pages: [BRANCH_QUERY_RESULT],
-  pageParams: [0],
-};
 
 describe("gitMutationKeys", () => {
   it("scopes stacked action keys by cwd", () => {
@@ -56,10 +29,7 @@ describe("git mutation options", () => {
   const queryClient = new QueryClient();
 
   it("attaches cwd-scoped mutation key for runStackedAction", () => {
-    const options = gitRunStackedActionMutationOptions({
-      cwd: "/repo/a",
-      queryClient,
-    });
+    const options = gitRunStackedActionMutationOptions({ cwd: "/repo/a", queryClient });
     expect(options.mutationKey).toEqual(gitMutationKeys.runStackedAction("/repo/a"));
   });
 
@@ -74,45 +44,5 @@ describe("git mutation options", () => {
       queryClient,
     });
     expect(options.mutationKey).toEqual(gitMutationKeys.preparePullRequestThread("/repo/a"));
-  });
-});
-
-describe("invalidateGitQueries", () => {
-  it("can invalidate a single cwd without blasting other git query scopes", async () => {
-    const queryClient = new QueryClient();
-
-    queryClient.setQueryData(
-      gitBranchSearchInfiniteQueryOptions({
-        cwd: "/repo/a",
-        query: "feature",
-      }).queryKey,
-      BRANCH_SEARCH_RESULT,
-    );
-    queryClient.setQueryData(
-      gitBranchSearchInfiniteQueryOptions({
-        cwd: "/repo/b",
-        query: "feature",
-      }).queryKey,
-      BRANCH_SEARCH_RESULT,
-    );
-
-    await invalidateGitQueries(queryClient, { cwd: "/repo/a" });
-
-    expect(
-      queryClient.getQueryState(
-        gitBranchSearchInfiniteQueryOptions({
-          cwd: "/repo/a",
-          query: "feature",
-        }).queryKey,
-      )?.isInvalidated,
-    ).toBe(true);
-    expect(
-      queryClient.getQueryState(
-        gitBranchSearchInfiniteQueryOptions({
-          cwd: "/repo/b",
-          query: "feature",
-        }).queryKey,
-      )?.isInvalidated,
-    ).toBe(false);
   });
 });

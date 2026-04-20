@@ -1,47 +1,50 @@
+// FILE: _chat.index.tsx
+// Purpose: Open or resume the home-chat draft using the same bootstrap path as standard threads.
+// Layer: Routing
+// Depends on: shared new-chat handler so "/" stays a thin alias instead of a special chat surface.
+
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
-import { isElectron } from "../env";
-import { cn, isMacPlatform, usesCustomDesktopTitlebar } from "../lib/utils";
-import { SidebarTrigger, useSidebar } from "../components/ui/sidebar";
-import { SidebarBrandToggleButton } from "../components/SidebarBrandToggleButton";
-import { DesktopWindowControls } from "../components/DesktopTitleBar";
-
-const hasCustomDesktopTitlebar = isElectron && usesCustomDesktopTitlebar(navigator.platform);
+import { useHandleNewChat } from "../hooks/useHandleNewChat";
 
 function ChatIndexRouteView() {
-  const { open: sidebarOpen } = useSidebar();
-  const shouldOffsetForMacTrafficLights =
-    isElectron && isMacPlatform(navigator.platform) && !sidebarOpen;
+  const { handleNewChat } = useHandleNewChat();
+  const [attempt, setAttempt] = useState(0);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setErrorMessage(null);
+
+    void (async () => {
+      const result = await handleNewChat({ fresh: true });
+      if (cancelled || result.ok) {
+        return;
+      }
+      setErrorMessage(result.error);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [attempt, handleNewChat]);
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background text-muted-foreground/40">
-      {!isElectron && (
-        <header className="border-b border-border px-3 py-2">
-          <div className="flex items-center gap-2">
-            <SidebarTrigger className="size-7 shrink-0 md:hidden" />
-            <SidebarBrandToggleButton className="hidden md:inline-flex" />
-            <span className="text-sm font-medium text-foreground md:hidden">Threads</span>
-          </div>
-        </header>
-      )}
-
-      {isElectron && (
-        <div
-          className={cn(
-            "drag-region flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-5 transition-[padding] duration-200 ease-linear",
-            shouldOffsetForMacTrafficLights && "pl-[90px]",
-          )}
-        >
-          <SidebarBrandToggleButton />
-          <span className="text-xs text-muted-foreground/50">No active thread</span>
-          {hasCustomDesktopTitlebar && <DesktopWindowControls />}
-        </div>
-      )}
-
-      <div className="flex flex-1 items-center justify-center">
-        <div className="text-center">
-          <p className="text-sm">Select a thread or create a new one to get started.</p>
-        </div>
+    <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-3">
+        <span className="text-sm text-muted-foreground/70">
+          {errorMessage ? errorMessage : "Preparing new chat…"}
+        </span>
+        {errorMessage ? (
+          <button
+            type="button"
+            className="rounded-md border border-border/70 px-3 py-1.5 text-sm text-foreground/85 transition-colors hover:bg-accent"
+            onClick={() => setAttempt((value) => value + 1)}
+          >
+            Retry
+          </button>
+        ) : null}
       </div>
     </div>
   );

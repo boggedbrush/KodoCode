@@ -1,72 +1,87 @@
-import { type ChatTextSize } from "@t3tools/contracts/settings";
+// FILE: timelineHeight.ts
+// Purpose: Estimates chat row heights before ResizeObserver measurements arrive.
+// Layer: Web chat virtualization utility
+// Exports: message/work height estimators used by MessagesTimeline and browser tests
+
+import type { TurnDiffFileChange } from "../types";
+import { DEFAULT_CHAT_FONT_SIZE_PX, normalizeChatFontSizePx } from "../appSettings";
 import { deriveDisplayedUserMessageState } from "../lib/terminalContext";
+import { buildTurnDiffTree, type TurnDiffTreeNode } from "../lib/turnDiffTree";
 import { buildInlineTerminalContextText } from "./chat/userMessageTerminalContexts";
+import { deriveUserMessagePreviewState } from "./chat/userMessagePreview";
+import {
+  getChatTranscriptAssistantCharWidthPx,
+  getChatTranscriptLineHeightPx,
+  getChatTranscriptUserCharWidthPx,
+} from "./chat/chatTypography";
 
 const ASSISTANT_CHARS_PER_LINE_FALLBACK = 72;
 const USER_CHARS_PER_LINE_FALLBACK = 56;
-const USER_LINE_HEIGHT_PX = 20.75;
-const ASSISTANT_LINE_HEIGHT_PX = 22.75;
-// Assistant rows render as markdown content plus a compact timestamp meta line.
-// The DOM baseline is much smaller than the user bubble chrome, so model it
-// separately instead of reusing the old shared constant.
-const ASSISTANT_BASE_HEIGHT_PX = 41;
-const USER_BASE_HEIGHT_PX = 76;
-const ATTACHMENTS_PER_ROW = 2;
-// Full-app browser measurements land closer to a ~116px attachment row once
-// the bubble shrinks to content width, so calibrate the estimate to that DOM.
-const USER_ATTACHMENT_ROW_HEIGHT_PX = 116;
+const ASSISTANT_BASE_HEIGHT_PX = 78;
+const USER_BASE_HEIGHT_PX = 96;
+const USER_ATTACHMENT_THUMBNAIL_SIZE_PX = 60;
+const USER_ATTACHMENT_THUMBNAIL_GAP_PX = 8;
+const USER_ATTACHMENT_THUMBNAILS_PER_ROW = 4;
+const USER_ATTACHMENT_ROW_MARGIN_BOTTOM_PX = 4;
+const USER_MESSAGE_TOGGLE_HEIGHT_PX = 20;
+const USER_DISPATCH_CHIP_HEIGHT_PX = 24;
+const USER_DISPATCH_CHIP_MARGIN_BOTTOM_PX = 6;
+const USER_DISPATCH_CHIP_WITH_MEDIA_MARGIN_BOTTOM_PX = 12;
 const USER_BUBBLE_WIDTH_RATIO = 0.8;
 const USER_BUBBLE_HORIZONTAL_PADDING_PX = 32;
 const ASSISTANT_MESSAGE_HORIZONTAL_PADDING_PX = 8;
-// Browser parity tests now load DM Sans before measuring chat rows, and plain
-// user markdown wraps materially earlier than the older generic-font estimate.
-// Keep the markdown model calibrated to the actual UI font so virtualization
-// stays close to rendered user bubble heights across desktop and mobile widths.
-const USER_MARKDOWN_AVG_CHAR_WIDTH_PX = 8.8;
-const USER_MONO_AVG_CHAR_WIDTH_PX = 8;
-const ASSISTANT_AVG_CHAR_WIDTH_PX = 7.2;
 const MIN_USER_CHARS_PER_LINE = 4;
 const MIN_ASSISTANT_CHARS_PER_LINE = 20;
-
-const TEXT_SIZE_WIDTH_SCALE = {
-  small: 13 / 14,
-  default: 1,
-  large: 15 / 14,
-} as const satisfies Record<ChatTextSize, number>;
-
-const USER_LINE_HEIGHT_PX_BY_TEXT_SIZE = {
-  small: 18.75,
-  default: USER_LINE_HEIGHT_PX,
-  large: 23.25,
-} as const satisfies Record<ChatTextSize, number>;
-
-const ASSISTANT_LINE_HEIGHT_PX_BY_TEXT_SIZE = {
-  small: 20.25,
-  default: ASSISTANT_LINE_HEIGHT_PX,
-  large: 25.5,
-} as const satisfies Record<ChatTextSize, number>;
-
-const USER_BASE_HEIGHT_PX_BY_TEXT_SIZE = {
-  small: 72,
-  default: USER_BASE_HEIGHT_PX,
-  large: 81,
-} as const satisfies Record<ChatTextSize, number>;
-
-const ASSISTANT_BASE_HEIGHT_PX_BY_TEXT_SIZE = {
-  small: 38,
-  default: ASSISTANT_BASE_HEIGHT_PX,
-  large: 45,
-} as const satisfies Record<ChatTextSize, number>;
+const ASSISTANT_INLINE_CODE_WIDTH_MULTIPLIER = 1.2;
+const ASSISTANT_INLINE_CODE_WRAP_OVERHEAD_CHARS = 2;
+const INLINE_CODE_SPAN_REGEX = /`([^`\n]+)`/g;
+const COMPLETION_DIVIDER_HEIGHT_PX = 40;
+const TURN_DIFF_SUMMARY_CHROME_HEIGHT_PX = 76;
+const TURN_DIFF_TREE_ROW_HEIGHT_PX = 24;
+const TURN_DIFF_TREE_ROW_GAP_PX = 2;
+const WORK_GROUP_CHROME_HEIGHT_PX = 24;
+const WORK_GROUP_HEADER_HEIGHT_PX = 20;
+const WORK_ENTRY_ROW_HEIGHT_PX = 30;
+const WORK_ENTRY_CHANGED_FILES_HEIGHT_PX = 24;
+const WORK_ENTRY_GAP_PX = 2;
+const INLINE_TOOL_PREVIEW_MARGIN_TOP_PX = 10;
+const INLINE_TOOL_PREVIEW_ROW_HEIGHT_PX = 22;
+const INLINE_TOOL_PREVIEW_ROW_GAP_PX = 1;
+const INLINE_TOOL_PREVIEW_TOGGLE_MARGIN_TOP_PX = 4;
+const INLINE_TOOL_PREVIEW_TOGGLE_HEIGHT_PX = 18;
+const INLINE_TOOL_PREVIEW_CONTAINER_CHROME_HEIGHT_PX = 0;
+const changedFilesSummaryHeightCache = new WeakMap<
+  ReadonlyArray<TurnDiffFileChange>,
+  { collapsed?: number; expanded?: number }
+>();
 
 interface TimelineMessageHeightInput {
   role: "user" | "assistant" | "system";
   text: string;
-  attachments?: ReadonlyArray<{ id: string }>;
+  attachments?: ReadonlyArray<{ id: string; type?: "image" | "assistant-selection" }>;
+  dispatchMode?: "queue" | "steer";
+  diffSummaryFiles?: ReadonlyArray<TurnDiffFileChange>;
+  diffSummaryAllDirectoriesExpanded?: boolean;
+  inlineToolEntries?: ReadonlyArray<TimelineWorkEntryHeightInput>;
+  inlineToolExpanded?: boolean;
+  showCompletionDivider?: boolean;
 }
 
 interface TimelineHeightEstimateLayout {
   timelineWidthPx: number | null;
-  chatTextSize?: ChatTextSize;
+  chatFontSizePx?: number;
+}
+
+interface TimelineWorkEntryHeightInput {
+  tone: "thinking" | "tool" | "info" | "error";
+  command?: string | null;
+  detail?: string | null;
+  changedFiles?: ReadonlyArray<string>;
+}
+
+interface TimelineWorkGroupEstimateOptions {
+  expanded: boolean;
+  maxVisibleEntries: number;
 }
 
 function estimateWrappedLineCount(text: string, charsPerLine: number): number {
@@ -94,80 +109,236 @@ function isFinitePositiveNumber(value: number | null | undefined): value is numb
 
 function estimateCharsPerLineForUser(
   timelineWidthPx: number | null,
-  averageCharWidthPx: number,
-  chatTextSize: ChatTextSize,
+  chatFontSizePx: number,
 ): number {
   if (!isFinitePositiveNumber(timelineWidthPx)) return USER_CHARS_PER_LINE_FALLBACK;
   const bubbleWidthPx = timelineWidthPx * USER_BUBBLE_WIDTH_RATIO;
   const textWidthPx = Math.max(bubbleWidthPx - USER_BUBBLE_HORIZONTAL_PADDING_PX, 0);
-  const scaledCharWidthPx = averageCharWidthPx * TEXT_SIZE_WIDTH_SCALE[chatTextSize];
-  return Math.max(MIN_USER_CHARS_PER_LINE, Math.floor(textWidthPx / scaledCharWidthPx));
+  return Math.max(
+    MIN_USER_CHARS_PER_LINE,
+    Math.floor(textWidthPx / getChatTranscriptUserCharWidthPx(chatFontSizePx)),
+  );
 }
 
 function estimateCharsPerLineForAssistant(
   timelineWidthPx: number | null,
-  chatTextSize: ChatTextSize,
+  chatFontSizePx: number,
 ): number {
   if (!isFinitePositiveNumber(timelineWidthPx)) return ASSISTANT_CHARS_PER_LINE_FALLBACK;
   const textWidthPx = Math.max(timelineWidthPx - ASSISTANT_MESSAGE_HORIZONTAL_PADDING_PX, 0);
-  const scaledCharWidthPx = ASSISTANT_AVG_CHAR_WIDTH_PX * TEXT_SIZE_WIDTH_SCALE[chatTextSize];
-  return Math.max(MIN_ASSISTANT_CHARS_PER_LINE, Math.floor(textWidthPx / scaledCharWidthPx));
+  return Math.max(
+    MIN_ASSISTANT_CHARS_PER_LINE,
+    Math.floor(textWidthPx / getChatTranscriptAssistantCharWidthPx(chatFontSizePx)),
+  );
+}
+
+// Count the tree rows the diff summary will render before ResizeObserver corrects the real size.
+function countVisibleTurnDiffTreeRows(
+  nodes: ReadonlyArray<TurnDiffTreeNode>,
+  allDirectoriesExpanded: boolean,
+): number {
+  let count = 0;
+  for (const node of nodes) {
+    count += 1;
+    if (allDirectoriesExpanded && node.kind === "directory") {
+      count += countVisibleTurnDiffTreeRows(node.children, allDirectoriesExpanded);
+    }
+  }
+  return count;
+}
+
+export function estimateChangedFilesSummaryHeight(
+  files: ReadonlyArray<TurnDiffFileChange>,
+  allDirectoriesExpanded = true,
+): number {
+  if (files.length === 0) return 0;
+
+  const cacheKey = allDirectoriesExpanded ? "expanded" : "collapsed";
+  const cachedHeights = changedFilesSummaryHeightCache.get(files);
+  const cachedHeight = cachedHeights?.[cacheKey];
+  if (typeof cachedHeight === "number") {
+    return cachedHeight;
+  }
+
+  const visibleRowCount = countVisibleTurnDiffTreeRows(
+    buildTurnDiffTree(files),
+    allDirectoriesExpanded,
+  );
+
+  const height =
+    TURN_DIFF_SUMMARY_CHROME_HEIGHT_PX +
+    visibleRowCount * TURN_DIFF_TREE_ROW_HEIGHT_PX +
+    Math.max(visibleRowCount - 1, 0) * TURN_DIFF_TREE_ROW_GAP_PX;
+  changedFilesSummaryHeightCache.set(files, {
+    ...cachedHeights,
+    [cacheKey]: height,
+  });
+
+  return height;
+}
+
+function estimateTimelineWorkEntryHeight(entry: TimelineWorkEntryHeightInput): number {
+  const hasChangedFiles = (entry.changedFiles?.length ?? 0) > 0;
+  const previewIsChangedFiles = hasChangedFiles && !entry.command && !entry.detail;
+
+  return (
+    WORK_ENTRY_ROW_HEIGHT_PX +
+    (hasChangedFiles && !previewIsChangedFiles ? WORK_ENTRY_CHANGED_FILES_HEIGHT_PX : 0)
+  );
+}
+
+// Bias work-log estimates upward so fast scrolls do not stack rows before they are measured.
+export function estimateTimelineWorkGroupHeight(
+  entries: ReadonlyArray<TimelineWorkEntryHeightInput>,
+  options: TimelineWorkGroupEstimateOptions,
+): number {
+  if (entries.length === 0) return WORK_GROUP_CHROME_HEIGHT_PX;
+
+  const visibleEntries =
+    options.expanded || entries.length <= options.maxVisibleEntries
+      ? entries
+      : entries.slice(-options.maxVisibleEntries);
+  const showHeader =
+    entries.length > options.maxVisibleEntries ||
+    visibleEntries.some((entry) => entry.tone !== "tool");
+
+  return (
+    WORK_GROUP_CHROME_HEIGHT_PX +
+    (showHeader ? WORK_GROUP_HEADER_HEIGHT_PX : 0) +
+    visibleEntries.reduce((total, entry) => total + estimateTimelineWorkEntryHeight(entry), 0) +
+    Math.max(visibleEntries.length - 1, 0) * WORK_ENTRY_GAP_PX
+  );
+}
+
+// Estimate the inline tool preview block that can appear under assistant messages.
+export function estimateTimelineInlineToolPreviewHeight(
+  entries: ReadonlyArray<TimelineWorkEntryHeightInput>,
+  options: TimelineWorkGroupEstimateOptions,
+): number {
+  if (entries.length === 0) return 0;
+
+  const visibleEntries =
+    options.expanded || entries.length <= options.maxVisibleEntries
+      ? entries
+      : entries.slice(0, options.maxVisibleEntries);
+  const hasToggle = entries.length > options.maxVisibleEntries;
+
+  return (
+    INLINE_TOOL_PREVIEW_MARGIN_TOP_PX +
+    INLINE_TOOL_PREVIEW_CONTAINER_CHROME_HEIGHT_PX +
+    visibleEntries.length * INLINE_TOOL_PREVIEW_ROW_HEIGHT_PX +
+    Math.max(visibleEntries.length - 1, 0) * INLINE_TOOL_PREVIEW_ROW_GAP_PX +
+    (hasToggle
+      ? INLINE_TOOL_PREVIEW_TOGGLE_MARGIN_TOP_PX + INLINE_TOOL_PREVIEW_TOGGLE_HEIGHT_PX
+      : 0)
+  );
+}
+
+function expandAssistantInlineCodeForEstimate(text: string): string {
+  return text.replace(INLINE_CODE_SPAN_REGEX, (_match, code: string) =>
+    "x".repeat(
+      Math.max(
+        code.length + 2,
+        Math.ceil(
+          code.length * ASSISTANT_INLINE_CODE_WIDTH_MULTIPLIER +
+            ASSISTANT_INLINE_CODE_WRAP_OVERHEAD_CHARS,
+        ),
+      ),
+    ),
+  );
 }
 
 export function estimateTimelineMessageHeight(
   message: TimelineMessageHeightInput,
   layout: TimelineHeightEstimateLayout = { timelineWidthPx: null },
 ): number {
-  const chatTextSize = layout.chatTextSize ?? "default";
+  const chatFontSizePx = normalizeChatFontSizePx(
+    layout.chatFontSizePx ?? DEFAULT_CHAT_FONT_SIZE_PX,
+  );
+  const lineHeightPx = getChatTranscriptLineHeightPx(chatFontSizePx);
 
   if (message.role === "assistant") {
-    const charsPerLine = estimateCharsPerLineForAssistant(layout.timelineWidthPx, chatTextSize);
-    const estimatedLines = estimateWrappedLineCount(message.text, charsPerLine);
+    const charsPerLine = estimateCharsPerLineForAssistant(layout.timelineWidthPx, chatFontSizePx);
+    const estimatedLines = estimateWrappedLineCount(
+      expandAssistantInlineCodeForEstimate(message.text),
+      charsPerLine,
+    );
+    const changedFilesHeight = estimateChangedFilesSummaryHeight(
+      message.diffSummaryFiles ?? [],
+      message.diffSummaryAllDirectoriesExpanded ?? true,
+    );
+    const inlineToolPreviewHeight = estimateTimelineInlineToolPreviewHeight(
+      message.inlineToolEntries ?? [],
+      {
+        expanded: message.inlineToolExpanded ?? false,
+        maxVisibleEntries: 4,
+      },
+    );
     return (
-      ASSISTANT_BASE_HEIGHT_PX_BY_TEXT_SIZE[chatTextSize] +
-      estimatedLines * ASSISTANT_LINE_HEIGHT_PX_BY_TEXT_SIZE[chatTextSize]
+      ASSISTANT_BASE_HEIGHT_PX +
+      estimatedLines * lineHeightPx +
+      (message.showCompletionDivider ? COMPLETION_DIVIDER_HEIGHT_PX : 0) +
+      changedFilesHeight +
+      inlineToolPreviewHeight
     );
   }
 
   if (message.role === "user") {
-    const displayedUserMessage = deriveDisplayedUserMessageState(message.text);
+    const charsPerLine = estimateCharsPerLineForUser(layout.timelineWidthPx, chatFontSizePx);
+    const displayedUserMessage = deriveDisplayedUserMessageState(message.text, {
+      hideImageOnlyBootstrapPrompt: (message.attachments?.length ?? 0) > 0,
+    });
+    const userMessagePreview = deriveUserMessagePreviewState(displayedUserMessage.visibleText);
     const renderedText =
       displayedUserMessage.contexts.length > 0
-        ? [
-            buildInlineTerminalContextText(displayedUserMessage.contexts),
-            displayedUserMessage.visibleText,
-          ]
+        ? [buildInlineTerminalContextText(displayedUserMessage.contexts), userMessagePreview.text]
             .filter((part) => part.length > 0)
             .join(" ")
-        : displayedUserMessage.visibleText;
-    // Plain user text renders through `ChatMarkdown` with proportional UI copy,
-    // while terminal-context messages render in a monospaced `pre-wrap` body.
-    // Keep those wrap models separate so long browser-test paragraphs track the
-    // real DOM more closely across desktop and CI font stacks.
-    const charsPerLine = estimateCharsPerLineForUser(
-      layout.timelineWidthPx,
-      displayedUserMessage.contexts.length > 0
-        ? USER_MONO_AVG_CHAR_WIDTH_PX
-        : USER_MARKDOWN_AVG_CHAR_WIDTH_PX,
-      chatTextSize,
-    );
-    const estimatedLines = estimateWrappedLineCount(renderedText, charsPerLine);
-    const attachmentCount = message.attachments?.length ?? 0;
-    const attachmentRows = Math.ceil(attachmentCount / ATTACHMENTS_PER_ROW);
-    const attachmentHeight = attachmentRows * USER_ATTACHMENT_ROW_HEIGHT_PX;
+        : userMessagePreview.text;
+    const estimatedLines =
+      renderedText.length > 0 ? estimateWrappedLineCount(renderedText, charsPerLine) : 0;
+    const imageAttachmentCount =
+      message.attachments?.filter((attachment) => attachment.type === "image").length ?? 0;
+    const assistantSelectionCount =
+      message.attachments?.filter((attachment) => attachment.type === "assistant-selection")
+        .length ?? 0;
+    const imageAttachmentHeight =
+      imageAttachmentCount > 0
+        ? Math.ceil(imageAttachmentCount / USER_ATTACHMENT_THUMBNAILS_PER_ROW) *
+            USER_ATTACHMENT_THUMBNAIL_SIZE_PX +
+          Math.max(Math.ceil(imageAttachmentCount / USER_ATTACHMENT_THUMBNAILS_PER_ROW) - 1, 0) *
+            USER_ATTACHMENT_THUMBNAIL_GAP_PX
+        : 0;
+    const assistantSelectionHeight = assistantSelectionCount > 0 ? 40 : 0;
+    const attachmentHeight =
+      imageAttachmentHeight + assistantSelectionHeight > 0
+        ? imageAttachmentHeight +
+          assistantSelectionHeight +
+          (renderedText.length > 0 ? USER_ATTACHMENT_ROW_MARGIN_BOTTOM_PX : 0)
+        : 0;
+    const dispatchChipHeight =
+      message.dispatchMode === "steer"
+        ? USER_DISPATCH_CHIP_HEIGHT_PX +
+          (imageAttachmentCount > 0 || assistantSelectionCount > 0
+            ? USER_DISPATCH_CHIP_WITH_MEDIA_MARGIN_BOTTOM_PX
+            : USER_DISPATCH_CHIP_MARGIN_BOTTOM_PX)
+        : 0;
+    const toggleHeight = userMessagePreview.collapsible ? USER_MESSAGE_TOGGLE_HEIGHT_PX : 0;
     return (
-      USER_BASE_HEIGHT_PX_BY_TEXT_SIZE[chatTextSize] +
-      estimatedLines * USER_LINE_HEIGHT_PX_BY_TEXT_SIZE[chatTextSize] +
-      attachmentHeight
+      USER_BASE_HEIGHT_PX +
+      estimatedLines * lineHeightPx +
+      attachmentHeight +
+      dispatchChipHeight +
+      toggleHeight
     );
   }
 
   // `system` messages are not rendered in the chat timeline, but keep a stable
   // explicit branch in case they are present in timeline data.
-  const charsPerLine = estimateCharsPerLineForAssistant(layout.timelineWidthPx, chatTextSize);
-  const estimatedLines = estimateWrappedLineCount(message.text, charsPerLine);
-  return (
-    ASSISTANT_BASE_HEIGHT_PX_BY_TEXT_SIZE[chatTextSize] +
-    estimatedLines * ASSISTANT_LINE_HEIGHT_PX_BY_TEXT_SIZE[chatTextSize]
+  const charsPerLine = estimateCharsPerLineForAssistant(layout.timelineWidthPx, chatFontSizePx);
+  const estimatedLines = estimateWrappedLineCount(
+    expandAssistantInlineCodeForEstimate(message.text),
+    charsPerLine,
   );
+  return ASSISTANT_BASE_HEIGHT_PX + estimatedLines * lineHeightPx;
 }

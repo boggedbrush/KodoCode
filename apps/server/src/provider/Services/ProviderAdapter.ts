@@ -9,13 +9,31 @@
  */
 import type {
   ApprovalRequestId,
+  ProviderComposerCapabilities,
   ProviderApprovalDecision,
+  ProviderForkThreadInput,
+  ProviderForkThreadResult,
   ProviderKind,
+  ProviderListAgentsResult,
+  ProviderListCommandsInput,
+  ProviderListCommandsResult,
+  ProviderListModelsInput,
+  ProviderListModelsResult,
+  ProviderListPluginsInput,
+  ProviderListPluginsResult,
+  ProviderReadPluginInput,
+  ProviderReadPluginResult,
+  ProviderListSkillsResult,
+  ProviderListSkillsInput,
+  ProviderStartReviewInput,
   ProviderUserInputAnswers,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
+  ProviderSteerTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
+  ServerVoiceTranscriptionInput,
+  ServerVoiceTranscriptionResult,
   ThreadId,
   ProviderTurnStartResult,
   TurnId,
@@ -30,6 +48,13 @@ export interface ProviderAdapterCapabilities {
    * Declares whether changing the model on an existing session is supported.
    */
   readonly sessionModelSwitch: ProviderSessionModelSwitchMode;
+  readonly supportsSkillMentions?: boolean;
+  readonly supportsSkillDiscovery?: boolean;
+  readonly supportsNativeSlashCommandDiscovery?: boolean;
+  readonly supportsPluginMentions?: boolean;
+  readonly supportsPluginDiscovery?: boolean;
+  readonly supportsRuntimeModelList?: boolean;
+  readonly supportsTurnSteering?: boolean;
 }
 
 export interface ProviderThreadTurnSnapshot {
@@ -40,6 +65,7 @@ export interface ProviderThreadTurnSnapshot {
 export interface ProviderThreadSnapshot {
   readonly threadId: ThreadId;
   readonly turns: ReadonlyArray<ProviderThreadTurnSnapshot>;
+  readonly cwd?: string | null;
 }
 
 export interface ProviderAdapterShape<TError> {
@@ -64,9 +90,27 @@ export interface ProviderAdapterShape<TError> {
   ) => Effect.Effect<ProviderTurnStartResult, TError>;
 
   /**
+   * Redirect an active turn toward a new prompt when the provider supports it.
+   */
+  readonly steerTurn?: (
+    input: ProviderSteerTurnInput,
+  ) => Effect.Effect<ProviderTurnStartResult, TError>;
+
+  /**
+   * Start a native provider review run when the adapter supports it.
+   */
+  readonly startReview?: (
+    input: ProviderStartReviewInput,
+  ) => Effect.Effect<ProviderTurnStartResult, TError>;
+
+  /**
    * Interrupt an active turn.
    */
-  readonly interruptTurn: (threadId: ThreadId, turnId?: TurnId) => Effect.Effect<void, TError>;
+  readonly interruptTurn: (
+    threadId: ThreadId,
+    turnId?: TurnId,
+    providerThreadId?: string,
+  ) => Effect.Effect<void, TError>;
 
   /**
    * Respond to an interactive approval request.
@@ -107,12 +151,35 @@ export interface ProviderAdapterShape<TError> {
   readonly readThread: (threadId: ThreadId) => Effect.Effect<ProviderThreadSnapshot, TError>;
 
   /**
+   * Read a persisted provider thread snapshot without requiring a local app thread binding.
+   */
+  readonly readExternalThread?: (input: {
+    readonly externalThreadId: string;
+    readonly cwd?: string;
+  }) => Effect.Effect<ProviderThreadSnapshot, TError>;
+
+  /**
    * Roll back a provider thread by N turns.
    */
   readonly rollbackThread: (
     threadId: ThreadId,
     numTurns: number,
   ) => Effect.Effect<ProviderThreadSnapshot, TError>;
+
+  /**
+   * Trigger provider-native context compaction for a thread when supported.
+   */
+  readonly compactThread?: (threadId: ThreadId) => Effect.Effect<void, TError>;
+
+  /**
+   * Fork one provider thread into another persisted thread cursor when supported.
+   *
+   * Adapters may omit this to signal that the caller should fall back to
+   * conversation-history-only forking.
+   */
+  readonly forkThread?: (
+    input: ProviderForkThreadInput,
+  ) => Effect.Effect<ProviderForkThreadResult, TError>;
 
   /**
    * Stop all sessions owned by this adapter.
@@ -123,4 +190,56 @@ export interface ProviderAdapterShape<TError> {
    * Canonical runtime event stream emitted by this adapter.
    */
   readonly streamEvents: Stream.Stream<ProviderRuntimeEvent>;
+
+  /**
+   * Read provider-specific composer capabilities.
+   */
+  readonly getComposerCapabilities?: () => Effect.Effect<ProviderComposerCapabilities, TError>;
+
+  /**
+   * List skills available for a given cwd.
+   */
+  readonly listSkills?: (
+    input: ProviderListSkillsInput,
+  ) => Effect.Effect<ProviderListSkillsResult, TError>;
+
+  /**
+   * List provider-native slash commands available for a given cwd.
+   */
+  readonly listCommands?: (
+    input: ProviderListCommandsInput,
+  ) => Effect.Effect<ProviderListCommandsResult, TError>;
+
+  /**
+   * List plugins available for the current provider/runtime.
+   */
+  readonly listPlugins?: (
+    input: ProviderListPluginsInput,
+  ) => Effect.Effect<ProviderListPluginsResult, TError>;
+
+  /**
+   * Read one plugin in detail from a marketplace entry.
+   */
+  readonly readPlugin?: (
+    input: ProviderReadPluginInput,
+  ) => Effect.Effect<ProviderReadPluginResult, TError>;
+
+  /**
+   * List models directly from the provider runtime when supported.
+   */
+  readonly listModels?: (
+    input: ProviderListModelsInput,
+  ) => Effect.Effect<ProviderListModelsResult, TError>;
+
+  /**
+   * List agents/subagents directly from the provider runtime when supported.
+   */
+  readonly listAgents?: () => Effect.Effect<ProviderListAgentsResult, TError>;
+
+  /**
+   * Transcribe one captured voice clip into plain text when supported.
+   */
+  readonly transcribeVoice?: (
+    input: ServerVoiceTranscriptionInput,
+  ) => Effect.Effect<ServerVoiceTranscriptionResult, TError>;
 }

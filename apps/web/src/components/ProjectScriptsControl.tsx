@@ -13,8 +13,16 @@ import {
   PlusIcon,
   SettingsIcon,
   WrenchIcon,
-} from "lucide-react";
-import React, { type FormEvent, type KeyboardEvent, useCallback, useMemo, useState } from "react";
+} from "~/lib/icons";
+import React, {
+  type FormEvent,
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import {
   keybindingValueForCommand,
@@ -90,6 +98,8 @@ interface ProjectScriptsControlProps {
   scripts: ProjectScript[];
   keybindings: ResolvedKeybindingsConfig;
   preferredScriptId?: string | null;
+  showInlineControls?: boolean;
+  openAddActionNonce?: number;
   onRunScript: (script: ProjectScript) => void;
   onAddScript: (input: NewProjectScriptInput) => Promise<void> | void;
   onUpdateScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void> | void;
@@ -151,6 +161,8 @@ export default function ProjectScriptsControl({
   scripts,
   keybindings,
   preferredScriptId = null,
+  showInlineControls = true,
+  openAddActionNonce,
   onRunScript,
   onAddScript,
   onUpdateScript,
@@ -167,6 +179,7 @@ export default function ProjectScriptsControl({
   const [keybinding, setKeybinding] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const lastOpenAddActionNonceRef = useRef<number | undefined>(openAddActionNonce);
 
   const primaryScript = useMemo(() => {
     if (preferredScriptId) {
@@ -259,6 +272,19 @@ export default function ProjectScriptsControl({
     setDialogOpen(true);
   };
 
+  // Allow parent surfaces like the compact header menu to open the shared
+  // "Add action" dialog without duplicating script form logic.
+  useEffect(() => {
+    if (openAddActionNonce === undefined) return;
+    if (lastOpenAddActionNonceRef.current === undefined) {
+      lastOpenAddActionNonceRef.current = openAddActionNonce;
+      return;
+    }
+    if (openAddActionNonce === lastOpenAddActionNonceRef.current) return;
+    lastOpenAddActionNonceRef.current = openAddActionNonce;
+    openAddDialog();
+  }, [openAddActionNonce]);
+
   const confirmDeleteScript = useCallback(() => {
     if (!editingScriptId) return;
     setDeleteConfirmOpen(false);
@@ -268,7 +294,7 @@ export default function ProjectScriptsControl({
 
   return (
     <>
-      {primaryScript ? (
+      {showInlineControls && primaryScript ? (
         <Group aria-label="Project scripts">
           <Button
             size="xs"
@@ -277,11 +303,11 @@ export default function ProjectScriptsControl({
             title={`Run ${primaryScript.name}`}
           >
             <ScriptIcon icon={primaryScript.icon} />
-            <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+            <span className="sr-only @sm/header-actions:not-sr-only @sm/header-actions:ml-0.5">
               {primaryScript.name}
             </span>
           </Button>
-          <GroupSeparator className="hidden @3xl/header-actions:block" />
+          <GroupSeparator className="hidden @sm/header-actions:block" />
           <Menu highlightItemOnHover={false}>
             <MenuTrigger
               render={<Button size="icon-xs" variant="outline" aria-label="Script actions" />}
@@ -339,14 +365,7 @@ export default function ProjectScriptsControl({
             </MenuPopup>
           </Menu>
         </Group>
-      ) : (
-        <Button size="xs" variant="outline" onClick={openAddDialog} title="Add action">
-          <PlusIcon className="size-3.5" />
-          <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-            Add action
-          </span>
-        </Button>
-      )}
+      ) : null}
 
       <Dialog
         onOpenChange={(open) => {

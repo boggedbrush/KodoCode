@@ -7,6 +7,49 @@ export const MAX_WHEN_EXPRESSION_DEPTH = 64;
 export const MAX_SCRIPT_ID_LENGTH = 24;
 export const MAX_KEYBINDINGS_COUNT = 256;
 
+const STATIC_KEYBINDING_COMMANDS = [
+  "sidebar.toggle",
+  "sidebar.search",
+  "sidebar.addProject",
+  "sidebar.importThread",
+  "terminal.toggle",
+  "terminal.split",
+  "terminal.splitRight",
+  "terminal.splitLeft",
+  "terminal.splitDown",
+  "terminal.splitUp",
+  "terminal.new",
+  "terminal.close",
+  "terminal.workspace.newFullWidth",
+  "terminal.workspace.closeActive",
+  "terminal.workspace.terminal",
+  "terminal.workspace.chat",
+  "browser.toggle",
+  "diff.toggle",
+  "chat.new",
+  "chat.newLatestProject",
+  "chat.newChat",
+  "chat.newLocal",
+  "chat.newTerminal",
+  "chat.newClaude",
+  "chat.newCodex",
+  "chat.newGemini",
+  "chat.split",
+  "thread.jump.1",
+  "thread.jump.2",
+  "thread.jump.3",
+  "thread.jump.4",
+  "thread.jump.5",
+  "thread.jump.6",
+  "thread.jump.7",
+  "thread.jump.8",
+  "thread.jump.9",
+  "chat.visible.next",
+  "chat.visible.previous",
+  "editor.openFavorite",
+] as const;
+
+// Shared list of numbered thread-jump commands used by the web shortcut UI.
 export const THREAD_JUMP_KEYBINDING_COMMANDS = [
   "thread.jump.1",
   "thread.jump.2",
@@ -19,31 +62,6 @@ export const THREAD_JUMP_KEYBINDING_COMMANDS = [
   "thread.jump.9",
 ] as const;
 export type ThreadJumpKeybindingCommand = (typeof THREAD_JUMP_KEYBINDING_COMMANDS)[number];
-
-export const THREAD_KEYBINDING_COMMANDS = [
-  "thread.previous",
-  "thread.next",
-  ...THREAD_JUMP_KEYBINDING_COMMANDS,
-] as const;
-export type ThreadKeybindingCommand = (typeof THREAD_KEYBINDING_COMMANDS)[number];
-
-const STATIC_KEYBINDING_COMMANDS = [
-  "terminal.toggle",
-  "terminal.split",
-  "terminal.new",
-  "terminal.close",
-  "diff.toggle",
-  "sidebar.toggle",
-  "chat.new",
-  "chat.newLocal",
-  "composer.mode.ask",
-  "composer.mode.plan",
-  "composer.mode.code",
-  "composer.mode.review",
-  "app.reload",
-  "editor.openFavorite",
-  ...THREAD_KEYBINDING_COMMANDS,
-] as const;
 
 export const SCRIPT_RUN_COMMAND_PATTERN = Schema.TemplateLiteral([
   Schema.Literal("script."),
@@ -91,27 +109,24 @@ export const KeybindingShortcut = Schema.Struct({
 });
 export type KeybindingShortcut = typeof KeybindingShortcut.Type;
 
-const KeybindingWhenNodeRef = Schema.suspend(
-  (): Schema.Codec<KeybindingWhenNode> => KeybindingWhenNode,
-);
-export const KeybindingWhenNode = Schema.Union([
+export const KeybindingWhenNode: Schema.Schema<KeybindingWhenNode> = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("identifier"),
     name: Schema.NonEmptyString,
   }),
   Schema.Struct({
     type: Schema.Literal("not"),
-    node: KeybindingWhenNodeRef,
+    node: Schema.suspend((): Schema.Schema<KeybindingWhenNode> => KeybindingWhenNode),
   }),
   Schema.Struct({
     type: Schema.Literal("and"),
-    left: KeybindingWhenNodeRef,
-    right: KeybindingWhenNodeRef,
+    left: Schema.suspend((): Schema.Schema<KeybindingWhenNode> => KeybindingWhenNode),
+    right: Schema.suspend((): Schema.Schema<KeybindingWhenNode> => KeybindingWhenNode),
   }),
   Schema.Struct({
     type: Schema.Literal("or"),
-    left: KeybindingWhenNodeRef,
-    right: KeybindingWhenNodeRef,
+    left: Schema.suspend((): Schema.Schema<KeybindingWhenNode> => KeybindingWhenNode),
+    right: Schema.suspend((): Schema.Schema<KeybindingWhenNode> => KeybindingWhenNode),
   }),
 ]);
 export type KeybindingWhenNode =
@@ -131,16 +146,3 @@ export const ResolvedKeybindingsConfig = Schema.Array(ResolvedKeybindingRule).ch
   Schema.isMaxLength(MAX_KEYBINDINGS_COUNT),
 );
 export type ResolvedKeybindingsConfig = typeof ResolvedKeybindingsConfig.Type;
-
-export class KeybindingsConfigError extends Schema.TaggedErrorClass<KeybindingsConfigError>()(
-  "KeybindingsConfigParseError",
-  {
-    configPath: Schema.String,
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
-  },
-) {
-  override get message(): string {
-    return `Unable to parse keybindings config at ${this.configPath}: ${this.detail}`;
-  }
-}

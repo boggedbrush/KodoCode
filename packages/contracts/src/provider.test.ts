@@ -21,6 +21,12 @@ describe("ProviderSessionStartInput", () => {
         },
       },
       runtimeMode: "full-access",
+      providerOptions: {
+        codex: {
+          binaryPath: "/usr/local/bin/codex",
+          homePath: "/tmp/.codex",
+        },
+      },
     });
     expect(parsed.runtimeMode).toBe("full-access");
     expect(parsed.modelSelection?.provider).toBe("codex");
@@ -30,6 +36,8 @@ describe("ProviderSessionStartInput", () => {
     }
     expect(parsed.modelSelection.options?.reasoningEffort).toBe("high");
     expect(parsed.modelSelection.options?.fastMode).toBe(true);
+    expect(parsed.providerOptions?.codex?.binaryPath).toBe("/usr/local/bin/codex");
+    expect(parsed.providerOptions?.codex?.homePath).toBe("/tmp/.codex");
   });
 
   it("rejects payloads without runtime mode", () => {
@@ -55,6 +63,13 @@ describe("ProviderSessionStartInput", () => {
           fastMode: true,
         },
       },
+      providerOptions: {
+        claudeAgent: {
+          binaryPath: "/usr/local/bin/claude",
+          permissionMode: "plan",
+          maxThinkingTokens: 12_000,
+        },
+      },
       runtimeMode: "full-access",
     });
     expect(parsed.provider).toBe("claudeAgent");
@@ -66,6 +81,9 @@ describe("ProviderSessionStartInput", () => {
     expect(parsed.modelSelection.options?.thinking).toBe(true);
     expect(parsed.modelSelection.options?.effort).toBe("max");
     expect(parsed.modelSelection.options?.fastMode).toBe(true);
+    expect(parsed.providerOptions?.claudeAgent?.binaryPath).toBe("/usr/local/bin/claude");
+    expect(parsed.providerOptions?.claudeAgent?.permissionMode).toBe("plan");
+    expect(parsed.providerOptions?.claudeAgent?.maxThinkingTokens).toBe(12_000);
     expect(parsed.runtimeMode).toBe("full-access");
   });
 });
@@ -112,5 +130,24 @@ describe("ProviderSendTurnInput", () => {
     }
     expect(parsed.modelSelection.options?.effort).toBe("ultrathink");
     expect(parsed.modelSelection.options?.fastMode).toBe(true);
+  });
+
+  it("accepts claude modelSelection including xhigh for Opus 4.7", () => {
+    const parsed = decodeProviderSendTurnInput({
+      threadId: "thread-1",
+      modelSelection: {
+        provider: "claudeAgent",
+        model: "claude-opus-4-7",
+        options: {
+          effort: "xhigh",
+        },
+      },
+    });
+
+    expect(parsed.modelSelection?.provider).toBe("claudeAgent");
+    if (parsed.modelSelection?.provider !== "claudeAgent") {
+      throw new Error("Expected claude modelSelection");
+    }
+    expect(parsed.modelSelection.options?.effort).toBe("xhigh");
   });
 });

@@ -1,77 +1,18 @@
-import { EditorId, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
+// FILE: OpenInPicker.tsx
+// Purpose: Render the chat header "Open In" controls for the currently active project.
+// Layer: Chat header action
+// Depends on: shared editor metadata, native shell bridge, and preferred editor state.
+
+import { type EditorId, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { memo, useCallback, useEffect, useMemo } from "react";
 import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from "../../keybindings";
 import { usePreferredEditor } from "../../editorPreferences";
-import { ChevronDownIcon, FolderClosedIcon } from "lucide-react";
+import { resolveAvailableEditorOptions } from "../../editorMetadata";
+import { ChevronDownIcon } from "~/lib/icons";
 import { Button } from "../ui/button";
 import { Group, GroupSeparator } from "../ui/group";
 import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "../ui/menu";
-import {
-  AntigravityIcon,
-  CursorIcon,
-  Icon,
-  TraeIcon,
-  IntelliJIdeaIcon,
-  VisualStudioCode,
-  Zed,
-} from "../Icons";
-import { isMacPlatform, isWindowsPlatform } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
-
-const resolveOptions = (platform: string, availableEditors: ReadonlyArray<EditorId>) => {
-  const baseOptions: ReadonlyArray<{ label: string; Icon: Icon; value: EditorId }> = [
-    {
-      label: "Cursor",
-      Icon: CursorIcon,
-      value: "cursor",
-    },
-    {
-      label: "Trae",
-      Icon: TraeIcon,
-      value: "trae",
-    },
-    {
-      label: "VS Code",
-      Icon: VisualStudioCode,
-      value: "vscode",
-    },
-    {
-      label: "VS Code Insiders",
-      Icon: VisualStudioCode,
-      value: "vscode-insiders",
-    },
-    {
-      label: "VSCodium",
-      Icon: VisualStudioCode,
-      value: "vscodium",
-    },
-    {
-      label: "Zed",
-      Icon: Zed,
-      value: "zed",
-    },
-    {
-      label: "Antigravity",
-      Icon: AntigravityIcon,
-      value: "antigravity",
-    },
-    {
-      label: "IntelliJ IDEA",
-      Icon: IntelliJIdeaIcon,
-      value: "idea",
-    },
-    {
-      label: isMacPlatform(platform)
-        ? "Finder"
-        : isWindowsPlatform(platform)
-          ? "Explorer"
-          : "Files",
-      Icon: FolderClosedIcon,
-      value: "file-manager",
-    },
-  ];
-  return baseOptions.filter((option) => availableEditors.includes(option.value));
-};
 
 export const OpenInPicker = memo(function OpenInPicker({
   keybindings,
@@ -84,7 +25,7 @@ export const OpenInPicker = memo(function OpenInPicker({
 }) {
   const [preferredEditor, setPreferredEditor] = usePreferredEditor(availableEditors);
   const options = useMemo(
-    () => resolveOptions(navigator.platform, availableEditors),
+    () => resolveAvailableEditorOptions(navigator.platform, availableEditors),
     [availableEditors],
   );
   const primaryOption = options.find(({ value }) => value === preferredEditor) ?? null;
@@ -129,11 +70,11 @@ export const OpenInPicker = memo(function OpenInPicker({
         onClick={() => openInEditor(preferredEditor)}
       >
         {primaryOption?.Icon && <primaryOption.Icon aria-hidden="true" className="size-3.5" />}
-        <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+        <span className="sr-only @sm/header-actions:not-sr-only @sm/header-actions:ml-0.5">
           Open
         </span>
       </Button>
-      <GroupSeparator className="hidden @3xl/header-actions:block" />
+      <GroupSeparator className="hidden @sm/header-actions:block" />
       <Menu>
         <MenuTrigger render={<Button aria-label="Copy options" size="icon-xs" variant="outline" />}>
           <ChevronDownIcon aria-hidden="true" className="size-4" />

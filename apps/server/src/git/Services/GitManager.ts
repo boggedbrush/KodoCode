@@ -8,20 +8,24 @@
  */
 import {
   GitActionProgressEvent,
+  GitHandoffThreadInput,
+  GitHandoffThreadResult,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
   GitPullRequestRefInput,
+  GitReadWorkingTreeDiffInput,
+  GitReadWorkingTreeDiffResult,
   GitResolvePullRequestResult,
   GitRunStackedActionInput,
   GitRunStackedActionResult,
-  GitStatusLocalResult,
-  GitStatusRemoteResult,
   GitStatusInput,
   GitStatusResult,
+  GitSummarizeDiffInput,
+  GitSummarizeDiffResult,
 } from "@t3tools/contracts";
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
-import type { GitManagerServiceError } from "@t3tools/contracts";
+import type { GitManagerServiceError } from "../Errors.ts";
 
 export interface GitActionProgressReporter {
   readonly publish: (event: GitActionProgressEvent) => Effect.Effect<void, never>;
@@ -44,33 +48,18 @@ export interface GitManagerShape {
   ) => Effect.Effect<GitStatusResult, GitManagerServiceError>;
 
   /**
-   * Read local repository status without remote hosting enrichment.
+   * Read a unified patch for the current repository working tree.
    */
-  readonly localStatus: (
-    input: GitStatusInput,
-  ) => Effect.Effect<GitStatusLocalResult, GitManagerServiceError>;
+  readonly readWorkingTreeDiff: (
+    input: GitReadWorkingTreeDiffInput,
+  ) => Effect.Effect<GitReadWorkingTreeDiffResult, GitManagerServiceError>;
 
   /**
-   * Read remote tracking / PR status for a repository.
+   * Generate a read-only markdown summary for an existing diff patch.
    */
-  readonly remoteStatus: (
-    input: GitStatusInput,
-  ) => Effect.Effect<GitStatusRemoteResult | null, GitManagerServiceError>;
-
-  /**
-   * Clear any cached local status snapshot for a repository.
-   */
-  readonly invalidateLocalStatus: (cwd: string) => Effect.Effect<void, never>;
-
-  /**
-   * Clear any cached remote status snapshot for a repository.
-   */
-  readonly invalidateRemoteStatus: (cwd: string) => Effect.Effect<void, never>;
-
-  /**
-   * Clear any cached status snapshot for a repository so the next read is fresh.
-   */
-  readonly invalidateStatus: (cwd: string) => Effect.Effect<void, never>;
+  readonly summarizeDiff: (
+    input: GitSummarizeDiffInput,
+  ) => Effect.Effect<GitSummarizeDiffResult, GitManagerServiceError>;
 
   /**
    * Resolve a pull request by URL/number against the current repository.
@@ -87,6 +76,13 @@ export interface GitManagerShape {
   ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>;
 
   /**
+   * Move a thread between Local and Worktree while preserving recoverable Git state.
+   */
+  readonly handoffThread: (
+    input: GitHandoffThreadInput,
+  ) => Effect.Effect<GitHandoffThreadResult, GitManagerServiceError>;
+
+  /**
    * Run a Git action (`commit`, `push`, `create_pr`, `commit_push`, `commit_push_pr`).
    * When `featureBranch` is set, creates and checks out a feature branch first.
    */
@@ -100,5 +96,5 @@ export interface GitManagerShape {
  * GitManager - Service tag for stacked Git workflow orchestration.
  */
 export class GitManager extends ServiceMap.Service<GitManager, GitManagerShape>()(
-  "t3/git/Services/GitManager",
+  "kodo/git/Services/GitManager",
 ) {}

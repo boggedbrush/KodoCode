@@ -5,20 +5,19 @@ import {
   getCanRetryAfterDownloadFailure,
   getAutoUpdateDisabledReason,
   nextStatusAfterDownloadFailure,
+  shouldCheckForUpdatesOnForeground,
   shouldBroadcastDownloadProgress,
 } from "./updateState";
 
 const baseState: DesktopUpdateState = {
   enabled: true,
   status: "idle",
-  deliveryMethod: "native",
   currentVersion: "1.0.0",
   hostArch: "x64",
   appArch: "x64",
   runningUnderArm64Translation: false,
   availableVersion: null,
   downloadedVersion: null,
-  releasePageUrl: null,
   downloadPercent: null,
   checkedAt: null,
   message: null,
@@ -78,7 +77,7 @@ describe("getAutoUpdateDisabledReason", () => {
     ).toContain("packaged production builds");
   });
 
-  it("reports packaged local builds without an update feed as disabled", () => {
+  it("reports packaged builds without an update feed as disabled", () => {
     expect(
       getAutoUpdateDisabledReason({
         isDevelopment: false,
@@ -91,7 +90,7 @@ describe("getAutoUpdateDisabledReason", () => {
     ).toContain("no update feed");
   });
 
-  it("allows packaged builds with an update feed", () => {
+  it("allows packaged builds when an update feed is configured", () => {
     expect(
       getAutoUpdateDisabledReason({
         isDevelopment: false,
@@ -172,5 +171,67 @@ describe("getCanRetryAfterDownloadFailure", () => {
         availableVersion: null,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldCheckForUpdatesOnForeground", () => {
+  it("returns false when the app was not backgrounded first", () => {
+    expect(
+      shouldCheckForUpdatesOnForeground({
+        checkedAt: "2026-03-04T00:00:00.000Z",
+        backgroundedAtMs: null,
+        foregroundedAtMs: Date.parse("2026-03-04T00:05:00.000Z"),
+        minBackgroundDurationMs: 30_000,
+        minIntervalMs: 5 * 60 * 1000,
+      }),
+    ).toBe(false);
+  });
+
+  it("returns true after foregrounding when no previous check exists", () => {
+    expect(
+      shouldCheckForUpdatesOnForeground({
+        checkedAt: null,
+        backgroundedAtMs: Date.parse("2026-03-04T00:00:00.000Z"),
+        foregroundedAtMs: Date.parse("2026-03-04T00:05:00.000Z"),
+        minBackgroundDurationMs: 30_000,
+        minIntervalMs: 5 * 60 * 1000,
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false when the app was backgrounded too briefly", () => {
+    expect(
+      shouldCheckForUpdatesOnForeground({
+        checkedAt: "2026-03-04T00:00:00.000Z",
+        backgroundedAtMs: Date.parse("2026-03-04T00:04:45.000Z"),
+        foregroundedAtMs: Date.parse("2026-03-04T00:05:00.000Z"),
+        minBackgroundDurationMs: 30_000,
+        minIntervalMs: 5 * 60 * 1000,
+      }),
+    ).toBe(false);
+  });
+
+  it("returns false when the last check is still within the foreground cooldown", () => {
+    expect(
+      shouldCheckForUpdatesOnForeground({
+        checkedAt: "2026-03-04T00:03:00.000Z",
+        backgroundedAtMs: Date.parse("2026-03-04T00:04:00.000Z"),
+        foregroundedAtMs: Date.parse("2026-03-04T00:06:00.000Z"),
+        minBackgroundDurationMs: 30_000,
+        minIntervalMs: 5 * 60 * 1000,
+      }),
+    ).toBe(false);
+  });
+
+  it("returns true when the last check is older than the foreground cooldown", () => {
+    expect(
+      shouldCheckForUpdatesOnForeground({
+        checkedAt: "2026-03-04T00:00:00.000Z",
+        backgroundedAtMs: Date.parse("2026-03-04T00:04:00.000Z"),
+        foregroundedAtMs: Date.parse("2026-03-04T00:06:00.000Z"),
+        minBackgroundDurationMs: 30_000,
+        minIntervalMs: 5 * 60 * 1000,
+      }),
+    ).toBe(true);
   });
 });

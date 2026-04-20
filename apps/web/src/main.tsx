@@ -3,37 +3,16 @@ import ReactDOM from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { createHashHistory, createBrowserHistory } from "@tanstack/react-router";
 
-import "@fontsource/dm-sans/400.css";
-import "@fontsource/dm-sans/500.css";
-import "@fontsource/dm-sans/700.css";
-import "@fontsource/noto-sans/400.css";
-import "@fontsource/noto-sans/500.css";
-import "@fontsource/noto-sans/700.css";
-import "@fontsource/noto-sans-arabic/400.css";
-import "@fontsource/noto-sans-arabic/500.css";
-import "@fontsource/noto-sans-arabic/700.css";
-import "@fontsource/noto-sans-devanagari/400.css";
-import "@fontsource/noto-sans-devanagari/500.css";
-import "@fontsource/noto-sans-devanagari/700.css";
-import "@fontsource/noto-sans-hebrew/400.css";
-import "@fontsource/noto-sans-hebrew/500.css";
-import "@fontsource/noto-sans-hebrew/700.css";
-import "@fontsource/noto-sans-thai/400.css";
-import "@fontsource/noto-sans-thai/500.css";
-import "@fontsource/noto-sans-thai/700.css";
+import "@fontsource-variable/jetbrains-mono";
 import "@xterm/xterm/css/xterm.css";
 import "./index.css";
 
 import { isElectron } from "./env";
-import { initializeThemeFromStorage } from "./hooks/useTheme";
 import { getRouter } from "./router";
 import { APP_DISPLAY_NAME } from "./branding";
 
 // Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory();
-
-// Apply the persisted theme before the first React render so system-dark boots correctly.
-initializeThemeFromStorage();
 
 const router = getRouter(history);
 

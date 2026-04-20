@@ -1,4 +1,5 @@
 import {
+  ApprovalRequestId,
   CheckpointRef,
   CommandId,
   CorrelationId,
@@ -25,7 +26,6 @@ import {
   ORCHESTRATION_PROJECTOR_NAMES,
   OrchestrationProjectionPipelineLive,
 } from "./ProjectionPipeline.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipeline } from "../Services/ProjectionPipeline.ts";
 import { ServerConfig } from "../../config.ts";
@@ -229,6 +229,148 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-base-")))(
             name: "example.png",
             mimeType: "image/png",
             sizeBytes: 5,
+          },
+        ]);
+      }),
+    );
+  },
+);
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-approvals-")))(
+  "OrchestrationProjectionPipeline",
+  (it) => {
+    it.effect("refreshes stored thread approval summary after approval-response-requested", () =>
+      Effect.gen(function* () {
+        const eventStore = yield* OrchestrationEventStore;
+        const projectionPipeline = yield* OrchestrationProjectionPipeline;
+        const sql = yield* SqlClient.SqlClient;
+        const projectId = ProjectId.makeUnsafe("project-approvals");
+        const threadId = ThreadId.makeUnsafe("thread-approvals");
+        const requestId = ApprovalRequestId.makeUnsafe("approval-request-1");
+        const createdAt = "2026-03-05T09:00:00.000Z";
+        const requestedAt = "2026-03-05T09:00:01.000Z";
+        const resolvedAt = "2026-03-05T09:00:02.000Z";
+
+        yield* eventStore.append({
+          type: "project.created",
+          eventId: EventId.makeUnsafe("evt-approvals-project"),
+          aggregateKind: "project",
+          aggregateId: projectId,
+          occurredAt: createdAt,
+          commandId: CommandId.makeUnsafe("cmd-approvals-project"),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe("cmd-approvals-project"),
+          metadata: {},
+          payload: {
+            projectId,
+            title: "Approvals Project",
+            workspaceRoot: "/tmp/project-approvals",
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt,
+            updatedAt: createdAt,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.created",
+          eventId: EventId.makeUnsafe("evt-approvals-thread"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: createdAt,
+          commandId: CommandId.makeUnsafe("cmd-approvals-thread"),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe("cmd-approvals-thread"),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId,
+            title: "Approvals Thread",
+            modelSelection: {
+              provider: "codex",
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "full-access",
+            branch: null,
+            worktreePath: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        });
+
+        yield* eventStore.append({
+          type: "thread.activity-appended",
+          eventId: EventId.makeUnsafe("evt-approvals-requested"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: requestedAt,
+          commandId: CommandId.makeUnsafe("cmd-approvals-requested"),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe("cmd-approvals-requested"),
+          metadata: {},
+          payload: {
+            threadId,
+            activity: {
+              id: EventId.makeUnsafe("activity-approval-requested"),
+              tone: "approval",
+              kind: "approval.requested",
+              summary: "Command approval requested",
+              payload: {
+                requestId,
+                requestKind: "command",
+              },
+              turnId: null,
+              createdAt: requestedAt,
+            },
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const rowsAfterRequest = yield* sql<{
+          readonly pendingApprovalCount: number;
+        }>`
+        SELECT
+          pending_approval_count AS "pendingApprovalCount"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+      `;
+        assert.deepEqual(rowsAfterRequest, [{ pendingApprovalCount: 1 }]);
+
+        yield* eventStore.append({
+          type: "thread.approval-response-requested",
+          eventId: EventId.makeUnsafe("evt-approvals-resolved"),
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: resolvedAt,
+          commandId: CommandId.makeUnsafe("cmd-approvals-resolved"),
+          causationEventId: null,
+          correlationId: CorrelationId.makeUnsafe("cmd-approvals-resolved"),
+          metadata: {},
+          payload: {
+            threadId,
+            requestId,
+            decision: "accept",
+            createdAt: resolvedAt,
+          },
+        });
+
+        yield* projectionPipeline.bootstrap;
+
+        const rowsAfterResolve = yield* sql<{
+          readonly pendingApprovalCount: number;
+          readonly updatedAt: string;
+        }>`
+        SELECT
+          pending_approval_count AS "pendingApprovalCount",
+          updated_at AS "updatedAt"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+      `;
+        assert.deepEqual(rowsAfterResolve, [
+          {
+            pendingApprovalCount: 0,
+            updatedAt: resolvedAt,
           },
         ]);
       }),
@@ -1499,7 +1641,6 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       `;
         assert.deepEqual(turnRows, [
           { turnId: "turn-completed", checkpointTurnCount: 1, status: "completed" },
-          { turnId: "turn-interrupted", checkpointTurnCount: null, status: "interrupted" },
         ]);
       }),
   );
@@ -1842,7 +1983,6 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
 
 const engineLayer = it.layer(
   OrchestrationEngineLive.pipe(
-    Layer.provide(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
@@ -1892,6 +2032,35 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         WHERE projector = 'projection.projects'
       `;
       assert.deepEqual(projectorRows, [{ lastAppliedSequence: 1 }]);
+
+      const snapshotProjectorRows = yield* sql<{
+        readonly projector: string;
+        readonly lastAppliedSequence: number;
+      }>`
+        SELECT
+          projector,
+          last_applied_sequence AS "lastAppliedSequence"
+        FROM projection_state
+        WHERE projector IN (
+          'projection.projects',
+          'projection.threads',
+          'projection.thread-messages',
+          'projection.thread-proposed-plans',
+          'projection.thread-activities',
+          'projection.thread-sessions',
+          'projection.checkpoints'
+        )
+        ORDER BY projector ASC
+      `;
+      assert.deepEqual(snapshotProjectorRows, [
+        { projector: "projection.checkpoints", lastAppliedSequence: 1 },
+        { projector: "projection.projects", lastAppliedSequence: 1 },
+        { projector: "projection.thread-activities", lastAppliedSequence: 1 },
+        { projector: "projection.thread-messages", lastAppliedSequence: 1 },
+        { projector: "projection.thread-proposed-plans", lastAppliedSequence: 1 },
+        { projector: "projection.thread-sessions", lastAppliedSequence: 1 },
+        { projector: "projection.threads", lastAppliedSequence: 1 },
+      ]);
     }),
   );
 
@@ -1950,6 +2119,198 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
           defaultModelSelection: '{"provider":"codex","model":"gpt-5"}',
         },
       ]);
+    }),
+  );
+});
+
+it.layer(
+  Layer.fresh(makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-turn-finish-")),
+)("OrchestrationProjectionPipeline", (it) => {
+  it.effect("keeps assistant message completions from settling a running turn early", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.makeUnsafe("thread-turn-finish");
+      const turnId = TurnId.makeUnsafe("turn-turn-finish");
+      const startedAt = "2026-02-27T09:00:00.000Z";
+      const assistantCompletedAt = "2026-02-27T09:00:02.000Z";
+      const turnFinishedAt = "2026-02-27T09:00:05.000Z";
+
+      yield* eventStore.append({
+        type: "thread.turn-start-requested",
+        eventId: EventId.makeUnsafe("evt-turn-finish-1"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: startedAt,
+        commandId: CommandId.makeUnsafe("cmd-turn-finish-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-turn-finish-1"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: MessageId.makeUnsafe("message-turn-finish"),
+          runtimeMode: "full-access",
+          createdAt: startedAt,
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.makeUnsafe("evt-turn-finish-2"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: startedAt,
+        commandId: CommandId.makeUnsafe("cmd-turn-finish-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-turn-finish-2"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "running",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: turnId,
+            lastError: null,
+            updatedAt: startedAt,
+          },
+        },
+      });
+
+      yield* eventStore.append({
+        type: "thread.message-sent",
+        eventId: EventId.makeUnsafe("evt-turn-finish-3"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: assistantCompletedAt,
+        commandId: CommandId.makeUnsafe("cmd-turn-finish-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-turn-finish-3"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId: MessageId.makeUnsafe("assistant-turn-finish"),
+          role: "assistant",
+          text: "",
+          turnId,
+          streaming: false,
+          createdAt: assistantCompletedAt,
+          updatedAt: assistantCompletedAt,
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      const rowsAfterAssistantComplete = yield* sql<{
+        readonly state: string;
+        readonly completedAt: string | null;
+        readonly assistantMessageId: string | null;
+      }>`
+        SELECT
+          state,
+          completed_at AS "completedAt",
+          assistant_message_id AS "assistantMessageId"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(rowsAfterAssistantComplete, [
+        {
+          state: "running",
+          completedAt: null,
+          assistantMessageId: "assistant-turn-finish",
+        },
+      ]);
+
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.makeUnsafe("evt-turn-finish-4"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: turnFinishedAt,
+        commandId: CommandId.makeUnsafe("cmd-turn-finish-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-turn-finish-4"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "ready",
+            providerName: "codex",
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: turnFinishedAt,
+          },
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      const rowsAfterSessionReady = yield* sql<{
+        readonly state: string;
+        readonly completedAt: string | null;
+      }>`
+        SELECT
+          state,
+          completed_at AS "completedAt"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id = ${turnId}
+      `;
+      assert.deepEqual(rowsAfterSessionReady, [
+        {
+          state: "completed",
+          completedAt: turnFinishedAt,
+        },
+      ]);
+    }),
+  );
+
+  it.effect("projects steer dispatch mode onto the triggering user message", () =>
+    Effect.gen(function* () {
+      const eventStore = yield* OrchestrationEventStore;
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const sql = yield* SqlClient.SqlClient;
+      const threadId = ThreadId.makeUnsafe("thread-steer-chip");
+      const messageId = MessageId.makeUnsafe("message-steer-chip");
+      const createdAt = "2026-02-27T11:00:00.000Z";
+
+      yield* eventStore.append({
+        type: "thread.message-sent",
+        eventId: EventId.makeUnsafe("evt-steer-chip-1"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: createdAt,
+        commandId: CommandId.makeUnsafe("cmd-steer-chip-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-steer-chip-1"),
+        metadata: {},
+        payload: {
+          threadId,
+          messageId,
+          role: "user",
+          text: "hello",
+          dispatchMode: "steer",
+          turnId: null,
+          streaming: false,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      });
+
+      yield* projectionPipeline.bootstrap;
+
+      const rows = yield* sql<{ readonly dispatchMode: string | null }>`
+        SELECT dispatch_mode AS "dispatchMode"
+        FROM projection_thread_messages
+        WHERE message_id = ${messageId}
+      `;
+
+      assert.deepEqual(rows, [{ dispatchMode: "steer" }]);
     }),
   );
 });

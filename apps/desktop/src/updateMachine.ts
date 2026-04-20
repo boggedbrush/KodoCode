@@ -9,14 +9,12 @@ export function createInitialDesktopUpdateState(
   return {
     enabled: false,
     status: "disabled",
-    deliveryMethod: "native",
     currentVersion,
     hostArch: runtimeInfo.hostArch,
     appArch: runtimeInfo.appArch,
     runningUnderArm64Translation: runtimeInfo.runningUnderArm64Translation,
     availableVersion: null,
     downloadedVersion: null,
-    releasePageUrl: null,
     downloadPercent: null,
     checkedAt: null,
     message: null,
@@ -97,7 +95,7 @@ export function reduceDesktopUpdateStateOnDownloadStart(
   return {
     ...state,
     status: "downloading",
-    downloadPercent: 0,
+    downloadPercent: null,
     message: null,
     errorContext: null,
     canRetry: false,

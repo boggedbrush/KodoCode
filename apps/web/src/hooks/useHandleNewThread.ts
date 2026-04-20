@@ -1,171 +1,298 @@
-import { DEFAULT_RUNTIME_MODE, type ProjectId, ThreadId } from "@t3tools/contracts";
-import { useNavigate, useParams } from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { type ProjectId, ThreadId, DEFAULT_MODEL_BY_PROVIDER } from "@t3tools/contracts";
+import { useNavigate } from "@tanstack/react-router";
+import { useCallback } from "react";
+import { useAppSettings } from "../appSettings";
 import {
   type ComposerThreadDraftState,
-  type DraftThreadEnvMode,
   type DraftThreadState,
   useComposerDraftStore,
 } from "../composerDraftStore";
-import { resolveModeModelSelection } from "../modelSelection";
-import { newThreadId } from "../lib/utils";
-import { orderItemsByPreferredIds } from "../components/Sidebar.logic";
-import { useSettings } from "../hooks/useSettings";
+import {
+  buildDraftThreadContextPatch,
+  createActiveDraftThreadSnapshot,
+  createActiveThreadSnapshot,
+  createFreshDraftThreadSeed,
+  resolveTerminalThreadCreationState,
+  resolveThreadBootstrapPlan,
+  type NewThreadOptions,
+} from "../lib/threadBootstrap";
+import { newCommandId, newThreadId } from "../lib/utils";
+import { readNativeApi } from "../nativeApi";
+import { useFocusedChatContext } from "../focusedChatContext";
 import { useStore } from "../store";
-import { useThreadById } from "../storeSelectors";
-import { useServerConfig } from "../rpc/serverState";
-import { useUiStateStore } from "../uiStateStore";
-
-function isComposerDraftEmpty(draft: ComposerThreadDraftState | null | undefined): boolean {
-  return (
-    !draft ||
-    (draft.prompt.length === 0 &&
-      draft.images.length === 0 &&
-      draft.persistedAttachments.length === 0 &&
-      draft.terminalContexts.length === 0)
-  );
-}
+import { useTemporaryThreadStore } from "../temporaryThreadStore";
+import { useTerminalStateStore } from "../terminalStateStore";
+import { getThreadFromState } from "../threadDerivation";
 
 export function useHandleNewThread() {
-  const projectIds = useStore(useShallow((store) => store.projects.map((project) => project.id)));
-  const projectOrder = useUiStateStore((store) => store.projectOrder);
+  const projects = useStore((store) => store.projects);
+  const { settings } = useAppSettings();
   const navigate = useNavigate();
-  const routeThreadId = useParams({
-    strict: false,
-    select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
-  });
-  const activeThread = useThreadById(routeThreadId);
-  const activeDraftThread = useComposerDraftStore((store) =>
-    routeThreadId ? (store.draftThreadsByThreadId[routeThreadId] ?? null) : null,
-  );
-  const settings = useSettings();
-  const serverConfig = useServerConfig();
-  const serverProviders = serverConfig?.providers;
-  const orderedProjects = useMemo(() => {
-    return orderItemsByPreferredIds({
-      items: projectIds,
-      preferredIds: projectOrder,
-      getId: (projectId) => projectId,
-    });
-  }, [projectIds, projectOrder]);
+  const { activeDraftThread, activeProjectId, activeThread, focusedThreadId, routeThreadId } =
+    useFocusedChatContext();
+  const openChatThreadPage = useTerminalStateStore((store) => store.openChatThreadPage);
+  const openTerminalThreadPage = useTerminalStateStore((store) => store.openTerminalThreadPage);
+  const markTemporaryThread = useTemporaryThreadStore((store) => store.markTemporaryThread);
 
   const handleNewThread = useCallback(
-    (
-      projectId: ProjectId,
-      options?: {
-        branch?: string | null;
-        worktreePath?: string | null;
-        envMode?: DraftThreadEnvMode;
-      },
-    ): Promise<void> => {
+    (projectId: ProjectId, options?: NewThreadOptions): Promise<void> => {
+      const entryPoint = options?.entryPoint ?? "chat";
+      const wantsTemporaryThread = options?.temporary === true;
+      const applyProviderOverride = (threadId: ThreadId) => {
+        if (!options?.provider) {
+          return;
+        }
+        setModelSelection(threadId, {
+          provider: options.provider,
+          model: DEFAULT_MODEL_BY_PROVIDER[options.provider],
+        });
+      };
+      const restoreComposerDraft = (
+        threadId: ThreadId,
+        draftState: ComposerThreadDraftState | null,
+      ) => {
+        if (!draftState) {
+          return;
+        }
+        useComposerDraftStore.setState((state) => {
+          if (state.draftsByThreadId[threadId] === draftState) {
+            return state;
+          }
+          return {
+            draftsByThreadId: {
+              ...state.draftsByThreadId,
+              [threadId]: draftState,
+            },
+          };
+        });
+      };
+      const activateThreadEntryPoint = (threadId: ThreadId) => {
+        if (entryPoint === "terminal") {
+          openTerminalThreadPage(threadId, { terminalOnly: true });
+          return;
+        }
+        openChatThreadPage(threadId);
+      };
       const {
         clearProjectDraftThreadId,
         getDraftThread,
         getDraftThreadByProjectId,
         applyStickyState,
         setDraftThreadContext,
-        setModelSelection,
         setProjectDraftThreadId,
+        setModelSelection,
       } = useComposerDraftStore.getState();
-      const hasBranchOption = options?.branch !== undefined;
-      const hasWorktreePathOption = options?.worktreePath !== undefined;
-      const hasEnvModeOption = options?.envMode !== undefined;
-      const applyCodeDefaultsToBlankDraft = (threadId: ThreadId, draftThread: DraftThreadState) => {
-        if (draftThread.interactionMode !== "default") {
-          return;
-        }
-        const existingComposerDraft = useComposerDraftStore.getState().draftsByThreadId[threadId];
-        if (!isComposerDraftEmpty(existingComposerDraft)) {
-          return;
-        }
-        setDraftThreadContext(threadId, { interactionMode: "code" });
-        if (!serverProviders?.length) {
-          return;
-        }
-        const modeSelection = resolveModeModelSelection("code", settings, serverProviders);
-        if (modeSelection) {
-          setModelSelection(threadId, modeSelection);
-        }
-      };
-      const storedDraftThread = getDraftThreadByProjectId(projectId);
-      const latestActiveDraftThread: DraftThreadState | null = routeThreadId
-        ? getDraftThread(routeThreadId)
+      const shouldForceFreshThread = options?.fresh === true;
+
+      if (shouldForceFreshThread) {
+        clearProjectDraftThreadId(projectId, entryPoint);
+      }
+
+      const storedDraftThreadCandidate = getDraftThreadByProjectId(projectId, entryPoint);
+      const latestActiveDraftThreadCandidate: DraftThreadState | null = focusedThreadId
+        ? getDraftThread(focusedThreadId)
         : null;
-      if (storedDraftThread) {
+      const storedDraftThread =
+        !shouldForceFreshThread &&
+        !wantsTemporaryThread &&
+        storedDraftThreadCandidate?.isTemporary !== true
+          ? storedDraftThreadCandidate
+          : null;
+      const latestActiveDraftThread: DraftThreadState | null =
+        !shouldForceFreshThread &&
+        !wantsTemporaryThread &&
+        latestActiveDraftThreadCandidate?.isTemporary !== true
+          ? latestActiveDraftThreadCandidate
+          : null;
+      const bootstrapPlan = resolveThreadBootstrapPlan({
+        storedDraftThread,
+        latestActiveDraftThread,
+        entryPoint,
+        projectId,
+        routeThreadId: focusedThreadId,
+      });
+      // Read from the store at call time so post-sync sidebar flows can use the latest project defaults.
+      const projectDefaultModelSelection =
+        useStore.getState().projects.find((project) => project.id === projectId)
+          ?.defaultModelSelection ?? null;
+      const activeThreadSnapshot = createActiveThreadSnapshot(activeThread, projectId);
+      const activeDraftThreadSnapshot = createActiveDraftThreadSnapshot(
+        activeDraftThread,
+        projectId,
+      );
+      const resolveCreationState = (
+        targetThreadId: ThreadId,
+        draftThread: DraftThreadState | null,
+        creationOptions: NewThreadOptions | undefined,
+      ) =>
+        resolveTerminalThreadCreationState({
+          activeDraftThread: activeDraftThreadSnapshot,
+          activeThread: activeThreadSnapshot,
+          defaultProvider: options?.provider ?? settings.defaultProvider,
+          draftComposerState:
+            useComposerDraftStore.getState().draftsByThreadId[targetThreadId] ?? null,
+          draftThread,
+          options: creationOptions,
+          projectDefaultModelSelection,
+          projectId,
+        });
+      // Terminal-first threads need a real orchestration thread immediately so
+      // the sidebar can render them as durable rows instead of draft-only routes.
+      const createTerminalThread = async (
+        threadId: ThreadId,
+        creationState: ReturnType<typeof resolveCreationState>,
+      ): Promise<void> => {
+        if (getThreadFromState(useStore.getState(), threadId)) {
+          return;
+        }
+        const api = readNativeApi();
+        if (!api) {
+          return;
+        }
+        await api.orchestration.dispatchCommand({
+          type: "thread.create",
+          commandId: newCommandId(),
+          threadId,
+          projectId,
+          title: "New terminal",
+          modelSelection: creationState.modelSelection,
+          runtimeMode: creationState.runtimeMode,
+          interactionMode: creationState.interactionMode,
+          envMode: creationState.envMode,
+          branch: creationState.branch,
+          worktreePath: creationState.worktreePath,
+          lastKnownPr: creationState.lastKnownPr,
+          createdAt: new Date().toISOString(),
+        });
+      };
+      if (bootstrapPlan.kind === "stored") {
         return (async () => {
-          applyCodeDefaultsToBlankDraft(storedDraftThread.threadId, storedDraftThread);
-          if (hasBranchOption || hasWorktreePathOption || hasEnvModeOption) {
-            setDraftThreadContext(storedDraftThread.threadId, {
-              ...(hasBranchOption ? { branch: options?.branch ?? null } : {}),
-              ...(hasWorktreePathOption ? { worktreePath: options?.worktreePath ?? null } : {}),
-              ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
-            });
+          if (wantsTemporaryThread) {
+            markTemporaryThread(bootstrapPlan.threadId);
           }
-          setProjectDraftThreadId(projectId, storedDraftThread.threadId);
-          if (routeThreadId === storedDraftThread.threadId) {
+          const preservedComposerDraft =
+            useComposerDraftStore.getState().draftsByThreadId[bootstrapPlan.threadId] ?? null;
+          let resolvedStoredDraftThread: DraftThreadState | null = bootstrapPlan.draftThread;
+          const shouldPreserveStoredTerminalContext =
+            entryPoint === "terminal" && bootstrapPlan.draftThread.entryPoint === "terminal";
+          const draftContextPatch = shouldPreserveStoredTerminalContext
+            ? null
+            : buildDraftThreadContextPatch(entryPoint, options);
+          const creationOptions = shouldPreserveStoredTerminalContext ? undefined : options;
+          if (draftContextPatch) {
+            setDraftThreadContext(bootstrapPlan.threadId, draftContextPatch);
+            resolvedStoredDraftThread = getDraftThread(bootstrapPlan.threadId);
+          }
+          applyProviderOverride(bootstrapPlan.threadId);
+          setProjectDraftThreadId(projectId, bootstrapPlan.threadId, { entryPoint });
+          restoreComposerDraft(bootstrapPlan.threadId, preservedComposerDraft);
+          activateThreadEntryPoint(bootstrapPlan.threadId);
+          if (focusedThreadId === bootstrapPlan.threadId) {
+            if (entryPoint === "terminal") {
+              await createTerminalThread(
+                bootstrapPlan.threadId,
+                resolveCreationState(
+                  bootstrapPlan.threadId,
+                  resolvedStoredDraftThread,
+                  creationOptions,
+                ),
+              );
+            }
             return;
           }
           await navigate({
             to: "/$threadId",
-            params: { threadId: storedDraftThread.threadId },
+            params: { threadId: bootstrapPlan.threadId },
           });
+          restoreComposerDraft(bootstrapPlan.threadId, preservedComposerDraft);
+          if (entryPoint === "terminal") {
+            await createTerminalThread(
+              bootstrapPlan.threadId,
+              resolveCreationState(
+                bootstrapPlan.threadId,
+                resolvedStoredDraftThread,
+                creationOptions,
+              ),
+            );
+          }
         })();
       }
 
-      clearProjectDraftThreadId(projectId);
+      clearProjectDraftThreadId(projectId, entryPoint);
 
-      if (
-        latestActiveDraftThread &&
-        routeThreadId &&
-        latestActiveDraftThread.projectId === projectId
-      ) {
-        applyCodeDefaultsToBlankDraft(routeThreadId, latestActiveDraftThread);
-        if (hasBranchOption || hasWorktreePathOption || hasEnvModeOption) {
-          setDraftThreadContext(routeThreadId, {
-            ...(hasBranchOption ? { branch: options?.branch ?? null } : {}),
-            ...(hasWorktreePathOption ? { worktreePath: options?.worktreePath ?? null } : {}),
-            ...(hasEnvModeOption ? { envMode: options?.envMode } : {}),
-          });
+      if (bootstrapPlan.kind === "route") {
+        if (wantsTemporaryThread) {
+          markTemporaryThread(bootstrapPlan.threadId);
         }
-        setProjectDraftThreadId(projectId, routeThreadId);
+        const preservedComposerDraft =
+          useComposerDraftStore.getState().draftsByThreadId[bootstrapPlan.threadId] ?? null;
+        let resolvedActiveDraftThread: DraftThreadState | null = bootstrapPlan.draftThread;
+        const draftContextPatch = buildDraftThreadContextPatch(entryPoint, options);
+        if (draftContextPatch) {
+          setDraftThreadContext(bootstrapPlan.threadId, draftContextPatch);
+          resolvedActiveDraftThread = getDraftThread(bootstrapPlan.threadId);
+        }
+        applyProviderOverride(bootstrapPlan.threadId);
+        setProjectDraftThreadId(projectId, bootstrapPlan.threadId, { entryPoint });
+        restoreComposerDraft(bootstrapPlan.threadId, preservedComposerDraft);
+        activateThreadEntryPoint(bootstrapPlan.threadId);
+        if (entryPoint === "terminal") {
+          return createTerminalThread(
+            bootstrapPlan.threadId,
+            resolveCreationState(bootstrapPlan.threadId, resolvedActiveDraftThread, options),
+          );
+        }
         return Promise.resolve();
       }
 
       const threadId = newThreadId();
+      if (wantsTemporaryThread) {
+        markTemporaryThread(threadId);
+      }
       const createdAt = new Date().toISOString();
       return (async () => {
         setProjectDraftThreadId(projectId, threadId, {
-          createdAt,
-          branch: options?.branch ?? null,
-          worktreePath: options?.worktreePath ?? null,
-          envMode: options?.envMode ?? "local",
-          runtimeMode: DEFAULT_RUNTIME_MODE,
-          interactionMode: "code",
+          ...createFreshDraftThreadSeed({
+            createdAt,
+            entryPoint,
+            options,
+          }),
         });
+        activateThreadEntryPoint(threadId);
         applyStickyState(threadId);
-        if (serverProviders?.length) {
-          // Fresh chats should reflect mode-driven defaults, not sticky model memory, so the picker stays accurate.
-          const modeSelection = resolveModeModelSelection("code", settings, serverProviders);
-          if (modeSelection) {
-            setModelSelection(threadId, modeSelection);
-          }
-        }
+        applyProviderOverride(threadId);
 
         await navigate({
           to: "/$threadId",
           params: { threadId },
         });
+        if (entryPoint === "terminal") {
+          await createTerminalThread(
+            threadId,
+            resolveCreationState(threadId, getDraftThread(threadId), options),
+          );
+        }
       })();
     },
-    [navigate, routeThreadId, serverProviders, settings],
+    [
+      activeDraftThread,
+      activeThread,
+      navigate,
+      openChatThreadPage,
+      openTerminalThreadPage,
+      focusedThreadId,
+      markTemporaryThread,
+      settings.defaultProvider,
+    ],
   );
 
   return {
     activeDraftThread,
+    activeProjectId,
     activeThread,
-    defaultProjectId: orderedProjects[0] ?? null,
+    activeContextThreadId: focusedThreadId,
     handleNewThread,
+    projects,
     routeThreadId,
   };
 }

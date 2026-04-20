@@ -132,28 +132,8 @@ describe("updateMachine", () => {
 
     expect(available.status).toBe("available");
     expect(downloading.status).toBe("downloading");
-    expect(downloading.downloadPercent).toBe(0);
+    expect(downloading.downloadPercent).toBeNull();
     expect(progress.downloadPercent).toBe(55.5);
     expect(progress.errorContext).toBeNull();
-  });
-
-  it("keeps external delivery metadata while transitions happen", () => {
-    const initial = {
-      ...createInitialDesktopUpdateState("1.0.0", runtimeInfo),
-      enabled: true,
-      deliveryMethod: "external" as const,
-      releasePageUrl: "https://github.com/boggedbrush/KodoCode/releases/latest",
-      status: "checking" as const,
-    };
-    const available = reduceDesktopUpdateStateOnUpdateAvailable(
-      initial,
-      "1.1.0",
-      "2026-03-04T00:00:00.000Z",
-    );
-
-    expect(available.deliveryMethod).toBe("external");
-    expect(available.releasePageUrl).toBe(
-      "https://github.com/boggedbrush/KodoCode/releases/latest",
-    );
   });
 });

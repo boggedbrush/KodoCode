@@ -13,8 +13,8 @@ import {
   ProjectCreatedPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
-  ThreadActivityAppendedPayload,
   ThreadArchivedPayload,
+  ThreadActivityAppendedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
@@ -35,6 +35,15 @@ function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error"
   if (status === "error") return "error" as const;
   if (status === "missing") return "interrupted" as const;
   return "completed" as const;
+}
+
+function isTerminalLatestTurn(
+  latestTurn: OrchestrationThread["latestTurn"] | null | undefined,
+): boolean {
+  if (!latestTurn?.completedAt) {
+    return false;
+  }
+  return latestTurn.state === "completed" || latestTurn.state === "error";
 }
 
 function updateThread(
@@ -181,6 +190,7 @@ export function projectEvent(
           const existing = nextBase.projects.find((entry) => entry.id === payload.projectId);
           const nextProject = {
             id: payload.projectId,
+            kind: payload.kind,
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
             defaultModelSelection: payload.defaultModelSelection,
@@ -209,6 +219,7 @@ export function projectEvent(
             project.id === payload.projectId
               ? {
                   ...project,
+                  ...(payload.kind !== undefined ? { kind: payload.kind } : {}),
                   ...(payload.title !== undefined ? { title: payload.title } : {}),
                   ...(payload.workspaceRoot !== undefined
                     ? { workspaceRoot: payload.workspaceRoot }
@@ -254,17 +265,27 @@ export function projectEvent(
             id: payload.threadId,
             projectId: payload.projectId,
             title: payload.title,
-            // Preserve the user's canonical selection; runtime code resolves provider defaults.
             modelSelection: payload.modelSelection,
             runtimeMode: payload.runtimeMode,
             interactionMode: payload.interactionMode,
+            envMode: payload.envMode,
             branch: payload.branch,
             worktreePath: payload.worktreePath,
+            associatedWorktreePath: payload.associatedWorktreePath,
+            associatedWorktreeBranch: payload.associatedWorktreeBranch,
+            associatedWorktreeRef: payload.associatedWorktreeRef,
+            parentThreadId: payload.parentThreadId,
+            subagentAgentId: payload.subagentAgentId,
+            subagentNickname: payload.subagentNickname,
+            subagentRole: payload.subagentRole,
+            forkSourceThreadId: payload.forkSourceThreadId,
+            lastKnownPr: payload.lastKnownPr ?? null,
             latestTurn: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             archivedAt: null,
             deletedAt: null,
+            handoff: payload.handoff,
             messages: [],
             activities: [],
             checkpoints: [],
@@ -295,24 +316,30 @@ export function projectEvent(
 
     case "thread.archived":
       return decodeForEvent(ThreadArchivedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
-            archivedAt: payload.archivedAt,
-            updatedAt: payload.updatedAt,
-          }),
-        })),
+        Effect.map((payload) => {
+          const archivedAt = payload.archivedAt ?? payload.updatedAt ?? event.occurredAt;
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              archivedAt,
+              updatedAt: payload.updatedAt ?? archivedAt,
+            }),
+          };
+        }),
       );
 
     case "thread.unarchived":
       return decodeForEvent(ThreadUnarchivedPayload, event.payload, event.type, "payload").pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: updateThread(nextBase.threads, payload.threadId, {
-            archivedAt: null,
-            updatedAt: payload.updatedAt,
-          }),
-        })),
+        Effect.map((payload) => {
+          const updatedAt = payload.updatedAt ?? payload.unarchivedAt ?? event.occurredAt;
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              archivedAt: null,
+              updatedAt,
+            }),
+          };
+        }),
       );
 
     case "thread.meta-updated":
@@ -324,8 +351,30 @@ export function projectEvent(
             ...(payload.modelSelection !== undefined
               ? { modelSelection: payload.modelSelection }
               : {}),
+            ...(payload.envMode !== undefined ? { envMode: payload.envMode } : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+            ...(payload.associatedWorktreePath !== undefined
+              ? { associatedWorktreePath: payload.associatedWorktreePath }
+              : {}),
+            ...(payload.associatedWorktreeBranch !== undefined
+              ? { associatedWorktreeBranch: payload.associatedWorktreeBranch }
+              : {}),
+            ...(payload.associatedWorktreeRef !== undefined
+              ? { associatedWorktreeRef: payload.associatedWorktreeRef }
+              : {}),
+            ...(payload.parentThreadId !== undefined
+              ? { parentThreadId: payload.parentThreadId }
+              : {}),
+            ...(payload.subagentAgentId !== undefined
+              ? { subagentAgentId: payload.subagentAgentId }
+              : {}),
+            ...(payload.subagentNickname !== undefined
+              ? { subagentNickname: payload.subagentNickname }
+              : {}),
+            ...(payload.subagentRole !== undefined ? { subagentRole: payload.subagentRole } : {}),
+            ...(payload.lastKnownPr !== undefined ? { lastKnownPr: payload.lastKnownPr } : {}),
+            ...(payload.handoff !== undefined ? { handoff: payload.handoff } : {}),
             updatedAt: payload.updatedAt,
           }),
         })),
@@ -378,8 +427,11 @@ export function projectEvent(
             role: payload.role,
             text: payload.text,
             ...(payload.attachments !== undefined ? { attachments: payload.attachments } : {}),
+            ...(payload.skills !== undefined ? { skills: payload.skills } : {}),
+            ...(payload.mentions !== undefined ? { mentions: payload.mentions } : {}),
             turnId: payload.turnId,
             streaming: payload.streaming,
+            source: payload.source,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
           },
@@ -399,11 +451,14 @@ export function projectEvent(
                         ? message.text
                         : entry.text,
                     streaming: message.streaming,
+                    source: message.source,
                     updatedAt: message.updatedAt,
                     turnId: message.turnId,
                     ...(message.attachments !== undefined
                       ? { attachments: message.attachments }
                       : {}),
+                    ...(message.skills !== undefined ? { skills: message.skills } : {}),
+                    ...(message.mentions !== undefined ? { mentions: message.mentions } : {}),
                   }
                 : entry,
             )
@@ -445,23 +500,26 @@ export function projectEvent(
             session,
             latestTurn:
               session.status === "running" && session.activeTurnId !== null
-                ? {
-                    turnId: session.activeTurnId,
-                    state: "running",
-                    requestedAt:
-                      thread.latestTurn?.turnId === session.activeTurnId
-                        ? thread.latestTurn.requestedAt
-                        : session.updatedAt,
-                    startedAt:
-                      thread.latestTurn?.turnId === session.activeTurnId
-                        ? (thread.latestTurn.startedAt ?? session.updatedAt)
-                        : session.updatedAt,
-                    completedAt: null,
-                    assistantMessageId:
-                      thread.latestTurn?.turnId === session.activeTurnId
-                        ? thread.latestTurn.assistantMessageId
-                        : null,
-                  }
+                ? thread.latestTurn?.turnId === session.activeTurnId &&
+                  isTerminalLatestTurn(thread.latestTurn)
+                  ? thread.latestTurn
+                  : {
+                      turnId: session.activeTurnId,
+                      state: "running",
+                      requestedAt:
+                        thread.latestTurn?.turnId === session.activeTurnId
+                          ? thread.latestTurn.requestedAt
+                          : session.updatedAt,
+                      startedAt:
+                        thread.latestTurn?.turnId === session.activeTurnId
+                          ? (thread.latestTurn.startedAt ?? session.updatedAt)
+                          : session.updatedAt,
+                      completedAt: null,
+                      assistantMessageId:
+                        thread.latestTurn?.turnId === session.activeTurnId
+                          ? thread.latestTurn.assistantMessageId
+                          : null,
+                    }
                 : thread.latestTurn,
             updatedAt: event.occurredAt,
           }),

@@ -1,29 +1,32 @@
 "use client";
 
 import { Toast } from "@base-ui/react/toast";
-import { useEffect, type CSSProperties } from "react";
-import { useParams } from "@tanstack/react-router";
+import { useEffect, useMemo, type CSSProperties } from "react";
+import { useParams, useSearch } from "@tanstack/react-router";
 import { ThreadId } from "@t3tools/contracts";
 import {
-  CheckIcon,
   CircleAlertIcon,
   CircleCheckIcon,
-  CopyIcon,
   InfoIcon,
   LoaderCircleIcon,
   TriangleAlertIcon,
-} from "lucide-react";
+} from "~/lib/icons";
 
 import { cn } from "~/lib/utils";
 import { buttonVariants } from "~/components/ui/button";
-import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { buildVisibleToastLayout, shouldHideCollapsedToastContent } from "./toast.logic";
+import { parseDiffRouteSearch } from "../../diffRouteSearch";
+import { selectSplitView, useSplitViewStore } from "../../splitViewStore";
+import {
+  resolveVisibleToastThreadIds,
+  shouldRenderToastForVisibleThreads,
+} from "./toastRouteVisibility";
 
-export type ThreadToastData = {
+type ThreadToastData = {
+  allowCrossThreadVisibility?: boolean;
   threadId?: ThreadId | null;
   tooltipStyle?: boolean;
   dismissAfterVisibleMs?: number;
-  hideCopyButton?: boolean;
 };
 
 const toastManager = Toast.createToastManager<ThreadToastData>();
@@ -39,25 +42,6 @@ const TOAST_ICONS = {
   warning: TriangleAlertIcon,
 } as const;
 
-function CopyErrorButton({ text }: { text: string }) {
-  const { copyToClipboard, isCopied } = useCopyToClipboard();
-
-  return (
-    <button
-      className="shrink-0 cursor-pointer rounded-md p-1 text-muted-foreground opacity-60 transition-opacity hover:opacity-100"
-      onClick={() => copyToClipboard(text)}
-      title="Copy error"
-      type="button"
-    >
-      {isCopied ? (
-        <CheckIcon className="size-3.5 text-success" />
-      ) : (
-        <CopyIcon className="size-3.5" />
-      )}
-    </button>
-  );
-}
-
 type ToastPosition =
   | "top-left"
   | "top-center"
@@ -72,19 +56,30 @@ interface ToastProviderProps extends Toast.Provider.Props {
 
 function shouldRenderForActiveThread(
   data: ThreadToastData | undefined,
-  activeThreadId: ThreadId | null,
+  visibleThreadIds: ReadonlySet<ThreadId>,
 ): boolean {
-  const toastThreadId = data?.threadId;
-  if (!toastThreadId) return true;
-  return toastThreadId === activeThreadId;
+  return shouldRenderToastForVisibleThreads({
+    allowCrossThreadVisibility: data?.allowCrossThreadVisibility,
+    toastThreadId: data?.threadId,
+    visibleThreadIds,
+  });
 }
 
-function useActiveThreadIdFromRoute(): ThreadId | null {
-  return useParams({
+function useVisibleThreadIdsFromRoute(): ReadonlySet<ThreadId> {
+  const activeThreadId = useParams({
     strict: false,
     select: (params) =>
       typeof params.threadId === "string" ? ThreadId.makeUnsafe(params.threadId) : null,
   });
+  const routeSearch = useSearch({
+    strict: false,
+    select: (search) => parseDiffRouteSearch(search),
+  });
+  const splitView = useSplitViewStore(selectSplitView(routeSearch.splitViewId ?? null));
+
+  return useMemo(() => {
+    return resolveVisibleToastThreadIds({ activeThreadId, splitView });
+  }, [activeThreadId, splitView]);
 }
 
 function ThreadToastVisibleAutoDismiss({
@@ -176,10 +171,10 @@ function ToastProvider({ children, position = "top-right", ...props }: ToastProv
 
 function Toasts({ position = "top-right" }: { position: ToastPosition }) {
   const { toasts } = Toast.useToastManager<ThreadToastData>();
-  const activeThreadId = useActiveThreadIdFromRoute();
+  const visibleThreadIds = useVisibleThreadIdsFromRoute();
   const isTop = position.startsWith("top");
   const visibleToasts = toasts.filter((toast) =>
-    shouldRenderForActiveThread(toast.data, activeThreadId),
+    shouldRenderForActiveThread(toast.data, visibleThreadIds),
   );
   const visibleToastLayout = buildVisibleToastLayout(visibleToasts);
 
@@ -198,11 +193,11 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
         className={cn(
           "fixed z-50 mx-auto flex w-[calc(100%-var(--toast-inset)*2)] max-w-90 [--toast-header-offset:52px] [--toast-inset:--spacing(4)] sm:[--toast-inset:--spacing(8)]",
           // Vertical positioning
-          "data-[position*=top]:top-[calc(var(--desktop-window-safe-inset)+var(--toast-inset)+var(--toast-header-offset))]",
-          "data-[position*=bottom]:bottom-[calc(var(--desktop-window-safe-inset)+var(--toast-inset))]",
+          "data-[position*=top]:top-[calc(var(--toast-inset)+var(--toast-header-offset))]",
+          "data-[position*=bottom]:bottom-(--toast-inset)",
           // Horizontal positioning
-          "data-[position*=left]:left-[calc(var(--desktop-window-safe-inset)+var(--toast-inset))]",
-          "data-[position*=right]:right-[calc(var(--desktop-window-safe-inset)+var(--toast-inset))]",
+          "data-[position*=left]:left-(--toast-inset)",
+          "data-[position*=right]:right-(--toast-inset)",
           "data-[position*=center]:-translate-x-1/2 data-[position*=center]:left-1/2",
         )}
         data-position={position}
@@ -307,17 +302,12 @@ function Toasts({ position = "top-right" }: { position: ToastPosition }) {
                   )}
 
                   <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <div className="flex items-center justify-between gap-1">
-                      <Toast.Title
-                        className="min-w-0 wrap-break-word font-medium"
-                        data-slot="toast-title"
-                      />
-                      {toast.type === "error" &&
-                        typeof toast.description === "string" &&
-                        !toast.data?.hideCopyButton && <CopyErrorButton text={toast.description} />}
-                    </div>
+                    <Toast.Title
+                      className="min-w-0 break-words font-medium"
+                      data-slot="toast-title"
+                    />
                     <Toast.Description
-                      className="min-w-0 select-text wrap-break-word text-muted-foreground"
+                      className="min-w-0 break-words text-muted-foreground"
                       data-slot="toast-description"
                     />
                   </div>
@@ -350,13 +340,13 @@ function AnchoredToastProvider({ children, ...props }: Toast.Provider.Props) {
 
 function AnchoredToasts() {
   const { toasts } = Toast.useToastManager<ThreadToastData>();
-  const activeThreadId = useActiveThreadIdFromRoute();
+  const visibleThreadIds = useVisibleThreadIdsFromRoute();
 
   return (
     <Toast.Portal data-slot="toast-portal-anchored">
       <Toast.Viewport className="outline-none" data-slot="toast-viewport-anchored">
         {toasts
-          .filter((toast) => shouldRenderForActiveThread(toast.data, activeThreadId))
+          .filter((toast) => shouldRenderForActiveThread(toast.data, visibleThreadIds))
           .map((toast) => {
             const Icon = toast.type ? TOAST_ICONS[toast.type as keyof typeof TOAST_ICONS] : null;
             const tooltipStyle = toast.data?.tooltipStyle ?? false;
@@ -401,19 +391,12 @@ function AnchoredToasts() {
                         )}
 
                         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <div className="flex items-center gap-1">
-                            <Toast.Title
-                              className="min-w-0 wrap-break-word font-medium"
-                              data-slot="toast-title"
-                            />
-                            {toast.type === "error" &&
-                              typeof toast.description === "string" &&
-                              !toast.data?.hideCopyButton && (
-                                <CopyErrorButton text={toast.description} />
-                              )}
-                          </div>
+                          <Toast.Title
+                            className="min-w-0 break-words font-medium"
+                            data-slot="toast-title"
+                          />
                           <Toast.Description
-                            className="min-w-0 select-text wrap-break-word text-muted-foreground"
+                            className="min-w-0 break-words text-muted-foreground"
                             data-slot="toast-description"
                           />
                         </div>

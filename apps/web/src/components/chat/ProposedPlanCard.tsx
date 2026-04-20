@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useState } from "react";
+import { memo, useState, useId, type CSSProperties } from "react";
 import {
   buildCollapsedProposedPlanPreviewMarkdown,
   buildProposedPlanMarkdownFilename,
@@ -8,7 +8,7 @@ import {
   stripDisplayedPlanMarkdown,
 } from "../../proposedPlan";
 import ChatMarkdown from "../ChatMarkdown";
-import { EllipsisIcon } from "lucide-react";
+import { EllipsisIcon } from "~/lib/icons";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -25,38 +25,26 @@ import {
 } from "../ui/dialog";
 import { toastManager } from "../ui/toast";
 import { readNativeApi } from "~/nativeApi";
-import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-
 export const ProposedPlanCard = memo(function ProposedPlanCard({
   planMarkdown,
   cwd,
   workspaceRoot,
-  defaultExpanded = false,
+  chatTypographyStyle,
 }: {
   planMarkdown: string;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
-  defaultExpanded?: boolean;
+  chatTypographyStyle?: CSSProperties;
 }) {
-  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [savePath, setSavePath] = useState("");
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
-  const { copyToClipboard, isCopied } = useCopyToClipboard({
-    onError: (error) => {
-      toastManager.add({
-        type: "error",
-        title: "Could not copy plan",
-        description: error instanceof Error ? error.message : "An error occurred while copying.",
-      });
-    },
-  });
   const savePathInputId = useId();
   const title = proposedPlanTitle(planMarkdown) ?? "Proposed plan";
   const lineCount = planMarkdown.split("\n").length;
   const canCollapse = planMarkdown.length > 900 || lineCount > 20;
   const displayedPlanMarkdown = stripDisplayedPlanMarkdown(planMarkdown);
-  const expanded = expandedOverride ?? defaultExpanded;
   const collapsedPreview = canCollapse
     ? buildCollapsedProposedPlanPreviewMarkdown(planMarkdown, { maxLines: 10 })
     : null;
@@ -66,14 +54,6 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const handleDownload = () => {
     downloadPlanAsTextFile(downloadFilename, saveContents);
   };
-
-  const handleCopyPlan = () => {
-    copyToClipboard(saveContents);
-  };
-
-  useEffect(() => {
-    setExpandedOverride(null);
-  }, [defaultExpanded, planMarkdown]);
 
   const openSaveDialog = () => {
     if (!workspaceRoot) {
@@ -148,9 +128,6 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
             <EllipsisIcon aria-hidden="true" className="size-4" />
           </MenuTrigger>
           <MenuPopup align="end">
-            <MenuItem onClick={handleCopyPlan}>
-              {isCopied ? "Copied!" : "Copy to clipboard"}
-            </MenuItem>
             <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
             <MenuItem onClick={openSaveDialog} disabled={!workspaceRoot || isSavingToWorkspace}>
               Save to workspace
@@ -161,9 +138,19 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       <div className="mt-4">
         <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
           {canCollapse && !expanded ? (
-            <ChatMarkdown text={collapsedPreview ?? ""} cwd={cwd} isStreaming={false} />
+            <ChatMarkdown
+              text={collapsedPreview ?? ""}
+              cwd={cwd}
+              isStreaming={false}
+              style={chatTypographyStyle}
+            />
           ) : (
-            <ChatMarkdown text={displayedPlanMarkdown} cwd={cwd} isStreaming={false} />
+            <ChatMarkdown
+              text={displayedPlanMarkdown}
+              cwd={cwd}
+              isStreaming={false}
+              style={chatTypographyStyle}
+            />
           )}
           {canCollapse && !expanded ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-linear-to-t from-card/95 via-card/80 to-transparent" />
@@ -175,9 +162,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
               size="sm"
               variant="outline"
               data-scroll-anchor-ignore
-              onClick={() =>
-                setExpandedOverride((current) => (current === null ? !defaultExpanded : !current))
-              }
+              onClick={() => setExpanded((value) => !value)}
             >
               {expanded ? "Collapse plan" : "Expand plan"}
             </Button>

@@ -9,14 +9,12 @@
 import {
   KeybindingRule,
   KeybindingsConfig,
-  KeybindingsConfigError,
   KeybindingShortcut,
   KeybindingWhenNode,
   MAX_KEYBINDINGS_COUNT,
   MAX_WHEN_EXPRESSION_DEPTH,
   ResolvedKeybindingRule,
   ResolvedKeybindingsConfig,
-  THREAD_JUMP_KEYBINDING_COMMANDS,
   type ServerConfigIssue,
 } from "@t3tools/contracts";
 import { Mutable } from "effect/Types";
@@ -25,7 +23,6 @@ import {
   Cache,
   Cause,
   Deferred,
-  Duration,
   Effect,
   Exit,
   FileSystem,
@@ -45,7 +42,19 @@ import {
 } from "effect";
 import * as Semaphore from "effect/Semaphore";
 import { ServerConfig } from "./config";
-import { fromLenientJson } from "@t3tools/shared/schemaJson";
+
+export class KeybindingsConfigError extends Schema.TaggedErrorClass<KeybindingsConfigError>()(
+  "KeybindingsConfigParseError",
+  {
+    configPath: Schema.String,
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {
+  override get message(): string {
+    return `Unable to parse keybindings config at ${this.configPath}: ${this.detail}`;
+  }
+}
 
 type WhenToken =
   | { type: "identifier"; value: string }
@@ -56,27 +65,45 @@ type WhenToken =
   | { type: "rparen" };
 
 export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
+  { key: "mod+b", command: "sidebar.toggle", when: "!terminalFocus" },
+  { key: "mod+k", command: "sidebar.search" },
+  { key: "mod+shift+o", command: "sidebar.addProject", when: "!terminalFocus" },
+  { key: "mod+i", command: "sidebar.importThread", when: "!terminalFocus" },
   { key: "mod+j", command: "terminal.toggle" },
   { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
-  { key: "mod+n", command: "terminal.new", when: "terminalFocus" },
+  { key: "mod+shift+arrowright", command: "terminal.splitRight", when: "terminalFocus" },
+  { key: "mod+shift+arrowleft", command: "terminal.splitLeft", when: "terminalFocus" },
+  { key: "mod+shift+arrowdown", command: "terminal.splitDown", when: "terminalFocus" },
+  { key: "mod+shift+arrowup", command: "terminal.splitUp", when: "terminalFocus" },
+  // Reserve Cmd/Ctrl+T for the terminal workspace's "new tab" action while focused.
+  { key: "mod+t", command: "terminal.new", when: "terminalFocus" },
   { key: "mod+w", command: "terminal.close", when: "terminalFocus" },
+  { key: "mod+shift+j", command: "terminal.workspace.newFullWidth" },
+  { key: "mod+w", command: "terminal.workspace.closeActive", when: "terminalWorkspaceOpen" },
+  { key: "mod+1", command: "terminal.workspace.terminal", when: "terminalWorkspaceOpen" },
+  { key: "mod+2", command: "terminal.workspace.chat", when: "terminalWorkspaceOpen" },
+  { key: "mod+shift+b", command: "browser.toggle", when: "!terminalFocus" },
   { key: "mod+d", command: "diff.toggle", when: "!terminalFocus" },
-  { key: "mod+b", command: "sidebar.toggle" },
   { key: "mod+n", command: "chat.new", when: "!terminalFocus" },
-  { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
-  { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
-  { key: "mod+shift+a", command: "composer.mode.ask", when: "!terminalFocus" },
-  { key: "mod+shift+p", command: "composer.mode.plan", when: "!terminalFocus" },
-  { key: "mod+shift+c", command: "composer.mode.code", when: "!terminalFocus" },
-  { key: "mod+shift+r", command: "composer.mode.review", when: "!terminalFocus" },
-  { key: "f5", command: "app.reload" },
+  { key: "mod+shift+n", command: "chat.newLatestProject", when: "!terminalFocus" },
+  { key: "mod+alt+n", command: "chat.newChat", when: "!terminalFocus" },
+  { key: "mod+shift+t", command: "chat.newTerminal", when: "!terminalFocus" },
+  { key: "mod+alt+c", command: "chat.newClaude", when: "!terminalFocus" },
+  { key: "mod+alt+x", command: "chat.newCodex", when: "!terminalFocus" },
+  { key: "mod+alt+g", command: "chat.newGemini", when: "!terminalFocus" },
+  { key: "mod+\\", command: "chat.split", when: "!terminalFocus" },
+  { key: "mod+1", command: "thread.jump.1", when: "!terminalFocus && !terminalWorkspaceOpen" },
+  { key: "mod+2", command: "thread.jump.2", when: "!terminalFocus && !terminalWorkspaceOpen" },
+  { key: "mod+3", command: "thread.jump.3", when: "!terminalFocus && !terminalWorkspaceOpen" },
+  { key: "mod+4", command: "thread.jump.4", when: "!terminalFocus && !terminalWorkspaceOpen" },
+  { key: "mod+5", command: "thread.jump.5", when: "!terminalFocus && !terminalWorkspaceOpen" },
+  { key: "mod+6", command: "thread.jump.6", when: "!terminalFocus && !terminalWorkspaceOpen" },
+  { key: "mod+7", command: "thread.jump.7", when: "!terminalFocus && !terminalWorkspaceOpen" },
+  { key: "mod+8", command: "thread.jump.8", when: "!terminalFocus && !terminalWorkspaceOpen" },
+  { key: "mod+9", command: "thread.jump.9", when: "!terminalFocus && !terminalWorkspaceOpen" },
+  { key: "mod+shift+]", command: "chat.visible.next", when: "!terminalFocus" },
+  { key: "mod+shift+[", command: "chat.visible.previous", when: "!terminalFocus" },
   { key: "mod+o", command: "editor.openFavorite" },
-  { key: "mod+shift+[", command: "thread.previous" },
-  { key: "mod+shift+]", command: "thread.next" },
-  ...THREAD_JUMP_KEYBINDING_COMMANDS.map((command, index) => ({
-    key: `mod+${index + 1}`,
-    command,
-  })),
 ];
 
 function normalizeKeyToken(token: string): string {
@@ -411,7 +438,7 @@ function encodeWhenAst(node: KeybindingWhenNode): string {
 
 const DEFAULT_RESOLVED_KEYBINDINGS = compileResolvedKeybindingsConfig(DEFAULT_KEYBINDINGS);
 
-const RawKeybindingsEntries = fromLenientJson(Schema.Array(Schema.Unknown));
+const RawKeybindingsEntries = Schema.fromJsonString(Schema.Array(Schema.Unknown));
 const KeybindingsConfigJson = Schema.fromJsonString(KeybindingsConfig);
 const PrettyJsonString = SchemaGetter.parseJson<string>().compose(
   SchemaGetter.stringifyJson({ space: 2 }),
@@ -528,7 +555,7 @@ export interface KeybindingsShape {
  * Keybindings - Service tag for keybinding configuration operations.
  */
 export class Keybindings extends ServiceMap.Service<Keybindings, KeybindingsShape>()(
-  "t3/keybindings",
+  "kodo/keybindings",
 ) {}
 
 const makeKeybindings = Effect.gen(function* () {
@@ -675,7 +702,6 @@ const makeKeybindings = Effect.gen(function* () {
       Effect.tap(() => fs.makeDirectory(path.dirname(keybindingsConfigPath), { recursive: true })),
       Effect.tap((encoded) => fs.writeFileString(tempPath, encoded)),
       Effect.flatMap(() => fs.rename(tempPath, keybindingsConfigPath)),
-      Effect.ensuring(fs.remove(tempPath, { force: true }).pipe(Effect.ignore({ log: true }))),
       Effect.mapError(
         (cause) =>
           new KeybindingsConfigError({
@@ -821,25 +847,16 @@ const makeKeybindings = Effect.gen(function* () {
 
     const revalidateAndEmitSafely = revalidateAndEmit.pipe(Effect.ignoreCause({ log: true }));
 
-    // Debounce watch events so the file is fully written before we read it.
-    // Editors emit multiple events per save (truncate, write, rename) and
-    // `fs.watch` can fire before the content has been flushed to disk.
-    const debouncedKeybindingsEvents = fs.watch(keybindingsConfigDir).pipe(
-      Stream.filter((event) => {
-        return (
-          event.path === keybindingsConfigFile ||
-          event.path === keybindingsConfigPath ||
-          path.resolve(keybindingsConfigDir, event.path) === keybindingsConfigPathResolved
-        );
-      }),
-      Stream.debounce(Duration.millis(100)),
-    );
-
-    yield* Stream.runForEach(debouncedKeybindingsEvents, () => revalidateAndEmitSafely).pipe(
-      Effect.ignoreCause({ log: true }),
-      Effect.forkIn(watcherScope),
-      Effect.asVoid,
-    );
+    yield* Stream.runForEach(fs.watch(keybindingsConfigDir), (event) => {
+      const isTargetConfigEvent =
+        event.path === keybindingsConfigFile ||
+        event.path === keybindingsConfigPath ||
+        path.resolve(keybindingsConfigDir, event.path) === keybindingsConfigPathResolved;
+      if (!isTargetConfigEvent) {
+        return Effect.void;
+      }
+      return revalidateAndEmitSafely;
+    }).pipe(Effect.ignoreCause({ log: true }), Effect.forkIn(watcherScope), Effect.asVoid);
   });
 
   const start = Effect.gen(function* () {

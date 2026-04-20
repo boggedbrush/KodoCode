@@ -1,6 +1,7 @@
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
-import { EllipsisIcon, ListTodoIcon } from "lucide-react";
+import { EllipsisIcon, ListTodoIcon } from "~/lib/icons";
+import { getInteractionModeControlValue } from "../../modeModelSelection";
 import { Button } from "../ui/button";
 import {
   Menu,
@@ -22,8 +23,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   onTogglePlanSidebar: () => void;
   onToggleRuntimeMode: () => void;
 }) {
-  const selectedInteractionMode =
-    props.interactionMode === "default" ? "code" : props.interactionMode;
+  const selectedInteractionMode = getInteractionModeControlValue(props.interactionMode);
 
   return (
     <Menu>

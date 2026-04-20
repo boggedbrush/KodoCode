@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import type { TerminalEvent, TerminalSessionSnapshot } from "@t3tools/contracts";
-import { terminalRunningSubprocessFromEvent } from "./terminalActivity";
+import { terminalActivityFromEvent } from "./terminalActivity";
 
 const snapshot: TerminalSessionSnapshot = {
   threadId: "thread-1",
   terminalId: "default",
   cwd: "/tmp",
-  worktreePath: null,
   status: "running",
   pid: 1234,
   history: "",
@@ -24,24 +23,34 @@ function eventBase() {
   };
 }
 
-describe("terminalRunningSubprocessFromEvent", () => {
-  it("returns the subprocess flag for terminal activity events", () => {
-    const active = terminalRunningSubprocessFromEvent({
+describe("terminalActivityFromEvent", () => {
+  it("returns lifecycle state for terminal activity events", () => {
+    const active = terminalActivityFromEvent({
       ...eventBase(),
       type: "activity",
+      cliKind: "codex",
+      agentState: "running",
       hasRunningSubprocess: true,
     });
-    const idle = terminalRunningSubprocessFromEvent({
+    const attention = terminalActivityFromEvent({
       ...eventBase(),
       type: "activity",
-      hasRunningSubprocess: false,
+      cliKind: "claude",
+      agentState: "attention",
+      hasRunningSubprocess: true,
     });
 
-    expect(active).toBe(true);
-    expect(idle).toBe(false);
+    expect(active).toEqual({
+      hasRunningSubprocess: true,
+      agentState: "running",
+    });
+    expect(attention).toEqual({
+      hasRunningSubprocess: true,
+      agentState: "attention",
+    });
   });
 
-  it("clears running state when a terminal session starts/restarts/exits", () => {
+  it("clears lifecycle state when a terminal session starts/restarts/exits", () => {
     const events: TerminalEvent[] = [
       { ...eventBase(), type: "started", snapshot },
       { ...eventBase(), type: "restarted", snapshot },
@@ -49,20 +58,23 @@ describe("terminalRunningSubprocessFromEvent", () => {
     ];
 
     for (const event of events) {
-      expect(terminalRunningSubprocessFromEvent(event)).toBe(false);
+      expect(terminalActivityFromEvent(event)).toEqual({
+        hasRunningSubprocess: false,
+        agentState: null,
+      });
     }
   });
 
   it("ignores non-activity terminal events", () => {
     expect(
-      terminalRunningSubprocessFromEvent({
+      terminalActivityFromEvent({
         ...eventBase(),
         type: "output",
         data: "hello",
       }),
     ).toBeNull();
     expect(
-      terminalRunningSubprocessFromEvent({
+      terminalActivityFromEvent({
         ...eventBase(),
         type: "error",
         message: "oops",

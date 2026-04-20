@@ -1,16 +1,10 @@
-import type {
-  GitBranch,
-  GitHostingProvider,
-  GitStatusLocalResult,
-  GitStatusRemoteResult,
-  GitStatusResult,
-  GitStatusStreamEvent,
-} from "@t3tools/contracts";
-
 /**
  * Sanitize an arbitrary string into a valid, lowercase git branch fragment.
  * Strips quotes, collapses separators, limits to 64 chars.
  */
+export const WORKTREE_BRANCH_PREFIX = "dpcode";
+const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(`^${WORKTREE_BRANCH_PREFIX}\\/[0-9a-f]{8}$`);
+
 export function sanitizeBranchFragment(raw: string): string {
   const normalized = raw
     .trim()
@@ -69,226 +63,29 @@ export function resolveAutoFeatureBranchName(
   return `${resolvedBase}-${suffix}`;
 }
 
-/**
- * Strip the remote prefix from a remote ref such as `origin/feature/demo`.
- */
-export function deriveLocalBranchNameFromRemoteRef(branchName: string): string {
-  const firstSeparatorIndex = branchName.indexOf("/");
-  if (firstSeparatorIndex <= 0 || firstSeparatorIndex === branchName.length - 1) {
-    return branchName;
-  }
-  return branchName.slice(firstSeparatorIndex + 1);
+export function isTemporaryWorktreeBranch(branch: string): boolean {
+  return TEMP_WORKTREE_BRANCH_PATTERN.test(branch.trim().toLowerCase());
 }
 
-/**
- * Normalize a git remote URL into a stable comparison key.
- */
-export function normalizeGitRemoteUrl(value: string): string {
-  const normalized = value
-    .trim()
-    .replace(/\/+$/g, "")
-    .replace(/\.git$/i, "");
-
-  if (/^(?:ssh|https?|git):\/\//i.test(normalized)) {
-    try {
-      const url = new URL(normalized);
-      const repositoryPath = url.pathname
-        .split("/")
-        .filter((segment) => segment.length > 0)
-        .join("/");
-      // Some valid remotes live at the host root (`https://git.example.com/repo.git`),
-      // so treat any non-empty path as canonical instead of falling back to the raw
-      // URL string and forcing downstream identity parsing to invent path segments.
-      if (url.hostname && repositoryPath.length > 0) {
-        // Only the host is case-insensitive. Preserving repository path casing avoids
-        // aliasing distinct repos on servers that treat `Team/Repo` and `team/repo`
-        // as different repository paths.
-        return `${url.hostname.toLowerCase()}/${repositoryPath}`;
-      }
-    } catch {
-      return normalized;
-    }
-  }
-
-  // SCP-style remotes are not limited to the `git@` user, especially on
-  // self-hosted deployments where a dedicated deploy account is common.
-  const scpStyleHostAndPath = /^[^@\s]+@([^:/\s]+)[:/]([^/\s]+(?:\/[^/\s]+)*)$/i.exec(normalized);
-  if (scpStyleHostAndPath?.[1] && scpStyleHostAndPath[2]) {
-    return `${scpStyleHostAndPath[1].toLowerCase()}/${scpStyleHostAndPath[2]}`;
-  }
-
-  return normalized;
+export function buildTemporaryWorktreeBranchName(): string {
+  const token = crypto.randomUUID().replace(/-/g, "").slice(0, 8).toLowerCase();
+  return `${WORKTREE_BRANCH_PREFIX}/${token}`;
 }
 
-function deriveLocalBranchNameCandidatesFromRemoteRef(
-  branchName: string,
-  remoteName?: string,
-): ReadonlyArray<string> {
-  const candidates = new Set<string>();
-  const firstSlashCandidate = deriveLocalBranchNameFromRemoteRef(branchName);
-  if (firstSlashCandidate.length > 0) {
-    candidates.add(firstSlashCandidate);
+// Preserve semantic thread branches when transient worktree placeholders briefly
+// appear in git status during rename/bootstrap transitions.
+export function resolveThreadBranchRegressionGuard(input: {
+  currentBranch: string | null;
+  nextBranch: string | null;
+}): string | null {
+  if (
+    input.currentBranch !== null &&
+    input.nextBranch !== null &&
+    !isTemporaryWorktreeBranch(input.currentBranch) &&
+    isTemporaryWorktreeBranch(input.nextBranch)
+  ) {
+    return input.currentBranch;
   }
 
-  if (remoteName) {
-    const remotePrefix = `${remoteName}/`;
-    if (branchName.startsWith(remotePrefix) && branchName.length > remotePrefix.length) {
-      candidates.add(branchName.slice(remotePrefix.length));
-    }
-  }
-
-  return [...candidates];
-}
-
-/**
- * Hide `origin/*` remote refs when a matching local branch already exists.
- */
-export function dedupeRemoteBranchesWithLocalMatches(
-  branches: ReadonlyArray<GitBranch>,
-): ReadonlyArray<GitBranch> {
-  const localBranchNames = new Set(
-    branches.filter((branch) => !branch.isRemote).map((branch) => branch.name),
-  );
-
-  return branches.filter((branch) => {
-    if (!branch.isRemote) {
-      return true;
-    }
-
-    if (branch.remoteName !== "origin") {
-      return true;
-    }
-
-    const localBranchCandidates = deriveLocalBranchNameCandidatesFromRemoteRef(
-      branch.name,
-      branch.remoteName,
-    );
-    return !localBranchCandidates.some((candidate) => localBranchNames.has(candidate));
-  });
-}
-
-function parseGitRemoteHost(remoteUrl: string): string | null {
-  const trimmed = remoteUrl.trim();
-  if (trimmed.length === 0) {
-    return null;
-  }
-
-  const scpStyleMatch = /^[^@\s]+@([^:/\s]+)[:/]/.exec(trimmed);
-  if (scpStyleMatch?.[1]) {
-    return scpStyleMatch[1].toLowerCase();
-  }
-
-  try {
-    return new URL(trimmed).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
-function toBaseUrl(host: string): string {
-  return `https://${host}`;
-}
-
-function isGitHubHost(host: string): boolean {
-  return host === "github.com" || host.includes("github");
-}
-
-function isGitLabHost(host: string): boolean {
-  return host === "gitlab.com" || host.includes("gitlab");
-}
-
-export function detectGitHostingProviderFromRemoteUrl(
-  remoteUrl: string,
-): GitHostingProvider | null {
-  const host = parseGitRemoteHost(remoteUrl);
-  if (!host) {
-    return null;
-  }
-
-  if (isGitHubHost(host)) {
-    return {
-      kind: "github",
-      name: host === "github.com" ? "GitHub" : "GitHub Self-Hosted",
-      baseUrl: toBaseUrl(host),
-    };
-  }
-
-  if (isGitLabHost(host)) {
-    return {
-      kind: "gitlab",
-      name: host === "gitlab.com" ? "GitLab" : "GitLab Self-Hosted",
-      baseUrl: toBaseUrl(host),
-    };
-  }
-
-  return {
-    kind: "unknown",
-    name: host,
-    baseUrl: toBaseUrl(host),
-  };
-}
-
-const EMPTY_GIT_STATUS_REMOTE: GitStatusRemoteResult = {
-  hasUpstream: false,
-  aheadCount: 0,
-  behindCount: 0,
-  pr: null,
-};
-
-export function mergeGitStatusParts(
-  local: GitStatusLocalResult,
-  remote: GitStatusRemoteResult | null,
-): GitStatusResult {
-  return {
-    ...local,
-    ...(remote ?? EMPTY_GIT_STATUS_REMOTE),
-  };
-}
-
-function toRemoteStatusPart(status: GitStatusResult): GitStatusRemoteResult {
-  return {
-    hasUpstream: status.hasUpstream,
-    aheadCount: status.aheadCount,
-    behindCount: status.behindCount,
-    pr: status.pr,
-  };
-}
-
-function toLocalStatusPart(status: GitStatusResult): GitStatusLocalResult {
-  return {
-    isRepo: status.isRepo,
-    ...(status.hostingProvider ? { hostingProvider: status.hostingProvider } : {}),
-    hasOriginRemote: status.hasOriginRemote,
-    isDefaultBranch: status.isDefaultBranch,
-    branch: status.branch,
-    hasWorkingTreeChanges: status.hasWorkingTreeChanges,
-    workingTree: status.workingTree,
-  };
-}
-
-export function applyGitStatusStreamEvent(
-  current: GitStatusResult | null,
-  event: GitStatusStreamEvent,
-): GitStatusResult {
-  switch (event._tag) {
-    case "snapshot":
-      return mergeGitStatusParts(event.local, event.remote);
-    case "localUpdated":
-      return mergeGitStatusParts(event.local, current ? toRemoteStatusPart(current) : null);
-    case "remoteUpdated":
-      if (current === null) {
-        return mergeGitStatusParts(
-          {
-            isRepo: true,
-            hasOriginRemote: false,
-            isDefaultBranch: false,
-            branch: null,
-            hasWorkingTreeChanges: false,
-            workingTree: { files: [], insertions: 0, deletions: 0 },
-          },
-          event.remote,
-        );
-      }
-      return mergeGitStatusParts(toLocalStatusPart(current), event.remote);
-  }
+  return input.nextBranch;
 }

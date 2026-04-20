@@ -1,17 +1,10 @@
 import { Schema } from "effect";
-import { ExecutionEnvironmentDescriptor } from "./environment";
-import {
-  IsoDateTime,
-  NonNegativeInt,
-  ProjectId,
-  ThreadId,
-  TrimmedNonEmptyString,
-} from "./baseSchemas";
+import { IsoDateTime, NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas";
 import { KeybindingRule, ResolvedKeybindingsConfig } from "./keybindings";
 import { EditorId } from "./editor";
-import { ModelCapabilities } from "./model";
 import { ProviderKind } from "./orchestration";
-import { ServerSettings } from "./settings";
+
+const SERVER_VOICE_TRANSCRIPTION_MAX_AUDIO_BASE64_CHARS = 14_000_000;
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
   kind: Schema.Literal("keybindings.malformed-config"),
@@ -32,8 +25,8 @@ export type ServerConfigIssue = typeof ServerConfigIssue.Type;
 
 const ServerConfigIssues = Schema.Array(ServerConfigIssue);
 
-export const ServerProviderState = Schema.Literals(["ready", "warning", "error", "disabled"]);
-export type ServerProviderState = typeof ServerProviderState.Type;
+export const ServerProviderStatusState = Schema.Literals(["ready", "warning", "error"]);
+export type ServerProviderStatusState = typeof ServerProviderStatusState.Type;
 
 export const ServerProviderAuthStatus = Schema.Literals([
   "authenticated",
@@ -42,59 +35,61 @@ export const ServerProviderAuthStatus = Schema.Literals([
 ]);
 export type ServerProviderAuthStatus = typeof ServerProviderAuthStatus.Type;
 
-export const ServerProviderAuth = Schema.Struct({
-  status: ServerProviderAuthStatus,
-  type: Schema.optional(TrimmedNonEmptyString),
-  label: Schema.optional(TrimmedNonEmptyString),
-});
-export type ServerProviderAuth = typeof ServerProviderAuth.Type;
-
-export const ServerProviderModel = Schema.Struct({
-  slug: TrimmedNonEmptyString,
-  name: TrimmedNonEmptyString,
-  isCustom: Schema.Boolean,
-  capabilities: Schema.NullOr(ModelCapabilities),
-});
-export type ServerProviderModel = typeof ServerProviderModel.Type;
-
-export const ServerProvider = Schema.Struct({
+export const ServerProviderStatus = Schema.Struct({
   provider: ProviderKind,
-  enabled: Schema.Boolean,
-  installed: Schema.Boolean,
-  version: Schema.NullOr(TrimmedNonEmptyString),
-  status: ServerProviderState,
-  auth: ServerProviderAuth,
+  status: ServerProviderStatusState,
+  available: Schema.Boolean,
+  authStatus: ServerProviderAuthStatus,
+  authType: Schema.optional(TrimmedNonEmptyString),
+  authLabel: Schema.optional(TrimmedNonEmptyString),
+  voiceTranscriptionAvailable: Schema.optional(Schema.Boolean),
   checkedAt: IsoDateTime,
   message: Schema.optional(TrimmedNonEmptyString),
-  models: Schema.Array(ServerProviderModel),
 });
-export type ServerProvider = typeof ServerProvider.Type;
+export type ServerProviderStatus = typeof ServerProviderStatus.Type;
 
-export const ServerProviders = Schema.Array(ServerProvider);
-export type ServerProviders = typeof ServerProviders.Type;
-
-export const ServerObservability = Schema.Struct({
-  logsDirectoryPath: TrimmedNonEmptyString,
-  localTracingEnabled: Schema.Boolean,
-  otlpTracesUrl: Schema.optional(TrimmedNonEmptyString),
-  otlpTracesEnabled: Schema.Boolean,
-  otlpMetricsUrl: Schema.optional(TrimmedNonEmptyString),
-  otlpMetricsEnabled: Schema.Boolean,
-});
-export type ServerObservability = typeof ServerObservability.Type;
+const ServerProviderStatuses = Schema.Array(ServerProviderStatus);
 
 export const ServerConfig = Schema.Struct({
-  environment: ExecutionEnvironmentDescriptor,
   cwd: TrimmedNonEmptyString,
+  homeDir: Schema.optional(TrimmedNonEmptyString),
+  worktreesDir: TrimmedNonEmptyString,
   keybindingsConfigPath: TrimmedNonEmptyString,
   keybindings: ResolvedKeybindingsConfig,
   issues: ServerConfigIssues,
-  providers: ServerProviders,
+  providers: ServerProviderStatuses,
   availableEditors: Schema.Array(EditorId),
-  observability: ServerObservability,
-  settings: ServerSettings,
 });
 export type ServerConfig = typeof ServerConfig.Type;
+
+export const ServerManagedWorktree = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  workspaceRoot: TrimmedNonEmptyString,
+});
+export type ServerManagedWorktree = typeof ServerManagedWorktree.Type;
+
+export const ServerListWorktreesResult = Schema.Struct({
+  worktrees: Schema.Array(ServerManagedWorktree),
+});
+export type ServerListWorktreesResult = typeof ServerListWorktreesResult.Type;
+
+export const ServerVoiceTranscriptionInput = Schema.Struct({
+  provider: ProviderKind,
+  cwd: TrimmedNonEmptyString,
+  threadId: Schema.optional(ThreadId),
+  mimeType: TrimmedNonEmptyString.check(Schema.isMaxLength(100)),
+  sampleRateHz: NonNegativeInt,
+  durationMs: NonNegativeInt,
+  audioBase64: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(SERVER_VOICE_TRANSCRIPTION_MAX_AUDIO_BASE64_CHARS),
+  ),
+});
+export type ServerVoiceTranscriptionInput = typeof ServerVoiceTranscriptionInput.Type;
+
+export const ServerVoiceTranscriptionResult = Schema.Struct({
+  text: TrimmedNonEmptyString,
+});
+export type ServerVoiceTranscriptionResult = typeof ServerVoiceTranscriptionResult.Type;
 
 export const ServerUpsertKeybindingInput = KeybindingRule;
 export type ServerUpsertKeybindingInput = typeof ServerUpsertKeybindingInput.Type;
@@ -107,104 +102,14 @@ export type ServerUpsertKeybindingResult = typeof ServerUpsertKeybindingResult.T
 
 export const ServerConfigUpdatedPayload = Schema.Struct({
   issues: ServerConfigIssues,
-  providers: ServerProviders,
-  settings: Schema.optional(ServerSettings),
+  providers: ServerProviderStatuses,
 });
 export type ServerConfigUpdatedPayload = typeof ServerConfigUpdatedPayload.Type;
 
-export const ServerConfigKeybindingsUpdatedPayload = Schema.Struct({
-  issues: ServerConfigIssues,
+export const ServerProviderStatusesUpdatedPayload = Schema.Struct({
+  providers: ServerProviderStatuses,
 });
-export type ServerConfigKeybindingsUpdatedPayload =
-  typeof ServerConfigKeybindingsUpdatedPayload.Type;
+export type ServerProviderStatusesUpdatedPayload = typeof ServerProviderStatusesUpdatedPayload.Type;
 
-export const ServerConfigProviderStatusesPayload = Schema.Struct({
-  providers: ServerProviders,
-});
-export type ServerConfigProviderStatusesPayload = typeof ServerConfigProviderStatusesPayload.Type;
-
-export const ServerConfigSettingsUpdatedPayload = Schema.Struct({
-  settings: ServerSettings,
-});
-export type ServerConfigSettingsUpdatedPayload = typeof ServerConfigSettingsUpdatedPayload.Type;
-
-export const ServerConfigStreamSnapshotEvent = Schema.Struct({
-  version: Schema.Literal(1),
-  type: Schema.Literal("snapshot"),
-  config: ServerConfig,
-});
-export type ServerConfigStreamSnapshotEvent = typeof ServerConfigStreamSnapshotEvent.Type;
-
-export const ServerConfigStreamKeybindingsUpdatedEvent = Schema.Struct({
-  version: Schema.Literal(1),
-  type: Schema.Literal("keybindingsUpdated"),
-  payload: ServerConfigKeybindingsUpdatedPayload,
-});
-export type ServerConfigStreamKeybindingsUpdatedEvent =
-  typeof ServerConfigStreamKeybindingsUpdatedEvent.Type;
-
-export const ServerConfigStreamProviderStatusesEvent = Schema.Struct({
-  version: Schema.Literal(1),
-  type: Schema.Literal("providerStatuses"),
-  payload: ServerConfigProviderStatusesPayload,
-});
-export type ServerConfigStreamProviderStatusesEvent =
-  typeof ServerConfigStreamProviderStatusesEvent.Type;
-
-export const ServerConfigStreamSettingsUpdatedEvent = Schema.Struct({
-  version: Schema.Literal(1),
-  type: Schema.Literal("settingsUpdated"),
-  payload: ServerConfigSettingsUpdatedPayload,
-});
-export type ServerConfigStreamSettingsUpdatedEvent =
-  typeof ServerConfigStreamSettingsUpdatedEvent.Type;
-
-export const ServerConfigStreamEvent = Schema.Union([
-  ServerConfigStreamSnapshotEvent,
-  ServerConfigStreamKeybindingsUpdatedEvent,
-  ServerConfigStreamProviderStatusesEvent,
-  ServerConfigStreamSettingsUpdatedEvent,
-]);
-export type ServerConfigStreamEvent = typeof ServerConfigStreamEvent.Type;
-
-export const ServerLifecycleReadyPayload = Schema.Struct({
-  at: IsoDateTime,
-  environment: ExecutionEnvironmentDescriptor,
-});
-export type ServerLifecycleReadyPayload = typeof ServerLifecycleReadyPayload.Type;
-
-export const ServerLifecycleWelcomePayload = Schema.Struct({
-  environment: ExecutionEnvironmentDescriptor,
-  cwd: TrimmedNonEmptyString,
-  projectName: TrimmedNonEmptyString,
-  bootstrapProjectId: Schema.optional(ProjectId),
-  bootstrapThreadId: Schema.optional(ThreadId),
-});
-export type ServerLifecycleWelcomePayload = typeof ServerLifecycleWelcomePayload.Type;
-
-export const ServerLifecycleStreamWelcomeEvent = Schema.Struct({
-  version: Schema.Literal(1),
-  sequence: NonNegativeInt,
-  type: Schema.Literal("welcome"),
-  payload: ServerLifecycleWelcomePayload,
-});
-export type ServerLifecycleStreamWelcomeEvent = typeof ServerLifecycleStreamWelcomeEvent.Type;
-
-export const ServerLifecycleStreamReadyEvent = Schema.Struct({
-  version: Schema.Literal(1),
-  sequence: NonNegativeInt,
-  type: Schema.Literal("ready"),
-  payload: ServerLifecycleReadyPayload,
-});
-export type ServerLifecycleStreamReadyEvent = typeof ServerLifecycleStreamReadyEvent.Type;
-
-export const ServerLifecycleStreamEvent = Schema.Union([
-  ServerLifecycleStreamWelcomeEvent,
-  ServerLifecycleStreamReadyEvent,
-]);
-export type ServerLifecycleStreamEvent = typeof ServerLifecycleStreamEvent.Type;
-
-export const ServerProviderUpdatedPayload = Schema.Struct({
-  providers: ServerProviders,
-});
-export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.Type;
+export const ServerRefreshProvidersResult = ServerProviderStatusesUpdatedPayload;
+export type ServerRefreshProvidersResult = typeof ServerRefreshProvidersResult.Type;

@@ -9,7 +9,7 @@ import { ServiceMap } from "effect";
 import type { Effect } from "effect";
 
 import type { ProcessRunResult } from "../../processRunner";
-import type { GitHubCliError } from "@t3tools/contracts";
+import type { GitHubCliError } from "../Errors.ts";
 
 export interface GitHubPullRequestSummary {
   readonly number: number;
@@ -99,5 +99,5 @@ export interface GitHubCliShape {
  * GitHubCli - Service tag for GitHub CLI process execution.
  */
 export class GitHubCli extends ServiceMap.Service<GitHubCli, GitHubCliShape>()(
-  "t3/git/Services/GitHubCli",
+  "kodo/git/Services/GitHubCli",
 ) {}

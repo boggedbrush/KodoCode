@@ -1,4 +1,4 @@
-import type { GitResolvePullRequestResult, ThreadId } from "@t3tools/contracts";
+import type { GitResolvePullRequestResult } from "@t3tools/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "@tanstack/react-pacer";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,16 +24,18 @@ import { Spinner } from "./ui/spinner";
 
 interface PullRequestThreadDialogProps {
   open: boolean;
-  threadId: ThreadId;
   cwd: string | null;
   initialReference: string | null;
   onOpenChange: (open: boolean) => void;
-  onPrepared: (input: { branch: string; worktreePath: string | null }) => Promise<void> | void;
+  onPrepared: (input: {
+    branch: string;
+    worktreePath: string | null;
+    pullRequest: NonNullable<GitResolvePullRequestResult["pullRequest"]>;
+  }) => Promise<void> | void;
 }
 
 export function PullRequestThreadDialog({
   open,
-  threadId,
   cwd,
   initialReference,
   onOpenChange,
@@ -132,11 +134,11 @@ export function PullRequestThreadDialog({
         const result = await preparePullRequestThreadMutation.mutateAsync({
           reference: parsedReference,
           mode,
-          ...(mode === "worktree" ? { threadId } : {}),
         });
         await onPrepared({
           branch: result.branch,
           worktreePath: result.worktreePath,
+          pullRequest: resolvedPullRequest,
         });
         onOpenChange(false);
       } finally {
@@ -150,16 +152,15 @@ export function PullRequestThreadDialog({
       parsedReference,
       preparePullRequestThreadMutation,
       resolvedPullRequest,
-      threadId,
     ],
   );
 
   const validationMessage = !referenceDirty
     ? null
     : reference.trim().length === 0
-      ? "Paste a GitHub pull request URL, `gh pr checkout 123`, or enter 123 / #123."
+      ? "Paste a GitHub pull request URL or enter 123 / #123."
       : parsedReference === null
-        ? "Use a GitHub pull request URL, `gh pr checkout 123`, 123, or #123."
+        ? "Use a GitHub pull request URL, 123, or #123."
         : null;
   const errorMessage =
     validationMessage ??
@@ -195,7 +196,7 @@ export function PullRequestThreadDialog({
             <span className="text-xs font-medium text-foreground">Pull request</span>
             <Input
               ref={referenceInputRef}
-              placeholder="https://github.com/owner/repo/pull/42, gh pr checkout 42, or #42"
+              placeholder="https://github.com/owner/repo/pull/42 or #42"
               value={reference}
               onChange={(event) => {
                 setReferenceDirty(true);

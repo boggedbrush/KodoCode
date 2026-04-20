@@ -22,7 +22,7 @@ export interface ProviderRuntimeIngestionShape {
    * Uses an internal queue and continues after non-interrupt failures by
    * logging warnings.
    */
-  readonly start: () => Effect.Effect<void, never, Scope.Scope>;
+  readonly start: Effect.Effect<void, never, Scope.Scope>;
 
   /**
    * Resolves when the internal processing queue is empty and idle.
@@ -37,4 +37,4 @@ export interface ProviderRuntimeIngestionShape {
 export class ProviderRuntimeIngestionService extends ServiceMap.Service<
   ProviderRuntimeIngestionService,
   ProviderRuntimeIngestionShape
->()("t3/orchestration/Services/ProviderRuntimeIngestion/ProviderRuntimeIngestionService") {}
+>()("kodo/orchestration/Services/ProviderRuntimeIngestion/ProviderRuntimeIngestionService") {}

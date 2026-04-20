@@ -6,7 +6,6 @@ import { ServerConfig } from "../../config.ts";
 
 type RuntimeSqliteLayerConfig = {
   readonly filename: string;
-  readonly spanAttributes?: Record<string, unknown>;
 };
 
 type Loader = {
@@ -17,14 +16,15 @@ const defaultSqliteClientLoaders = {
   node: () => import("../NodeSqliteClient.ts"),
 } satisfies Record<string, () => Promise<Loader>>;
 
-const makeRuntimeSqliteLayer = Effect.fn("makeRuntimeSqliteLayer")(function* (
+const makeRuntimeSqliteLayer = (
   config: RuntimeSqliteLayerConfig,
-) {
-  const runtime = process.versions.bun !== undefined ? "bun" : "node";
-  const loader = defaultSqliteClientLoaders[runtime];
-  const clientModule = yield* Effect.promise<Loader>(loader);
-  return clientModule.layer(config);
-}, Layer.unwrap);
+): Layer.Layer<SqlClient.SqlClient> =>
+  Effect.gen(function* () {
+    const runtime = process.versions.bun !== undefined ? "bun" : "node";
+    const loader = defaultSqliteClientLoaders[runtime];
+    const clientModule = yield* Effect.promise<Loader>(loader);
+    return clientModule.layer(config);
+  }).pipe(Layer.unwrap);
 
 const setup = Layer.effectDiscard(
   Effect.gen(function* () {
@@ -35,39 +35,20 @@ const setup = Layer.effectDiscard(
   }),
 );
 
-export const makeSqlitePersistenceLive = Effect.fn("makeSqlitePersistenceLive")(function* (
-  dbPath: string,
-) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
+export const makeSqlitePersistenceLive = (dbPath: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true });
 
-  return Layer.provideMerge(
-    setup,
-    makeRuntimeSqliteLayer({
-      filename: dbPath,
-      spanAttributes: {
-        "db.name": path.basename(dbPath),
-        "service.name": "kodo-server",
-      },
-    }),
-  );
-}, Layer.unwrap);
+    return Layer.provideMerge(setup, makeRuntimeSqliteLayer({ filename: dbPath }));
+  }).pipe(Layer.unwrap);
 
 export const SqlitePersistenceMemory = Layer.provideMerge(
   setup,
   makeRuntimeSqliteLayer({ filename: ":memory:" }),
 );
 
-const layerFromServerConfig = (
-  selectDbPath: (config: { readonly dbPath: string; readonly authDbPath: string }) => string,
-) =>
-  Layer.unwrap(
-    Effect.map(Effect.service(ServerConfig), (config) =>
-      makeSqlitePersistenceLive(selectDbPath(config)),
-    ),
-  );
-
-export const layerConfig = layerFromServerConfig(({ dbPath }) => dbPath);
-
-export const authLayerConfig = layerFromServerConfig(({ authDbPath }) => authDbPath);
+export const layerConfig = Layer.unwrap(
+  Effect.map(Effect.service(ServerConfig), ({ dbPath }) => makeSqlitePersistenceLive(dbPath)),
+);

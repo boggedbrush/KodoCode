@@ -3,10 +3,11 @@ import type {
   GitStackedAction,
   GitStatusResult,
 } from "@t3tools/contracts";
+import { isTemporaryWorktreeBranch } from "@t3tools/shared/git";
 
 export type GitActionIconName = "commit" | "push" | "pr";
 
-export type GitDialogAction = "commit" | "push" | "create_pr";
+export type GitDialogAction = "commit" | "push" | "commit_push" | "create_pr";
 
 export interface GitActionMenuItem {
   id: "commit" | "push" | "pr";
@@ -20,7 +21,7 @@ export interface GitActionMenuItem {
 export interface GitQuickAction {
   label: string;
   disabled: boolean;
-  kind: "run_action" | "run_pull" | "open_pr" | "show_hint";
+  kind: "run_action" | "run_pull" | "open_pr" | "show_hint" | "create_branch";
   action?: GitStackedAction;
   hint?: string;
 }
@@ -37,30 +38,49 @@ export type DefaultBranchConfirmableAction =
   | "commit_push"
   | "commit_push_pr";
 
+export function requiresFeatureBranchForDefaultBranchAction(
+  action: DefaultBranchConfirmableAction,
+): boolean {
+  return action === "create_pr" || action === "commit_push_pr";
+}
+
+const SHORT_SHA_LENGTH = 7;
+const TOAST_DESCRIPTION_MAX = 72;
+
+function shortenSha(sha: string | undefined): string | null {
+  if (!sha) return null;
+  return sha.slice(0, SHORT_SHA_LENGTH);
+}
+
+function truncateText(
+  value: string | undefined,
+  maxLength = TOAST_DESCRIPTION_MAX,
+): string | undefined {
+  if (!value) return undefined;
+  if (value.length <= maxLength) return value;
+  if (maxLength <= 3) return "...".slice(0, maxLength);
+  return `${value.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
 export function buildGitActionProgressStages(input: {
   action: GitStackedAction;
   hasCustomCommitMessage: boolean;
   hasWorkingTreeChanges: boolean;
+  forcePushOnly?: boolean;
   pushTarget?: string;
   featureBranch?: boolean;
   shouldPushBeforePr?: boolean;
 }): string[] {
   const branchStages = input.featureBranch ? ["Preparing feature branch..."] : [];
   const pushStage = input.pushTarget ? `Pushing to ${input.pushTarget}...` : "Pushing...";
-  const prStages = [
-    "Preparing PR...",
-    "Generating PR content...",
-    "Creating GitHub pull request...",
-  ];
-
   if (input.action === "push") {
     return [pushStage];
   }
   if (input.action === "create_pr") {
-    return input.shouldPushBeforePr ? [pushStage, ...prStages] : prStages;
+    return input.shouldPushBeforePr ? [pushStage, "Creating PR..."] : ["Creating PR..."];
   }
-
-  const shouldIncludeCommitStages = input.action === "commit" || input.hasWorkingTreeChanges;
+  const shouldIncludeCommitStages =
+    !input.forcePushOnly && (input.action === "commit" || input.hasWorkingTreeChanges);
   const commitStages = !shouldIncludeCommitStages
     ? []
     : input.hasCustomCommitMessage
@@ -72,13 +92,47 @@ export function buildGitActionProgressStages(input: {
   if (input.action === "commit_push") {
     return [...branchStages, ...commitStages, pushStage];
   }
-  return [...branchStages, ...commitStages, pushStage, ...prStages];
+  return [...branchStages, ...commitStages, pushStage, "Creating PR..."];
+}
+
+const withDescription = (title: string, description: string | undefined) =>
+  description ? { title, description } : { title };
+
+export function summarizeGitResult(result: GitRunStackedActionResult): {
+  title: string;
+  description?: string;
+} {
+  if (result.pr.status === "created" || result.pr.status === "opened_existing") {
+    const prNumber = result.pr.number ? ` #${result.pr.number}` : "";
+    const title = `${result.pr.status === "created" ? "Created PR" : "Opened PR"}${prNumber}`;
+    return withDescription(title, truncateText(result.pr.title));
+  }
+
+  if (result.push.status === "pushed") {
+    const shortSha = shortenSha(result.commit.commitSha);
+    const branch = result.push.upstreamBranch ?? result.push.branch;
+    const pushedCommitPart = shortSha ? ` ${shortSha}` : "";
+    const branchPart = branch ? ` to ${branch}` : "";
+    return withDescription(
+      `Pushed${pushedCommitPart}${branchPart}`,
+      truncateText(result.commit.subject),
+    );
+  }
+
+  if (result.commit.status === "created") {
+    const shortSha = shortenSha(result.commit.commitSha);
+    const title = shortSha ? `Committed ${shortSha}` : "Committed changes";
+    return withDescription(title, truncateText(result.commit.subject));
+  }
+
+  return { title: "Done" };
 }
 
 export function buildMenuItems(
   gitStatus: GitStatusResult | null,
   isBusy: boolean,
   hasOriginRemote = true,
+  isDefaultBranch = false,
 ): GitActionMenuItem[] {
   if (!gitStatus) return [];
 
@@ -95,14 +149,20 @@ export function buildMenuItems(
     !isBehind &&
     gitStatus.aheadCount > 0 &&
     (gitStatus.hasUpstream || canPushWithoutUpstream);
+  const canCommitPush =
+    !isBusy &&
+    hasBranch &&
+    !isBehind &&
+    (hasChanges || gitStatus.aheadCount > 0) &&
+    (gitStatus.hasUpstream || canPushWithoutUpstream);
   const canCreatePr =
     !isBusy &&
     hasBranch &&
     !hasChanges &&
     !hasOpenPr &&
-    gitStatus.aheadCount > 0 &&
     !isBehind &&
-    (gitStatus.hasUpstream || canPushWithoutUpstream);
+    ((!isDefaultBranch && gitStatus.hasUpstream) ||
+      (gitStatus.aheadCount > 0 && (gitStatus.hasUpstream || canPushWithoutUpstream)));
   const canOpenPr = !isBusy && hasOpenPr;
 
   return [
@@ -116,16 +176,16 @@ export function buildMenuItems(
     },
     {
       id: "push",
-      label: "Push",
-      disabled: !canPush,
+      label: isDefaultBranch ? "Commit & push" : "Push",
+      disabled: !(isDefaultBranch ? canCommitPush : canPush),
       icon: "push",
       kind: "open_dialog",
-      dialogAction: "push",
+      dialogAction: isDefaultBranch ? "commit_push" : "push",
     },
     hasOpenPr
       ? {
           id: "pr",
-          label: "View PR",
+          label: "Create PR",
           disabled: !canOpenPr,
           icon: "pr",
           kind: "open_pr",
@@ -146,6 +206,7 @@ export function resolveQuickAction(
   isBusy: boolean,
   isDefaultBranch = false,
   hasOriginRemote = true,
+  shouldOfferCreateBranch = false,
 ): GitQuickAction {
   if (isBusy) {
     return { label: "Commit", disabled: true, kind: "show_hint", hint: "Git action in progress." };
@@ -173,6 +234,19 @@ export function resolveQuickAction(
       disabled: true,
       kind: "show_hint",
       hint: "Create and checkout a branch before pushing or opening a PR.",
+    };
+  }
+
+  // Worktree with temporary branch (dpcode/xxxxxxxx) that hasn't been pushed yet
+  // → prompt user to create a permanent branch name
+  if (
+    !gitStatus.hasUpstream &&
+    (isTemporaryWorktreeBranch(gitStatus.branch!) || shouldOfferCreateBranch)
+  ) {
+    return {
+      label: "Create Branch",
+      disabled: false,
+      kind: "create_branch",
     };
   }
 
@@ -216,7 +290,7 @@ export function resolveQuickAction(
     }
     if (hasOpenPr || isDefaultBranch) {
       return {
-        label: "Push",
+        label: isDefaultBranch ? "Commit & push" : "Push",
         disabled: false,
         kind: "run_action",
         action: isDefaultBranch ? "commit_push" : "push",
@@ -250,7 +324,7 @@ export function resolveQuickAction(
   if (isAhead) {
     if (hasOpenPr || isDefaultBranch) {
       return {
-        label: "Push",
+        label: isDefaultBranch ? "Commit & push" : "Push",
         disabled: false,
         kind: "run_action",
         action: isDefaultBranch ? "commit_push" : "push",
@@ -268,6 +342,15 @@ export function resolveQuickAction(
     return { label: "View PR", disabled: false, kind: "open_pr" };
   }
 
+  if (!isDefaultBranch) {
+    return {
+      label: "Create PR",
+      disabled: false,
+      kind: "run_action",
+      action: "create_pr",
+    };
+  }
+
   return {
     label: "Commit",
     disabled: true,
@@ -276,10 +359,27 @@ export function resolveQuickAction(
   };
 }
 
+export function shouldOfferCreateBranchPrompt(input: {
+  activeThreadBranch: string | null;
+  activeWorktreePath: string | null;
+  gitStatus: Pick<GitStatusResult, "branch" | "hasUpstream"> | null;
+}): boolean {
+  if (
+    !input.activeWorktreePath ||
+    !input.activeThreadBranch ||
+    !input.gitStatus?.branch ||
+    input.gitStatus.hasUpstream
+  ) {
+    return false;
+  }
+
+  return isTemporaryWorktreeBranch(input.activeThreadBranch);
+}
+
 export function requiresDefaultBranchConfirmation(
   action: GitStackedAction,
   isDefaultBranch: boolean,
-): boolean {
+): action is DefaultBranchConfirmableAction {
   if (!isDefaultBranch) return false;
   return (
     action === "push" ||
@@ -314,27 +414,15 @@ export function resolveDefaultBranchActionDialogCopy(input: {
 
   if (input.includesCommit) {
     return {
-      title: "Commit, push & create PR from default branch?",
-      description: `This action will commit, push, and create a PR${suffix}`,
-      continueLabel: `Commit, push & create PR`,
+      title: "Create feature branch, commit & PR?",
+      description: `Pull requests can't be opened from "${branchLabel}" into itself. This action will create a feature branch, commit your changes there, push it, and create the PR.`,
+      continueLabel: "Create feature branch & continue",
     };
   }
   return {
-    title: "Push & create PR from default branch?",
-    description: `This action will push local commits and create a PR${suffix}`,
-    continueLabel: "Push & create PR",
-  };
-}
-
-export function resolveThreadBranchUpdate(
-  result: GitRunStackedActionResult,
-): { branch: string } | null {
-  if (result.branch.status !== "created" || !result.branch.name) {
-    return null;
-  }
-
-  return {
-    branch: result.branch.name,
+    title: "Create feature branch & PR?",
+    description: `Pull requests can't be opened from "${branchLabel}" into itself. This action will create a feature branch from your current commits, push it, and create the PR.`,
+    continueLabel: "Create feature branch & continue",
   };
 }
 
@@ -351,6 +439,15 @@ export function resolveLiveThreadBranchUpdate(input: {
   }
 
   if (input.threadBranch === input.gitStatus.branch) {
+    return null;
+  }
+
+  if (
+    input.threadBranch !== null &&
+    input.gitStatus.branch !== null &&
+    !isTemporaryWorktreeBranch(input.threadBranch) &&
+    isTemporaryWorktreeBranch(input.gitStatus.branch)
+  ) {
     return null;
   }
 

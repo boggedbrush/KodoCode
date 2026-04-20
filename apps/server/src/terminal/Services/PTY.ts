@@ -27,6 +27,10 @@ export interface PtyProcess {
   write(data: string): void;
   resize(cols: number, rows: number): void;
   kill(signal?: string): void;
+  /** Pause reading from the PTY (backpressure). No-op if unsupported. */
+  pause(): void;
+  /** Resume reading from the PTY after a pause. No-op if unsupported. */
+  resume(): void;
   onData(callback: (data: string) => void): () => void;
   onExit(callback: (event: PtyExitEvent) => void): () => void;
 }
@@ -54,5 +58,5 @@ export interface PtyAdapterShape {
  * PtyAdapter - Service tag for PTY process integration.
  */
 export class PtyAdapter extends ServiceMap.Service<PtyAdapter, PtyAdapterShape>()(
-  "t3/terminal/Services/PTY/PtyAdapter",
+  "kodo/terminal/Services/PTY/PtyAdapter",
 ) {}

@@ -22,7 +22,6 @@ import {
   type CodexAppServerSendTurnInput,
 } from "../../codexAppServerManager.ts";
 import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterValidationError } from "../Errors.ts";
 import { CodexAdapter } from "../Services/CodexAdapter.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
@@ -56,8 +55,16 @@ class FakeCodexManager extends CodexAppServerManager {
     }),
   );
 
+  public steerTurnImpl = vi.fn(
+    async (_input: CodexAppServerSendTurnInput): Promise<ProviderTurnStartResult> => ({
+      threadId: asThreadId("thread-1"),
+      turnId: asTurnId("turn-steer-1"),
+    }),
+  );
+
   public interruptTurnImpl = vi.fn(
-    async (_threadId: ThreadId, _turnId?: TurnId): Promise<void> => undefined,
+    async (_threadId: ThreadId, _turnId?: TurnId, _providerThreadId?: string): Promise<void> =>
+      undefined,
   );
 
   public readThreadImpl = vi.fn(async (_threadId: ThreadId) => ({
@@ -96,8 +103,16 @@ class FakeCodexManager extends CodexAppServerManager {
     return this.sendTurnImpl(input);
   }
 
-  override interruptTurn(threadId: ThreadId, turnId?: TurnId): Promise<void> {
-    return this.interruptTurnImpl(threadId, turnId);
+  override steerTurn(input: CodexAppServerSendTurnInput): Promise<ProviderTurnStartResult> {
+    return this.steerTurnImpl(input);
+  }
+
+  override interruptTurn(
+    threadId: ThreadId,
+    turnId?: TurnId,
+    providerThreadId?: string,
+  ): Promise<void> {
+    return this.interruptTurnImpl(threadId, turnId, providerThreadId);
   }
 
   override readThread(threadId: ThreadId) {
@@ -152,7 +167,6 @@ const validationManager = new FakeCodexManager();
 const validationLayer = it.layer(
   makeCodexAdapterLive({ manager: validationManager }).pipe(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
-    Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
   ),
@@ -203,7 +217,6 @@ validationLayer("CodexAdapterLive validation", (it) => {
       assert.deepStrictEqual(validationManager.startSessionImpl.mock.calls[0]?.[0], {
         provider: "codex",
         threadId: asThreadId("thread-1"),
-        binaryPath: "codex",
         model: "gpt-5.3-codex",
         serviceTier: "fast",
         runtimeMode: "full-access",
@@ -219,7 +232,6 @@ sessionErrorManager.sendTurnImpl.mockImplementation(async () => {
 const sessionErrorLayer = it.layer(
   makeCodexAdapterLive({ manager: sessionErrorManager }).pipe(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
-    Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
   ),
@@ -288,7 +300,6 @@ const lifecycleManager = new FakeCodexManager();
 const lifecycleLayer = it.layer(
   makeCodexAdapterLive({ manager: lifecycleManager }).pipe(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
-    Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
   ),
@@ -331,6 +342,45 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       assert.equal(firstEvent.value.itemId, "msg_1");
       assert.equal(firstEvent.value.turnId, "turn-1");
       assert.equal(firstEvent.value.payload.itemType, "assistant_message");
+    }),
+  );
+
+  it.effect("maps exited review items to assistant completion events with review text", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      const event: ProviderEvent = {
+        id: asEventId("evt-review-complete"),
+        kind: "notification",
+        provider: "codex",
+        createdAt: new Date().toISOString(),
+        method: "item/completed",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-review"),
+        payload: {
+          item: {
+            type: "exitedReviewMode",
+            id: "review_1",
+            review: "Working tree is clean.",
+          },
+        },
+      };
+
+      lifecycleManager.emit("event", event);
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+
+      assert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") {
+        return;
+      }
+      assert.equal(firstEvent.value.type, "item.completed");
+      if (firstEvent.value.type !== "item.completed") {
+        return;
+      }
+      assert.equal(firstEvent.value.turnId, "turn-review");
+      assert.equal(firstEvent.value.payload.itemType, "assistant_message");
+      assert.equal(firstEvent.value.payload.detail, "Working tree is clean.");
     }),
   );
 
@@ -474,20 +524,26 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
-  it.effect("maps process stderr notifications to runtime.warning", () =>
+  it.effect("maps non-fatal Codex error notifications to runtime.warning", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
       const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
 
       lifecycleManager.emit("event", {
-        id: asEventId("evt-process-stderr"),
+        id: asEventId("evt-non-fatal-error"),
         kind: "notification",
         provider: "codex",
         threadId: asThreadId("thread-1"),
         createdAt: new Date().toISOString(),
-        method: "process/stderr",
+        method: "error",
         turnId: asTurnId("turn-1"),
-        message: "The filename or extension is too long. (os error 206)",
+        payload: {
+          error: {
+            message:
+              "write_stdin failed: stdin is closed for this session; rerun exec_command with tty=true to keep stdin open",
+          },
+          willRetry: false,
+        },
       } satisfies ProviderEvent);
 
       const firstEvent = yield* Fiber.join(firstEventFiber);
@@ -503,26 +559,25 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       assert.equal(firstEvent.value.turnId, "turn-1");
       assert.equal(
         firstEvent.value.payload.message,
-        "The filename or extension is too long. (os error 206)",
+        "write_stdin failed: stdin is closed for this session; rerun exec_command with tty=true to keep stdin open",
       );
     }),
   );
 
-  it.effect("maps fatal websocket stderr notifications to runtime.error", () =>
+  it.effect("maps process stderr provider errors to runtime.warning", () =>
     Effect.gen(function* () {
       const adapter = yield* CodexAdapter;
       const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
 
       lifecycleManager.emit("event", {
-        id: asEventId("evt-process-stderr-websocket"),
-        kind: "notification",
+        id: asEventId("evt-process-stderr"),
+        kind: "error",
         provider: "codex",
         threadId: asThreadId("thread-1"),
         createdAt: new Date().toISOString(),
         method: "process/stderr",
         turnId: asTurnId("turn-1"),
-        message:
-          "2026-03-31T18:14:06.833399Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 503 Service Unavailable, url: wss://chatgpt.com/backend-api/codex/responses",
+        message: "write_stdin failed: stdin is closed for this session",
       } satisfies ProviderEvent);
 
       const firstEvent = yield* Fiber.join(firstEventFiber);
@@ -531,15 +586,14 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       if (firstEvent._tag !== "Some") {
         return;
       }
-      assert.equal(firstEvent.value.type, "runtime.error");
-      if (firstEvent.value.type !== "runtime.error") {
+      assert.equal(firstEvent.value.type, "runtime.warning");
+      if (firstEvent.value.type !== "runtime.warning") {
         return;
       }
       assert.equal(firstEvent.value.turnId, "turn-1");
-      assert.equal(firstEvent.value.payload.class, "provider_error");
       assert.equal(
         firstEvent.value.payload.message,
-        "2026-03-31T18:14:06.833399Z ERROR codex_api::endpoint::responses_websocket: failed to connect to websocket: HTTP error: 503 Service Unavailable, url: wss://chatgpt.com/backend-api/codex/responses",
+        "write_stdin failed: stdin is closed for this session",
       );
     }),
   );
@@ -723,7 +777,6 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
                     description: "Allow workspace writes only",
                   },
                 ],
-                multiSelect: true,
               },
             ],
           },
@@ -750,7 +803,6 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         if (events[0]?.type === "user-input.requested") {
           assert.equal(events[0].requestId, "req-user-input-1");
           assert.equal(events[0].payload.questions[0]?.id, "sandbox_mode");
-          assert.equal(events[0].payload.questions[0]?.multiSelect, true);
         }
 
         assert.equal(events[1]?.type, "user-input.resolved");
@@ -980,6 +1032,40 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         lastReasoningOutputTokens: 0,
         compactsAutomatically: true,
       });
+    }),
+  );
+
+  it.effect("maps thread/compacting notifications to context compaction progress events", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      lifecycleManager.emit("event", {
+        id: asEventId("evt-codex-thread-compacting"),
+        kind: "notification",
+        provider: "codex",
+        threadId: asThreadId("thread-1"),
+        createdAt: new Date().toISOString(),
+        method: "thread/compacting",
+        message: "Compacting context",
+        payload: {
+          threadId: "thread-1",
+          state: "compacting",
+        },
+      } satisfies ProviderEvent);
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      assert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") {
+        return;
+      }
+      assert.equal(firstEvent.value.type, "item.updated");
+      if (firstEvent.value.type !== "item.updated") {
+        return;
+      }
+      assert.equal(firstEvent.value.payload.itemType, "context_compaction");
+      assert.equal(firstEvent.value.payload.detail, "Compacting context");
+      assert.equal(firstEvent.value.payload.status, "inProgress");
     }),
   );
 });

@@ -9,26 +9,14 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ChatRouteImport } from './routes/_chat'
 import { Route as ChatIndexRouteImport } from './routes/_chat.index'
-import { Route as SettingsUsageRouteImport } from './routes/settings.usage'
-import { Route as SettingsProvidersRouteImport } from './routes/settings.providers'
-import { Route as SettingsModelsRouteImport } from './routes/settings.models'
-import { Route as SettingsGitRouteImport } from './routes/settings.git'
-import { Route as SettingsGeneralRouteImport } from './routes/settings.general'
-import { Route as SettingsEnhanceRouteImport } from './routes/settings.enhance'
-import { Route as SettingsArchivedRouteImport } from './routes/settings.archived'
-import { Route as SettingsAppearanceRouteImport } from './routes/settings.appearance'
-import { Route as SettingsAdvancedRouteImport } from './routes/settings.advanced'
-import { Route as SettingsAboutRouteImport } from './routes/settings.about'
+import { Route as ChatSettingsRouteImport } from './routes/_chat.settings'
+import { Route as ChatPluginsRouteImport } from './routes/_chat.plugins'
 import { Route as ChatThreadIdRouteImport } from './routes/_chat.$threadId'
+import { Route as ChatWorkspaceIndexRouteImport } from './routes/_chat.workspace.index'
+import { Route as ChatWorkspaceWorkspaceIdRouteImport } from './routes/_chat.workspace.$workspaceId'
 
-const SettingsRoute = SettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const ChatRoute = ChatRouteImport.update({
   id: '/_chat',
   getParentRoute: () => rootRouteImport,
@@ -38,172 +26,93 @@ const ChatIndexRoute = ChatIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ChatRoute,
 } as any)
-const SettingsUsageRoute = SettingsUsageRouteImport.update({
-  id: '/usage',
-  path: '/usage',
-  getParentRoute: () => SettingsRoute,
+const ChatSettingsRoute = ChatSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => ChatRoute,
 } as any)
-const SettingsProvidersRoute = SettingsProvidersRouteImport.update({
-  id: '/providers',
-  path: '/providers',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const SettingsModelsRoute = SettingsModelsRouteImport.update({
-  id: '/models',
-  path: '/models',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const SettingsGitRoute = SettingsGitRouteImport.update({
-  id: '/git',
-  path: '/git',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const SettingsGeneralRoute = SettingsGeneralRouteImport.update({
-  id: '/general',
-  path: '/general',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const SettingsEnhanceRoute = SettingsEnhanceRouteImport.update({
-  id: '/enhance',
-  path: '/enhance',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const SettingsArchivedRoute = SettingsArchivedRouteImport.update({
-  id: '/archived',
-  path: '/archived',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const SettingsAppearanceRoute = SettingsAppearanceRouteImport.update({
-  id: '/appearance',
-  path: '/appearance',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const SettingsAdvancedRoute = SettingsAdvancedRouteImport.update({
-  id: '/advanced',
-  path: '/advanced',
-  getParentRoute: () => SettingsRoute,
-} as any)
-const SettingsAboutRoute = SettingsAboutRouteImport.update({
-  id: '/about',
-  path: '/about',
-  getParentRoute: () => SettingsRoute,
+const ChatPluginsRoute = ChatPluginsRouteImport.update({
+  id: '/plugins',
+  path: '/plugins',
+  getParentRoute: () => ChatRoute,
 } as any)
 const ChatThreadIdRoute = ChatThreadIdRouteImport.update({
   id: '/$threadId',
   path: '/$threadId',
   getParentRoute: () => ChatRoute,
 } as any)
+const ChatWorkspaceIndexRoute = ChatWorkspaceIndexRouteImport.update({
+  id: '/workspace/',
+  path: '/workspace/',
+  getParentRoute: () => ChatRoute,
+} as any)
+const ChatWorkspaceWorkspaceIdRoute =
+  ChatWorkspaceWorkspaceIdRouteImport.update({
+    id: '/workspace/$workspaceId',
+    path: '/workspace/$workspaceId',
+    getParentRoute: () => ChatRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof ChatIndexRoute
-  '/settings': typeof SettingsRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
-  '/settings/about': typeof SettingsAboutRoute
-  '/settings/advanced': typeof SettingsAdvancedRoute
-  '/settings/appearance': typeof SettingsAppearanceRoute
-  '/settings/archived': typeof SettingsArchivedRoute
-  '/settings/enhance': typeof SettingsEnhanceRoute
-  '/settings/general': typeof SettingsGeneralRoute
-  '/settings/git': typeof SettingsGitRoute
-  '/settings/models': typeof SettingsModelsRoute
-  '/settings/providers': typeof SettingsProvidersRoute
-  '/settings/usage': typeof SettingsUsageRoute
+  '/plugins': typeof ChatPluginsRoute
+  '/settings': typeof ChatSettingsRoute
+  '/workspace/$workspaceId': typeof ChatWorkspaceWorkspaceIdRoute
+  '/workspace/': typeof ChatWorkspaceIndexRoute
 }
 export interface FileRoutesByTo {
-  '/settings': typeof SettingsRouteWithChildren
   '/$threadId': typeof ChatThreadIdRoute
-  '/settings/about': typeof SettingsAboutRoute
-  '/settings/advanced': typeof SettingsAdvancedRoute
-  '/settings/appearance': typeof SettingsAppearanceRoute
-  '/settings/archived': typeof SettingsArchivedRoute
-  '/settings/enhance': typeof SettingsEnhanceRoute
-  '/settings/general': typeof SettingsGeneralRoute
-  '/settings/git': typeof SettingsGitRoute
-  '/settings/models': typeof SettingsModelsRoute
-  '/settings/providers': typeof SettingsProvidersRoute
-  '/settings/usage': typeof SettingsUsageRoute
+  '/plugins': typeof ChatPluginsRoute
+  '/settings': typeof ChatSettingsRoute
   '/': typeof ChatIndexRoute
+  '/workspace/$workspaceId': typeof ChatWorkspaceWorkspaceIdRoute
+  '/workspace': typeof ChatWorkspaceIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_chat': typeof ChatRouteWithChildren
-  '/settings': typeof SettingsRouteWithChildren
   '/_chat/$threadId': typeof ChatThreadIdRoute
-  '/settings/about': typeof SettingsAboutRoute
-  '/settings/advanced': typeof SettingsAdvancedRoute
-  '/settings/appearance': typeof SettingsAppearanceRoute
-  '/settings/archived': typeof SettingsArchivedRoute
-  '/settings/enhance': typeof SettingsEnhanceRoute
-  '/settings/general': typeof SettingsGeneralRoute
-  '/settings/git': typeof SettingsGitRoute
-  '/settings/models': typeof SettingsModelsRoute
-  '/settings/providers': typeof SettingsProvidersRoute
-  '/settings/usage': typeof SettingsUsageRoute
+  '/_chat/plugins': typeof ChatPluginsRoute
+  '/_chat/settings': typeof ChatSettingsRoute
   '/_chat/': typeof ChatIndexRoute
+  '/_chat/workspace/$workspaceId': typeof ChatWorkspaceWorkspaceIdRoute
+  '/_chat/workspace/': typeof ChatWorkspaceIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/settings'
     | '/$threadId'
-    | '/settings/about'
-    | '/settings/advanced'
-    | '/settings/appearance'
-    | '/settings/archived'
-    | '/settings/enhance'
-    | '/settings/general'
-    | '/settings/git'
-    | '/settings/models'
-    | '/settings/providers'
-    | '/settings/usage'
+    | '/plugins'
+    | '/settings'
+    | '/workspace/$workspaceId'
+    | '/workspace/'
   fileRoutesByTo: FileRoutesByTo
   to:
-    | '/settings'
     | '/$threadId'
-    | '/settings/about'
-    | '/settings/advanced'
-    | '/settings/appearance'
-    | '/settings/archived'
-    | '/settings/enhance'
-    | '/settings/general'
-    | '/settings/git'
-    | '/settings/models'
-    | '/settings/providers'
-    | '/settings/usage'
+    | '/plugins'
+    | '/settings'
     | '/'
+    | '/workspace/$workspaceId'
+    | '/workspace'
   id:
     | '__root__'
     | '/_chat'
-    | '/settings'
     | '/_chat/$threadId'
-    | '/settings/about'
-    | '/settings/advanced'
-    | '/settings/appearance'
-    | '/settings/archived'
-    | '/settings/enhance'
-    | '/settings/general'
-    | '/settings/git'
-    | '/settings/models'
-    | '/settings/providers'
-    | '/settings/usage'
+    | '/_chat/plugins'
+    | '/_chat/settings'
     | '/_chat/'
+    | '/_chat/workspace/$workspaceId'
+    | '/_chat/workspace/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   ChatRoute: typeof ChatRouteWithChildren
-  SettingsRoute: typeof SettingsRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/settings': {
-      id: '/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof SettingsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/_chat': {
       id: '/_chat'
       path: ''
@@ -218,75 +127,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatIndexRouteImport
       parentRoute: typeof ChatRoute
     }
-    '/settings/usage': {
-      id: '/settings/usage'
-      path: '/usage'
-      fullPath: '/settings/usage'
-      preLoaderRoute: typeof SettingsUsageRouteImport
-      parentRoute: typeof SettingsRoute
+    '/_chat/settings': {
+      id: '/_chat/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof ChatSettingsRouteImport
+      parentRoute: typeof ChatRoute
     }
-    '/settings/providers': {
-      id: '/settings/providers'
-      path: '/providers'
-      fullPath: '/settings/providers'
-      preLoaderRoute: typeof SettingsProvidersRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/settings/models': {
-      id: '/settings/models'
-      path: '/models'
-      fullPath: '/settings/models'
-      preLoaderRoute: typeof SettingsModelsRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/settings/git': {
-      id: '/settings/git'
-      path: '/git'
-      fullPath: '/settings/git'
-      preLoaderRoute: typeof SettingsGitRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/settings/general': {
-      id: '/settings/general'
-      path: '/general'
-      fullPath: '/settings/general'
-      preLoaderRoute: typeof SettingsGeneralRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/settings/enhance': {
-      id: '/settings/enhance'
-      path: '/enhance'
-      fullPath: '/settings/enhance'
-      preLoaderRoute: typeof SettingsEnhanceRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/settings/archived': {
-      id: '/settings/archived'
-      path: '/archived'
-      fullPath: '/settings/archived'
-      preLoaderRoute: typeof SettingsArchivedRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/settings/appearance': {
-      id: '/settings/appearance'
-      path: '/appearance'
-      fullPath: '/settings/appearance'
-      preLoaderRoute: typeof SettingsAppearanceRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/settings/advanced': {
-      id: '/settings/advanced'
-      path: '/advanced'
-      fullPath: '/settings/advanced'
-      preLoaderRoute: typeof SettingsAdvancedRouteImport
-      parentRoute: typeof SettingsRoute
-    }
-    '/settings/about': {
-      id: '/settings/about'
-      path: '/about'
-      fullPath: '/settings/about'
-      preLoaderRoute: typeof SettingsAboutRouteImport
-      parentRoute: typeof SettingsRoute
+    '/_chat/plugins': {
+      id: '/_chat/plugins'
+      path: '/plugins'
+      fullPath: '/plugins'
+      preLoaderRoute: typeof ChatPluginsRouteImport
+      parentRoute: typeof ChatRoute
     }
     '/_chat/$threadId': {
       id: '/_chat/$threadId'
@@ -295,54 +148,45 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatThreadIdRouteImport
       parentRoute: typeof ChatRoute
     }
+    '/_chat/workspace/': {
+      id: '/_chat/workspace/'
+      path: '/workspace'
+      fullPath: '/workspace/'
+      preLoaderRoute: typeof ChatWorkspaceIndexRouteImport
+      parentRoute: typeof ChatRoute
+    }
+    '/_chat/workspace/$workspaceId': {
+      id: '/_chat/workspace/$workspaceId'
+      path: '/workspace/$workspaceId'
+      fullPath: '/workspace/$workspaceId'
+      preLoaderRoute: typeof ChatWorkspaceWorkspaceIdRouteImport
+      parentRoute: typeof ChatRoute
+    }
   }
 }
 
 interface ChatRouteChildren {
   ChatThreadIdRoute: typeof ChatThreadIdRoute
+  ChatPluginsRoute: typeof ChatPluginsRoute
+  ChatSettingsRoute: typeof ChatSettingsRoute
   ChatIndexRoute: typeof ChatIndexRoute
+  ChatWorkspaceWorkspaceIdRoute: typeof ChatWorkspaceWorkspaceIdRoute
+  ChatWorkspaceIndexRoute: typeof ChatWorkspaceIndexRoute
 }
 
 const ChatRouteChildren: ChatRouteChildren = {
   ChatThreadIdRoute: ChatThreadIdRoute,
+  ChatPluginsRoute: ChatPluginsRoute,
+  ChatSettingsRoute: ChatSettingsRoute,
   ChatIndexRoute: ChatIndexRoute,
+  ChatWorkspaceWorkspaceIdRoute: ChatWorkspaceWorkspaceIdRoute,
+  ChatWorkspaceIndexRoute: ChatWorkspaceIndexRoute,
 }
 
 const ChatRouteWithChildren = ChatRoute._addFileChildren(ChatRouteChildren)
 
-interface SettingsRouteChildren {
-  SettingsAboutRoute: typeof SettingsAboutRoute
-  SettingsAdvancedRoute: typeof SettingsAdvancedRoute
-  SettingsAppearanceRoute: typeof SettingsAppearanceRoute
-  SettingsArchivedRoute: typeof SettingsArchivedRoute
-  SettingsEnhanceRoute: typeof SettingsEnhanceRoute
-  SettingsGeneralRoute: typeof SettingsGeneralRoute
-  SettingsGitRoute: typeof SettingsGitRoute
-  SettingsModelsRoute: typeof SettingsModelsRoute
-  SettingsProvidersRoute: typeof SettingsProvidersRoute
-  SettingsUsageRoute: typeof SettingsUsageRoute
-}
-
-const SettingsRouteChildren: SettingsRouteChildren = {
-  SettingsAboutRoute: SettingsAboutRoute,
-  SettingsAdvancedRoute: SettingsAdvancedRoute,
-  SettingsAppearanceRoute: SettingsAppearanceRoute,
-  SettingsArchivedRoute: SettingsArchivedRoute,
-  SettingsEnhanceRoute: SettingsEnhanceRoute,
-  SettingsGeneralRoute: SettingsGeneralRoute,
-  SettingsGitRoute: SettingsGitRoute,
-  SettingsModelsRoute: SettingsModelsRoute,
-  SettingsProvidersRoute: SettingsProvidersRoute,
-  SettingsUsageRoute: SettingsUsageRoute,
-}
-
-const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
-  SettingsRouteChildren,
-)
-
 const rootRouteChildren: RootRouteChildren = {
   ChatRoute: ChatRouteWithChildren,
-  SettingsRoute: SettingsRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

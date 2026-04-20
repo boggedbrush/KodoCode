@@ -1,13 +1,12 @@
 import { type ProviderInteractionMode } from "@t3tools/contracts";
 import { memo, useState } from "react";
-
-import { INTERACTION_MODE_ACCENT_COLORS } from "../../modeColors";
+import { getInteractionModeControlValue } from "../../modeModelSelection";
 
 const MODES = [
-  { mode: "ask" as const, label: "Ask", color: INTERACTION_MODE_ACCENT_COLORS.ask },
-  { mode: "plan" as const, label: "Plan", color: INTERACTION_MODE_ACCENT_COLORS.plan },
-  { mode: "code" as const, label: "Code", color: INTERACTION_MODE_ACCENT_COLORS.code },
-  { mode: "review" as const, label: "Review", color: INTERACTION_MODE_ACCENT_COLORS.review },
+  { mode: "ask" as const, label: "Ask", color: "#64B5F6" },
+  { mode: "plan" as const, label: "Plan", color: "#c8954a" },
+  { mode: "code" as const, label: "Code", color: "#5236CC" },
+  { mode: "review" as const, label: "Review", color: "#4DB6AC" },
 ];
 
 export const InteractionModePill = memo(function InteractionModePill({
@@ -18,7 +17,7 @@ export const InteractionModePill = memo(function InteractionModePill({
   onSetMode: (mode: ProviderInteractionMode) => void;
 }) {
   const [hoveredMode, setHoveredMode] = useState<ProviderInteractionMode | null>(null);
-  const activeMode = interactionMode === "default" ? "code" : interactionMode;
+  const activeMode = getInteractionModeControlValue(interactionMode);
 
   return (
     <div className="flex items-center gap-0.5 rounded-full bg-black/10 px-1 py-0.5 dark:bg-white/5">
@@ -29,15 +28,15 @@ export const InteractionModePill = memo(function InteractionModePill({
           <button
             key={mode}
             type="button"
-            onClick={() => onSetMode(mode)}
-            onMouseEnter={() => setHoveredMode(mode)}
-            onMouseLeave={() => setHoveredMode(null)}
             className="rounded-full px-3 py-0.5 text-sm font-semibold transition-colors"
-            title={`Switch to ${label} mode`}
             style={{
               backgroundColor: isActive || isHovered ? color : "transparent",
               color: isActive || isHovered ? "#fff" : color,
             }}
+            title={`Switch to ${label} mode`}
+            onClick={() => onSetMode(mode)}
+            onMouseEnter={() => setHoveredMode(mode)}
+            onMouseLeave={() => setHoveredMode(null)}
           >
             {label}
           </button>

@@ -1,24 +1,17 @@
-import {
-  type ClaudeModelOptions,
-  type CodexModelOptions,
-  type ProviderKind,
-  type ProviderModelOptions,
-  type ServerProviderModel,
-  type ThreadId,
-} from "@t3tools/contracts";
+// FILE: TraitsPicker.tsx
+// Purpose: Renders composer trait controls for effort, thinking, and fast mode across menu surfaces.
+// Layer: Chat composer presentation
+// Depends on: shared trait resolution helpers, provider model option updates, and shared menu primitives.
+
+import { type ProviderKind, type ThreadId } from "@t3tools/contracts";
 import {
   applyClaudePromptEffortPrefix,
-  isClaudeUltrathinkPrompt,
-  trimOrNull,
-  getDefaultEffort,
-  getDefaultContextWindow,
-  hasContextWindowOption,
-  resolveEffort,
+  geminiModelOptionsFromEffortValue,
 } from "@t3tools/shared/model";
 import { memo, useCallback, useState } from "react";
-import type { VariantProps } from "class-variance-authority";
-import { ChevronDownIcon } from "lucide-react";
-import { Button, buttonVariants } from "../ui/button";
+import { IoFlash } from "react-icons/io5";
+import { ChevronDownIcon } from "~/lib/icons";
+import { Button } from "../ui/button";
 import {
   Menu,
   MenuGroup,
@@ -29,157 +22,39 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { useComposerDraftStore } from "../../composerDraftStore";
-import { getProviderModelCapabilities } from "../../providerModels";
-import { cn } from "~/lib/utils";
-
-type ProviderOptions = ProviderModelOptions[ProviderKind];
-const COMPOSER_AUTO_EFFORT_VALUE = "auto";
-type TraitsPersistence =
-  | {
-      threadId: ThreadId;
-      onModelOptionsChange?: never;
-    }
-  | {
-      threadId?: undefined;
-      onModelOptionsChange: (nextOptions: ProviderOptions | undefined) => void;
-    };
+import { buildNextProviderOptions, type ProviderOptions } from "../../providerModelOptions";
+import { COMPOSER_PICKER_TRIGGER_TEXT_CLASS_NAME } from "./composerPickerStyles";
+import { getComposerTraitSelection } from "./composerTraits";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { ShortcutKbd } from "../ui/shortcut-kbd";
 
 const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
 
-function getRawEffort(
-  provider: ProviderKind,
-  modelOptions: ProviderOptions | null | undefined,
-): string | null {
-  if (provider === "codex") {
-    return trimOrNull((modelOptions as CodexModelOptions | undefined)?.reasoningEffort);
-  }
-  return trimOrNull((modelOptions as ClaudeModelOptions | undefined)?.effort);
-}
-
-function getRawContextWindow(
-  provider: ProviderKind,
-  modelOptions: ProviderOptions | null | undefined,
-): string | null {
-  if (provider === "claudeAgent") {
-    return trimOrNull((modelOptions as ClaudeModelOptions | undefined)?.contextWindow);
-  }
-  return null;
-}
-
-function buildNextOptions(
-  provider: ProviderKind,
-  modelOptions: ProviderOptions | null | undefined,
-  patch: Record<string, unknown>,
-): ProviderOptions {
-  if (provider === "codex") {
-    return { ...(modelOptions as CodexModelOptions | undefined), ...patch } as CodexModelOptions;
-  }
-  return { ...(modelOptions as ClaudeModelOptions | undefined), ...patch } as ClaudeModelOptions;
-}
-
-function getSelectedTraits(
-  provider: ProviderKind,
-  models: ReadonlyArray<ServerProviderModel>,
-  model: string | null | undefined,
-  prompt: string,
-  modelOptions: ProviderOptions | null | undefined,
-  allowPromptInjectedEffort: boolean,
-) {
-  const caps = getProviderModelCapabilities(models, model, provider);
-  const effortLevels = allowPromptInjectedEffort
-    ? caps.reasoningEffortLevels
-    : caps.reasoningEffortLevels.filter(
-        (option) => !caps.promptInjectedEffortLevels.includes(option.value),
-      );
-
-  // Resolve effort from options (provider-specific key)
-  const rawEffort = getRawEffort(provider, modelOptions);
-  const effort = resolveEffort(caps, rawEffort) ?? null;
-
-  // Thinking toggle (only for models that support it)
-  const thinkingEnabled = caps.supportsThinkingToggle
-    ? ((modelOptions as ClaudeModelOptions | undefined)?.thinking ?? true)
-    : null;
-
-  // Fast mode
-  const fastModeEnabled =
-    caps.supportsFastMode &&
-    (modelOptions as { fastMode?: boolean } | undefined)?.fastMode === true;
-
-  // Context window
-  const contextWindowOptions = caps.contextWindowOptions;
-  const rawContextWindow = getRawContextWindow(provider, modelOptions);
-  const defaultContextWindow = getDefaultContextWindow(caps);
-  const contextWindow =
-    rawContextWindow && hasContextWindowOption(caps, rawContextWindow)
-      ? rawContextWindow
-      : defaultContextWindow;
-
-  // Prompt-controlled effort (e.g. ultrathink in prompt text)
-  const ultrathinkPromptControlled =
-    allowPromptInjectedEffort &&
-    caps.promptInjectedEffortLevels.length > 0 &&
-    isClaudeUltrathinkPrompt(prompt);
-
-  // Check if "ultrathink" appears in the body text (not just our prefix)
-  const ultrathinkInBodyText =
-    ultrathinkPromptControlled && isClaudeUltrathinkPrompt(prompt.replace(/^Ultrathink:\s*/i, ""));
-
-  return {
-    caps,
-    rawEffort,
-    effort,
-    effortLevels,
-    thinkingEnabled,
-    fastModeEnabled,
-    contextWindowOptions,
-    contextWindow,
-    defaultContextWindow,
-    ultrathinkPromptControlled,
-    ultrathinkInBodyText,
-  };
-}
-
 export interface TraitsMenuContentProps {
   provider: ProviderKind;
-  models: ReadonlyArray<ServerProviderModel>;
+  threadId: ThreadId;
   model: string | null | undefined;
   prompt: string;
   onPromptChange: (prompt: string) => void;
+  includeFastMode?: boolean;
   modelOptions?: ProviderOptions | null | undefined;
-  allowPromptInjectedEffort?: boolean;
-  triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
-  triggerClassName?: string;
-  fallbackModel?: string;
-  showAsAuto?: boolean;
+  onSelectionComplete?: () => void;
 }
 
 export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   provider,
-  models,
+  threadId,
   model,
   prompt,
   onPromptChange,
+  includeFastMode = true,
   modelOptions,
-  allowPromptInjectedEffort = true,
-  fallbackModel,
-  showAsAuto,
-  ...persistence
-}: TraitsMenuContentProps & TraitsPersistence) {
+  onSelectionComplete,
+}: TraitsMenuContentProps) {
   const setProviderModelOptions = useComposerDraftStore((store) => store.setProviderModelOptions);
-  const updateModelOptions = useCallback(
-    (nextOptions: ProviderOptions | undefined) => {
-      if ("onModelOptionsChange" in persistence) {
-        persistence.onModelOptionsChange(nextOptions);
-        return;
-      }
-      setProviderModelOptions(persistence.threadId, provider, nextOptions, { persistSticky: true });
-    },
-    [persistence, provider, setProviderModelOptions],
-  );
   const {
     caps,
-    rawEffort,
+    defaultEffort,
     effort,
     effortLevels,
     thinkingEnabled,
@@ -188,31 +63,12 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     contextWindow,
     defaultContextWindow,
     ultrathinkPromptControlled,
-    ultrathinkInBodyText,
-  } = getSelectedTraits(
-    provider,
-    models,
-    model || fallbackModel,
-    prompt,
-    modelOptions,
-    allowPromptInjectedEffort,
-  );
-  const defaultEffort = getDefaultEffort(caps);
-  const showAutoEffort =
-    rawEffort === null && !ultrathinkPromptControlled && effortLevels.length > 0;
+  } = getComposerTraitSelection(provider, model, prompt, modelOptions);
 
   const handleEffortChange = useCallback(
     (value: string) => {
+      if (ultrathinkPromptControlled) return;
       if (!value) return;
-      const effortKey = provider === "codex" ? "reasoningEffort" : "effort";
-      if (value === COMPOSER_AUTO_EFFORT_VALUE) {
-        if (ultrathinkInBodyText) return;
-        if (ultrathinkPromptControlled) {
-          onPromptChange(prompt.replace(/^Ultrathink:\s*/i, ""));
-        }
-        updateModelOptions(buildNextOptions(provider, modelOptions, { [effortKey]: undefined }));
-        return;
-      }
       const nextOption = effortLevels.find((option) => option.value === value);
       if (!nextOption) return;
       if (caps.promptInjectedEffortLevels.includes(nextOption.value)) {
@@ -221,26 +77,34 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
             ? ULTRATHINK_PROMPT_PREFIX
             : applyClaudePromptEffortPrefix(prompt, "ultrathink");
         onPromptChange(nextPrompt);
+        onSelectionComplete?.();
         return;
       }
-      if (ultrathinkInBodyText) return;
-      if (ultrathinkPromptControlled) {
-        const stripped = prompt.replace(/^Ultrathink:\s*/i, "");
-        onPromptChange(stripped);
-      }
-      updateModelOptions(
-        buildNextOptions(provider, modelOptions, { [effortKey]: nextOption.value }),
+      const nextModelOptionsPatch =
+        provider === "gemini"
+          ? (geminiModelOptionsFromEffortValue(nextOption.value) ?? {})
+          : provider === "codex"
+            ? { reasoningEffort: nextOption.value }
+            : { effort: nextOption.value };
+      setProviderModelOptions(
+        threadId,
+        provider,
+        buildNextProviderOptions(provider, modelOptions, nextModelOptionsPatch),
+        { ...(model !== undefined ? { model } : {}), persistSticky: true },
       );
+      onSelectionComplete?.();
     },
     [
       ultrathinkPromptControlled,
-      ultrathinkInBodyText,
       modelOptions,
       onPromptChange,
-      updateModelOptions,
+      onSelectionComplete,
+      threadId,
+      setProviderModelOptions,
       effortLevels,
       prompt,
       caps.promptInjectedEffortLevels,
+      model,
       provider,
     ],
   );
@@ -255,29 +119,18 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
         <>
           <MenuGroup>
             <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">Effort</div>
-            {ultrathinkInBodyText ? (
+            {ultrathinkPromptControlled ? (
               <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">
-                Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change effort.
+                Remove Ultrathink from the prompt to change effort.
               </div>
             ) : null}
-            <MenuRadioGroup
-              value={
-                ultrathinkPromptControlled
-                  ? "ultrathink"
-                  : showAutoEffort || showAsAuto
-                    ? COMPOSER_AUTO_EFFORT_VALUE
-                    : effort
-              }
-              onValueChange={handleEffortChange}
-            >
-              <MenuRadioItem value={COMPOSER_AUTO_EFFORT_VALUE} disabled={ultrathinkInBodyText}>
-                Auto
-              </MenuRadioItem>
+            <MenuRadioGroup value={effort} onValueChange={handleEffortChange}>
               {effortLevels.map((option) => (
                 <MenuRadioItem
                   key={option.value}
                   value={option.value}
-                  disabled={ultrathinkInBodyText}
+                  disabled={ultrathinkPromptControlled}
+                  onClick={() => onSelectionComplete?.()}
                 >
                   {option.label}
                   {option.value === defaultEffort ? " (default)" : ""}
@@ -292,17 +145,25 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
           <MenuRadioGroup
             value={thinkingEnabled ? "on" : "off"}
             onValueChange={(value) => {
-              updateModelOptions(
-                buildNextOptions(provider, modelOptions, { thinking: value === "on" }),
+              setProviderModelOptions(
+                threadId,
+                provider,
+                buildNextProviderOptions(provider, modelOptions, { thinking: value === "on" }),
+                { ...(model !== undefined ? { model } : {}), persistSticky: true },
               );
+              onSelectionComplete?.();
             }}
           >
-            <MenuRadioItem value="on">On (default)</MenuRadioItem>
-            <MenuRadioItem value="off">Off</MenuRadioItem>
+            <MenuRadioItem value="on" onClick={() => onSelectionComplete?.()}>
+              On (default)
+            </MenuRadioItem>
+            <MenuRadioItem value="off" onClick={() => onSelectionComplete?.()}>
+              Off
+            </MenuRadioItem>
           </MenuRadioGroup>
         </MenuGroup>
       ) : null}
-      {caps.supportsFastMode ? (
+      {includeFastMode && caps.supportsFastMode ? (
         <>
           <MenuDivider />
           <MenuGroup>
@@ -310,13 +171,21 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
             <MenuRadioGroup
               value={fastModeEnabled ? "on" : "off"}
               onValueChange={(value) => {
-                updateModelOptions(
-                  buildNextOptions(provider, modelOptions, { fastMode: value === "on" }),
+                setProviderModelOptions(
+                  threadId,
+                  provider,
+                  buildNextProviderOptions(provider, modelOptions, { fastMode: value === "on" }),
+                  { ...(model !== undefined ? { model } : {}), persistSticky: true },
                 );
+                onSelectionComplete?.();
               }}
             >
-              <MenuRadioItem value="off">off</MenuRadioItem>
-              <MenuRadioItem value="on">on</MenuRadioItem>
+              <MenuRadioItem value="off" onClick={() => onSelectionComplete?.()}>
+                off
+              </MenuRadioItem>
+              <MenuRadioItem value="on" onClick={() => onSelectionComplete?.()}>
+                on
+              </MenuRadioItem>
             </MenuRadioGroup>
           </MenuGroup>
         </>
@@ -331,15 +200,21 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
             <MenuRadioGroup
               value={contextWindow ?? defaultContextWindow ?? ""}
               onValueChange={(value) => {
-                updateModelOptions(
-                  buildNextOptions(provider, modelOptions, {
-                    contextWindow: value,
-                  }),
+                setProviderModelOptions(
+                  threadId,
+                  provider,
+                  buildNextProviderOptions(provider, modelOptions, { contextWindow: value }),
+                  { ...(model !== undefined ? { model } : {}), persistSticky: true },
                 );
+                onSelectionComplete?.();
               }}
             >
               {contextWindowOptions.map((option) => (
-                <MenuRadioItem key={option.value} value={option.value}>
+                <MenuRadioItem
+                  key={option.value}
+                  value={option.value}
+                  onClick={() => onSelectionComplete?.()}
+                >
                   {option.label}
                   {option.value === defaultContextWindow ? " (default)" : ""}
                 </MenuRadioItem>
@@ -354,22 +229,33 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
 
 export const TraitsPicker = memo(function TraitsPicker({
   provider,
-  models,
+  threadId,
   model,
   prompt,
   onPromptChange,
+  includeFastMode = true,
   modelOptions,
-  allowPromptInjectedEffort = true,
-  triggerVariant,
-  triggerClassName,
-  fallbackModel,
-  showAsAuto,
-  ...persistence
-}: TraitsMenuContentProps & TraitsPersistence & { showAsAuto?: boolean }) {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  open,
+  onOpenChange,
+  shortcutLabel,
+}: TraitsMenuContentProps & {
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  shortcutLabel?: string | null;
+}) {
+  const [uncontrolledMenuOpen, setUncontrolledMenuOpen] = useState(false);
+  const isMenuOpen = open ?? uncontrolledMenuOpen;
+  const setMenuOpen = useCallback(
+    (nextOpen: boolean) => {
+      if (open === undefined) {
+        setUncontrolledMenuOpen(nextOpen);
+      }
+      onOpenChange?.(nextOpen);
+    },
+    [onOpenChange, open],
+  );
   const {
     caps,
-    rawEffort,
     effort,
     effortLevels,
     thinkingEnabled,
@@ -378,82 +264,127 @@ export const TraitsPicker = memo(function TraitsPicker({
     contextWindow,
     defaultContextWindow,
     ultrathinkPromptControlled,
-  } = getSelectedTraits(provider, models, model, prompt, modelOptions, allowPromptInjectedEffort);
-  const showAutoEffort =
-    rawEffort === null && !ultrathinkPromptControlled && effortLevels.length > 0;
+  } = getComposerTraitSelection(provider, model, prompt, modelOptions);
 
   const effortLabel = effort
     ? (effortLevels.find((l) => l.value === effort)?.label ?? effort)
     : null;
   const contextWindowLabel =
     contextWindowOptions.length > 1 && contextWindow !== defaultContextWindow
-      ? (contextWindowOptions.find((o) => o.value === contextWindow)?.label ?? null)
+      ? (contextWindowOptions.find((option) => option.value === contextWindow)?.label ?? null)
       : null;
-  const primaryTraitLabel = ultrathinkPromptControlled
+  const primaryTriggerLabel = ultrathinkPromptControlled
     ? "Ultrathink"
-    : showAsAuto || showAutoEffort
-      ? "Auto"
-      : effortLabel
-        ? effortLabel
-        : thinkingEnabled === null
-          ? null
-          : `Thinking ${thinkingEnabled ? "On" : "Off"}`;
-  const triggerLabel =
-    [
-      primaryTraitLabel,
-      ...(caps.supportsFastMode && fastModeEnabled ? ["Fast"] : []),
-      ...(contextWindowLabel ? [contextWindowLabel] : []),
-    ]
-      .filter(Boolean)
-      .join(" · ") || "Current Effort";
+    : effortLabel
+      ? effortLabel
+      : thinkingEnabled === null
+        ? null
+        : `Thinking ${thinkingEnabled ? "On" : "Off"}`;
+  const showsFastBadge = caps.supportsFastMode && fastModeEnabled;
 
   const isCodexStyle = provider === "codex";
+
+  const triggerButton = (
+    <Button
+      size="sm"
+      variant="ghost"
+      className={
+        isCodexStyle
+          ? `min-w-0 max-w-40 shrink justify-start overflow-hidden whitespace-nowrap px-2 sm:max-w-48 sm:px-3 [&_svg]:mx-0 ${COMPOSER_PICKER_TRIGGER_TEXT_CLASS_NAME}`
+          : `shrink-0 whitespace-nowrap px-2 sm:px-3 ${COMPOSER_PICKER_TRIGGER_TEXT_CLASS_NAME}`
+      }
+    />
+  );
+
+  const triggerContent = isCodexStyle ? (
+    <span className="flex min-w-0 w-full items-center gap-2 overflow-hidden">
+      <span className="min-w-0 flex flex-1 items-center gap-1.5 truncate">
+        {primaryTriggerLabel ? <span className="truncate">{primaryTriggerLabel}</span> : null}
+        {showsFastBadge ? (
+          <>
+            {primaryTriggerLabel ? (
+              <span className="shrink-0 text-muted-foreground/45">·</span>
+            ) : null}
+            <span className="inline-flex shrink-0 items-center gap-1">
+              <IoFlash aria-hidden="true" className="size-3 text-[hsl(var(--chart-4))]" />
+              <span>Fast</span>
+            </span>
+          </>
+        ) : null}
+        {contextWindowLabel ? (
+          <>
+            {primaryTriggerLabel || showsFastBadge ? (
+              <span className="shrink-0 text-muted-foreground/45">·</span>
+            ) : null}
+            <span className="shrink-0">{contextWindowLabel}</span>
+          </>
+        ) : null}
+      </span>
+      <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
+    </span>
+  ) : (
+    <>
+      <span className="inline-flex items-center gap-1.5">
+        {primaryTriggerLabel ? <span>{primaryTriggerLabel}</span> : null}
+        {showsFastBadge ? (
+          <>
+            {primaryTriggerLabel ? <span className="text-muted-foreground/45">·</span> : null}
+            <span className="inline-flex items-center gap-1">
+              <IoFlash aria-hidden="true" className="size-3 text-[hsl(var(--chart-4))]" />
+              <span>Fast</span>
+            </span>
+          </>
+        ) : null}
+        {contextWindowLabel ? (
+          <>
+            {primaryTriggerLabel || showsFastBadge ? (
+              <span className="text-muted-foreground/45">·</span>
+            ) : null}
+            <span>{contextWindowLabel}</span>
+          </>
+        ) : null}
+      </span>
+      <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
+    </>
+  );
 
   return (
     <Menu
       open={isMenuOpen}
       onOpenChange={(open) => {
-        setIsMenuOpen(open);
+        setMenuOpen(open);
       }}
     >
-      <MenuTrigger
-        render={
-          <Button
-            size="sm"
-            variant={triggerVariant ?? "ghost"}
-            className={cn(
-              isCodexStyle
-                ? "min-w-0 max-w-40 shrink justify-start overflow-hidden whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:max-w-48 sm:px-3 [&_svg]:mx-0"
-                : "shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3",
-              triggerClassName,
-            )}
-          />
-        }
-      >
-        {isCodexStyle ? (
-          <span className="flex min-w-0 w-full items-center gap-2 overflow-hidden">
-            {triggerLabel}
-            <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
-          </span>
-        ) : (
-          <>
-            <span>{triggerLabel}</span>
-            <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
-          </>
-        )}
-      </MenuTrigger>
+      {shortcutLabel ? (
+        <Tooltip>
+          <TooltipTrigger render={<MenuTrigger render={triggerButton} />}>
+            {triggerContent}
+          </TooltipTrigger>
+          {!isMenuOpen ? (
+            <TooltipPopup side="top" sideOffset={6}>
+              <span className="inline-flex items-center gap-2 px-1 py-0.5">
+                <span>Change reasoning</span>
+                <ShortcutKbd
+                  shortcutLabel={shortcutLabel}
+                  className="h-4 min-w-4 px-1 text-[length:var(--app-font-size-ui-2xs,9px)] text-muted-foreground"
+                />
+              </span>
+            </TooltipPopup>
+          ) : null}
+        </Tooltip>
+      ) : (
+        <MenuTrigger render={triggerButton}>{triggerContent}</MenuTrigger>
+      )}
       <MenuPopup align="start">
         <TraitsMenuContent
           provider={provider}
-          models={models}
+          threadId={threadId}
           model={model}
           prompt={prompt}
           onPromptChange={onPromptChange}
+          includeFastMode={includeFastMode}
           modelOptions={modelOptions}
-          allowPromptInjectedEffort={allowPromptInjectedEffort}
-          {...(showAsAuto !== undefined ? { showAsAuto } : {})}
-          {...(fallbackModel !== undefined && { fallbackModel })}
-          {...persistence}
+          onSelectionComplete={() => setMenuOpen(false)}
         />
       </MenuPopup>
     </Menu>

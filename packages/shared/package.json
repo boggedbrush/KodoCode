@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/shared",
-  "version": "0.0.1",
+  "version": "0.0.0-alpha.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -20,6 +20,10 @@
       "types": "./src/shell.ts",
       "import": "./src/shell.ts"
     },
+    "./codexConfig": {
+      "types": "./src/codexConfig.ts",
+      "import": "./src/codexConfig.ts"
+    },
     "./Net": {
       "types": "./src/Net.ts",
       "import": "./src/Net.ts"
@@ -28,33 +32,41 @@
       "types": "./src/DrainableWorker.ts",
       "import": "./src/DrainableWorker.ts"
     },
-    "./KeyedCoalescingWorker": {
-      "types": "./src/KeyedCoalescingWorker.ts",
-      "import": "./src/KeyedCoalescingWorker.ts"
+    "./chatThreads": {
+      "types": "./src/chatThreads.ts",
+      "import": "./src/chatThreads.ts"
     },
     "./schemaJson": {
       "types": "./src/schemaJson.ts",
       "import": "./src/schemaJson.ts"
     },
-    "./Struct": {
-      "types": "./src/Struct.ts",
-      "import": "./src/Struct.ts"
+    "./terminalThreads": {
+      "types": "./src/terminalThreads.ts",
+      "import": "./src/terminalThreads.ts"
     },
-    "./serverSettings": {
-      "types": "./src/serverSettings.ts",
-      "import": "./src/serverSettings.ts"
+    "./threadEnvironment": {
+      "types": "./src/threadEnvironment.ts",
+      "import": "./src/threadEnvironment.ts"
     },
-    "./String": {
-      "types": "./src/String.ts",
-      "import": "./src/String.ts"
+    "./threadSummary": {
+      "types": "./src/threadSummary.ts",
+      "import": "./src/threadSummary.ts"
     },
-    "./projectScripts": {
-      "types": "./src/projectScripts.ts",
-      "import": "./src/projectScripts.ts"
+    "./threadWorkspace": {
+      "types": "./src/threadWorkspace.ts",
+      "import": "./src/threadWorkspace.ts"
     },
-    "./provider-usage": {
-      "types": "./src/provider-usage/metadata.ts",
-      "import": "./src/provider-usage/metadata.ts"
+    "./subagents": {
+      "types": "./src/subagents.ts",
+      "import": "./src/subagents.ts"
+    },
+    "./agentMentions": {
+      "types": "./src/agentMentions.ts",
+      "import": "./src/agentMentions.ts"
+    },
+    "./worktreeHandoff": {
+      "types": "./src/worktreeHandoff.ts",
+      "import": "./src/worktreeHandoff.ts"
     }
   },
   "scripts": {

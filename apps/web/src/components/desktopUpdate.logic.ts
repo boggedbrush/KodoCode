@@ -1,20 +1,28 @@
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
 
-export type DesktopUpdateButtonAction = "download" | "install" | "open-release" | "none";
+export type DesktopUpdateButtonAction = "check" | "download" | "install" | "none";
 
 export function resolveDesktopUpdateButtonAction(
   state: DesktopUpdateState,
 ): DesktopUpdateButtonAction {
-  if (state.downloadedVersion) {
-    return "install";
+  if (
+    state.status === "idle" ||
+    state.status === "checking" ||
+    state.status === "up-to-date" ||
+    (state.status === "error" && state.errorContext === "check")
+  ) {
+    return "check";
   }
   if (state.status === "available") {
-    if (state.deliveryMethod === "external" && state.releasePageUrl) {
-      return "open-release";
-    }
     return "download";
   }
+  if (state.status === "downloaded") {
+    return "install";
+  }
   if (state.status === "error") {
+    if (state.errorContext === "install" && state.downloadedVersion) {
+      return "install";
+    }
     if (state.errorContext === "download" && state.availableVersion) {
       return "download";
     }
@@ -23,13 +31,16 @@ export function resolveDesktopUpdateButtonAction(
 }
 
 export function shouldShowDesktopUpdateButton(state: DesktopUpdateState | null): boolean {
-  if (!state || !state.enabled) {
-    return false;
-  }
-  if (state.status === "downloading") {
-    return true;
-  }
-  return resolveDesktopUpdateButtonAction(state) !== "none";
+  if (!state?.enabled) return false;
+  // Only show the button when there's actually something to do:
+  // a new version to download, a downloaded update to install, or a retryable error
+  return (
+    state.status === "checking" ||
+    state.status === "available" ||
+    state.status === "downloading" ||
+    state.status === "downloaded" ||
+    (state.status === "error" && state.errorContext !== "check")
+  );
 }
 
 export function shouldShowArm64IntelBuildWarning(state: DesktopUpdateState | null): boolean {
@@ -37,7 +48,105 @@ export function shouldShowArm64IntelBuildWarning(state: DesktopUpdateState | nul
 }
 
 export function isDesktopUpdateButtonDisabled(state: DesktopUpdateState | null): boolean {
-  return state?.status === "downloading";
+  return state?.status === "downloading" || state?.status === "checking";
+}
+
+function formatDesktopUpdateDownloadPercent(percent: number | null): string | null {
+  if (typeof percent !== "number" || !Number.isFinite(percent)) {
+    return null;
+  }
+  const normalized = Math.max(0, Math.min(100, Math.floor(percent)));
+  return `${normalized}%`;
+}
+
+export interface DesktopUpdateButtonPresentation {
+  label: string;
+  secondaryLabel: string | null;
+  progressPercent: number | null;
+}
+
+export function getDesktopUpdateButtonPresentation(
+  state: DesktopUpdateState | null,
+  options?: { installing?: boolean },
+): DesktopUpdateButtonPresentation {
+  if (options?.installing) {
+    return {
+      label: "Updating...",
+      secondaryLabel: null,
+      progressPercent: null,
+    };
+  }
+
+  if (!state) {
+    return {
+      label: "Update",
+      secondaryLabel: null,
+      progressPercent: null,
+    };
+  }
+
+  if (state.status === "checking") {
+    return {
+      label: "Checking...",
+      secondaryLabel: null,
+      progressPercent: null,
+    };
+  }
+
+  if (state.status === "downloading") {
+    const percentText = formatDesktopUpdateDownloadPercent(state.downloadPercent);
+    return {
+      label: "Downloading...",
+      secondaryLabel: state.availableVersion ?? null,
+      progressPercent: percentText ? Number.parseInt(percentText, 10) : null,
+    };
+  }
+
+  const action = resolveDesktopUpdateButtonAction(state);
+  if (action === "download") {
+    if (state.status === "error" && state.errorContext === "download") {
+      return {
+        label: "Download failed",
+        secondaryLabel: state.availableVersion ?? null,
+        progressPercent: null,
+      };
+    }
+    return {
+      label: "Update available",
+      secondaryLabel: state.availableVersion ?? null,
+      progressPercent: null,
+    };
+  }
+  if (action === "install") {
+    if (state.status === "error" && state.errorContext === "install") {
+      return {
+        label: "Install failed",
+        secondaryLabel: state.downloadedVersion ?? state.availableVersion ?? null,
+        progressPercent: null,
+      };
+    }
+    return {
+      label: "Ready to update",
+      secondaryLabel: state.downloadedVersion ?? state.availableVersion ?? null,
+      progressPercent: null,
+    };
+  }
+  if (action === "check") {
+    return {
+      label: "Check updates",
+      secondaryLabel: null,
+      progressPercent: null,
+    };
+  }
+  return {
+    label: "Update",
+    secondaryLabel: null,
+    progressPercent: null,
+  };
+}
+
+export function getDesktopUpdateButtonLabel(state: DesktopUpdateState | null): string {
+  return getDesktopUpdateButtonPresentation(state).label;
 }
 
 export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState): string {
@@ -49,20 +158,29 @@ export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState):
   if (action === "download") {
     return "This Mac has Apple Silicon, but Kodo Code is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.";
   }
-  if (action === "open-release") {
-    return "This Mac has Apple Silicon, but Kodo Code is still running the Intel build under Rosetta. Open the latest release to download the native Apple Silicon build manually.";
-  }
   if (action === "install") {
     return "This Mac has Apple Silicon, but Kodo Code is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
   }
   return "This Mac has Apple Silicon, but Kodo Code is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.";
 }
 
-export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string {
+export function getDesktopUpdateButtonTooltip(
+  state: DesktopUpdateState,
+  options?: { installing?: boolean },
+): string {
+  if (options?.installing) {
+    return "Applying update...";
+  }
+  if (state.status === "idle") {
+    return "Check for updates";
+  }
+  if (state.status === "checking") {
+    return "Checking for updates...";
+  }
+  if (state.status === "up-to-date") {
+    return `You're up to date on ${state.currentVersion}. Click to check again.`;
+  }
   if (state.status === "available") {
-    if (state.deliveryMethod === "external" && state.releasePageUrl) {
-      return `Update ${state.availableVersion ?? "available"} ready. Click to open the latest GitHub release.`;
-    }
     return `Update ${state.availableVersion ?? "available"} ready to download`;
   }
   if (state.status === "downloading") {
@@ -74,6 +192,11 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
     return `Update ${state.downloadedVersion ?? state.availableVersion ?? "ready"} downloaded. Click to restart and install.`;
   }
   if (state.status === "error") {
+    if (state.errorContext === "check") {
+      return state.message
+        ? `${state.message}. Click to check again.`
+        : "Update check failed. Click to try again.";
+    }
     if (state.errorContext === "download" && state.availableVersion) {
       return `Download failed for ${state.availableVersion}. Click to retry.`;
     }
@@ -82,14 +205,7 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
     }
     return state.message ?? "Update failed";
   }
-  return "Up to date";
-}
-
-export function getDesktopUpdateInstallConfirmationMessage(
-  state: Pick<DesktopUpdateState, "availableVersion" | "downloadedVersion">,
-): string {
-  const version = state.downloadedVersion ?? state.availableVersion;
-  return `Install update${version ? ` ${version}` : ""} and restart Kodo Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.`;
+  return "Update available";
 }
 
 export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): string | null {
@@ -100,20 +216,10 @@ export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): 
 }
 
 export function shouldToastDesktopUpdateActionResult(result: DesktopUpdateActionResult): boolean {
-  return getDesktopUpdateActionError(result) !== null;
+  return result.accepted && !result.completed;
 }
 
 export function shouldHighlightDesktopUpdateError(state: DesktopUpdateState | null): boolean {
   if (!state || state.status !== "error") return false;
   return state.errorContext === "download" || state.errorContext === "install";
-}
-
-export function canCheckForUpdate(state: DesktopUpdateState | null): boolean {
-  if (!state || !state.enabled) return false;
-  return (
-    state.status !== "checking" &&
-    state.status !== "downloading" &&
-    state.status !== "downloaded" &&
-    state.status !== "disabled"
-  );
 }

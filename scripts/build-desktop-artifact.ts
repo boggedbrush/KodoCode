@@ -1,16 +1,18 @@
 #!/usr/bin/env node
+// FILE: build-desktop-artifact.ts
+// Purpose: Stages and builds packaged desktop artifacts plus updater metadata for GitHub releases.
+// Layer: Release/build script
+// Depends on: apps/desktop package metadata, electron-builder, and GitHub release config.
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 
 import rootPackageJson from "../package.json" with { type: "json" };
 import desktopPackageJson from "../apps/desktop/package.json" with { type: "json" };
 import serverPackageJson from "../apps/server/package.json" with { type: "json" };
 
-import { BRAND_ASSET_PATHS, PUBLISH_ICON_OVERRIDES } from "./lib/brand-assets.ts";
-import { repackLinuxAppImageWithExternalUpdater } from "./linux-appimage-updates.ts";
-import { pinInstalledDependencyVersions } from "./lib/installed-dependency-versions.ts";
+import { BRAND_ASSET_PATHS } from "./lib/brand-assets.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -21,14 +23,31 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 const BuildPlatform = Schema.Literals(["mac", "linux", "win"]);
 const BuildArch = Schema.Literals(["arm64", "x64", "universal"]);
+const MICROPHONE_USAGE_DESCRIPTION =
+  "DP Code needs microphone access so you can record voice notes and transcribe them into the chat composer.";
 
 const RepoRoot = Effect.service(Path.Path).pipe(
   Effect.flatMap((path) => path.fromFileUrl(new URL("..", import.meta.url))),
 );
+const DesktopAfterPackHookSource = Effect.zipWith(
+  RepoRoot,
+  Effect.service(Path.Path),
+  (repoRoot, path) => path.join(repoRoot, "apps/desktop/scripts/electron-builder-after-pack.cjs"),
+);
+const ProductionMacIconComposerSource = Effect.zipWith(
+  RepoRoot,
+  Effect.service(Path.Path),
+  (repoRoot, path) => path.join(repoRoot, BRAND_ASSET_PATHS.productionMacIconComposer),
+);
 const ProductionMacIconSource = Effect.zipWith(
   RepoRoot,
   Effect.service(Path.Path),
-  (repoRoot, path) => path.join(repoRoot, BRAND_ASSET_PATHS.productionMacIconIcns),
+  (repoRoot, path) => path.join(repoRoot, BRAND_ASSET_PATHS.productionMacIconPng),
+);
+const ProductionMacLegacyIconSource = Effect.zipWith(
+  RepoRoot,
+  Effect.service(Path.Path),
+  (repoRoot, path) => path.join(repoRoot, BRAND_ASSET_PATHS.productionMacLegacyIconPng),
 );
 const ProductionLinuxIconSource = Effect.zipWith(
   RepoRoot,
@@ -156,20 +175,6 @@ function resolvePythonForNodeGyp(): string | undefined {
   return executable;
 }
 
-function prependRepoToolingToPath(env: NodeJS.ProcessEnv, repoRoot: string): NodeJS.ProcessEnv {
-  const repoNodeModulesBin = join(repoRoot, "node_modules", ".bin");
-  const currentPath = env.PATH ?? env.Path ?? "";
-  const nextPath = currentPath
-    ? `${repoNodeModulesBin}${delimiter}${currentPath}`
-    : repoNodeModulesBin;
-
-  return {
-    ...env,
-    PATH: nextPath,
-    Path: nextPath,
-  };
-}
-
 interface ResolvedBuildOptions {
   readonly platform: typeof BuildPlatform.Type;
   readonly target: string;
@@ -188,17 +193,17 @@ interface StagePackageJson {
   readonly name: string;
   readonly version: string;
   readonly buildVersion: string;
-  readonly kodoCodeCommitHash: string;
+  readonly t3codeCommitHash: string;
   readonly private: true;
   readonly description: string;
   readonly author: string;
   readonly main: string;
   readonly build: Record<string, unknown>;
   readonly dependencies: Record<string, unknown>;
-  readonly overrides: Record<string, unknown>;
   readonly devDependencies: {
     readonly electron: string;
   };
+  readonly overrides: Record<string, unknown>;
 }
 
 const AzureTrustedSigningOptionsConfig = Config.all({
@@ -230,11 +235,13 @@ const BuildEnvConfig = Config.all({
 });
 
 const resolveBooleanFlag = (flag: Option.Option<boolean>, envValue: boolean) =>
-  Option.getOrElse(Option.filter(flag, Boolean), () => envValue);
+  Option.getOrElse(flag, () => envValue);
 const mergeOptions = <A>(a: Option.Option<A>, b: Option.Option<A>, defaultValue: A) =>
   Option.getOrElse(a, () => Option.getOrElse(b, () => defaultValue));
 
-const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (input: BuildCliInput) {
+export const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (
+  input: BuildCliInput,
+) {
   const path = yield* Path.Path;
   const repoRoot = yield* RepoRoot;
   const env = yield* BuildEnvConfig.asEffect();
@@ -266,7 +273,6 @@ const resolveBuildOptions = Effect.fn("resolveBuildOptions")(function* (input: B
   const keepStage = resolveBooleanFlag(input.keepStage, env.keepStage);
   const signed = resolveBooleanFlag(input.signed, env.signed);
   const verbose = resolveBooleanFlag(input.verbose, env.verbose);
-
   const mockUpdates = resolveBooleanFlag(input.mockUpdates, env.mockUpdates);
   const mockUpdateServerPort = mergeOptions(
     input.mockUpdateServerPort,
@@ -307,19 +313,86 @@ const runCommand = Effect.fn("runCommand")(function* (command: ChildProcess.Comm
   }
 });
 
-function stageMacIcons(stageResourcesDir: string) {
+function generateMacIconSet(
+  sourcePng: string,
+  targetIcns: string,
+  tmpRoot: string,
+  path: Path.Path,
+  verbose: boolean,
+) {
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const iconsetDir = path.join(tmpRoot, "icon.iconset");
+    yield* fs.makeDirectory(iconsetDir, { recursive: true });
+
+    const iconSizes = [16, 32, 128, 256, 512] as const;
+    for (const size of iconSizes) {
+      yield* runCommand(
+        ChildProcess.make({
+          ...commandOutputOptions(verbose),
+        })`sips -z ${size} ${size} ${sourcePng} --out ${path.join(iconsetDir, `icon_${size}x${size}.png`)}`,
+      );
+
+      const retinaSize = size * 2;
+      yield* runCommand(
+        ChildProcess.make({
+          ...commandOutputOptions(verbose),
+        })`sips -z ${retinaSize} ${retinaSize} ${sourcePng} --out ${path.join(iconsetDir, `icon_${size}x${size}@2x.png`)}`,
+      );
+    }
+
+    yield* runCommand(
+      ChildProcess.make({
+        ...commandOutputOptions(verbose),
+      })`iconutil -c icns ${iconsetDir} -o ${targetIcns}`,
+    );
+  });
+}
+
+function stageMacIcons(stageResourcesDir: string, verbose: boolean) {
   return Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const iconSource = yield* ProductionMacIconSource;
-    if (!(yield* fs.exists(iconSource))) {
+    const modernIconSource = yield* ProductionMacIconSource;
+    if (!(yield* fs.exists(modernIconSource))) {
       return yield* new BuildScriptError({
-        message: `Production icon source is missing at ${iconSource}`,
+        message: `Production macOS icon source is missing at ${modernIconSource}`,
       });
     }
+    const legacyIconSource = yield* ProductionMacLegacyIconSource;
+    if (!(yield* fs.exists(legacyIconSource))) {
+      return yield* new BuildScriptError({
+        message: `Production legacy macOS icon source is missing at ${legacyIconSource}`,
+      });
+    }
+    const composerIconSource = yield* ProductionMacIconComposerSource;
+    const hasComposerIcon = yield* fs.exists(composerIconSource);
 
+    const tmpRoot = yield* fs.makeTempDirectoryScoped({
+      prefix: "t3code-icon-build-",
+    });
+
+    const iconPngPath = path.join(stageResourcesDir, "icon.png");
     const iconIcnsPath = path.join(stageResourcesDir, "icon.icns");
-    yield* fs.copyFile(iconSource, iconIcnsPath);
+    const iconComposerPath = path.join(stageResourcesDir, "icon.icon");
+
+    yield* runCommand(
+      ChildProcess.make({
+        ...commandOutputOptions(verbose),
+      })`sips -z 512 512 ${modernIconSource} --out ${iconPngPath}`,
+    );
+
+    yield* generateMacIconSet(legacyIconSource, iconIcnsPath, tmpRoot, path, verbose);
+
+    if (hasComposerIcon) {
+      // Replace any repo-local placeholder so the staged build always reflects the authored Icon Composer asset.
+      yield* fs.remove(iconComposerPath, { recursive: true }).pipe(Effect.catch(() => Effect.void));
+      yield* fs.copy(composerIconSource, iconComposerPath);
+    }
+
+    return {
+      hasComposerIcon,
+    } as const;
   });
 }
 
@@ -392,34 +465,6 @@ function validateBundledClientAssets(clientDir: string) {
   });
 }
 
-function applyStageWebIconOverrides(repoRoot: string, stageAppDir: string) {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-
-    for (const override of PUBLISH_ICON_OVERRIDES) {
-      const sourcePath = path.join(repoRoot, override.sourceRelativePath);
-      const targetPath = path.join(stageAppDir, "apps/server", override.targetRelativePath);
-
-      if (!(yield* fs.exists(sourcePath))) {
-        return yield* new BuildScriptError({
-          message: `Missing production web icon source at ${sourcePath}`,
-        });
-      }
-
-      if (!(yield* fs.exists(targetPath))) {
-        return yield* new BuildScriptError({
-          message: `Missing staged web icon target at ${targetPath}`,
-        });
-      }
-
-      yield* fs.copyFile(sourcePath, targetPath);
-    }
-
-    yield* Effect.log("[desktop-artifact] Applied production web icons to staged client bundle.");
-  });
-}
-
 function resolveDesktopRuntimeDependencies(
   dependencies: Record<string, unknown> | undefined,
   catalog: Record<string, unknown>,
@@ -467,12 +512,12 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   signed: boolean,
   mockUpdates: boolean,
   mockUpdateServerPort: string | undefined,
+  hasMacIconComposer: boolean,
 ) {
   const buildConfig: Record<string, unknown> = {
     appId: "com.kodo.code",
     productName,
     artifactName: "Kodo-Code-${version}-${arch}.${ext}",
-    asarUnpack: ["apps/server/dist/**", "node_modules/**"],
     directories: {
       buildResources: "apps/desktop/resources",
     },
@@ -492,9 +537,20 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "mac") {
     buildConfig.mac = {
       target: target === "dmg" ? [target, "zip"] : [target],
-      icon: "icon.icns",
+      icon: hasMacIconComposer ? "icon.icon" : "icon.icns",
       category: "public.app-category.developer-tools",
+      extendInfo: {
+        NSMicrophoneUsageDescription: MICROPHONE_USAGE_DESCRIPTION,
+        ...(hasMacIconComposer ? { CFBundleIconFile: "icon.icns" } : {}),
+      },
     };
+    if (hasMacIconComposer) {
+      // Keep the DMG volume icon and pre-Tahoe bundle metadata on the legacy path while Tahoe uses Assets.car.
+      buildConfig.afterPack = "./electron-builder-after-pack.cjs";
+      buildConfig.dmg = {
+        icon: "icon.icns",
+      };
+    }
   }
 
   if (platform === "linux") {
@@ -528,20 +584,29 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
 const assertPlatformBuildResources = Effect.fn("assertPlatformBuildResources")(function* (
   platform: typeof BuildPlatform.Type,
   stageResourcesDir: string,
+  verbose: boolean,
 ) {
   if (platform === "mac") {
-    yield* stageMacIcons(stageResourcesDir);
-    return;
+    return yield* stageMacIcons(stageResourcesDir, verbose);
   }
 
   if (platform === "linux") {
     yield* stageLinuxIcons(stageResourcesDir);
-    return;
+    return {
+      hasComposerIcon: false,
+    } as const;
   }
 
   if (platform === "win") {
     yield* stageWindowsIcons(stageResourcesDir);
+    return {
+      hasComposerIcon: false,
+    } as const;
   }
+
+  return {
+    hasComposerIcon: false,
+  } as const;
 });
 
 const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
@@ -566,6 +631,20 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       message: "Could not resolve production dependencies from apps/server/package.json.",
     });
   }
+
+  const resolvedOverrides = yield* Effect.try({
+    try: () =>
+      resolveCatalogDependencies(
+        rootPackageJson.overrides,
+        rootPackageJson.workspaces.catalog,
+        "apps/desktop",
+      ),
+    catch: (cause) =>
+      new BuildScriptError({
+        message: "Could not resolve overrides from package.json.",
+        cause,
+      }),
+  });
 
   const resolvedServerDependencies = yield* Effect.try({
     try: () =>
@@ -592,41 +671,12 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
         cause,
       }),
   });
-  const resolvedRootOverrides = yield* Effect.try({
-    try: () =>
-      resolveCatalogDependencies(
-        rootPackageJson.overrides,
-        rootPackageJson.workspaces.catalog,
-        "root overrides",
-      ),
-    catch: (cause) =>
-      new BuildScriptError({
-        message: "Could not resolve root overrides for the desktop staging manifest.",
-        cause,
-      }),
-  });
-  const pinnedServerDependencies = yield* Effect.try({
-    try: () => pinInstalledDependencyVersions(resolvedServerDependencies, repoRoot),
-    catch: (cause) =>
-      new BuildScriptError({
-        message: "Could not pin server runtime dependencies from the local install state.",
-        cause,
-      }),
-  });
-  const pinnedDesktopRuntimeDependencies = yield* Effect.try({
-    try: () => pinInstalledDependencyVersions(resolvedDesktopRuntimeDependencies, repoRoot),
-    catch: (cause) =>
-      new BuildScriptError({
-        message: "Could not pin desktop runtime dependencies from the local install state.",
-        cause,
-      }),
-  });
 
   const appVersion = options.version ?? serverPackageJson.version;
   const commitHash = resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
-    prefix: `kodo-code-desktop-${options.platform}-stage-`,
+    prefix: `t3code-desktop-${options.platform}-stage-`,
   });
 
   const stageAppDir = path.join(stageRoot, "app");
@@ -673,21 +723,37 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   yield* fs.copy(distDirs.desktopDist, path.join(stageAppDir, "apps/desktop/dist-electron"));
   yield* fs.copy(distDirs.desktopResources, stageResourcesDir);
   yield* fs.copy(distDirs.serverDist, path.join(stageAppDir, "apps/server/dist"));
-  yield* applyStageWebIconOverrides(repoRoot, stageAppDir);
 
-  yield* assertPlatformBuildResources(options.platform, stageResourcesDir);
+  const stagedPlatformResources = yield* assertPlatformBuildResources(
+    options.platform,
+    stageResourcesDir,
+    options.verbose,
+  );
+
+  if (options.platform === "mac" && stagedPlatformResources.hasComposerIcon) {
+    const afterPackHookSource = yield* DesktopAfterPackHookSource;
+    if (!(yield* fs.exists(afterPackHookSource))) {
+      return yield* new BuildScriptError({
+        message: `Missing electron-builder afterPack hook at ${afterPackHookSource}`,
+      });
+    }
+    yield* fs.copyFile(
+      afterPackHookSource,
+      path.join(stageAppDir, "electron-builder-after-pack.cjs"),
+    );
+  }
 
   // electron-builder is filtering out stageResourcesDir directory in the AppImage for production
   yield* fs.copy(stageResourcesDir, path.join(stageAppDir, "apps/desktop/prod-resources"));
 
   const stagePackageJson: StagePackageJson = {
-    name: "kodo-code",
+    name: "kodo-code-desktop",
     version: appVersion,
     buildVersion: appVersion,
-    kodoCodeCommitHash: commitHash,
+    t3codeCommitHash: commitHash,
     private: true,
     description: "Kodo Code desktop build",
-    author: "boggedbrush",
+    author: "Emanuele Di Pietro",
     main: "apps/desktop/dist-electron/main.js",
     build: yield* createBuildConfig(
       options.platform,
@@ -696,26 +762,25 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
       options.signed,
       options.mockUpdates,
       options.mockUpdateServerPort,
+      stagedPlatformResources.hasComposerIcon,
     ),
     dependencies: {
-      ...pinnedServerDependencies,
-      ...pinnedDesktopRuntimeDependencies,
+      ...resolvedServerDependencies,
+      ...resolvedDesktopRuntimeDependencies,
     },
-    overrides: resolvedRootOverrides,
     devDependencies: {
       electron: electronVersion,
     },
+    overrides: resolvedOverrides,
   };
 
   const stagePackageJsonString = yield* encodeJsonString(stagePackageJson);
   yield* fs.writeFileString(path.join(stageAppDir, "package.json"), `${stagePackageJsonString}\n`);
 
-  const stageInstallEnv = prependRepoToolingToPath({ ...process.env }, repoRoot);
   yield* Effect.log("[desktop-artifact] Installing staged production dependencies...");
   yield* runCommand(
     ChildProcess.make({
       cwd: stageAppDir,
-      env: stageInstallEnv,
       ...commandOutputOptions(options.verbose),
       // Windows needs shell mode to resolve .cmd shims (e.g. bun.cmd).
       shell: process.platform === "win32",
@@ -787,47 +852,6 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     return yield* new BuildScriptError({
       message: `Build completed but no files were produced in ${stageDistDir}`,
     });
-  }
-
-  const publishConfig = resolveGitHubPublishConfig();
-  const appimagetoolPath = process.env.T3CODE_APPIMAGETOOL?.trim();
-  if (options.platform === "linux" && options.target === "AppImage" && publishConfig) {
-    if (!appimagetoolPath) {
-      yield* Effect.log(
-        "[desktop-artifact] Skipping AppImage external update metadata; T3CODE_APPIMAGETOOL is not set.",
-      );
-    } else {
-      const appImagePath = copiedArtifacts.find((artifactPath) =>
-        artifactPath.endsWith(".AppImage"),
-      );
-      const manifestPath = path.join(options.outputDir, "latest-linux.yml");
-      if (!appImagePath) {
-        return yield* new BuildScriptError({
-          message: `Expected a Linux AppImage artifact in ${options.outputDir}, but none was found.`,
-        });
-      }
-
-      yield* Effect.log(
-        "[desktop-artifact] Repacking AppImage with standard update metadata for Gear Lever/AppImageUpdate...",
-      );
-      const repackedResult = yield* Effect.try({
-        try: () =>
-          repackLinuxAppImageWithExternalUpdater({
-            appImagePath,
-            manifestPath,
-            appimagetoolPath,
-            owner: publishConfig.owner,
-            repo: publishConfig.repo,
-            version: appVersion,
-          }),
-        catch: (cause) =>
-          new BuildScriptError({
-            message: "Failed to repack the Linux AppImage with external update metadata.",
-            cause,
-          }),
-      });
-      copiedArtifacts.push(repackedResult.zsyncPath);
-    }
   }
 
   yield* Effect.log("[desktop-artifact] Done. Artifacts:").pipe(

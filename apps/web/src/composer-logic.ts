@@ -1,16 +1,12 @@
 import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
+import {
+  BUILT_IN_COMPOSER_SLASH_COMMANDS,
+  isBuiltInComposerSlashCommand,
+  type ComposerSlashCommand,
+} from "./composerSlashCommands";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
-export type ComposerTriggerKind = "path" | "slash-command" | "slash-model" | "slash-presets";
-export type ComposerSlashCommand =
-  | "model"
-  | "presets"
-  | "ask"
-  | "plan"
-  | "code"
-  | "review"
-  | "usage";
-export type ComposerStandaloneSlashCommand = Exclude<ComposerSlashCommand, "model" | "presets">;
+export type ComposerTriggerKind = "mention" | "slash-command" | "slash-model" | "skill";
 
 export interface ComposerTrigger {
   kind: ComposerTriggerKind;
@@ -19,18 +15,22 @@ export interface ComposerTrigger {
   rangeEnd: number;
 }
 
-const SLASH_COMMANDS: readonly ComposerSlashCommand[] = [
-  "model",
-  "presets",
-  "ask",
-  "plan",
-  "code",
-  "review",
-  "usage",
-];
-const isInlineTokenSegment = (
-  segment: { type: "text"; text: string } | { type: "mention" } | { type: "terminal-context" },
-): boolean => segment.type !== "text";
+export function stripComposerTriggerText(text: string, trigger: ComposerTrigger | null): string {
+  if (!trigger) {
+    return text;
+  }
+
+  return `${text.slice(0, trigger.rangeStart)}${text.slice(trigger.rangeEnd)}`;
+}
+
+type ComposerSegmentLike =
+  | { type: "text"; text: string }
+  | { type: "mention" }
+  | { type: "skill" }
+  | { type: "terminal-context" }
+  | { type: "agent-mention"; alias: string };
+
+const isInlineTokenSegment = (segment: ComposerSegmentLike): boolean => segment.type !== "text";
 
 function clampCursor(text: string, cursor: number): number {
   if (!Number.isFinite(cursor)) return text.length;
@@ -75,6 +75,25 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
       expandedCursor += expandedLength;
       continue;
     }
+    if (segment.type === "skill") {
+      const expandedLength = segment.name.length + 1;
+      if (remaining <= 1) {
+        return expandedCursor + (remaining === 0 ? 0 : expandedLength);
+      }
+      remaining -= 1;
+      expandedCursor += expandedLength;
+      continue;
+    }
+    if (segment.type === "agent-mention") {
+      // @alias = 1 + alias.length
+      const expandedLength = segment.alias.length + 1;
+      if (remaining <= 1) {
+        return expandedCursor + (remaining === 0 ? 0 : expandedLength);
+      }
+      remaining -= 1;
+      expandedCursor += expandedLength;
+      continue;
+    }
     if (segment.type === "terminal-context") {
       if (remaining <= 1) {
         return expandedCursor + remaining;
@@ -95,9 +114,7 @@ export function expandCollapsedComposerCursor(text: string, cursorInput: number)
   return expandedCursor;
 }
 
-function collapsedSegmentLength(
-  segment: { type: "text"; text: string } | { type: "mention" } | { type: "terminal-context" },
-): number {
+function collapsedSegmentLength(segment: ComposerSegmentLike): number {
   if (segment.type === "text") {
     return segment.text.length;
   }
@@ -105,9 +122,7 @@ function collapsedSegmentLength(
 }
 
 function clampCollapsedComposerCursorForSegments(
-  segments: ReadonlyArray<
-    { type: "text"; text: string } | { type: "mention" } | { type: "terminal-context" }
-  >,
+  segments: ReadonlyArray<ComposerSegmentLike>,
   cursorInput: number,
 ): number {
   const collapsedLength = segments.reduce(
@@ -140,6 +155,31 @@ export function collapseExpandedComposerCursor(text: string, cursorInput: number
   for (const segment of segments) {
     if (segment.type === "mention") {
       const expandedLength = segment.path.length + 1;
+      if (remaining === 0) {
+        return collapsedCursor;
+      }
+      if (remaining <= expandedLength) {
+        return collapsedCursor + 1;
+      }
+      remaining -= expandedLength;
+      collapsedCursor += 1;
+      continue;
+    }
+    if (segment.type === "skill") {
+      const expandedLength = segment.name.length + 1;
+      if (remaining === 0) {
+        return collapsedCursor;
+      }
+      if (remaining <= expandedLength) {
+        return collapsedCursor + 1;
+      }
+      remaining -= expandedLength;
+      collapsedCursor += 1;
+      continue;
+    }
+    if (segment.type === "agent-mention") {
+      // @alias = 1 + alias.length
+      const expandedLength = segment.alias.length + 1;
       if (remaining === 0) {
         return collapsedCursor;
       }
@@ -217,15 +257,11 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
           rangeEnd: cursor,
         };
       }
-      if (commandQuery.toLowerCase() === "presets") {
-        return {
-          kind: "slash-presets",
-          query: "",
-          rangeStart: lineStart,
-          rangeEnd: cursor,
-        };
-      }
-      if (SLASH_COMMANDS.some((command) => command.startsWith(commandQuery.toLowerCase()))) {
+      if (
+        BUILT_IN_COMPOSER_SLASH_COMMANDS.some((command) =>
+          command.startsWith(commandQuery.toLowerCase()),
+        )
+      ) {
         return {
           kind: "slash-command",
           query: commandQuery,
@@ -233,7 +269,14 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
           rangeEnd: cursor,
         };
       }
-      return null;
+      // Unknown `/query` stays in the slash-command lane so provider-native
+      // commands can be suggested without borrowing the `$skill` flow.
+      return {
+        kind: "slash-command",
+        query: commandQuery,
+        rangeStart: lineStart,
+        rangeEnd: cursor,
+      };
     }
 
     const modelMatch = /^\/model(?:\s+(.*))?$/.exec(linePrefix);
@@ -245,26 +288,28 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
         rangeEnd: cursor,
       };
     }
-
-    const presetsMatch = /^\/presets(?:\s+(.*))?$/.exec(linePrefix);
-    if (presetsMatch) {
-      return {
-        kind: "slash-presets",
-        query: (presetsMatch[1] ?? "").trim(),
-        rangeStart: lineStart,
-        rangeEnd: cursor,
-      };
-    }
   }
 
   const tokenStart = tokenStartForCursor(text, cursor);
   const token = text.slice(tokenStart, cursor);
+  if (token.startsWith("$")) {
+    return {
+      kind: "skill",
+      query: token.slice(1),
+      rangeStart: tokenStart,
+      rangeEnd: cursor,
+    };
+  }
   if (!token.startsWith("@")) {
     return null;
   }
 
+  if (!/^@[^()\s]*$/.test(token)) {
+    return null;
+  }
+
   return {
-    kind: "path",
+    kind: "mention",
     query: token.slice(1),
     rangeStart: tokenStart,
     rangeEnd: cursor,
@@ -273,25 +318,16 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
-): ComposerStandaloneSlashCommand | null {
-  const match = /^\/(ask|plan|code|review|usage)\s*$/i.exec(text.trim());
+): Exclude<ComposerSlashCommand, "model"> | null {
+  const match = /^\/([a-z-]+)\s*$/i.exec(text.trim());
   if (!match) {
     return null;
   }
   const command = match[1]?.toLowerCase();
-  if (command === "ask") return "ask";
-  if (command === "plan") return "plan";
-  if (command === "code") return "code";
-  if (command === "review") return "review";
-  return "usage";
-}
-
-export function parseStandaloneComposerPresetsCommand(text: string): { query: string } | null {
-  const match = /^\/presets(?:\s+(.*))?\s*$/i.exec(text.trim());
-  if (!match) {
+  if (!command || !isBuiltInComposerSlashCommand(command) || command === "model") {
     return null;
   }
-  return { query: (match[1] ?? "").trim() };
+  return command;
 }
 
 export function replaceTextRange(

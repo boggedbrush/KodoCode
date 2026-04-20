@@ -10,29 +10,36 @@ import {
   dialog,
   ipcMain,
   Menu,
+  Notification,
   nativeImage,
   nativeTheme,
   protocol,
+  session,
   shell,
+  systemPreferences,
 } from "electron";
 import type { MenuItemConstructorOptions } from "electron";
+import * as Effect from "effect/Effect";
 import type {
   DesktopTheme,
   DesktopUpdateActionResult,
-  DesktopUpdateCheckResult,
   DesktopUpdateState,
 } from "@t3tools/contracts";
 import { autoUpdater } from "electron-updater";
 
 import type { ContextMenuItem } from "@t3tools/contracts";
+import { NetService } from "@t3tools/shared/Net";
 import { RotatingFileSink } from "@t3tools/shared/logging";
-import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
-import { DEFAULT_DESKTOP_BACKEND_PORT, resolveDesktopBackendPort } from "./backendPort";
+import { isBackendReadinessAborted, waitForHttpReady } from "./backendReadiness";
 import { showDesktopConfirmDialog } from "./confirmDialog";
-import { resolveDesktopBackendEntryPath, resolveDesktopStaticDirPath } from "./packagedPaths";
-import { patchStdIoWrite, type StdIoWrite } from "./stdioCapture";
+import { shouldAllowMediaPermissionRequest } from "./mediaPermissions";
 import { syncShellEnvironment } from "./syncShellEnvironment";
-import { getAutoUpdateDisabledReason, shouldBroadcastDownloadProgress } from "./updateState";
+import {
+  getAutoUpdateDisabledReason,
+  shouldBroadcastDownloadProgress,
+  shouldCheckForUpdatesOnForeground,
+} from "./updateState";
+import { registerDesktopVoiceTranscriptionHandler } from "./voiceTranscription";
 import {
   createInitialDesktopUpdateState,
   reduceDesktopUpdateStateOnCheckFailure,
@@ -45,7 +52,15 @@ import {
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
 } from "./updateMachine";
+import {
+  buildGitHubReleaseDownloadBaseUrl,
+  resolveGitHubUpdateSource,
+  resolveLatestStableGitHubRelease,
+} from "./githubUpdateFeed";
 import { isArm64HostRunningIntelBuild, resolveDesktopRuntimeInfo } from "./runtimeArch";
+import { DesktopBrowserManager } from "./browserManager";
+import { registerBrowserIpcHandlers, sendBrowserState } from "./browserIpc";
+import { BrowserUsePipeServer } from "./browserUsePipeServer";
 
 syncShellEnvironment();
 
@@ -54,60 +69,54 @@ const CONFIRM_CHANNEL = "desktop:confirm";
 const SET_THEME_CHANNEL = "desktop:set-theme";
 const CONTEXT_MENU_CHANNEL = "desktop:context-menu";
 const OPEN_EXTERNAL_CHANNEL = "desktop:open-external";
+const SHOW_IN_FOLDER_CHANNEL = "desktop:show-in-folder";
 const MENU_ACTION_CHANNEL = "desktop:menu-action";
 const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
+const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
-const UPDATE_CHECK_CHANNEL = "desktop:update-check";
-const GET_WS_URL_CHANNEL = "desktop:get-ws-url";
-const WINDOW_MINIMIZE_CHANNEL = "desktop:window-minimize";
-const WINDOW_TOGGLE_MAXIMIZE_CHANNEL = "desktop:window-toggle-maximize";
-const WINDOW_CLOSE_CHANNEL = "desktop:window-close";
-const WINDOW_IS_MAXIMIZED_CHANNEL = "desktop:window-is-maximized";
-const WINDOW_MAXIMIZED_CHANGE_CHANNEL = "desktop:window-maximized-change";
-const BASE_DIR =
-  process.env.KODOCODE_HOME?.trim() ||
-  process.env.T3CODE_HOME?.trim() ||
-  Path.join(OS.homedir(), ".kodo-code");
+const NOTIFICATIONS_IS_SUPPORTED_CHANNEL = "desktop:notifications-is-supported";
+const NOTIFICATIONS_SHOW_CHANNEL = "desktop:notifications-show";
+const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".dpcode");
 const STATE_DIR = Path.join(BASE_DIR, "userdata");
-const DESKTOP_SCHEME = "kodo";
-const LEGACY_DESKTOP_SCHEME = "t3";
+const DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
-const APP_DISPLAY_NAME = isDevelopment ? "Kodo Code (Dev)" : "Kodo Code (Alpha)";
-const APP_USER_MODEL_ID = "com.kodo.code";
-const LINUX_DESKTOP_ENTRY_NAME = isDevelopment ? "kodo-code-dev.desktop" : "kodo-code.desktop";
-const LINUX_WM_CLASS = isDevelopment ? "kodo-code-dev" : "kodo-code";
-const USER_DATA_DIR_NAME = isDevelopment ? "kodo-code-dev" : "kodo-code";
-const LEGACY_USER_DATA_DIR_NAMES = isDevelopment
-  ? ["T3 Code (Dev)", "t3code-dev"]
-  : ["T3 Code (Alpha)", "t3code"];
+const APP_DISPLAY_NAME = isDevelopment ? "DP Code (Dev)" : "DP Code (Alpha)";
+const APP_USER_MODEL_ID = isDevelopment ? "com.t3tools.dpcode.dev" : "com.t3tools.dpcode";
+const USER_DATA_DIR_NAME = isDevelopment ? "t3code-dev" : "t3code";
+const LEGACY_USER_DATA_DIR_NAME = isDevelopment ? "DP Code (Dev)" : "DP Code (Alpha)";
 const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
 const COMMIT_HASH_DISPLAY_LENGTH = 12;
 const LOG_DIR = Path.join(STATE_DIR, "logs");
 const LOG_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const LOG_FILE_MAX_FILES = 10;
 const APP_RUN_ID = Crypto.randomBytes(6).toString("hex");
-const SERVER_SETTINGS_PATH = Path.join(STATE_DIR, "settings.json");
 const AUTO_UPDATE_STARTUP_DELAY_MS = 15_000;
 const AUTO_UPDATE_POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
+const AUTO_UPDATE_FOREGROUND_RECHECK_MIN_INTERVAL_MS = 5 * 60 * 1000;
+const AUTO_UPDATE_FOREGROUND_RECHECK_MIN_BACKGROUND_MS = 30 * 1000;
+const AUTO_UPDATE_CHECK_TIMEOUT_MS = 45 * 1000;
 const DESKTOP_UPDATE_CHANNEL = "latest";
 const DESKTOP_UPDATE_ALLOW_PRERELEASE = false;
-const LINUX_TRANSPARENT_WINDOW_ARG = "--kodo-linux-transparent-window=1";
-const DEVTOOLS_ARG = "--devtools";
+const BROWSER_PERF_SAMPLE_INTERVAL_MS = 5_000;
+const DPCODE_BROWSER_LABEL = "DPCODE browser";
+const browserPerfLoggingEnabled =
+  process.env.DPCODE_BROWSER_PERF === "1" ||
+  process.env.T3CODE_BROWSER_PERF === "1" ||
+  (isDevelopment &&
+    process.env.DPCODE_BROWSER_PERF !== "0" &&
+    process.env.T3CODE_BROWSER_PERF !== "0");
 
 type DesktopUpdateErrorContext = DesktopUpdateState["errorContext"];
-type LinuxDesktopNamedApp = Electron.App & {
-  setDesktopName?: (desktopName: string) => void;
-};
 
 let mainWindow: BrowserWindow | null = null;
 let backendProcess: ChildProcess.ChildProcess | null = null;
 let backendPort = 0;
 let backendAuthToken = "";
 let backendWsUrl = "";
-let backendStartPromise: Promise<void> | null = null;
+let backendReadinessAbortController: AbortController | null = null;
 let restartAttempt = 0;
 let restartTimer: ReturnType<typeof setTimeout> | null = null;
 let isQuitting = false;
@@ -116,10 +125,55 @@ let aboutCommitHashCache: string | null | undefined;
 let desktopLogSink: RotatingFileSink | null = null;
 let backendLogSink: RotatingFileSink | null = null;
 let restoreStdIoCapture: (() => void) | null = null;
-let backendObservabilitySettings = readPersistedBackendObservabilitySettings();
+let unreadBackgroundNotificationCount = 0;
+let browserPerfInterval: ReturnType<typeof setInterval> | null = null;
+const browserManager = new DesktopBrowserManager();
+let browserUsePipeServer: BrowserUsePipeServer | null = null;
+let configuredGitHubUpdateSource: ReturnType<typeof resolveGitHubUpdateSource> = null;
+let configuredGitHubUpdateToken = "";
+
+browserManager.subscribe((state) => {
+  sendBrowserState(mainWindow?.webContents, state);
+});
+
+function startBrowserPerformanceLogging(): void {
+  if (browserPerfInterval || !browserPerfLoggingEnabled) {
+    return;
+  }
+
+  browserPerfInterval = setInterval(() => {
+    const snapshot = browserManager.getPerformanceSnapshot();
+    const trackedProcessIds = new Set(snapshot.trackedProcessIds);
+    const processMetrics = app
+      .getAppMetrics()
+      .filter((metric) => trackedProcessIds.has(metric.pid))
+      .map((metric) => ({
+        pid: metric.pid,
+        type: metric.type,
+        cpu: Number(metric.cpu.percentCPUUsage.toFixed(1)),
+        memMb: Math.round(metric.memory.workingSetSize / 1024),
+        name: metric.name,
+      }));
+
+    console.info(`[${DPCODE_BROWSER_LABEL} perf]`, {
+      ...snapshot.counters,
+      trackedProcessIds: snapshot.trackedProcessIds,
+      processes: processMetrics,
+    });
+  }, BROWSER_PERF_SAMPLE_INTERVAL_MS);
+  browserPerfInterval.unref();
+}
+
+async function ensureBrowserUsePipeServer(): Promise<void> {
+  if (browserUsePipeServer) {
+    return;
+  }
+  const server = new BrowserUsePipeServer(browserManager);
+  await server.start();
+  browserUsePipeServer = server;
+}
 
 let destructiveMenuIconCache: Electron.NativeImage | null | undefined;
-const expectedBackendExitChildren = new WeakSet<ChildProcess.ChildProcess>();
 const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
   platform: process.platform,
   processArch: process.arch,
@@ -127,7 +181,6 @@ const desktopRuntimeInfo = resolveDesktopRuntimeInfo({
 });
 const initialUpdateState = (): DesktopUpdateState =>
   createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo);
-const shouldOpenDevTools = process.argv.includes(DEVTOOLS_ARG);
 
 function logTimestamp(): string {
   return new Date().toISOString();
@@ -139,32 +192,6 @@ function logScope(scope: string): string {
 
 function sanitizeLogValue(value: string): string {
   return value.replace(/\s+/g, " ").trim();
-}
-
-function readPersistedBackendObservabilitySettings(): {
-  readonly otlpTracesUrl: string | undefined;
-  readonly otlpMetricsUrl: string | undefined;
-} {
-  try {
-    if (!FS.existsSync(SERVER_SETTINGS_PATH)) {
-      return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
-    }
-    return parsePersistedServerObservabilitySettings(FS.readFileSync(SERVER_SETTINGS_PATH, "utf8"));
-  } catch (error) {
-    console.warn("[desktop] failed to read persisted backend observability settings", error);
-    return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
-  }
-}
-
-function backendChildEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  delete env.T3CODE_PORT;
-  delete env.T3CODE_AUTH_TOKEN;
-  delete env.T3CODE_MODE;
-  delete env.T3CODE_NO_BROWSER;
-  delete env.T3CODE_HOST;
-  delete env.T3CODE_DESKTOP_WS_URL;
-  return env;
 }
 
 function writeDesktopLogHeader(message: string): void {
@@ -214,6 +241,63 @@ function getSafeTheme(rawTheme: unknown): DesktopTheme | null {
   return null;
 }
 
+// Wait until the desktop backend exposes its health route so packaged startup
+// can proceed even if the rest of the server is still warming up.
+async function waitForBackendHttpListening(baseUrl: string): Promise<void> {
+  cancelBackendReadinessWait();
+  const controller = new AbortController();
+  backendReadinessAbortController = controller;
+
+  try {
+    await waitForHttpReady(baseUrl, {
+      signal: controller.signal,
+      path: "/health",
+    });
+  } finally {
+    if (backendReadinessAbortController === controller) {
+      backendReadinessAbortController = null;
+    }
+  }
+}
+
+// Wait for the backend's full startup pipeline, but keep this separate from
+// the initial launch gate so slow projection/bootstrap work does not look like
+// a fatal startup failure.
+async function waitForBackendStartupReady(baseUrl: string): Promise<void> {
+  cancelBackendReadinessWait();
+  const controller = new AbortController();
+  backendReadinessAbortController = controller;
+
+  try {
+    await waitForHttpReady(baseUrl, {
+      signal: controller.signal,
+      path: "/health",
+      isReady: async (response) => {
+        if (!response.ok) {
+          return false;
+        }
+        try {
+          const payload = (await response.json()) as {
+            startupReady?: unknown;
+          };
+          return payload.startupReady === true;
+        } catch {
+          return false;
+        }
+      },
+    });
+  } finally {
+    if (backendReadinessAbortController === controller) {
+      backendReadinessAbortController = null;
+    }
+  }
+}
+
+function cancelBackendReadinessWait(): void {
+  backendReadinessAbortController?.abort();
+  backendReadinessAbortController = null;
+}
+
 function writeDesktopStreamChunk(
   streamName: "stdout" | "stderr",
   chunk: unknown,
@@ -235,48 +319,36 @@ function installStdIoCapture(): void {
     return;
   }
 
-  const originalStdoutWrite = process.stdout.write.bind(process.stdout) as StdIoWrite;
-  const originalStderrWrite = process.stderr.write.bind(process.stderr) as StdIoWrite;
-  const stdoutCapture = patchStdIoWrite({
-    originalWrite: originalStdoutWrite,
-    onChunkCaptured: (chunk, encoding) => {
-      writeDesktopStreamChunk("stdout", chunk, encoding);
-    },
-    onPassthroughDisabled: () => {
-      writeDesktopLogHeader("stdout passthrough disabled after broken stdio pipe");
-    },
-  });
-  const stderrCapture = patchStdIoWrite({
-    originalWrite: originalStderrWrite,
-    onChunkCaptured: (chunk, encoding) => {
-      writeDesktopStreamChunk("stderr", chunk, encoding);
-    },
-    onPassthroughDisabled: () => {
-      writeDesktopLogHeader("stderr passthrough disabled after broken stdio pipe");
-    },
-  });
+  const originalStdoutWrite = process.stdout.write.bind(process.stdout);
+  const originalStderrWrite = process.stderr.write.bind(process.stderr);
 
-  const stdoutErrorListener = (error: Error): void => {
-    if (!stdoutCapture.handleStreamError(error)) {
-      throw error;
-    }
-  };
-  const stderrErrorListener = (error: Error): void => {
-    if (!stderrCapture.handleStreamError(error)) {
-      throw error;
-    }
-  };
+  const patchWrite =
+    (streamName: "stdout" | "stderr", originalWrite: typeof process.stdout.write) =>
+    (
+      chunk: string | Uint8Array,
+      encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+      callback?: (error?: Error | null) => void,
+    ): boolean => {
+      const encoding = typeof encodingOrCallback === "string" ? encodingOrCallback : undefined;
+      writeDesktopStreamChunk(streamName, chunk, encoding);
+      if (typeof encodingOrCallback === "function") {
+        return originalWrite(chunk, encodingOrCallback);
+      }
+      if (callback !== undefined) {
+        return originalWrite(chunk, encoding, callback);
+      }
+      if (encoding !== undefined) {
+        return originalWrite(chunk, encoding);
+      }
+      return originalWrite(chunk);
+    };
 
-  process.stdout.write = stdoutCapture.write;
-  process.stderr.write = stderrCapture.write;
-  process.stdout.on("error", stdoutErrorListener);
-  process.stderr.on("error", stderrErrorListener);
+  process.stdout.write = patchWrite("stdout", originalStdoutWrite);
+  process.stderr.write = patchWrite("stderr", originalStderrWrite);
 
   restoreStdIoCapture = () => {
     process.stdout.write = originalStdoutWrite;
     process.stderr.write = originalStderrWrite;
-    process.stdout.off("error", stdoutErrorListener);
-    process.stderr.off("error", stderrErrorListener);
     restoreStdIoCapture = null;
   };
 }
@@ -315,10 +387,6 @@ function captureBackendOutput(child: ChildProcess.ChildProcess): void {
 
 initializePackagedLogging();
 
-if (process.platform === "linux") {
-  app.commandLine.appendSwitch("class", LINUX_WM_CLASS);
-}
-
 function getDestructiveMenuIcon(): Electron.NativeImage | undefined {
   if (process.platform !== "darwin") return undefined;
   if (destructiveMenuIconCache !== undefined) {
@@ -345,12 +413,13 @@ let updatePollTimer: ReturnType<typeof setInterval> | null = null;
 let updateStartupTimer: ReturnType<typeof setTimeout> | null = null;
 let updateCheckInFlight = false;
 let updateDownloadInFlight = false;
-let updateInstallInFlight = false;
 let updaterConfigured = false;
 let updateState: DesktopUpdateState = initialUpdateState();
+let updateBackgroundedAtMs: number | null = null;
+let updateBackgroundBlurTimer: ReturnType<typeof setTimeout> | null = null;
+let updateCheckTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
 function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
-  if (updateInstallInFlight) return "install";
   if (updateDownloadInFlight) return "download";
   if (updateCheckInFlight) return "check";
   return updateState.errorContext;
@@ -359,15 +428,6 @@ function resolveUpdaterErrorContext(): DesktopUpdateErrorContext {
 protocol.registerSchemesAsPrivileged([
   {
     scheme: DESKTOP_SCHEME,
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true,
-    },
-  },
-  {
-    scheme: LEGACY_DESKTOP_SCHEME,
     privileges: {
       standard: true,
       secure: true,
@@ -406,27 +466,6 @@ function readAppUpdateYml(): Record<string, string> | null {
   }
 }
 
-function resolveGitHubLatestReleaseUrl(): string | null {
-  const appUpdateYml = readAppUpdateYml();
-  if (appUpdateYml?.provider !== "github") {
-    return null;
-  }
-
-  const owner = appUpdateYml.owner?.trim();
-  const repo = appUpdateYml.repo?.trim();
-  if (!owner || !repo) {
-    return null;
-  }
-
-  return `https://github.com/${owner}/${repo}/releases/latest`;
-}
-
-function shouldUseExternalUpdateDelivery(): boolean {
-  return (
-    process.platform === "darwin" && app.isPackaged && !process.env.T3CODE_DESKTOP_MOCK_UPDATES
-  );
-}
-
 function normalizeCommitHash(value: unknown): string | null {
   if (typeof value !== "string") {
     return null;
@@ -446,11 +485,8 @@ function resolveEmbeddedCommitHash(): string | null {
 
   try {
     const raw = FS.readFileSync(packageJsonPath, "utf8");
-    const parsed = JSON.parse(raw) as {
-      kodoCodeCommitHash?: unknown;
-      t3codeCommitHash?: unknown;
-    };
-    return normalizeCommitHash(parsed.kodoCodeCommitHash ?? parsed.t3codeCommitHash);
+    const parsed = JSON.parse(raw) as { t3codeCommitHash?: unknown };
+    return normalizeCommitHash(parsed.t3codeCommitHash);
   } catch {
     return null;
   }
@@ -479,12 +515,7 @@ function resolveAboutCommitHash(): string | null {
 }
 
 function resolveBackendEntry(): string {
-  return resolveDesktopBackendEntryPath({
-    appPath: resolveAppRoot(),
-    existsSync: FS.existsSync,
-    isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
-  });
+  return Path.join(resolveAppRoot(), "apps/server/dist/index.mjs");
 }
 
 function resolveBackendCwd(): string {
@@ -495,15 +526,19 @@ function resolveBackendCwd(): string {
 }
 
 function resolveDesktopStaticDir(): string | null {
-  return resolveDesktopStaticDirPath(
-    {
-      appPath: resolveAppRoot(),
-      existsSync: FS.existsSync,
-      isPackaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
-    },
-    FS.existsSync,
-  );
+  const appRoot = resolveAppRoot();
+  const candidates = [
+    Path.join(appRoot, "apps/server/dist/client"),
+    Path.join(appRoot, "apps/web/dist"),
+  ];
+
+  for (const candidate of candidates) {
+    if (FS.existsSync(Path.join(candidate, "index.html"))) {
+      return candidate;
+    }
+  }
+
+  return null;
 }
 
 function resolveDesktopStaticPath(staticRoot: string, requestUrl: string): string {
@@ -546,7 +581,7 @@ function handleFatalStartupError(stage: string, error: unknown): void {
   console.error(`[desktop] fatal startup error (${stage})`, error);
   if (!isQuitting) {
     isQuitting = true;
-    dialog.showErrorBox("Kodo Code failed to start", `Stage: ${stage}\n${message}${detail}`);
+    dialog.showErrorBox("DP Code failed to start", `Stage: ${stage}\n${message}${detail}`);
   }
   stopBackend();
   restoreStdIoCapture?.();
@@ -567,10 +602,7 @@ function registerDesktopProtocol(): void {
   const staticRootPrefix = `${staticRootResolved}${Path.sep}`;
   const fallbackIndex = Path.join(staticRootResolved, "index.html");
 
-  const handleDesktopRequest = (
-    request: Electron.ProtocolRequest,
-    callback: (response: Electron.ProtocolResponse) => void,
-  ) => {
+  protocol.registerFileProtocol(DESKTOP_SCHEME, (request, callback) => {
     try {
       const candidate = resolveDesktopStaticPath(staticRootResolved, request.url);
       const resolvedCandidate = Path.resolve(candidate);
@@ -591,10 +623,7 @@ function registerDesktopProtocol(): void {
     } catch {
       callback({ path: fallbackIndex });
     }
-  };
-
-  protocol.registerFileProtocol(DESKTOP_SCHEME, handleDesktopRequest);
-  protocol.registerFileProtocol(LEGACY_DESKTOP_SCHEME, handleDesktopRequest);
+  });
 
   desktopProtocolRegistered = true;
 }
@@ -660,7 +689,7 @@ async function checkForUpdatesFromMenu(): Promise<void> {
     void dialog.showMessageBox({
       type: "info",
       title: "You're up to date!",
-      message: `Kodo Code ${updateState.currentVersion} is currently the newest version available.`,
+      message: `DP Code ${updateState.currentVersion} is currently the newest version available.`,
       buttons: ["OK"],
     });
   } else if (updateState.status === "error") {
@@ -725,6 +754,23 @@ function configureApplicationMenu(): void {
     {
       label: "View",
       submenu: [
+        {
+          label: "New Terminal Tab",
+          accelerator: "CmdOrCtrl+T",
+          click: () => dispatchMenuAction("new-terminal-tab"),
+        },
+        { type: "separator" },
+        {
+          label: "Toggle Sidebar",
+          accelerator: "CmdOrCtrl+B",
+          click: () => dispatchMenuAction("toggle-sidebar"),
+        },
+        {
+          label: "Toggle Browser",
+          accelerator: "CmdOrCtrl+Shift+B",
+          click: () => dispatchMenuAction("toggle-browser"),
+        },
+        { type: "separator" },
         { role: "reload" },
         { role: "forceReload" },
         { role: "toggleDevTools" },
@@ -742,6 +788,12 @@ function configureApplicationMenu(): void {
       role: "help",
       submenu: [
         {
+          label: "Keyboard Shortcuts",
+          accelerator: "CmdOrCtrl+/",
+          click: () => dispatchMenuAction("show-shortcuts"),
+        },
+        { type: "separator" },
+        {
           label: "Check for Updates...",
           click: () => handleCheckForUpdatesMenuClick(),
         },
@@ -753,15 +805,12 @@ function configureApplicationMenu(): void {
 }
 
 function resolveResourcePath(fileName: string): string | null {
-  const developmentCandidates = [
+  const candidates = [
     Path.join(__dirname, "../resources", fileName),
-    Path.join(process.resourcesPath, "resources", fileName),
-  ];
-  const productionCandidates = [
     Path.join(__dirname, "../prod-resources", fileName),
+    Path.join(process.resourcesPath, "resources", fileName),
     Path.join(process.resourcesPath, fileName),
   ];
-  const candidates = isDevelopment ? developmentCandidates : productionCandidates;
 
   for (const candidate of candidates) {
     if (FS.existsSync(candidate)) {
@@ -773,69 +822,89 @@ function resolveResourcePath(fileName: string): string | null {
 }
 
 function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
-  const brandAssetCandidates =
-    ext === "png"
-      ? [
-          isDevelopment
-            ? Path.join(ROOT_DIR, "assets/dev/blueprint-universal-1024.png")
-            : Path.join(ROOT_DIR, "assets/prod/kodo-black-universal-1024.png"),
-        ]
-      : ext === "ico"
-        ? [
-            isDevelopment
-              ? Path.join(ROOT_DIR, "assets/dev/blueprint-windows.ico")
-              : Path.join(ROOT_DIR, "assets/prod/kodo-black-windows.ico"),
-          ]
-        : ext === "icns"
-          ? [
-              isDevelopment
-                ? Path.join(ROOT_DIR, "assets/dev/blueprint-macos.icns")
-                : Path.join(ROOT_DIR, "assets/prod/kodo-black-macos.icns"),
-            ]
-          : [];
-
-  for (const candidate of brandAssetCandidates) {
-    if (FS.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
   return resolveResourcePath(`icon.${ext}`);
 }
 
-function resolveMacDockIcon(): Electron.NativeImage | null {
-  const iconPath = resolveIconPath("icns");
-  if (!iconPath) {
+function resolveNotificationIconPath(): string | null {
+  if (process.platform === "darwin") {
     return null;
   }
-
-  const icon = nativeImage.createFromPath(iconPath);
-  return icon.isEmpty() ? null : icon;
+  if (process.platform === "win32") {
+    return resolveResourcePath("dpcode.png") ?? resolveIconPath("ico");
+  }
+  return resolveResourcePath("dpcode.png") ?? resolveIconPath("png");
 }
 
-function resolveVectorIconPath(): string | null {
-  const candidate = isDevelopment
-    ? Path.join(ROOT_DIR, "assets/dev/blueprint.svg")
-    : Path.join(ROOT_DIR, "assets/prod/logo.svg");
-  return FS.existsSync(candidate) ? candidate : null;
+// Keep the app badge aligned with desktop notifications that arrive off-focus.
+function syncUnreadNotificationBadge(): void {
+  app.setBadgeCount(unreadBackgroundNotificationCount);
 }
 
-function resolveNativeAppIcon(ext: "ico" | "icns" | "png"): Electron.NativeImage | null {
-  const vectorIconPath = resolveVectorIconPath();
-  if (vectorIconPath) {
-    const vectorIcon = nativeImage.createFromPath(vectorIconPath);
-    if (!vectorIcon.isEmpty()) {
-      return vectorIcon;
+// Count minimized, hidden, or unfocused windows as background notification targets.
+function isMainWindowForeground(window: BrowserWindow | null): boolean {
+  if (!window) {
+    return false;
+  }
+  return window.isVisible() && !window.isMinimized() && window.isFocused();
+}
+
+function incrementUnreadNotificationBadge(): void {
+  unreadBackgroundNotificationCount = Math.min(unreadBackgroundNotificationCount + 1, 99);
+  syncUnreadNotificationBadge();
+}
+
+function clearUnreadNotificationBadge(): void {
+  if (unreadBackgroundNotificationCount === 0) {
+    return;
+  }
+  unreadBackgroundNotificationCount = 0;
+  syncUnreadNotificationBadge();
+}
+
+// Show a native OS notification and refocus the app window when the alert is clicked.
+function showDesktopNotification(input: {
+  title: string;
+  body?: string;
+  silent?: boolean;
+  threadId?: string;
+}): boolean {
+  const title = typeof input.title === "string" ? input.title.trim() : "";
+  const body = typeof input.body === "string" ? input.body.trim() : "";
+  const threadId = typeof input.threadId === "string" ? input.threadId.trim() : "";
+  if (title.length === 0 || !Notification.isSupported()) {
+    return false;
+  }
+
+  const iconPath = resolveNotificationIconPath();
+  const notification = new Notification({
+    title,
+    body,
+    silent: input.silent === true,
+    ...(iconPath ? { icon: iconPath } : {}),
+  });
+  if (!isMainWindowForeground(mainWindow)) {
+    incrementUnreadNotificationBadge();
+  }
+
+  notification.on("click", () => {
+    clearUnreadNotificationBadge();
+    if (!mainWindow) {
+      return;
     }
-  }
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    if (!mainWindow.isVisible()) {
+      mainWindow.show();
+    }
+    mainWindow.focus();
+    if (threadId.length > 0) {
+      mainWindow.webContents.send(MENU_ACTION_CHANNEL, `notification-open-thread:${threadId}`);
+    }
+  });
 
-  const rasterIconPath = resolveIconPath(ext);
-  if (!rasterIconPath) {
-    return null;
-  }
-
-  const rasterIcon = nativeImage.createFromPath(rasterIconPath);
-  return rasterIcon.isEmpty() ? null : rasterIcon;
+  notification.show();
+  return true;
 }
 
 /**
@@ -843,10 +912,10 @@ function resolveNativeAppIcon(ext: "ico" | "icns" | "png"): Electron.NativeImage
  *
  * Electron derives the default userData path from `productName` in
  * package.json, which currently produces directories with spaces and
- * parentheses (e.g. `~/.config/Kodo Code (Alpha)` on Linux). This is
+ * parentheses (e.g. `~/.config/DP Code (Alpha)` on Linux). This is
  * unfriendly for shell usage and violates Linux naming conventions.
  *
- * We override it to a clean lowercase name (`kodo-code`). If a legacy
+ * We override it to a clean lowercase name (`t3code`). If the legacy
  * directory already exists we keep using it so existing users don't
  * lose their Chromium profile data (localStorage, cookies, sessions).
  */
@@ -858,11 +927,9 @@ function resolveUserDataPath(): string {
         ? Path.join(OS.homedir(), "Library", "Application Support")
         : process.env.XDG_CONFIG_HOME || Path.join(OS.homedir(), ".config");
 
-  for (const legacyDirName of LEGACY_USER_DATA_DIR_NAMES) {
-    const legacyPath = Path.join(appDataBase, legacyDirName);
-    if (FS.existsSync(legacyPath)) {
-      return legacyPath;
-    }
+  const legacyPath = Path.join(appDataBase, LEGACY_USER_DATA_DIR_NAME);
+  if (FS.existsSync(legacyPath)) {
+    return legacyPath;
   }
 
   return Path.join(appDataBase, USER_DATA_DIR_NAME);
@@ -875,21 +942,11 @@ function configureAppIdentity(): void {
     applicationName: APP_DISPLAY_NAME,
     applicationVersion: app.getVersion(),
     version: commitHash ?? "unknown",
+    copyright: `© ${new Date().getFullYear()} Emanuele Di Pietro`,
   });
 
   if (process.platform === "win32") {
     app.setAppUserModelId(APP_USER_MODEL_ID);
-  }
-
-  if (process.platform === "linux") {
-    (app as LinuxDesktopNamedApp).setDesktopName?.(LINUX_DESKTOP_ENTRY_NAME);
-  }
-
-  if (process.platform === "darwin" && app.dock) {
-    const icon = resolveMacDockIcon();
-    if (icon) {
-      app.dock.setIcon(icon);
-    }
   }
 }
 
@@ -931,40 +988,145 @@ function shouldEnableAutoUpdates(): boolean {
   );
 }
 
-async function checkForUpdates(reason: string): Promise<boolean> {
-  if (isQuitting || !updaterConfigured || updateCheckInFlight) return false;
-  if (updateState.status === "downloading" || updateState.status === "downloaded") {
+async function refreshConfiguredUpdateFeed(): Promise<void> {
+  if (configuredGitHubUpdateSource === null) {
+    return;
+  }
+
+  const latestRelease = await resolveLatestStableGitHubRelease(
+    configuredGitHubUpdateSource,
+    configuredGitHubUpdateToken,
+  );
+  if (latestRelease === null) {
+    throw new Error("No stable GitHub release was found for the desktop update feed.");
+  }
+
+  autoUpdater.setFeedURL({
+    provider: "generic",
+    url: buildGitHubReleaseDownloadBaseUrl(configuredGitHubUpdateSource, latestRelease.tag),
+    ...(configuredGitHubUpdateToken
+      ? {
+          requestHeaders: {
+            authorization: `token ${configuredGitHubUpdateToken}`,
+          },
+        }
+      : {}),
+  });
+}
+
+function clearUpdateBackgroundBlurTimer(): void {
+  if (updateBackgroundBlurTimer) {
+    clearTimeout(updateBackgroundBlurTimer);
+    updateBackgroundBlurTimer = null;
+  }
+}
+
+// Fail closed if electron-updater never emits a terminal check outcome.
+function clearUpdateCheckTimeoutTimer(): void {
+  if (updateCheckTimeoutTimer) {
+    clearTimeout(updateCheckTimeoutTimer);
+    updateCheckTimeoutTimer = null;
+  }
+}
+
+function armUpdateCheckTimeout(reason: string): void {
+  clearUpdateCheckTimeoutTimer();
+  updateCheckTimeoutTimer = setTimeout(() => {
+    updateCheckTimeoutTimer = null;
+    if (updateState.status !== "checking") {
+      return;
+    }
+    updateCheckInFlight = false;
+    setUpdateState(
+      reduceDesktopUpdateStateOnCheckFailure(
+        updateState,
+        "Timed out while checking for updates. Try again.",
+        new Date().toISOString(),
+      ),
+    );
+    console.error(`[desktop-updater] Update check timed out (${reason}).`);
+  }, AUTO_UPDATE_CHECK_TIMEOUT_MS);
+  updateCheckTimeoutTimer.unref();
+}
+
+function isDesktopAppForegrounded(): boolean {
+  return BrowserWindow.getAllWindows().some(
+    (window) => !window.isDestroyed() && window.isFocused(),
+  );
+}
+
+function markDesktopAppBackgrounded(): void {
+  clearUpdateBackgroundBlurTimer();
+  updateBackgroundBlurTimer = setTimeout(() => {
+    updateBackgroundBlurTimer = null;
+    if (isDesktopAppForegrounded()) {
+      return;
+    }
+    updateBackgroundedAtMs = Date.now();
+  }, 0);
+}
+
+function handleDesktopAppForegrounded(): void {
+  clearUpdateBackgroundBlurTimer();
+  clearUnreadNotificationBadge();
+  const foregroundedAtMs = Date.now();
+  const backgroundedAtMs = updateBackgroundedAtMs;
+  updateBackgroundedAtMs = null;
+  const shouldCheck = shouldCheckForUpdatesOnForeground({
+    checkedAt: updateState.checkedAt,
+    backgroundedAtMs,
+    foregroundedAtMs,
+    minBackgroundDurationMs: AUTO_UPDATE_FOREGROUND_RECHECK_MIN_BACKGROUND_MS,
+    minIntervalMs: AUTO_UPDATE_FOREGROUND_RECHECK_MIN_INTERVAL_MS,
+  });
+  if (!shouldCheck) {
+    return;
+  }
+  void checkForUpdates("foreground");
+}
+
+async function checkForUpdates(reason: string): Promise<void> {
+  if (isQuitting || !updaterConfigured || updateCheckInFlight) return;
+  if (
+    updateState.status === "checking" ||
+    updateState.status === "downloading" ||
+    updateState.status === "downloaded"
+  ) {
     console.info(
       `[desktop-updater] Skipping update check (${reason}) while status=${updateState.status}.`,
     );
-    return false;
+    return;
   }
   updateCheckInFlight = true;
   setUpdateState(reduceDesktopUpdateStateOnCheckStart(updateState, new Date().toISOString()));
+  armUpdateCheckTimeout(reason);
   console.info(`[desktop-updater] Checking for updates (${reason})...`);
 
   try {
+    await refreshConfiguredUpdateFeed();
     await autoUpdater.checkForUpdates();
-    return true;
   } catch (error: unknown) {
+    clearUpdateCheckTimeoutTimer();
     const message = error instanceof Error ? error.message : String(error);
     setUpdateState(
       reduceDesktopUpdateStateOnCheckFailure(updateState, message, new Date().toISOString()),
     );
     console.error(`[desktop-updater] Failed to check for updates: ${message}`);
-    return true;
   } finally {
     updateCheckInFlight = false;
   }
 }
 
-async function downloadAvailableUpdate(): Promise<{ accepted: boolean; completed: boolean }> {
+async function downloadAvailableUpdate(): Promise<{
+  accepted: boolean;
+  completed: boolean;
+}> {
   if (!updaterConfigured || updateDownloadInFlight || updateState.status !== "available") {
     return { accepted: false, completed: false };
   }
   updateDownloadInFlight = true;
   setUpdateState(reduceDesktopUpdateStateOnDownloadStart(updateState));
-  autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
+  autoUpdater.disableDifferentialDownload = true;
   console.info("[desktop-updater] Downloading update...");
 
   try {
@@ -980,28 +1142,22 @@ async function downloadAvailableUpdate(): Promise<{ accepted: boolean; completed
   }
 }
 
-async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed: boolean }> {
+async function installDownloadedUpdate(): Promise<{
+  accepted: boolean;
+  completed: boolean;
+}> {
   if (isQuitting || !updaterConfigured || updateState.status !== "downloaded") {
     return { accepted: false, completed: false };
   }
 
   isQuitting = true;
-  updateInstallInFlight = true;
   clearUpdatePollTimer();
   try {
     await stopBackendAndWaitForExit();
-    // Destroy all windows before launching the NSIS installer to avoid the installer finding live windows it needs to close.
-    for (const win of BrowserWindow.getAllWindows()) {
-      win.destroy();
-    }
-    // `quitAndInstall()` only starts the handoff to the updater. The actual
-    // install may still fail asynchronously, so keep the action incomplete
-    // until we either quit or receive an updater error.
-    autoUpdater.quitAndInstall(true, true);
-    return { accepted: true, completed: false };
+    autoUpdater.quitAndInstall();
+    return { accepted: true, completed: true };
   } catch (error: unknown) {
     const message = formatErrorMessage(error);
-    updateInstallInFlight = false;
     isQuitting = false;
     setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
     console.error(`[desktop-updater] Failed to install update: ${message}`);
@@ -1010,45 +1166,22 @@ async function installDownloadedUpdate(): Promise<{ accepted: boolean; completed
 }
 
 function configureAutoUpdater(): void {
-  const githubToken =
-    process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
-  if (githubToken) {
-    // When a token is provided, re-configure the feed with `private: true` so
-    // electron-updater uses the GitHub API (api.github.com) instead of the
-    // public Atom feed (github.com/…/releases.atom) which rejects Bearer auth.
-    const appUpdateYml = readAppUpdateYml();
-    if (appUpdateYml?.provider === "github") {
-      autoUpdater.setFeedURL({
-        ...appUpdateYml,
-        provider: "github" as const,
-        private: true,
-        token: githubToken,
-      });
-    }
-  }
-
-  if (process.env.T3CODE_DESKTOP_MOCK_UPDATES) {
-    autoUpdater.setFeedURL({
-      provider: "generic",
-      url: `http://localhost:${process.env.T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT ?? 3000}`,
-    });
-  }
-
-  const releasePageUrl = resolveGitHubLatestReleaseUrl();
-  const deliveryMethod =
-    shouldUseExternalUpdateDelivery() && releasePageUrl ? "external" : "native";
+  const appUpdateYml = readAppUpdateYml();
   const enabled = shouldEnableAutoUpdates();
   setUpdateState({
     ...createInitialDesktopUpdateState(app.getVersion(), desktopRuntimeInfo),
     enabled,
     status: enabled ? "idle" : "disabled",
-    deliveryMethod,
-    releasePageUrl,
   });
   if (!enabled) {
     return;
   }
   updaterConfigured = true;
+  configuredGitHubUpdateSource = resolveGitHubUpdateSource(appUpdateYml);
+
+  const githubToken =
+    process.env.T3CODE_DESKTOP_UPDATE_GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || "";
+  configuredGitHubUpdateToken = githubToken;
 
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -1056,7 +1189,10 @@ function configureAutoUpdater(): void {
   autoUpdater.channel = DESKTOP_UPDATE_CHANNEL;
   autoUpdater.allowPrerelease = DESKTOP_UPDATE_ALLOW_PRERELEASE;
   autoUpdater.allowDowngrade = false;
-  autoUpdater.disableDifferentialDownload = isArm64HostRunningIntelBuild(desktopRuntimeInfo);
+  // We resolve the exact latest stable release before every check and point the
+  // updater at that tag directly, so full downloads are more reliable than
+  // blockmap-based patching against a moving "latest" target.
+  autoUpdater.disableDifferentialDownload = true;
   let lastLoggedDownloadMilestone = -1;
 
   if (isArm64HostRunningIntelBuild(desktopRuntimeInfo)) {
@@ -1069,6 +1205,7 @@ function configureAutoUpdater(): void {
     console.info("[desktop-updater] Looking for updates...");
   });
   autoUpdater.on("update-available", (info) => {
+    clearUpdateCheckTimeoutTimer();
     setUpdateState(
       reduceDesktopUpdateStateOnUpdateAvailable(
         updateState,
@@ -1080,19 +1217,14 @@ function configureAutoUpdater(): void {
     console.info(`[desktop-updater] Update available: ${info.version}`);
   });
   autoUpdater.on("update-not-available", () => {
+    clearUpdateCheckTimeoutTimer();
     setUpdateState(reduceDesktopUpdateStateOnNoUpdate(updateState, new Date().toISOString()));
     lastLoggedDownloadMilestone = -1;
     console.info("[desktop-updater] No updates available.");
   });
   autoUpdater.on("error", (error) => {
+    clearUpdateCheckTimeoutTimer();
     const message = formatErrorMessage(error);
-    if (updateInstallInFlight) {
-      updateInstallInFlight = false;
-      isQuitting = false;
-      setUpdateState(reduceDesktopUpdateStateOnInstallFailure(updateState, message));
-      console.error(`[desktop-updater] Updater error: ${message}`);
-      return;
-    }
     if (!updateCheckInFlight && !updateDownloadInFlight) {
       setUpdateState({
         status: "error",
@@ -1137,6 +1269,17 @@ function configureAutoUpdater(): void {
   }, AUTO_UPDATE_POLL_INTERVAL_MS);
   updatePollTimer.unref();
 }
+function backendEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    T3CODE_MODE: "desktop",
+    T3CODE_NO_BROWSER: "1",
+    T3CODE_PORT: String(backendPort),
+    T3CODE_HOME: BASE_DIR,
+    T3CODE_AUTH_TOKEN: backendAuthToken,
+  };
+}
+
 function scheduleBackendRestart(reason: string): void {
   if (isQuitting || restartTimer) return;
 
@@ -1146,124 +1289,66 @@ function scheduleBackendRestart(reason: string): void {
 
   restartTimer = setTimeout(() => {
     restartTimer = null;
-    void startBackend();
+    startBackend();
   }, delayMs);
 }
 
-async function refreshDesktopBackendConnectionEndpoint(): Promise<void> {
-  backendPort = await resolveDesktopBackendPort({
-    host: "127.0.0.1",
-    startPort: DEFAULT_DESKTOP_BACKEND_PORT,
-  });
-  const baseUrl = `ws://127.0.0.1:${backendPort}`;
-  backendWsUrl = `${baseUrl}/?token=${encodeURIComponent(backendAuthToken)}`;
-  writeDesktopLogHeader(
-    `resolved backend connection endpoint startPort=${DEFAULT_DESKTOP_BACKEND_PORT} port=${backendPort}`,
-  );
-}
-
-async function startBackend(): Promise<void> {
+function startBackend(): void {
   if (isQuitting || backendProcess) return;
-  if (backendStartPromise) {
-    await backendStartPromise;
+
+  const backendEntry = resolveBackendEntry();
+  if (!FS.existsSync(backendEntry)) {
+    scheduleBackendRestart(`missing server entry at ${backendEntry}`);
     return;
   }
 
-  backendStartPromise = (async () => {
-    backendObservabilitySettings = readPersistedBackendObservabilitySettings();
-    const backendEntry = resolveBackendEntry();
-    if (!FS.existsSync(backendEntry)) {
-      scheduleBackendRestart(`missing server entry at ${backendEntry}`);
-      return;
-    }
+  const captureBackendLogs = app.isPackaged && backendLogSink !== null;
+  const child = ChildProcess.spawn(process.execPath, [backendEntry], {
+    cwd: resolveBackendCwd(),
+    // In Electron main, process.execPath points to the Electron binary.
+    // Run the child in Node mode so this backend process does not become a GUI app instance.
+    env: {
+      ...backendEnv(),
+      ELECTRON_RUN_AS_NODE: "1",
+    },
+    stdio: captureBackendLogs ? ["ignore", "pipe", "pipe"] : "inherit",
+  });
+  backendProcess = child;
+  let backendSessionClosed = false;
+  const closeBackendSession = (details: string) => {
+    if (backendSessionClosed) return;
+    backendSessionClosed = true;
+    writeBackendSessionBoundary("END", details);
+  };
+  writeBackendSessionBoundary(
+    "START",
+    `pid=${child.pid ?? "unknown"} port=${backendPort} cwd=${resolveBackendCwd()}`,
+  );
+  captureBackendOutput(child);
 
-    // Re-resolve the backend endpoint immediately before each spawn. A probe-only
-    // port scan from an earlier launch attempt is not a reservation, so reusing it
-    // after a crash can strand the desktop app in a repeated EADDRINUSE restart loop.
-    await refreshDesktopBackendConnectionEndpoint();
-
-    const captureBackendLogs = app.isPackaged && backendLogSink !== null;
-    const child = ChildProcess.spawn(process.execPath, [backendEntry, "--bootstrap-fd", "3"], {
-      cwd: resolveBackendCwd(),
-      // In Electron main, process.execPath points to the Electron binary.
-      // Run the child in Node mode so this backend process does not become a GUI app instance.
-      env: {
-        ...backendChildEnv(),
-        ELECTRON_RUN_AS_NODE: "1",
-      },
-      stdio: captureBackendLogs
-        ? ["ignore", "pipe", "pipe", "pipe"]
-        : ["ignore", "inherit", "inherit", "pipe"],
-    });
-    const bootstrapStream = child.stdio[3];
-    if (bootstrapStream && "write" in bootstrapStream) {
-      bootstrapStream.write(
-        `${JSON.stringify({
-          mode: "desktop",
-          noBrowser: true,
-          port: backendPort,
-          t3Home: BASE_DIR,
-          authToken: backendAuthToken,
-          ...(backendObservabilitySettings.otlpTracesUrl
-            ? { otlpTracesUrl: backendObservabilitySettings.otlpTracesUrl }
-            : {}),
-          ...(backendObservabilitySettings.otlpMetricsUrl
-            ? { otlpMetricsUrl: backendObservabilitySettings.otlpMetricsUrl }
-            : {}),
-        })}\n`,
-      );
-      bootstrapStream.end();
-    } else {
-      child.kill("SIGTERM");
-      scheduleBackendRestart("missing desktop bootstrap pipe");
-      return;
-    }
-    backendProcess = child;
-    let backendSessionClosed = false;
-    const closeBackendSession = (details: string) => {
-      if (backendSessionClosed) return;
-      backendSessionClosed = true;
-      writeBackendSessionBoundary("END", details);
-    };
-    writeBackendSessionBoundary(
-      "START",
-      `pid=${child.pid ?? "unknown"} port=${backendPort} cwd=${resolveBackendCwd()}`,
-    );
-    captureBackendOutput(child);
-
-    child.once("spawn", () => {
-      restartAttempt = 0;
-    });
-
-    child.on("error", (error) => {
-      const wasExpected = expectedBackendExitChildren.has(child);
-      if (backendProcess === child) {
-        backendProcess = null;
-      }
-      closeBackendSession(`pid=${child.pid ?? "unknown"} error=${error.message}`);
-      if (wasExpected) {
-        return;
-      }
-      scheduleBackendRestart(error.message);
-    });
-
-    child.on("exit", (code, signal) => {
-      const wasExpected = expectedBackendExitChildren.has(child);
-      if (backendProcess === child) {
-        backendProcess = null;
-      }
-      closeBackendSession(
-        `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
-      );
-      if (isQuitting || wasExpected) return;
-      const reason = `code=${code ?? "null"} signal=${signal ?? "null"}`;
-      scheduleBackendRestart(reason);
-    });
-  })().finally(() => {
-    backendStartPromise = null;
+  child.once("spawn", () => {
+    restartAttempt = 0;
   });
 
-  await backendStartPromise;
+  child.on("error", (error) => {
+    if (backendProcess === child) {
+      backendProcess = null;
+    }
+    closeBackendSession(`pid=${child.pid ?? "unknown"} error=${error.message}`);
+    scheduleBackendRestart(error.message);
+  });
+
+  child.on("exit", (code, signal) => {
+    if (backendProcess === child) {
+      backendProcess = null;
+    }
+    closeBackendSession(
+      `pid=${child.pid ?? "unknown"} code=${code ?? "null"} signal=${signal ?? "null"}`,
+    );
+    if (isQuitting) return;
+    const reason = `code=${code ?? "null"} signal=${signal ?? "null"}`;
+    scheduleBackendRestart(reason);
+  });
 }
 
 function stopBackend(): void {
@@ -1277,7 +1362,6 @@ function stopBackend(): void {
   if (!child) return;
 
   if (child.exitCode === null && child.signalCode === null) {
-    expectedBackendExitChildren.add(child);
     child.kill("SIGTERM");
     setTimeout(() => {
       if (child.exitCode === null && child.signalCode === null) {
@@ -1298,7 +1382,6 @@ async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
   if (!child) return;
   const backendChild = child;
   if (backendChild.exitCode !== null || backendChild.signalCode !== null) return;
-  expectedBackendExitChildren.add(backendChild);
 
   await new Promise<void>((resolve) => {
     let settled = false;
@@ -1340,11 +1423,6 @@ async function stopBackendAndWaitForExit(timeoutMs = 5_000): Promise<void> {
 }
 
 function registerIpcHandlers(): void {
-  ipcMain.removeAllListeners(GET_WS_URL_CHANNEL);
-  ipcMain.on(GET_WS_URL_CHANNEL, (event) => {
-    event.returnValue = backendWsUrl;
-  });
-
   ipcMain.removeHandler(PICK_FOLDER_CHANNEL);
   ipcMain.handle(PICK_FOLDER_CHANNEL, async () => {
     const owner = BrowserWindow.getFocusedWindow() ?? mainWindow;
@@ -1389,7 +1467,6 @@ function registerIpcHandlers(): void {
           id: item.id,
           label: item.label,
           destructive: item.destructive === true,
-          disabled: item.disabled === true,
         }));
       if (normalizedItems.length === 0) {
         return null;
@@ -1420,7 +1497,6 @@ function registerIpcHandlers(): void {
           }
           const itemOption: MenuItemConstructorOptions = {
             label: item.label,
-            enabled: !item.disabled,
             click: () => resolve(item.id),
           };
           if (item.destructive) {
@@ -1457,8 +1533,39 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.removeHandler(SHOW_IN_FOLDER_CHANNEL);
+  ipcMain.handle(SHOW_IN_FOLDER_CHANNEL, async (_event, rawPath: unknown) => {
+    if (typeof rawPath !== "string" || rawPath.trim().length === 0) {
+      throw new Error("Missing folder path.");
+    }
+    const resolvedPath = Path.resolve(rawPath);
+
+    let stats: FS.Stats;
+    try {
+      stats = await FS.promises.stat(resolvedPath);
+    } catch {
+      throw new Error(`Folder not found: ${resolvedPath}`);
+    }
+
+    if (stats.isDirectory()) {
+      const errorMessage = await shell.openPath(resolvedPath);
+      if (errorMessage.trim().length > 0) {
+        throw new Error(errorMessage);
+      }
+      return;
+    }
+
+    shell.showItemInFolder(resolvedPath);
+  });
+
   ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
   ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
+
+  ipcMain.removeHandler(UPDATE_CHECK_CHANNEL);
+  ipcMain.handle(UPDATE_CHECK_CHANNEL, async () => {
+    await checkForUpdates("renderer");
+    return updateState;
+  });
 
   ipcMain.removeHandler(UPDATE_DOWNLOAD_CHANNEL);
   ipcMain.handle(UPDATE_DOWNLOAD_CHANNEL, async () => {
@@ -1487,69 +1594,48 @@ function registerIpcHandlers(): void {
     } satisfies DesktopUpdateActionResult;
   });
 
-  ipcMain.removeHandler(UPDATE_CHECK_CHANNEL);
-  ipcMain.handle(UPDATE_CHECK_CHANNEL, async () => {
-    if (!updaterConfigured) {
-      return {
-        checked: false,
-        state: updateState,
-      } satisfies DesktopUpdateCheckResult;
-    }
-    const checked = await checkForUpdates("web-ui");
-    return {
-      checked,
-      state: updateState,
-    } satisfies DesktopUpdateCheckResult;
+  ipcMain.removeHandler(NOTIFICATIONS_IS_SUPPORTED_CHANNEL);
+  ipcMain.handle(NOTIFICATIONS_IS_SUPPORTED_CHANNEL, async () => Notification.isSupported());
+
+  ipcMain.removeHandler(NOTIFICATIONS_SHOW_CHANNEL);
+  ipcMain.handle(
+    NOTIFICATIONS_SHOW_CHANNEL,
+    async (
+      _event,
+      input:
+        | {
+            title?: unknown;
+            body?: unknown;
+            silent?: unknown;
+            threadId?: unknown;
+          }
+        | null
+        | undefined,
+    ) =>
+      showDesktopNotification({
+        title: typeof input?.title === "string" ? input.title : "",
+        body: typeof input?.body === "string" ? input.body : "",
+        silent: input?.silent === true,
+        ...(typeof input?.threadId === "string" ? { threadId: input.threadId } : {}),
+      }),
+  );
+  registerDesktopVoiceTranscriptionHandler();
+  startBrowserPerformanceLogging();
+  void ensureBrowserUsePipeServer().catch((error) => {
+    console.warn("[DPCODE browser] Failed to start browser-use native pipe", error);
   });
 
-  ipcMain.removeAllListeners(WINDOW_MINIMIZE_CHANNEL);
-  ipcMain.on(WINDOW_MINIMIZE_CHANNEL, () => {
-    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
-    window?.minimize();
-  });
-
-  ipcMain.removeAllListeners(WINDOW_TOGGLE_MAXIMIZE_CHANNEL);
-  ipcMain.on(WINDOW_TOGGLE_MAXIMIZE_CHANNEL, () => {
-    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
-    if (!window) return;
-    if (window.isMaximized()) {
-      window.unmaximize();
-    } else {
-      window.maximize();
-    }
-  });
-
-  ipcMain.removeAllListeners(WINDOW_CLOSE_CHANNEL);
-  ipcMain.on(WINDOW_CLOSE_CHANNEL, () => {
-    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
-    window?.close();
-  });
-
-  ipcMain.removeHandler(WINDOW_IS_MAXIMIZED_CHANNEL);
-  ipcMain.handle(WINDOW_IS_MAXIMIZED_CHANNEL, () => {
-    const window = BrowserWindow.getFocusedWindow() ?? mainWindow;
-    return window?.isMaximized() ?? false;
-  });
+  registerBrowserIpcHandlers(ipcMain, browserManager);
 }
 
-function getIconOption(): { icon: Electron.NativeImage } | Record<string, never> {
+function getIconOption(): { icon: string } | Record<string, never> {
   if (process.platform === "darwin") return {}; // macOS uses .icns from app bundle
   const ext = process.platform === "win32" ? "ico" : "png";
-  const icon = resolveNativeAppIcon(ext);
-  return icon ? { icon } : {};
-}
-
-function shouldUseLinuxTransparentWindow(): boolean {
-  return process.platform === "linux" && process.env.KODO_DISABLE_LINUX_TRANSPARENT_WINDOW !== "1";
-}
-
-function shouldUseCustomTitlebar(): boolean {
-  return process.platform === "linux" || process.platform === "win32";
+  const iconPath = resolveIconPath(ext);
+  return iconPath ? { icon: iconPath } : {};
 }
 
 function createWindow(): BrowserWindow {
-  const customTitlebarEnabled = shouldUseCustomTitlebar();
-  const linuxTransparentWindowEnabled = shouldUseLinuxTransparentWindow();
   const window = new BrowserWindow({
     width: 1100,
     height: 780,
@@ -1559,27 +1645,19 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: true,
     ...getIconOption(),
     title: APP_DISPLAY_NAME,
-    ...(customTitlebarEnabled ? { frame: false } : {}),
-    ...(linuxTransparentWindowEnabled
-      ? {
-          backgroundColor: "#00000000",
-          transparent: true,
-        }
-      : {}),
-    ...(process.platform === "darwin"
-      ? {
-          titleBarStyle: "hiddenInset" as const,
-          trafficLightPosition: { x: 16, y: 18 },
-        }
-      : {}),
+    titleBarStyle: "hiddenInset",
+    trafficLightPosition: { x: 16, y: 18 },
+    vibrancy: "under-window",
+    visualEffectState: "active",
+    backgroundColor: "#00000000",
     webPreferences: {
-      additionalArguments: linuxTransparentWindowEnabled ? [LINUX_TRANSPARENT_WINDOW_ARG] : [],
       preload: Path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
     },
   });
+  browserManager.setWindow(window);
 
   window.webContents.on("context-menu", (event, params) => {
     event.preventDefault();
@@ -1596,6 +1674,14 @@ function createWindow(): BrowserWindow {
       if (params.dictionarySuggestions.length === 0) {
         menuTemplate.push({ label: "No suggestions", enabled: false });
       }
+      menuTemplate.push({ type: "separator" });
+    }
+
+    if (params.mediaType === "image") {
+      menuTemplate.push({
+        label: "Copy Image",
+        click: () => window.webContents.copyImageAt(params.x, params.y),
+      });
       menuTemplate.push({ type: "separator" });
     }
 
@@ -1629,18 +1715,9 @@ function createWindow(): BrowserWindow {
     window.show();
   });
 
-  window.on("maximize", () => {
-    window.webContents.send(WINDOW_MAXIMIZED_CHANGE_CHANNEL, true);
-  });
-  window.on("unmaximize", () => {
-    window.webContents.send(WINDOW_MAXIMIZED_CHANGE_CHANNEL, false);
-  });
-
   if (isDevelopment) {
     void window.loadURL(process.env.VITE_DEV_SERVER_URL as string);
-    if (shouldOpenDevTools) {
-      window.webContents.openDevTools({ mode: "detach" });
-    }
+    window.webContents.openDevTools({ mode: "detach" });
   } else {
     void window.loadURL(`${DESKTOP_SCHEME}://app/index.html`);
   }
@@ -1649,9 +1726,53 @@ function createWindow(): BrowserWindow {
     if (mainWindow === window) {
       mainWindow = null;
     }
+    browserManager.setWindow(null);
   });
 
   return window;
+}
+
+function configureMediaPermissions(): void {
+  const defaultSession = session.defaultSession;
+  if (!defaultSession) {
+    return;
+  }
+
+  defaultSession.setPermissionCheckHandler((_webContents, permission) => {
+    if (permission === "media") {
+      return process.platform === "darwin"
+        ? systemPreferences.getMediaAccessStatus("microphone") === "granted"
+        : false;
+    }
+    return false;
+  });
+
+  defaultSession.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+    if (permission !== "media") {
+      callback(false);
+      return;
+    }
+
+    // Some Electron microphone requests omit `mediaTypes`, so denying here can suppress
+    // the macOS permission prompt entirely even though the renderer asked for audio input.
+    if (!shouldAllowMediaPermissionRequest(details)) {
+      callback(false);
+      return;
+    }
+
+    if (process.platform === "darwin") {
+      const status = systemPreferences.getMediaAccessStatus("microphone");
+      if (status === "granted") {
+        callback(true);
+        return;
+      }
+
+      void systemPreferences.askForMediaAccess("microphone").then(callback, () => callback(false));
+      return;
+    }
+
+    callback(true);
+  });
 }
 
 // Override Electron's userData path before the `ready` event so that
@@ -1663,22 +1784,73 @@ configureAppIdentity();
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
+  backendPort = await Effect.service(NetService).pipe(
+    Effect.flatMap((net) => net.reserveLoopbackPort()),
+    Effect.provide(NetService.layer),
+    Effect.runPromise,
+  );
+  writeDesktopLogHeader(`reserved backend port via NetService port=${backendPort}`);
   backendAuthToken = Crypto.randomBytes(24).toString("hex");
+  const backendHttpUrl = `http://127.0.0.1:${backendPort}`;
+  backendWsUrl = `ws://127.0.0.1:${backendPort}/?token=${encodeURIComponent(backendAuthToken)}`;
+  process.env.T3CODE_DESKTOP_WS_URL = backendWsUrl;
+  writeDesktopLogHeader(`bootstrap resolved websocket url=${backendWsUrl}`);
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");
-  await startBackend();
+  startBackend();
   writeDesktopLogHeader("bootstrap backend start requested");
+
+  if (isDevelopment) {
+    mainWindow = createWindow();
+    writeDesktopLogHeader("bootstrap main window created");
+    void waitForBackendStartupReady(backendHttpUrl)
+      .then(() => {
+        writeDesktopLogHeader("bootstrap backend ready");
+      })
+      .catch((error) => {
+        if (isBackendReadinessAborted(error)) {
+          return;
+        }
+        writeDesktopLogHeader(
+          `bootstrap backend readiness warning message=${formatErrorMessage(error)}`,
+        );
+        console.warn("[desktop] backend readiness check timed out during dev bootstrap", error);
+      });
+    return;
+  }
+
+  await waitForBackendHttpListening(backendHttpUrl);
+  writeDesktopLogHeader("bootstrap backend listening");
   mainWindow = createWindow();
   writeDesktopLogHeader("bootstrap main window created");
+  void waitForBackendStartupReady(backendHttpUrl)
+    .then(() => {
+      writeDesktopLogHeader("bootstrap backend ready");
+    })
+    .catch((error) => {
+      if (isBackendReadinessAborted(error)) {
+        return;
+      }
+      writeDesktopLogHeader(
+        `bootstrap backend readiness warning message=${formatErrorMessage(error)}`,
+      );
+      console.warn("[desktop] backend readiness check timed out during packaged bootstrap", error);
+    });
 }
 
 app.on("before-quit", () => {
   isQuitting = true;
-  updateInstallInFlight = false;
   writeDesktopLogHeader("before-quit received");
+  clearUpdateBackgroundBlurTimer();
+  clearUpdateCheckTimeoutTimer();
   clearUpdatePollTimer();
+  void browserUsePipeServer?.dispose().finally(() => {
+    browserUsePipeServer = null;
+  });
+  cancelBackendReadinessWait();
   stopBackend();
+  browserManager.dispose();
   restoreStdIoCapture?.();
 });
 
@@ -1687,6 +1859,7 @@ app
   .then(() => {
     writeDesktopLogHeader("app ready");
     configureAppIdentity();
+    configureMediaPermissions();
     configureApplicationMenu();
     registerDesktopProtocol();
     configureAutoUpdater();
@@ -1694,7 +1867,16 @@ app
       handleFatalStartupError("bootstrap", error);
     });
 
+    app.on("browser-window-blur", () => {
+      markDesktopAppBackgrounded();
+    });
+
+    app.on("browser-window-focus", () => {
+      handleDesktopAppForegrounded();
+    });
+
     app.on("activate", () => {
+      handleDesktopAppForegrounded();
       if (BrowserWindow.getAllWindows().length === 0) {
         mainWindow = createWindow();
       }
@@ -1705,9 +1887,7 @@ app
   });
 
 app.on("window-all-closed", () => {
-  // In dev, closing the last window should end the foreground terminal session
-  // instead of leaving a headless macOS app running.
-  if (!isQuitting && (isDevelopment || process.platform !== "darwin")) {
+  if (process.platform !== "darwin") {
     app.quit();
   }
 });
@@ -1717,7 +1897,10 @@ if (process.platform !== "win32") {
     if (isQuitting) return;
     isQuitting = true;
     writeDesktopLogHeader("SIGINT received");
+    clearUpdateBackgroundBlurTimer();
+    clearUpdateCheckTimeoutTimer();
     clearUpdatePollTimer();
+    cancelBackendReadinessWait();
     stopBackend();
     restoreStdIoCapture?.();
     app.quit();
@@ -1727,7 +1910,9 @@ if (process.platform !== "win32") {
     if (isQuitting) return;
     isQuitting = true;
     writeDesktopLogHeader("SIGTERM received");
+    clearUpdateCheckTimeoutTimer();
     clearUpdatePollTimer();
+    cancelBackendReadinessWait();
     stopBackend();
     restoreStdIoCapture?.();
     app.quit();

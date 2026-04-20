@@ -24,28 +24,25 @@ describe("OrchestrationReactor", () => {
       Layer.effect(OrchestrationReactor, makeOrchestrationReactor).pipe(
         Layer.provideMerge(
           Layer.succeed(ProviderRuntimeIngestionService, {
-            start: () => {
+            start: Effect.sync(() => {
               started.push("provider-runtime-ingestion");
-              return Effect.void;
-            },
+            }),
             drain: Effect.void,
           }),
         ),
         Layer.provideMerge(
           Layer.succeed(ProviderCommandReactor, {
-            start: () => {
+            start: Effect.sync(() => {
               started.push("provider-command-reactor");
-              return Effect.void;
-            },
+            }),
             drain: Effect.void,
           }),
         ),
         Layer.provideMerge(
           Layer.succeed(CheckpointReactor, {
-            start: () => {
+            start: Effect.sync(() => {
               started.push("checkpoint-reactor");
-              return Effect.void;
-            },
+            }),
             drain: Effect.void,
           }),
         ),
@@ -54,7 +51,7 @@ describe("OrchestrationReactor", () => {
 
     const reactor = await runtime.runPromise(Effect.service(OrchestrationReactor));
     const scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+    await Effect.runPromise(reactor.start.pipe(Scope.provide(scope)));
 
     expect(started).toEqual([
       "provider-runtime-ingestion",

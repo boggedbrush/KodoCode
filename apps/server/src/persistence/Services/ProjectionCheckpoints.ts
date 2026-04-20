@@ -90,4 +90,4 @@ export interface ProjectionCheckpointRepositoryShape {
 export class ProjectionCheckpointRepository extends ServiceMap.Service<
   ProjectionCheckpointRepository,
   ProjectionCheckpointRepositoryShape
->()("t3/persistence/Services/ProjectionCheckpoints/ProjectionCheckpointRepository") {}
+>()("kodo/persistence/Services/ProjectionCheckpoints/ProjectionCheckpointRepository") {}

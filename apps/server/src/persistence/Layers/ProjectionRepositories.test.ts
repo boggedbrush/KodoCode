@@ -25,6 +25,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
 
       yield* projects.upsert({
         projectId: ProjectId.makeUnsafe("project-null-options"),
+        kind: "project",
         title: "Null options project",
         workspaceRoot: "/tmp/project-null-options",
         defaultModelSelection: {
@@ -82,12 +83,21 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         },
         runtimeMode: "full-access",
         interactionMode: "default",
+        envMode: "local",
         branch: null,
         worktreePath: null,
+        associatedWorktreePath: null,
+        associatedWorktreeBranch: null,
+        associatedWorktreeRef: null,
+        lastKnownPr: null,
         latestTurnId: null,
+        handoff: null,
+        latestUserMessageAt: null,
+        pendingApprovalCount: 0,
+        pendingUserInputCount: 0,
+        hasActionableProposedPlan: 0,
         createdAt: "2026-03-24T00:00:00.000Z",
         updatedAt: "2026-03-24T00:00:00.000Z",
-        archivedAt: null,
         deletedAt: null,
       });
 

@@ -1,74 +1,205 @@
 import {
   DEFAULT_MODEL_BY_PROVIDER,
-  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  MODEL_CAPABILITIES_INDEX,
+  MODEL_OPTIONS_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
-  type ClaudeCodeEffort,
   type ClaudeModelOptions,
+  type ClaudeCodeEffort,
   type CodexModelOptions,
+  type GeminiModelOptions,
+  type GeminiThinkingBudget,
+  type GeminiThinkingLevel,
   type ModelCapabilities,
   type ModelSelection,
+  type ModelSlug,
   type ProviderKind,
-  type ServerProvider,
+  CodexReasoningEffort,
 } from "@t3tools/contracts";
+
+const MODEL_SLUG_SET_BY_PROVIDER: Record<ProviderKind, ReadonlySet<ModelSlug>> = {
+  claudeAgent: new Set(MODEL_OPTIONS_BY_PROVIDER.claudeAgent.map((option) => option.slug)),
+  codex: new Set(MODEL_OPTIONS_BY_PROVIDER.codex.map((option) => option.slug)),
+  gemini: new Set(MODEL_OPTIONS_BY_PROVIDER.gemini.map((option) => option.slug)),
+};
 
 export interface SelectableModelOption {
   slug: string;
   name: string;
 }
 
-export const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
+export type GeminiThinkingConfigKind = "budget" | "level";
 
-function hasServerModel(
-  providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
-  slug: string,
-): boolean {
+const GEMINI_3_MODEL_PATTERN = /^(?:auto-)?gemini-3(?:[.-]|$)/i;
+const GEMINI_2_5_MODEL_PATTERN = /^(?:auto-)?gemini-2\.5(?:[.-]|$)/i;
+const GEMINI_THINKING_LEVEL_SET = new Set<GeminiThinkingLevel>(["LOW", "HIGH"]);
+const GEMINI_THINKING_BUDGET_MAP = new Map<string, GeminiThinkingBudget>([
+  ["-1", -1],
+  ["0", 0],
+  ["512", 512],
+]);
+
+export const EMPTY_MODEL_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  promptInjectedEffortLevels: [],
+  contextWindowOptions: [],
+};
+export const DEFAULT_GEMINI_MODEL_CAPABILITIES = EMPTY_MODEL_CAPABILITIES;
+
+export const GEMINI_3_MODEL_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [
+    { value: "HIGH", label: "High", isDefault: true },
+    { value: "LOW", label: "Low" },
+  ],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  promptInjectedEffortLevels: [],
+  contextWindowOptions: [],
+};
+
+export const GEMINI_2_5_MODEL_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [
+    { value: "-1", label: "Dynamic", isDefault: true },
+    { value: "512", label: "512 Tokens" },
+  ],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  promptInjectedEffortLevels: [],
+  contextWindowOptions: [],
+};
+
+function isGeminiThinkingLevel(value: string): value is GeminiThinkingLevel {
+  return GEMINI_THINKING_LEVEL_SET.has(value as GeminiThinkingLevel);
+}
+
+function isGeminiThinkingBudget(value: string): value is `${GeminiThinkingBudget}` {
+  return GEMINI_THINKING_BUDGET_MAP.has(value);
+}
+
+function sanitizeGeminiAliasSegment(value: string): string {
+  const sanitized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return sanitized || "model";
+}
+
+export function getModelOptions(provider: ProviderKind = "codex") {
+  return MODEL_OPTIONS_BY_PROVIDER[provider];
+}
+
+export function getDefaultModel(provider: ProviderKind = "codex"): ModelSlug {
+  return DEFAULT_MODEL_BY_PROVIDER[provider];
+}
+
+export function getGeminiThinkingConfigKind(
+  model: string | null | undefined,
+): GeminiThinkingConfigKind | null {
+  const trimmed = trimOrNull(model);
+  if (!trimmed) {
+    return null;
+  }
+  if (GEMINI_3_MODEL_PATTERN.test(trimmed)) {
+    return "level";
+  }
+  if (GEMINI_2_5_MODEL_PATTERN.test(trimmed)) {
+    return "budget";
+  }
+  return null;
+}
+
+export function geminiCapabilitiesForModel(
+  modelId: string | null | undefined,
+  fallbackCapabilities: ModelCapabilities = EMPTY_MODEL_CAPABILITIES,
+): ModelCapabilities {
+  const trimmed = trimOrNull(modelId)?.toLowerCase();
+  switch (getGeminiThinkingConfigKind(modelId)) {
+    case "level":
+      return GEMINI_3_MODEL_CAPABILITIES;
+    case "budget":
+      if (!trimmed) {
+        return fallbackCapabilities;
+      }
+      return GEMINI_2_5_MODEL_CAPABILITIES;
+    default:
+      return fallbackCapabilities;
+  }
+}
+
+export function getGeminiThinkingSelectionValue(
+  caps: ModelCapabilities,
+  modelOptions: GeminiModelOptions | null | undefined,
+): string | null {
+  const candidates = [
+    trimOrNull(modelOptions?.thinkingLevel),
+    modelOptions?.thinkingBudget !== undefined ? String(modelOptions.thinkingBudget) : null,
+  ];
+
   return (
-    providers
-      .find((candidate) => candidate.provider === provider)
-      ?.models.some((model) => model.slug === slug) ?? false
+    candidates.find(
+      (candidate): candidate is string => !!candidate && hasEffortLevel(caps, candidate),
+    ) ??
+    candidates.find((candidate): candidate is string => !!candidate) ??
+    null
   );
 }
 
-function isEmptyCodexModelOptions(options: CodexModelOptions | undefined): boolean {
-  return options?.reasoningEffort === undefined && options?.fastMode === undefined;
-}
-
-export function getDefaultUtilityModelSelection(
-  providers: ReadonlyArray<ServerProvider>,
-): ModelSelection {
-  if (hasServerModel(providers, "codex", CODEX_SPARK_MODEL)) {
+export function geminiModelOptionsFromEffortValue(
+  value: string | null | undefined,
+): GeminiModelOptions | undefined {
+  const trimmed = trimOrNull(value);
+  if (!trimmed) {
+    return undefined;
+  }
+  if (isGeminiThinkingLevel(trimmed)) {
+    return { thinkingLevel: trimmed };
+  }
+  if (isGeminiThinkingBudget(trimmed)) {
     return {
-      provider: "codex",
-      model: CODEX_SPARK_MODEL,
-      options: { reasoningEffort: "low" },
+      thinkingBudget: GEMINI_THINKING_BUDGET_MAP.get(trimmed) as GeminiThinkingBudget,
     };
   }
-
-  return {
-    provider: "codex",
-    model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
-  };
+  return undefined;
 }
 
-export function resolveUtilityModelSelectionDefault(
-  selection: ModelSelection | null | undefined,
-  providers: ReadonlyArray<ServerProvider>,
-): ModelSelection {
-  const fallback = getDefaultUtilityModelSelection(providers);
-  if (!selection) {
-    return fallback;
+export function getGeminiThinkingModelAlias(
+  model: string,
+  modelOptions: GeminiModelOptions | null | undefined,
+): string | null {
+  const kind = getGeminiThinkingConfigKind(model);
+  if (!kind || !modelOptions) {
+    return null;
   }
 
-  if (
-    selection.provider === "codex" &&
-    selection.model === DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex &&
-    isEmptyCodexModelOptions(selection.options)
-  ) {
-    return fallback;
+  const caps = getModelCapabilities("gemini", model);
+  const effort = getGeminiThinkingSelectionValue(caps, modelOptions);
+  if (!effort || !hasEffortLevel(caps, effort)) {
+    return null;
+  }
+  const nextOptions = geminiModelOptionsFromEffortValue(effort);
+  if (!nextOptions) {
+    return null;
   }
 
-  return selection;
+  const base = sanitizeGeminiAliasSegment(model);
+  if (kind === "level" && nextOptions.thinkingLevel) {
+    return `dpcode-gemini-${base}-thinking-level-${nextOptions.thinkingLevel.toLowerCase()}`;
+  }
+  if (kind === "budget" && nextOptions.thinkingBudget !== undefined) {
+    const budget =
+      nextOptions.thinkingBudget === -1 ? "dynamic" : String(nextOptions.thinkingBudget);
+    return `dpcode-gemini-${base}-thinking-budget-${budget}`;
+  }
+  return null;
+}
+
+export function resolveGeminiApiModelId(
+  model: string,
+  modelOptions: GeminiModelOptions | null | undefined,
+): string {
+  return getGeminiThinkingModelAlias(model, modelOptions) ?? model;
 }
 
 // ── Effort helpers ────────────────────────────────────────────────────
@@ -83,95 +214,30 @@ export function getDefaultEffort(caps: ModelCapabilities): string | null {
   return caps.reasoningEffortLevels.find((l) => l.isDefault)?.value ?? null;
 }
 
-/**
- * Resolve a raw effort option against capabilities.
- *
- * Returns the effective effort value — the explicit value if supported and not
- * prompt-injected, otherwise the model's default. Returns `undefined` only
- * when the model has no effort levels at all.
- *
- * Prompt-injected efforts (e.g. "ultrathink") are excluded because they are
- * applied via prompt text, not the effort API parameter.
- */
-export function resolveEffort(
-  caps: ModelCapabilities,
-  raw: string | null | undefined,
-): string | undefined {
-  const defaultValue = getDefaultEffort(caps);
-  const trimmed = typeof raw === "string" ? raw.trim() : null;
-  if (
-    trimmed &&
-    !caps.promptInjectedEffortLevels.includes(trimmed) &&
-    hasEffortLevel(caps, trimmed)
-  ) {
-    return trimmed;
-  }
-  return defaultValue ?? undefined;
-}
-
-// ── Context window helpers ───────────────────────────────────────────
-
 /** Check whether a capabilities object includes a given context window value. */
 export function hasContextWindowOption(caps: ModelCapabilities, value: string): boolean {
-  return caps.contextWindowOptions.some((o) => o.value === value);
+  return caps.contextWindowOptions.some((option) => option.value === value);
 }
 
-/** Return the default context window value, or `null` if none is defined. */
+/** Return the default context window value for a capabilities object, or null if none. */
 export function getDefaultContextWindow(caps: ModelCapabilities): string | null {
-  return caps.contextWindowOptions.find((o) => o.isDefault)?.value ?? null;
+  return caps.contextWindowOptions.find((option) => option.isDefault)?.value ?? null;
 }
 
-/**
- * Resolve a raw `contextWindow` option against capabilities.
- *
- * Returns the effective context window value — the explicit value if supported,
- * otherwise the model's default. Returns `undefined` only when the model has
- * no context window options at all.
- *
- * Unlike effort levels (where the API has matching defaults), the context
- * window requires an explicit API suffix (e.g. `[1m]`), so we always preserve
- * the resolved value to avoid ambiguity between "user chose the default" and
- * "not specified".
- */
-export function resolveContextWindow(
-  caps: ModelCapabilities,
-  raw: string | null | undefined,
-): string | undefined {
-  const defaultValue = getDefaultContextWindow(caps);
-  if (!raw) return defaultValue ?? undefined;
-  return hasContextWindowOption(caps, raw) ? raw : (defaultValue ?? undefined);
-}
+// ── Data-driven capability resolver ───────────────────────────────────
 
-export function normalizeCodexModelOptionsWithCapabilities(
-  caps: ModelCapabilities,
-  modelOptions: CodexModelOptions | null | undefined,
-): CodexModelOptions | undefined {
-  const reasoningEffort = resolveEffort(caps, modelOptions?.reasoningEffort);
-  const fastMode = caps.supportsFastMode ? modelOptions?.fastMode : undefined;
-  const nextOptions: CodexModelOptions = {
-    ...(reasoningEffort
-      ? { reasoningEffort: reasoningEffort as CodexModelOptions["reasoningEffort"] }
-      : {}),
-    ...(fastMode !== undefined ? { fastMode } : {}),
-  };
-  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
-}
-
-export function normalizeClaudeModelOptionsWithCapabilities(
-  caps: ModelCapabilities,
-  modelOptions: ClaudeModelOptions | null | undefined,
-): ClaudeModelOptions | undefined {
-  const effort = resolveEffort(caps, modelOptions?.effort);
-  const thinking = caps.supportsThinkingToggle ? modelOptions?.thinking : undefined;
-  const fastMode = caps.supportsFastMode ? modelOptions?.fastMode : undefined;
-  const contextWindow = resolveContextWindow(caps, modelOptions?.contextWindow);
-  const nextOptions: ClaudeModelOptions = {
-    ...(thinking !== undefined ? { thinking } : {}),
-    ...(effort ? { effort: effort as ClaudeModelOptions["effort"] } : {}),
-    ...(fastMode !== undefined ? { fastMode } : {}),
-    ...(contextWindow !== undefined ? { contextWindow } : {}),
-  };
-  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+export function getModelCapabilities(
+  provider: ProviderKind,
+  model: string | null | undefined,
+): ModelCapabilities {
+  const slug = normalizeModelSlug(model, provider);
+  if (slug && MODEL_CAPABILITIES_INDEX[provider]?.[slug]) {
+    return MODEL_CAPABILITIES_INDEX[provider][slug];
+  }
+  if (provider === "gemini") {
+    return geminiCapabilitiesForModel(slug ?? model, EMPTY_MODEL_CAPABILITIES);
+  }
+  return EMPTY_MODEL_CAPABILITIES;
 }
 
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
@@ -181,7 +247,7 @@ export function isClaudeUltrathinkPrompt(text: string | null | undefined): boole
 export function normalizeModelSlug(
   model: string | null | undefined,
   provider: ProviderKind = "codex",
-): string | null {
+): ModelSlug | null {
   if (typeof model !== "string") {
     return null;
   }
@@ -191,24 +257,20 @@ export function normalizeModelSlug(
     return null;
   }
 
-  const normalized = trimmed.toLowerCase();
-  const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, string>;
-  const aliased = Object.prototype.hasOwnProperty.call(aliases, normalized)
-    ? aliases[normalized]
+  const providerScopedModel =
+    provider === "claudeAgent" ? trimmed.replace(/\[[^\]]+\]$/u, "") : trimmed;
+  const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, ModelSlug>;
+  const aliased = Object.prototype.hasOwnProperty.call(aliases, providerScopedModel)
+    ? aliases[providerScopedModel]
     : undefined;
-
-  if (!aliased && normalized === "auto") {
-    return "auto";
-  }
-
-  return typeof aliased === "string" ? aliased : trimmed;
+  return typeof aliased === "string" ? aliased : (providerScopedModel as ModelSlug);
 }
 
 export function resolveSelectableModel(
   provider: ProviderKind,
   value: string | null | undefined,
   options: ReadonlyArray<SelectableModelOption>,
-): string | null {
+): ModelSlug | null {
   if (typeof value !== "string") {
     return null;
   }
@@ -237,18 +299,24 @@ export function resolveSelectableModel(
   return resolved ? resolved.slug : null;
 }
 
-export function resolveModelSlug(model: string | null | undefined, provider: ProviderKind): string {
+export function resolveModelSlug(
+  model: string | null | undefined,
+  provider: ProviderKind = "codex",
+): ModelSlug {
   const normalized = normalizeModelSlug(model, provider);
   if (!normalized) {
     return DEFAULT_MODEL_BY_PROVIDER[provider];
   }
-  return normalized;
+
+  return MODEL_SLUG_SET_BY_PROVIDER[provider].has(normalized)
+    ? normalized
+    : DEFAULT_MODEL_BY_PROVIDER[provider];
 }
 
 export function resolveModelSlugForProvider(
   provider: ProviderKind,
   model: string | null | undefined,
-): string {
+): ModelSlug {
   return resolveModelSlug(model, provider);
 }
 
@@ -259,44 +327,93 @@ export function trimOrNull<T extends string>(value: T | null | undefined): T | n
   return trimmed || null;
 }
 
-export function resolveModelSelectionDefault(modelSelection: ModelSelection): ModelSelection {
-  // `auto` is a UI sentinel; execution layers require a concrete provider model id.
-  if (modelSelection.model.trim().toLowerCase() === "auto") {
-    return {
-      ...modelSelection,
-      model: DEFAULT_MODEL_BY_PROVIDER[modelSelection.provider],
-    };
-  }
-  return modelSelection;
+export function normalizeCodexModelOptions(
+  model: string | null | undefined,
+  modelOptions: CodexModelOptions | null | undefined,
+): CodexModelOptions | undefined {
+  const caps = getModelCapabilities("codex", model);
+  const defaultReasoningEffort = getDefaultEffort(caps) as CodexReasoningEffort;
+  const reasoningEffort = trimOrNull(modelOptions?.reasoningEffort) ?? defaultReasoningEffort;
+  const fastModeEnabled = modelOptions?.fastMode === true;
+  const nextOptions: CodexModelOptions = {
+    ...(reasoningEffort !== defaultReasoningEffort ? { reasoningEffort } : {}),
+    ...(fastModeEnabled ? { fastMode: true } : {}),
+  };
+  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
 
-/**
- * Resolve the actual API model identifier from a model selection.
- *
- * Provider-aware: each provider can map `contextWindow` (or other options)
- * to whatever the API requires — a model-id suffix, a separate parameter, etc.
- * The canonical slug stored in the selection stays unchanged so the
- * capabilities system keeps working.
- *
- * Expects `contextWindow` to already be resolved (via `resolveContextWindow`)
- * to the effective value, not stripped to `undefined` for defaults.
- */
-export function resolveApiModelId(modelSelection: ModelSelection): string {
-  const normalizedModelSelection = resolveModelSelectionDefault(modelSelection);
+export function normalizeClaudeModelOptions(
+  model: string | null | undefined,
+  modelOptions: ClaudeModelOptions | null | undefined,
+): ClaudeModelOptions | undefined {
+  const caps = getModelCapabilities("claudeAgent", model);
+  const defaultReasoningEffort = getDefaultEffort(caps);
+  const defaultContextWindow = getDefaultContextWindow(caps);
+  const resolvedEffort = trimOrNull(modelOptions?.effort);
+  const resolvedContextWindow = trimOrNull(modelOptions?.contextWindow);
+  const isPromptInjected = caps.promptInjectedEffortLevels.includes(resolvedEffort ?? "");
+  const effort =
+    resolvedEffort &&
+    !isPromptInjected &&
+    hasEffortLevel(caps, resolvedEffort) &&
+    resolvedEffort !== defaultReasoningEffort
+      ? resolvedEffort
+      : undefined;
+  const contextWindow =
+    resolvedContextWindow &&
+    hasContextWindowOption(caps, resolvedContextWindow) &&
+    resolvedContextWindow !== defaultContextWindow
+      ? resolvedContextWindow
+      : undefined;
+  const thinking =
+    caps.supportsThinkingToggle && modelOptions?.thinking === false ? false : undefined;
+  const fastMode = caps.supportsFastMode && modelOptions?.fastMode === true ? true : undefined;
+  const nextOptions: ClaudeModelOptions = {
+    ...(thinking === false ? { thinking: false } : {}),
+    ...(effort ? { effort } : {}),
+    ...(fastMode ? { fastMode: true } : {}),
+    ...(contextWindow ? { contextWindow } : {}),
+  };
+  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
 
-  switch (normalizedModelSelection.provider) {
+export function resolveApiModelId(modelSelection: ModelSelection): string {
+  switch (modelSelection.provider) {
     case "claudeAgent": {
-      switch (normalizedModelSelection.options?.contextWindow) {
-        case "1m":
-          return `${normalizedModelSelection.model}[1m]`;
-        default:
-          return normalizedModelSelection.model;
-      }
+      const caps = getModelCapabilities(modelSelection.provider, modelSelection.model);
+      return modelSelection.options?.contextWindow === "1m" && hasContextWindowOption(caps, "1m")
+        ? `${modelSelection.model}[1m]`
+        : modelSelection.model;
     }
-    default: {
-      return normalizedModelSelection.model;
-    }
+    default:
+      return modelSelection.model;
   }
+}
+
+export function normalizeGeminiModelOptions(
+  model: string | null | undefined,
+  modelOptions: GeminiModelOptions | null | undefined,
+): GeminiModelOptions | undefined {
+  const caps = getModelCapabilities("gemini", model);
+  const effort = getGeminiThinkingSelectionValue(caps, modelOptions);
+  if (!effort || !hasEffortLevel(caps, effort)) {
+    return undefined;
+  }
+  const defaultEffort = getDefaultEffort(caps);
+  const nextOptions = geminiModelOptionsFromEffortValue(effort);
+  if (!nextOptions) {
+    return undefined;
+  }
+
+  const normalizedEffort =
+    nextOptions.thinkingLevel !== undefined
+      ? nextOptions.thinkingLevel
+      : String(nextOptions.thinkingBudget);
+  if (normalizedEffort === defaultEffort) {
+    return undefined;
+  }
+
+  return nextOptions;
 }
 
 export function applyClaudePromptEffortPrefix(

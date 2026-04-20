@@ -11,6 +11,7 @@ import { ServiceMap } from "effect";
 import type { Effect } from "effect";
 
 import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
+import type { ProjectMetadataOrchestrationEvent } from "../projectMetadataProjection.ts";
 
 /**
  * OrchestrationProjectionPipelineShape - Service API for projection execution.
@@ -31,6 +32,14 @@ export interface OrchestrationProjectionPipelineShape {
   readonly projectEvent: (
     event: OrchestrationEvent,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /**
+   * Project a single project metadata event while the caller already owns the
+   * surrounding transaction.
+   */
+  readonly projectMetadataEvent: (
+    event: ProjectMetadataOrchestrationEvent,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 
 /**
@@ -39,4 +48,4 @@ export interface OrchestrationProjectionPipelineShape {
 export class OrchestrationProjectionPipeline extends ServiceMap.Service<
   OrchestrationProjectionPipeline,
   OrchestrationProjectionPipelineShape
->()("t3/orchestration/Services/ProjectionPipeline/OrchestrationProjectionPipeline") {}
+>()("kodo/orchestration/Services/ProjectionPipeline/OrchestrationProjectionPipeline") {}

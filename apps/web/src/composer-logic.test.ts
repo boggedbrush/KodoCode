@@ -7,18 +7,18 @@ import {
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
   parseStandaloneComposerSlashCommand,
-  parseStandaloneComposerPresetsCommand,
   replaceTextRange,
+  stripComposerTriggerText,
 } from "./composer-logic";
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
 
 describe("detectComposerTrigger", () => {
-  it("detects @path trigger at cursor", () => {
+  it("detects @mention trigger at cursor", () => {
     const text = "Please check @src/com";
     const trigger = detectComposerTrigger(text, text.length);
 
     expect(trigger).toEqual({
-      kind: "path",
+      kind: "mention",
       query: "src/com",
       rangeStart: "Please check ".length,
       rangeEnd: text.length,
@@ -49,18 +49,6 @@ describe("detectComposerTrigger", () => {
     });
   });
 
-  it("detects slash presets query after /presets", () => {
-    const text = "/presets cod";
-    const trigger = detectComposerTrigger(text, text.length);
-
-    expect(trigger).toEqual({
-      kind: "slash-presets",
-      query: "cod",
-      rangeStart: 0,
-      rangeEnd: text.length,
-    });
-  });
-
   it("detects non-model slash commands while typing", () => {
     const text = "/pl";
     const trigger = detectComposerTrigger(text, text.length);
@@ -73,28 +61,40 @@ describe("detectComposerTrigger", () => {
     });
   });
 
-  it("detects @path trigger in the middle of existing text", () => {
+  it("detects a skill trigger while typing a $skill token", () => {
+    const text = "Use $che";
+    const trigger = detectComposerTrigger(text, text.length);
+
+    expect(trigger).toEqual({
+      kind: "skill",
+      query: "che",
+      rangeStart: "Use ".length,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("detects @mention trigger in the middle of existing text", () => {
     // User typed @ between "inspect " and "in this sentence"
     const text = "Please inspect @in this sentence";
     const cursorAfterAt = "Please inspect @".length;
 
     const trigger = detectComposerTrigger(text, cursorAfterAt);
     expect(trigger).toEqual({
-      kind: "path",
+      kind: "mention",
       query: "",
       rangeStart: "Please inspect ".length,
       rangeEnd: cursorAfterAt,
     });
   });
 
-  it("detects @path trigger with query typed mid-text", () => {
+  it("detects @mention trigger with query typed mid-text", () => {
     // User typed @sr between "inspect " and "in this sentence"
     const text = "Please inspect @srin this sentence";
     const cursorAfterQuery = "Please inspect @sr".length;
 
     const trigger = detectComposerTrigger(text, cursorAfterQuery);
     expect(trigger).toEqual({
-      kind: "path",
+      kind: "mention",
       query: "sr",
       rangeStart: "Please inspect ".length,
       rangeEnd: cursorAfterQuery,
@@ -109,7 +109,7 @@ describe("detectComposerTrigger", () => {
 
     const trigger = detectComposerTrigger(text, cursorAfterAt);
     expect(trigger).not.toBeNull();
-    expect(trigger?.kind).toBe("path");
+    expect(trigger?.kind).toBe("mention");
     expect(trigger?.query).toBe("");
   });
 });
@@ -121,6 +121,22 @@ describe("replaceTextRange", () => {
       text: "hello ",
       cursor: 6,
     });
+  });
+});
+
+describe("stripComposerTriggerText", () => {
+  it("removes the active slash trigger text without touching the rest of the prompt", () => {
+    const text = "/rev";
+    const trigger = detectComposerTrigger(text, text.length);
+
+    expect(stripComposerTriggerText(text, trigger)).toBe("");
+  });
+
+  it("preserves earlier composer content when removing a trailing slash trigger", () => {
+    const text = "Need context first\n/rev";
+    const trigger = detectComposerTrigger(text, text.length);
+
+    expect(stripComposerTriggerText(text, trigger)).toBe("Need context first\n");
   });
 });
 
@@ -218,6 +234,15 @@ describe("isCollapsedCursorAdjacentToInlineToken", () => {
     expect(isCollapsedCursorAdjacentToInlineToken(text, text.length, "right")).toBe(false);
   });
 
+  it("keeps raw skill triggers non-adjacent while typing", () => {
+    expect(isCollapsedCursorAdjacentToInlineToken("hello $che", "hello $che".length, "left")).toBe(
+      false,
+    );
+    expect(isCollapsedCursorAdjacentToInlineToken("hello /che", "hello /che".length, "right")).toBe(
+      false,
+    );
+  });
+
   it("detects left adjacency only when cursor is directly after a mention", () => {
     const text = "open @AGENTS.md next";
     const mentionStart = "open ".length;
@@ -249,41 +274,19 @@ describe("isCollapsedCursorAdjacentToInlineToken", () => {
 });
 
 describe("parseStandaloneComposerSlashCommand", () => {
-  it("parses standalone /ask command", () => {
-    expect(parseStandaloneComposerSlashCommand("/ask")).toBe("ask");
-  });
-
   it("parses standalone /plan command", () => {
     expect(parseStandaloneComposerSlashCommand(" /plan ")).toBe("plan");
   });
 
-  it("parses standalone /code command", () => {
-    expect(parseStandaloneComposerSlashCommand("/code")).toBe("code");
+  it("parses standalone /default command", () => {
+    expect(parseStandaloneComposerSlashCommand("/default")).toBe("default");
   });
 
-  it("parses standalone /usage command", () => {
-    expect(parseStandaloneComposerSlashCommand("/usage")).toBe("usage");
+  it("parses standalone /fast command", () => {
+    expect(parseStandaloneComposerSlashCommand("/fast")).toBe("fast");
   });
 
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
-  });
-
-  it("does not parse /presets as standalone send command", () => {
-    expect(parseStandaloneComposerSlashCommand("/presets")).toBeNull();
-  });
-});
-
-describe("parseStandaloneComposerPresetsCommand", () => {
-  it("parses /presets with a query", () => {
-    expect(parseStandaloneComposerPresetsCommand("/presets pro")).toEqual({ query: "pro" });
-  });
-
-  it("parses /presets with no query", () => {
-    expect(parseStandaloneComposerPresetsCommand("/presets")).toEqual({ query: "" });
-  });
-
-  it("ignores non-presets commands", () => {
-    expect(parseStandaloneComposerPresetsCommand("/plan")).toBeNull();
   });
 });

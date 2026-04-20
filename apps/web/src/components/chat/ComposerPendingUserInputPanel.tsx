@@ -5,14 +5,12 @@ import {
   derivePendingUserInputProgress,
   type PendingUserInputDraftAnswer,
 } from "../../pendingUserInput";
-import { hexColorToRgba } from "../../modeColors";
-import { CheckIcon } from "lucide-react";
+import { CheckIcon } from "~/lib/icons";
 import { cn } from "~/lib/utils";
 
 interface PendingUserInputPanelProps {
   pendingUserInputs: PendingUserInput[];
   respondingRequestIds: ApprovalRequestId[];
-  accentColor: string;
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
@@ -22,7 +20,6 @@ interface PendingUserInputPanelProps {
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
   pendingUserInputs,
   respondingRequestIds,
-  accentColor,
   answers,
   questionIndex,
   onToggleOption,
@@ -37,7 +34,6 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       key={activePrompt.requestId}
       prompt={activePrompt}
       isResponding={respondingRequestIds.includes(activePrompt.requestId)}
-      accentColor={accentColor}
       answers={answers}
       questionIndex={questionIndex}
       onToggleOption={onToggleOption}
@@ -49,7 +45,6 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
 const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard({
   prompt,
   isResponding,
-  accentColor,
   answers,
   questionIndex,
   onToggleOption,
@@ -57,7 +52,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 }: {
   prompt: PendingUserInput;
   isResponding: boolean;
-  accentColor: string;
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
   onToggleOption: (questionId: string, optionLabel: string) => void;
@@ -66,9 +60,6 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
   const autoAdvanceTimerRef = useRef<number | null>(null);
-  const selectedBorderColor = hexColorToRgba(accentColor, 0.4);
-  const selectedBackgroundColor = hexColorToRgba(accentColor, 0.08);
-  const selectedShortcutBackgroundColor = hexColorToRgba(accentColor, 0.2);
 
   // Clear auto-advance timer on unmount
   useEffect(() => {
@@ -96,9 +87,8 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     [activeQuestion?.multiSelect, onAdvance, onToggleOption],
   );
 
-  // Keyboard shortcut: number keys 1-9 select corresponding options when focus is
-  // outside editable fields. Multi-select prompts toggle options in place; single-
-  // select prompts keep the existing auto-advance behavior.
+  // Keyboard shortcut: digits toggle options for multi-select prompts and preserve
+  // the current auto-advance behavior for single-select questions.
   useEffect(() => {
     if (!activeQuestion || isResponding) return;
     const handler = (event: globalThis.KeyboardEvent) => {
@@ -107,7 +97,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
         return;
       }
-      if (target instanceof HTMLElement && target.isContentEditable) {
+      // Let digit input pass through whenever focus is inside an editable region,
+      // including nested contenteditable descendants inside the composer.
+      if (
+        target instanceof HTMLElement &&
+        target.closest('[contenteditable]:not([contenteditable="false"])')
+      ) {
         return;
       }
       const digit = Number.parseInt(event.key, 10);
@@ -158,35 +153,19 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               className={cn(
                 "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-all duration-150",
                 isSelected
-                  ? "text-foreground"
+                  ? "border-blue-500/40 bg-blue-500/8 text-foreground"
                   : "border-transparent bg-muted/20 text-foreground/80 hover:bg-muted/40 hover:border-border/40",
                 isResponding && "opacity-50 cursor-not-allowed",
               )}
-              style={
-                isSelected
-                  ? {
-                      borderColor: selectedBorderColor,
-                      backgroundColor: selectedBackgroundColor,
-                    }
-                  : undefined
-              }
             >
               {shortcutKey !== null ? (
                 <kbd
                   className={cn(
                     "flex size-5 shrink-0 items-center justify-center rounded text-[11px] font-medium tabular-nums transition-colors duration-150",
                     isSelected
-                      ? ""
+                      ? "bg-blue-500/20 text-blue-400"
                       : "bg-muted/40 text-muted-foreground/50 group-hover:bg-muted/60 group-hover:text-muted-foreground/70",
                   )}
-                  style={
-                    isSelected
-                      ? {
-                          backgroundColor: selectedShortcutBackgroundColor,
-                          color: accentColor,
-                        }
-                      : undefined
-                  }
                 >
                   {shortcutKey}
                 </kbd>
@@ -199,9 +178,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
                   </span>
                 ) : null}
               </div>
-              {isSelected ? (
-                <CheckIcon className="size-3.5 shrink-0" style={{ color: accentColor }} />
-              ) : null}
+              {isSelected ? <CheckIcon className="size-3.5 shrink-0 text-blue-400" /> : null}
             </button>
           );
         })}

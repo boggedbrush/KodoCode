@@ -1,5 +1,6 @@
 import {
   type KeybindingCommand,
+  type ResolvedKeybindingRule,
   type KeybindingShortcut,
   type KeybindingWhenNode,
   type ResolvedKeybindingsConfig,
@@ -33,6 +34,146 @@ interface ResolvedShortcutLabelOptions extends ShortcutMatchOptions {
   platform?: string;
 }
 
+function commandShortcut(
+  key: string,
+  overrides: Partial<Omit<KeybindingShortcut, "key">> = {},
+): KeybindingShortcut {
+  return {
+    key,
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    modKey: true,
+    ...overrides,
+  };
+}
+
+function whenIdentifier(name: string): KeybindingWhenNode {
+  return { type: "identifier", name };
+}
+
+function whenNot(node: KeybindingWhenNode): KeybindingWhenNode {
+  return { type: "not", node };
+}
+
+function whenAnd(left: KeybindingWhenNode, right: KeybindingWhenNode): KeybindingWhenNode {
+  return { type: "and", left, right };
+}
+
+const whenNotTerminalFocus = whenNot(whenIdentifier("terminalFocus"));
+const whenThreadJumpAvailable = whenAnd(
+  whenNotTerminalFocus,
+  whenNot(whenIdentifier("terminalWorkspaceOpen")),
+);
+
+export const DEFAULT_SHORTCUT_FALLBACKS: ResolvedKeybindingsConfig = [
+  {
+    command: "sidebar.addProject",
+    shortcut: commandShortcut("o", { shiftKey: true }),
+    whenAst: whenNotTerminalFocus,
+  },
+  {
+    command: "sidebar.importThread",
+    shortcut: commandShortcut("i"),
+    whenAst: whenNotTerminalFocus,
+  },
+  {
+    command: "chat.newLatestProject",
+    shortcut: commandShortcut("n", { shiftKey: true }),
+    whenAst: whenNotTerminalFocus,
+  },
+  {
+    command: "chat.newClaude",
+    shortcut: commandShortcut("c", { altKey: true }),
+    whenAst: whenNotTerminalFocus,
+  },
+  {
+    command: "chat.newChat",
+    shortcut: commandShortcut("n", { altKey: true }),
+    whenAst: whenNotTerminalFocus,
+  },
+  {
+    command: "chat.newCodex",
+    shortcut: commandShortcut("x", { altKey: true }),
+    whenAst: whenNotTerminalFocus,
+  },
+  {
+    command: "chat.newGemini",
+    shortcut: commandShortcut("g", { altKey: true }),
+    whenAst: whenNotTerminalFocus,
+  },
+  {
+    command: "chat.split",
+    shortcut: commandShortcut("\\"),
+    whenAst: whenNotTerminalFocus,
+  },
+  {
+    command: "thread.jump.1",
+    shortcut: commandShortcut("1"),
+    whenAst: whenThreadJumpAvailable,
+  },
+  {
+    command: "thread.jump.2",
+    shortcut: commandShortcut("2"),
+    whenAst: whenThreadJumpAvailable,
+  },
+  {
+    command: "thread.jump.3",
+    shortcut: commandShortcut("3"),
+    whenAst: whenThreadJumpAvailable,
+  },
+  {
+    command: "thread.jump.4",
+    shortcut: commandShortcut("4"),
+    whenAst: whenThreadJumpAvailable,
+  },
+  {
+    command: "thread.jump.5",
+    shortcut: commandShortcut("5"),
+    whenAst: whenThreadJumpAvailable,
+  },
+  {
+    command: "thread.jump.6",
+    shortcut: commandShortcut("6"),
+    whenAst: whenThreadJumpAvailable,
+  },
+  {
+    command: "thread.jump.7",
+    shortcut: commandShortcut("7"),
+    whenAst: whenThreadJumpAvailable,
+  },
+  {
+    command: "thread.jump.8",
+    shortcut: commandShortcut("8"),
+    whenAst: whenThreadJumpAvailable,
+  },
+  {
+    command: "thread.jump.9",
+    shortcut: commandShortcut("9"),
+    whenAst: whenThreadJumpAvailable,
+  },
+  {
+    command: "terminal.workspace.newFullWidth",
+    shortcut: commandShortcut("j", { shiftKey: true }),
+  },
+  {
+    command: "terminal.workspace.closeActive",
+    shortcut: commandShortcut("w"),
+    whenAst: whenIdentifier("terminalWorkspaceOpen"),
+  },
+  {
+    command: "terminal.workspace.terminal",
+    shortcut: commandShortcut("1"),
+    whenAst: whenIdentifier("terminalWorkspaceOpen"),
+  },
+  {
+    command: "terminal.workspace.chat",
+    shortcut: commandShortcut("2"),
+    whenAst: whenIdentifier("terminalWorkspaceOpen"),
+  },
+];
+
 const TERMINAL_WORD_BACKWARD = "\u001bb";
 const TERMINAL_WORD_FORWARD = "\u001bf";
 const TERMINAL_LINE_START = "\u0001";
@@ -50,11 +191,39 @@ const EVENT_CODE_KEY_ALIASES: Readonly<Record<string, readonly string[]>> = {
   Digit7: ["7"],
   Digit8: ["8"],
   Digit9: ["9"],
+  KeyA: ["a"],
+  KeyB: ["b"],
+  KeyC: ["c"],
+  KeyD: ["d"],
+  KeyE: ["e"],
+  KeyF: ["f"],
+  KeyG: ["g"],
+  KeyH: ["h"],
+  KeyI: ["i"],
+  KeyJ: ["j"],
+  KeyK: ["k"],
+  KeyL: ["l"],
+  KeyM: ["m"],
+  KeyN: ["n"],
+  KeyO: ["o"],
+  KeyP: ["p"],
+  KeyQ: ["q"],
+  KeyR: ["r"],
+  KeyS: ["s"],
+  KeyT: ["t"],
+  KeyU: ["u"],
+  KeyV: ["v"],
+  KeyW: ["w"],
+  KeyX: ["x"],
+  KeyY: ["y"],
+  KeyZ: ["z"],
 };
 
 function normalizeEventKey(key: string): string {
   const normalized = key.toLowerCase();
   if (normalized === "esc") return "escape";
+  if (normalized === "{") return "[";
+  if (normalized === "}") return "]";
   return normalized;
 }
 
@@ -180,7 +349,7 @@ function matchesCommandShortcut(
   return resolveShortcutCommand(event, keybindings, options) === command;
 }
 
-export function resolveShortcutCommand(
+function resolveShortcutCommandFromBindings(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
@@ -195,7 +364,33 @@ export function resolveShortcutCommand(
     if (!matchesShortcut(event, binding.shortcut, platform)) continue;
     return binding.command;
   }
+
   return null;
+}
+
+function getFallbackBindings(
+  keybindings: ResolvedKeybindingsConfig,
+): ReadonlyArray<ResolvedKeybindingRule> {
+  const configuredCommands = new Set(keybindings.map((binding) => binding.command));
+  return DEFAULT_SHORTCUT_FALLBACKS.filter((binding) => !configuredCommands.has(binding.command));
+}
+
+export function resolveShortcutCommand(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): string | null {
+  const explicitCommand = resolveShortcutCommandFromBindings(event, keybindings, options);
+  if (explicitCommand !== null) {
+    return explicitCommand;
+  }
+
+  const fallbackBindings = getFallbackBindings(keybindings);
+  if (fallbackBindings.length === 0) {
+    return null;
+  }
+
+  return resolveShortcutCommandFromBindings(event, fallbackBindings, options);
 }
 
 function formatShortcutKeyLabel(key: string): string {
@@ -233,6 +428,29 @@ export function formatShortcutLabel(
   return parts.join("+");
 }
 
+const MODIFIER_SYMBOLS = new Set(["⌘", "⌥", "⌃", "⇧"]);
+
+export function splitShortcutLabel(shortcutLabel: string): string[] {
+  if (shortcutLabel.includes("+")) {
+    return shortcutLabel
+      .split("+")
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+  }
+
+  if ([...shortcutLabel].some((char) => MODIFIER_SYMBOLS.has(char))) {
+    const parts = [...shortcutLabel];
+    const key = parts
+      .filter((char) => !MODIFIER_SYMBOLS.has(char))
+      .join("")
+      .trim();
+    const modifiers = parts.filter((char) => MODIFIER_SYMBOLS.has(char));
+    return key.length > 0 ? [...modifiers, key] : modifiers;
+  }
+
+  return [shortcutLabel];
+}
+
 export function shortcutLabelForCommand(
   keybindings: ResolvedKeybindingsConfig,
   command: KeybindingCommand,
@@ -243,8 +461,32 @@ export function shortcutLabelForCommand(
       ? ({ platform: options } satisfies ResolvedShortcutLabelOptions)
       : options;
   const platform = resolvePlatform(resolvedOptions);
+  const contextProvided = resolvedOptions?.context !== undefined;
+
+  if (!contextProvided) {
+    for (let index = keybindings.length - 1; index >= 0; index -= 1) {
+      const binding = keybindings[index];
+      if (!binding || binding.command !== command) continue;
+      return formatShortcutLabel(binding.shortcut, platform);
+    }
+    for (const binding of getFallbackBindings(keybindings)) {
+      if (binding.command !== command) continue;
+      return formatShortcutLabel(binding.shortcut, platform);
+    }
+    return null;
+  }
+
   const shortcut = findEffectiveShortcutForCommand(keybindings, command, resolvedOptions);
-  return shortcut ? formatShortcutLabel(shortcut, platform) : null;
+  if (shortcut) {
+    return formatShortcutLabel(shortcut, platform);
+  }
+
+  const fallbackShortcut = findEffectiveShortcutForCommand(
+    getFallbackBindings(keybindings),
+    command,
+    resolvedOptions,
+  );
+  return fallbackShortcut ? formatShortcutLabel(fallbackShortcut, platform) : null;
 }
 
 export function threadJumpCommandForIndex(index: number): ThreadJumpKeybindingCommand | null {
@@ -256,23 +498,18 @@ export function threadJumpIndexFromCommand(command: string): number | null {
   return index === -1 ? null : index;
 }
 
-export function threadTraversalDirectionFromCommand(
-  command: string | null,
-): "previous" | "next" | null {
-  if (command === "thread.previous") return "previous";
-  if (command === "thread.next") return "next";
-  return null;
-}
-
 export function shouldShowThreadJumpHints(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
 ): boolean {
   const platform = resolvePlatform(options);
+  const fallbackBindings = getFallbackBindings(keybindings);
 
   for (const command of THREAD_JUMP_KEYBINDING_COMMANDS) {
-    const shortcut = findEffectiveShortcutForCommand(keybindings, command, options);
+    const shortcut =
+      findEffectiveShortcutForCommand(keybindings, command, options) ??
+      findEffectiveShortcutForCommand(fallbackBindings, command, options);
     if (!shortcut) continue;
     if (matchesShortcutModifiers(event, shortcut, platform)) {
       return true;
@@ -314,12 +551,28 @@ export function isTerminalCloseShortcut(
   return matchesCommandShortcut(event, keybindings, "terminal.close", options);
 }
 
+export function isSidebarToggleShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "sidebar.toggle", options);
+}
+
 export function isDiffToggleShortcut(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
 ): boolean {
   return matchesCommandShortcut(event, keybindings, "diff.toggle", options);
+}
+
+export function isBrowserToggleShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "browser.toggle", options);
 }
 
 export function isChatNewShortcut(
@@ -330,12 +583,49 @@ export function isChatNewShortcut(
   return matchesCommandShortcut(event, keybindings, "chat.new", options);
 }
 
-export function isChatNewLocalShortcut(
+export function isChatNewLatestProjectShortcut(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
   options?: ShortcutMatchOptions,
 ): boolean {
-  return matchesCommandShortcut(event, keybindings, "chat.newLocal", options);
+  return matchesCommandShortcut(event, keybindings, "chat.newLatestProject", options);
+}
+
+export function isChatNewChatShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return (
+    matchesCommandShortcut(event, keybindings, "chat.newChat", options) ||
+    matchesCommandShortcut(event, keybindings, "chat.newLocal", options)
+  );
+}
+
+export const isChatNewLocalShortcut = isChatNewChatShortcut;
+
+export function isChatNewClaudeShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "chat.newClaude", options);
+}
+
+export function isChatNewCodexShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "chat.newCodex", options);
+}
+
+export function isChatNewGeminiShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "chat.newGemini", options);
 }
 
 export function isOpenFavoriteEditorShortcut(
@@ -356,18 +646,7 @@ export function isTerminalClearShortcut(
 
   const key = event.key.toLowerCase();
 
-  if (key === "l" && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
-    return true;
-  }
-
-  return (
-    isMacPlatform(platform) &&
-    key === "k" &&
-    event.metaKey &&
-    !event.ctrlKey &&
-    !event.altKey &&
-    !event.shiftKey
-  );
+  return key === "l" && event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey;
 }
 
 export function terminalNavigationShortcutData(

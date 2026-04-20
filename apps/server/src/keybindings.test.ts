@@ -8,13 +8,13 @@ import { ServerConfig } from "./config";
 import {
   DEFAULT_KEYBINDINGS,
   Keybindings,
+  KeybindingsConfigError,
   KeybindingsLive,
   ResolvedKeybindingFromConfig,
   compileResolvedKeybindingRule,
   compileResolvedKeybindingsConfig,
   parseKeybindingShortcut,
 } from "./keybindings";
-import { KeybindingsConfigError } from "@t3tools/contracts";
 
 const KeybindingsConfigJson = Schema.fromJsonString(KeybindingsConfig);
 const makeKeybindingsLayer = () => {
@@ -165,25 +165,6 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
     }).pipe(Effect.provide(makeKeybindingsLayer())),
   );
 
-  it.effect("ships configurable thread navigation defaults", () =>
-    Effect.sync(() => {
-      const defaultsByCommand = new Map(
-        DEFAULT_KEYBINDINGS.map((binding) => [binding.command, binding.key] as const),
-      );
-
-      assert.equal(defaultsByCommand.get("thread.previous"), "mod+shift+[");
-      assert.equal(defaultsByCommand.get("thread.next"), "mod+shift+]");
-      assert.equal(defaultsByCommand.get("sidebar.toggle"), "mod+b");
-      assert.equal(defaultsByCommand.get("composer.mode.ask"), "mod+shift+a");
-      assert.equal(defaultsByCommand.get("composer.mode.plan"), "mod+shift+p");
-      assert.equal(defaultsByCommand.get("composer.mode.code"), "mod+shift+c");
-      assert.equal(defaultsByCommand.get("composer.mode.review"), "mod+shift+r");
-      assert.equal(defaultsByCommand.get("app.reload"), "f5");
-      assert.equal(defaultsByCommand.get("thread.jump.1"), "mod+1");
-      assert.equal(defaultsByCommand.get("thread.jump.9"), "mod+9");
-    }),
-  );
-
   it.effect("uses defaults in runtime when config is malformed without overriding file", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -270,6 +251,10 @@ it.layer(NodeServices.layer)("keybindings", (it) => {
         assert.isFalse(
           persisted.some((entry) => entry.command === "terminal.toggle" && entry.key === "mod+j"),
         );
+
+        const persistedNewTerminalThread = byCommand.get("chat.newTerminal");
+        assert.isNotNull(persistedNewTerminalThread);
+        assert.equal(persistedNewTerminalThread?.key, "mod+shift+t");
 
         for (const defaultRule of DEFAULT_KEYBINDINGS) {
           assert.isTrue(byCommand.has(defaultRule.command), `expected ${defaultRule.command}`);

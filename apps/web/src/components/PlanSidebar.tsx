@@ -1,5 +1,5 @@
-import { memo, useCallback, useEffect, useState } from "react";
-import { type TimestampFormat } from "@t3tools/contracts/settings";
+import { memo, useState, useCallback } from "react";
+import { type TimestampFormat } from "../appSettings";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { ScrollArea } from "./ui/scroll-area";
@@ -11,7 +11,7 @@ import {
   EllipsisIcon,
   LoaderIcon,
   PanelRightCloseIcon,
-} from "lucide-react";
+} from "~/lib/icons";
 import { cn } from "~/lib/utils";
 import type { ActivePlanState } from "../session-logic";
 import type { LatestProposedPlanState } from "../session-logic";
@@ -27,13 +27,6 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { readNativeApi } from "~/nativeApi";
 import { toastManager } from "./ui/toast";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import { INTERACTION_MODE_ACCENT_COLORS, hexColorToRgba } from "../modeColors";
-import { shouldAutoExpandPlanMarkdown } from "./planSidebar.logic";
-
-const PLAN_ACCENT_COLOR = INTERACTION_MODE_ACCENT_COLORS.plan;
-const PLAN_ACCENT_BACKGROUND = hexColorToRgba(PLAN_ACCENT_COLOR, 0.1);
-const PLAN_ACCENT_ICON_BACKGROUND = hexColorToRgba(PLAN_ACCENT_COLOR, 0.15);
-const PLAN_IN_PROGRESS_BACKGROUND = hexColorToRgba(PLAN_ACCENT_COLOR, 0.05);
 
 function stepStatusIcon(status: string): React.ReactNode {
   if (status === "completed") {
@@ -45,13 +38,7 @@ function stepStatusIcon(status: string): React.ReactNode {
   }
   if (status === "inProgress") {
     return (
-      <span
-        className="flex size-5 shrink-0 items-center justify-center rounded-full"
-        style={{
-          backgroundColor: PLAN_ACCENT_ICON_BACKGROUND,
-          color: PLAN_ACCENT_COLOR,
-        }}
-      >
+      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-blue-500/15 text-blue-400">
         <LoaderIcon className="size-3 animate-spin" />
       </span>
     );
@@ -80,22 +67,13 @@ const PlanSidebar = memo(function PlanSidebar({
   timestampFormat,
   onClose,
 }: PlanSidebarProps) {
-  const [proposedPlanExpandedOverride, setProposedPlanExpandedOverride] = useState<boolean | null>(
-    null,
-  );
+  const [proposedPlanExpanded, setProposedPlanExpanded] = useState(false);
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
   const { copyToClipboard, isCopied } = useCopyToClipboard();
 
   const planMarkdown = activeProposedPlan?.planMarkdown ?? null;
   const displayedPlanMarkdown = planMarkdown ? stripDisplayedPlanMarkdown(planMarkdown) : null;
   const planTitle = planMarkdown ? proposedPlanTitle(planMarkdown) : null;
-  const proposedPlanId = activeProposedPlan?.id ?? null;
-  const autoExpandPlanMarkdown = shouldAutoExpandPlanMarkdown(activePlan, activeProposedPlan);
-  const proposedPlanExpanded = proposedPlanExpandedOverride ?? autoExpandPlanMarkdown;
-
-  useEffect(() => {
-    setProposedPlanExpandedOverride(null);
-  }, [proposedPlanId]);
 
   const handleCopyPlan = useCallback(() => {
     if (!planMarkdown) return;
@@ -146,11 +124,7 @@ const PlanSidebar = memo(function PlanSidebar({
         <div className="flex items-center gap-2">
           <Badge
             variant="secondary"
-            className="rounded-md px-1.5 py-0 text-[10px] font-semibold tracking-wide uppercase"
-            style={{
-              backgroundColor: PLAN_ACCENT_BACKGROUND,
-              color: PLAN_ACCENT_COLOR,
-            }}
+            className="rounded-md bg-blue-500/10 px-1.5 py-0 text-[10px] font-semibold tracking-wide text-blue-400 uppercase"
           >
             Plan
           </Badge>
@@ -222,15 +196,9 @@ const PlanSidebar = memo(function PlanSidebar({
                   key={`${step.status}:${step.step}`}
                   className={cn(
                     "flex items-start gap-2.5 rounded-lg px-2.5 py-2 transition-colors duration-200",
+                    step.status === "inProgress" && "bg-blue-500/5",
                     step.status === "completed" && "bg-emerald-500/5",
                   )}
-                  style={
-                    step.status === "inProgress"
-                      ? {
-                          backgroundColor: PLAN_IN_PROGRESS_BACKGROUND,
-                        }
-                      : undefined
-                  }
                 >
                   <div className="mt-0.5">{stepStatusIcon(step.status)}</div>
                   <p
@@ -256,11 +224,7 @@ const PlanSidebar = memo(function PlanSidebar({
               <button
                 type="button"
                 className="group flex w-full items-center gap-1.5 text-left"
-                onClick={() => {
-                  setProposedPlanExpandedOverride((current) =>
-                    current === null ? !autoExpandPlanMarkdown : !current,
-                  );
-                }}
+                onClick={() => setProposedPlanExpanded((v) => !v)}
               >
                 {proposedPlanExpanded ? (
                   <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground/40 transition-transform" />

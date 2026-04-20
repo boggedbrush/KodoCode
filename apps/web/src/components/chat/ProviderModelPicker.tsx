@@ -1,10 +1,12 @@
-import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
+// FILE: ProviderModelPicker.tsx
+// Purpose: Renders the composer provider/model menu and supports controlled opening for shortcuts.
+// Layer: Chat composer presentation
+// Depends on: provider availability metadata, shared menu primitives, and picker trigger styling.
+
+import { type ModelSlug, type ProviderKind, type ServerProviderStatus } from "@t3tools/contracts";
 import { resolveSelectableModel } from "@t3tools/shared/model";
-import { memo, useState } from "react";
-import type { VariantProps } from "class-variance-authority";
+import { memo, useCallback, useState } from "react";
 import { type ProviderPickerKind, PROVIDER_OPTIONS } from "../../session-logic";
-import { ChevronDownIcon } from "lucide-react";
-import { Button, buttonVariants } from "../ui/button";
 import {
   Menu,
   MenuGroup,
@@ -12,15 +14,17 @@ import {
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
-  MenuSeparator as MenuDivider,
+  MenuSeparator,
   MenuSub,
   MenuSubPopup,
   MenuSubTrigger,
   MenuTrigger,
 } from "../ui/menu";
-import { ClaudeAI, CursorIcon, Gemini, Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import { ClaudeAI, Gemini, Icon, OpenAI } from "../Icons";
 import { cn } from "~/lib/utils";
-import { getProviderSnapshot } from "../../providerModels";
+import { PickerTriggerButton } from "./PickerTriggerButton";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { ShortcutKbd } from "../ui/shortcut-kbd";
 
 function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
   value: ProviderKind;
@@ -33,55 +37,86 @@ function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): o
 const PROVIDER_ICON_BY_PROVIDER: Record<ProviderPickerKind, Icon> = {
   codex: OpenAI,
   claudeAgent: ClaudeAI,
-  cursor: CursorIcon,
+  gemini: Gemini,
 };
 
+function resolveLiveProviderAvailability(provider: ServerProviderStatus | undefined): {
+  disabled: boolean;
+  label: string | null;
+} {
+  if (!provider) {
+    return {
+      disabled: false,
+      label: null,
+    };
+  }
+
+  if (!provider.available) {
+    return {
+      disabled: true,
+      label: provider.authStatus === "unauthenticated" ? "Sign in" : "Unavailable",
+    };
+  }
+
+  if (provider.authStatus === "unauthenticated") {
+    return {
+      disabled: true,
+      label: "Sign in",
+    };
+  }
+
+  return {
+    disabled: false,
+    label: null,
+  };
+}
+
 export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
-export const COMPOSER_AUTO_MODEL_VALUE = "auto";
 const UNAVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter((option) => !option.available);
-const COMING_SOON_PROVIDER_OPTIONS = [
-  { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },
-  { id: "gemini", label: "Gemini", icon: Gemini },
-] as const;
 
 function providerIconClassName(
   provider: ProviderKind | ProviderPickerKind,
   fallbackClassName: string,
 ): string {
-  return provider === "claudeAgent" ? "text-[#d97757]" : fallbackClassName;
+  return provider === "claudeAgent" || provider === "gemini"
+    ? "text-foreground"
+    : fallbackClassName;
 }
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   provider: ProviderKind;
-  model: string;
+  model: ModelSlug;
   lockedProvider: ProviderKind | null;
-  providers?: ReadonlyArray<ServerProvider>;
+  providers?: ReadonlyArray<ServerProviderStatus>;
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
   activeProviderIconClassName?: string;
   compact?: boolean;
   disabled?: boolean;
-  showAsAuto?: boolean;
-  triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
-  triggerClassName?: string;
-  onProviderModelChange: (provider: ProviderKind, model: string) => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  shortcutLabel?: string | null;
+  onProviderModelChange: (provider: ProviderKind, model: ModelSlug) => void;
 }) {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { onOpenChange, open } = props;
+  const [uncontrolledMenuOpen, setUncontrolledMenuOpen] = useState(false);
   const activeProvider = props.lockedProvider ?? props.provider;
+  const isMenuOpen = open ?? uncontrolledMenuOpen;
   const selectedProviderOptions = props.modelOptionsByProvider[activeProvider];
-  const selectedModelLabel = props.showAsAuto
-    ? "Auto"
-    : selectedProviderOptions.find((option) => option.slug === props.model)?.name ||
-      props.model ||
-      "Current Model";
+  const selectedModelLabel =
+    selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[activeProvider];
+  const setMenuOpen = useCallback(
+    (nextOpen: boolean) => {
+      if (open === undefined) {
+        setUncontrolledMenuOpen(nextOpen);
+      }
+      onOpenChange?.(nextOpen);
+    },
+    [onOpenChange, open],
+  );
   const handleModelChange = (provider: ProviderKind, value: string) => {
     if (props.disabled) return;
     if (!value) return;
-    if (value === COMPOSER_AUTO_MODEL_VALUE) {
-      props.onProviderModelChange(provider, COMPOSER_AUTO_MODEL_VALUE);
-      setIsMenuOpen(false);
-      return;
-    }
     const resolvedModel = resolveSelectableModel(
       provider,
       value,
@@ -89,7 +124,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     );
     if (!resolvedModel) return;
     props.onProviderModelChange(provider, resolvedModel);
-    setIsMenuOpen(false);
+    setMenuOpen(false);
   };
 
   return (
@@ -97,60 +132,86 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       open={isMenuOpen}
       onOpenChange={(open) => {
         if (props.disabled) {
-          setIsMenuOpen(false);
+          setMenuOpen(false);
           return;
         }
-        setIsMenuOpen(open);
+        setMenuOpen(open);
       }}
     >
-      <MenuTrigger
-        render={
-          <Button
-            size="sm"
-            variant={props.triggerVariant ?? "ghost"}
-            data-chat-provider-model-picker="true"
-            className={cn(
-              "min-w-0 justify-start overflow-hidden whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 [&_svg]:mx-0",
-              props.compact ? "max-w-42 shrink-0" : "max-w-48 shrink sm:max-w-56 sm:px-3",
-              props.triggerClassName,
-            )}
-            disabled={props.disabled}
-          />
-        }
-      >
-        <span
-          className={cn(
-            "flex min-w-0 w-full box-border items-center gap-2 overflow-hidden",
-            props.compact ? "max-w-36 sm:pl-1" : undefined,
-          )}
-        >
-          {props.model && (
-            <ProviderIcon
-              aria-hidden="true"
-              className={cn(
-                "size-4 shrink-0",
-                providerIconClassName(activeProvider, "text-muted-foreground/70"),
-                props.activeProviderIconClassName,
-              )}
+      {props.shortcutLabel ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <MenuTrigger
+                render={
+                  <PickerTriggerButton
+                    disabled={props.disabled ?? false}
+                    compact={props.compact ?? false}
+                    icon={
+                      <ProviderIcon
+                        aria-hidden="true"
+                        className={cn(
+                          "size-3.5 shrink-0",
+                          providerIconClassName(activeProvider, "text-muted-foreground/70"),
+                          props.activeProviderIconClassName,
+                        )}
+                      />
+                    }
+                    label={selectedModelLabel}
+                  />
+                }
+              />
+            }
+          >
+            <span className="sr-only">{selectedModelLabel}</span>
+          </TooltipTrigger>
+          {!isMenuOpen ? (
+            <TooltipPopup side="top" sideOffset={6}>
+              <span className="inline-flex items-center gap-2 px-1 py-0.5">
+                <span>Change model</span>
+                <ShortcutKbd
+                  shortcutLabel={props.shortcutLabel}
+                  className="h-4 min-w-4 px-1 text-[length:var(--app-font-size-ui-2xs,9px)] text-muted-foreground"
+                />
+              </span>
+            </TooltipPopup>
+          ) : null}
+        </Tooltip>
+      ) : (
+        <MenuTrigger
+          render={
+            <PickerTriggerButton
+              disabled={props.disabled ?? false}
+              compact={props.compact ?? false}
+              icon={
+                <ProviderIcon
+                  aria-hidden="true"
+                  className={cn(
+                    "size-3.5 shrink-0",
+                    providerIconClassName(activeProvider, "text-muted-foreground/70"),
+                    props.activeProviderIconClassName,
+                  )}
+                />
+              }
+              label={selectedModelLabel}
             />
-          )}
-          <span className="min-w-0 flex-1 truncate">{selectedModelLabel}</span>
-          <ChevronDownIcon aria-hidden="true" className="size-3 shrink-0 opacity-60" />
-        </span>
-      </MenuTrigger>
+          }
+        >
+          <span className="sr-only">{selectedModelLabel}</span>
+        </MenuTrigger>
+      )}
       <MenuPopup align="start">
         {props.lockedProvider !== null ? (
           <MenuGroup>
             <MenuRadioGroup
-              value={props.showAsAuto ? COMPOSER_AUTO_MODEL_VALUE : props.model}
+              value={props.model}
               onValueChange={(value) => handleModelChange(props.lockedProvider!, value)}
             >
-              <MenuRadioItem value={COMPOSER_AUTO_MODEL_VALUE}>Auto</MenuRadioItem>
               {props.modelOptionsByProvider[props.lockedProvider].map((modelOption) => (
                 <MenuRadioItem
                   key={`${props.lockedProvider}:${modelOption.slug}`}
                   value={modelOption.slug}
-                  onClick={() => setIsMenuOpen(false)}
+                  onClick={() => setMenuOpen(false)}
                 >
                   {modelOption.name}
                 </MenuRadioItem>
@@ -161,15 +222,11 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           <>
             {AVAILABLE_PROVIDER_OPTIONS.map((option) => {
               const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];
-              const liveProvider = props.providers
-                ? getProviderSnapshot(props.providers, option.value)
-                : undefined;
-              if (liveProvider && liveProvider.status !== "ready") {
-                const unavailableLabel = !liveProvider.enabled
-                  ? "Disabled"
-                  : !liveProvider.installed
-                    ? "Not installed"
-                    : "Unavailable";
+              const liveProvider = props.providers?.find(
+                (entry) => entry.provider === option.value,
+              );
+              const availability = resolveLiveProviderAvailability(liveProvider);
+              if (availability.disabled) {
                 return (
                   <MenuItem key={option.value} disabled>
                     <OptionIcon
@@ -181,7 +238,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                     />
                     <span>{option.label}</span>
                     <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
-                      {unavailableLabel}
+                      {availability.label}
                     </span>
                   </MenuItem>
                 );
@@ -198,24 +255,17 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                     />
                     {option.label}
                   </MenuSubTrigger>
-                  <MenuSubPopup className="[--available-height:min(24rem,70vh)]" sideOffset={4}>
+                  <MenuSubPopup className="[--available-height:min(24rem,70vh)]">
                     <MenuGroup>
                       <MenuRadioGroup
-                        value={
-                          props.provider === option.value
-                            ? props.showAsAuto
-                              ? COMPOSER_AUTO_MODEL_VALUE
-                              : props.model
-                            : ""
-                        }
+                        value={props.provider === option.value ? props.model : ""}
                         onValueChange={(value) => handleModelChange(option.value, value)}
                       >
-                        <MenuRadioItem value={COMPOSER_AUTO_MODEL_VALUE}>Auto</MenuRadioItem>
                         {props.modelOptionsByProvider[option.value].map((modelOption) => (
                           <MenuRadioItem
                             key={`${option.value}:${modelOption.slug}`}
                             value={modelOption.slug}
-                            onClick={() => setIsMenuOpen(false)}
+                            onClick={() => setMenuOpen(false)}
                           >
                             {modelOption.name}
                           </MenuRadioItem>
@@ -226,7 +276,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                 </MenuSub>
               );
             })}
-            {UNAVAILABLE_PROVIDER_OPTIONS.length > 0 && <MenuDivider />}
+            {UNAVAILABLE_PROVIDER_OPTIONS.length > 0 && <MenuSeparator />}
             {UNAVAILABLE_PROVIDER_OPTIONS.map((option) => {
               const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];
               return (
@@ -235,19 +285,6 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
                     aria-hidden="true"
                     className="size-4 shrink-0 text-muted-foreground/85 opacity-80"
                   />
-                  <span>{option.label}</span>
-                  <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
-                    Coming soon
-                  </span>
-                </MenuItem>
-              );
-            })}
-            {UNAVAILABLE_PROVIDER_OPTIONS.length === 0 && <MenuDivider />}
-            {COMING_SOON_PROVIDER_OPTIONS.map((option) => {
-              const OptionIcon = option.icon;
-              return (
-                <MenuItem key={option.id} disabled>
-                  <OptionIcon aria-hidden="true" className="size-4 shrink-0 opacity-80" />
                   <span>{option.label}</span>
                   <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
                     Coming soon

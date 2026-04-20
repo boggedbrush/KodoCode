@@ -1,66 +1,24 @@
-import { ThreadId, type TerminalEvent } from "@t3tools/contracts";
+import { ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import {
-  selectTerminalEventEntries,
-  selectThreadTerminalState,
-  useTerminalStateStore,
-} from "./terminalStateStore";
+import { collectTerminalIdsFromLayout } from "./terminalPaneLayout";
+import { selectThreadTerminalState, useTerminalStateStore } from "./terminalStateStore";
 
 const THREAD_ID = ThreadId.makeUnsafe("thread-1");
 
-function makeTerminalEvent(
-  type: TerminalEvent["type"],
-  overrides: Partial<TerminalEvent> = {},
-): TerminalEvent {
-  const base = {
-    threadId: THREAD_ID,
-    terminalId: "default",
-    createdAt: "2026-04-02T20:00:00.000Z",
-  };
-
-  switch (type) {
-    case "output":
-      return { ...base, type, data: "hello\n", ...overrides } as TerminalEvent;
-    case "activity":
-      return { ...base, type, hasRunningSubprocess: true, ...overrides } as TerminalEvent;
-    case "error":
-      return { ...base, type, message: "boom", ...overrides } as TerminalEvent;
-    case "cleared":
-      return { ...base, type, ...overrides } as TerminalEvent;
-    case "exited":
-      return { ...base, type, exitCode: 0, exitSignal: null, ...overrides } as TerminalEvent;
-    case "started":
-    case "restarted":
-      return {
-        ...base,
-        type,
-        snapshot: {
-          threadId: THREAD_ID,
-          terminalId: "default",
-          cwd: "/tmp/workspace",
-          worktreePath: null,
-          status: "running",
-          pid: 123,
-          history: "",
-          exitCode: null,
-          exitSignal: null,
-          updatedAt: "2026-04-02T20:00:00.000Z",
-        },
-        ...overrides,
-      } as TerminalEvent;
-  }
+function summarizeTerminalGroups(
+  terminalGroups: ReturnType<typeof selectThreadTerminalState>["terminalGroups"],
+) {
+  return terminalGroups.map((group) => ({
+    id: group.id,
+    activeTerminalId: group.activeTerminalId,
+    terminalIds: collectTerminalIdsFromLayout(group.layout),
+  }));
 }
 
 describe("terminalStateStore actions", () => {
   beforeEach(() => {
-    useTerminalStateStore.persist.clearStorage();
-    useTerminalStateStore.setState({
-      terminalStateByThreadId: {},
-      terminalLaunchContextByThreadId: {},
-      terminalEventEntriesByKey: {},
-      nextTerminalEventId: 1,
-    });
+    useTerminalStateStore.setState({ terminalStateByThreadId: {} });
   });
 
   it("returns a closed default terminal state for unknown threads", () => {
@@ -68,15 +26,58 @@ describe("terminalStateStore actions", () => {
       useTerminalStateStore.getState().terminalStateByThreadId,
       THREAD_ID,
     );
-    expect(terminalState).toEqual({
+    expect(terminalState).toMatchObject({
+      entryPoint: "chat",
       terminalOpen: false,
+      presentationMode: "drawer",
+      workspaceLayout: "both",
+      workspaceActiveTab: "terminal",
       terminalHeight: 280,
       terminalIds: ["default"],
+      terminalLabelsById: { default: "Terminal 1" },
+      terminalTitleOverridesById: {},
+      terminalCliKindsById: {},
+      terminalAttentionStatesById: {},
       runningTerminalIds: [],
       activeTerminalId: "default",
-      terminalGroups: [{ id: "group-default", terminalIds: ["default"] }],
       activeTerminalGroupId: "group-default",
     });
+    expect(summarizeTerminalGroups(terminalState.terminalGroups)).toEqual([
+      {
+        id: "group-default",
+        activeTerminalId: "default",
+        terminalIds: ["default"],
+      },
+    ]);
+  });
+
+  it("marks chat-first threads without forcing open terminal UI", () => {
+    const store = useTerminalStateStore.getState();
+    store.openTerminalThreadPage(THREAD_ID, { terminalOnly: true });
+    store.openChatThreadPage(THREAD_ID);
+
+    const terminalState = selectThreadTerminalState(
+      useTerminalStateStore.getState().terminalStateByThreadId,
+      THREAD_ID,
+    );
+    expect(terminalState.entryPoint).toBe("chat");
+    expect(terminalState.workspaceLayout).toBe("both");
+    expect(terminalState.workspaceActiveTab).toBe("chat");
+  });
+
+  it("opens terminal-first threads in the workspace terminal tab", () => {
+    const store = useTerminalStateStore.getState();
+    store.openTerminalThreadPage(THREAD_ID, { terminalOnly: true });
+
+    const terminalState = selectThreadTerminalState(
+      useTerminalStateStore.getState().terminalStateByThreadId,
+      THREAD_ID,
+    );
+    expect(terminalState.entryPoint).toBe("terminal");
+    expect(terminalState.terminalOpen).toBe(true);
+    expect(terminalState.presentationMode).toBe("workspace");
+    expect(terminalState.workspaceLayout).toBe("terminal-only");
+    expect(terminalState.workspaceActiveTab).toBe("terminal");
   });
 
   it("opens and splits terminals into the active group", () => {
@@ -91,12 +92,106 @@ describe("terminalStateStore actions", () => {
     expect(terminalState.terminalOpen).toBe(true);
     expect(terminalState.terminalIds).toEqual(["default", "terminal-2"]);
     expect(terminalState.activeTerminalId).toBe("terminal-2");
-    expect(terminalState.terminalGroups).toEqual([
-      { id: "group-default", terminalIds: ["default", "terminal-2"] },
+    expect(summarizeTerminalGroups(terminalState.terminalGroups)).toEqual([
+      {
+        id: "group-default",
+        activeTerminalId: "terminal-2",
+        terminalIds: ["default", "terminal-2"],
+      },
     ]);
   });
 
-  it("caps splits at four terminals per group", () => {
+  it("restores the last-used presentation mode when reopened", () => {
+    const store = useTerminalStateStore.getState();
+    store.setTerminalPresentationMode(THREAD_ID, "workspace");
+    store.setTerminalOpen(THREAD_ID, false);
+    store.setTerminalOpen(THREAD_ID, true);
+
+    const terminalState = selectThreadTerminalState(
+      useTerminalStateStore.getState().terminalStateByThreadId,
+      THREAD_ID,
+    );
+    expect(terminalState.terminalOpen).toBe(true);
+    expect(terminalState.presentationMode).toBe("workspace");
+  });
+
+  it("enters workspace mode on the terminal tab by default", () => {
+    const store = useTerminalStateStore.getState();
+    store.setTerminalPresentationMode(THREAD_ID, "workspace");
+    store.setTerminalWorkspaceTab(THREAD_ID, "chat");
+    store.setTerminalPresentationMode(THREAD_ID, "drawer");
+    store.setTerminalPresentationMode(THREAD_ID, "workspace");
+
+    const terminalState = selectThreadTerminalState(
+      useTerminalStateStore.getState().terminalStateByThreadId,
+      THREAD_ID,
+    );
+    expect(terminalState.presentationMode).toBe("workspace");
+    expect(terminalState.workspaceActiveTab).toBe("terminal");
+  });
+
+  it("opens a new full-width terminal in terminal-only workspace mode", () => {
+    const store = useTerminalStateStore.getState();
+    store.openNewFullWidthTerminal(THREAD_ID, "terminal-2");
+
+    const terminalState = selectThreadTerminalState(
+      useTerminalStateStore.getState().terminalStateByThreadId,
+      THREAD_ID,
+    );
+    expect(terminalState.terminalOpen).toBe(true);
+    expect(terminalState.presentationMode).toBe("workspace");
+    expect(terminalState.workspaceLayout).toBe("terminal-only");
+    expect(terminalState.workspaceActiveTab).toBe("terminal");
+    expect(terminalState.activeTerminalId).toBe("terminal-2");
+    expect(terminalState.terminalIds).toEqual(["default", "terminal-2"]);
+  });
+
+  it("restores chat when selecting the chat workspace tab from terminal-only mode", () => {
+    const store = useTerminalStateStore.getState();
+    store.openNewFullWidthTerminal(THREAD_ID, "terminal-2");
+    store.setTerminalWorkspaceTab(THREAD_ID, "chat");
+
+    const terminalState = selectThreadTerminalState(
+      useTerminalStateStore.getState().terminalStateByThreadId,
+      THREAD_ID,
+    );
+    expect(terminalState.workspaceLayout).toBe("both");
+    expect(terminalState.workspaceActiveTab).toBe("chat");
+  });
+
+  it("closes workspace chat into terminal-only mode without closing terminals", () => {
+    const store = useTerminalStateStore.getState();
+    store.setTerminalPresentationMode(THREAD_ID, "workspace");
+    store.setTerminalWorkspaceTab(THREAD_ID, "chat");
+    store.closeWorkspaceChat(THREAD_ID);
+
+    const terminalState = selectThreadTerminalState(
+      useTerminalStateStore.getState().terminalStateByThreadId,
+      THREAD_ID,
+    );
+    expect(terminalState.terminalOpen).toBe(true);
+    expect(terminalState.presentationMode).toBe("workspace");
+    expect(terminalState.workspaceLayout).toBe("terminal-only");
+    expect(terminalState.workspaceActiveTab).toBe("terminal");
+    expect(terminalState.terminalIds).toEqual(["default"]);
+  });
+
+  it("preserves terminal-only workspace layout when collapsing to drawer and reopening", () => {
+    const store = useTerminalStateStore.getState();
+    store.openNewFullWidthTerminal(THREAD_ID, "terminal-2");
+    store.setTerminalPresentationMode(THREAD_ID, "drawer");
+    store.setTerminalPresentationMode(THREAD_ID, "workspace");
+
+    const terminalState = selectThreadTerminalState(
+      useTerminalStateStore.getState().terminalStateByThreadId,
+      THREAD_ID,
+    );
+    expect(terminalState.presentationMode).toBe("workspace");
+    expect(terminalState.workspaceLayout).toBe("terminal-only");
+    expect(terminalState.workspaceActiveTab).toBe("terminal");
+  });
+
+  it("keeps split terminals in the same group up to the current group limit", () => {
     const store = useTerminalStateStore.getState();
     store.splitTerminal(THREAD_ID, "terminal-2");
     store.splitTerminal(THREAD_ID, "terminal-3");
@@ -112,9 +207,14 @@ describe("terminalStateStore actions", () => {
       "terminal-2",
       "terminal-3",
       "terminal-4",
+      "terminal-5",
     ]);
-    expect(terminalState.terminalGroups).toEqual([
-      { id: "group-default", terminalIds: ["default", "terminal-2", "terminal-3", "terminal-4"] },
+    expect(summarizeTerminalGroups(terminalState.terminalGroups)).toEqual([
+      {
+        id: "group-default",
+        activeTerminalId: "terminal-5",
+        terminalIds: ["default", "terminal-2", "terminal-3", "terminal-4", "terminal-5"],
+      },
     ]);
   });
 
@@ -128,27 +228,38 @@ describe("terminalStateStore actions", () => {
     expect(terminalState.terminalIds).toEqual(["default", "terminal-2"]);
     expect(terminalState.activeTerminalId).toBe("terminal-2");
     expect(terminalState.activeTerminalGroupId).toBe("group-terminal-2");
-    expect(terminalState.terminalGroups).toEqual([
-      { id: "group-default", terminalIds: ["default"] },
-      { id: "group-terminal-2", terminalIds: ["terminal-2"] },
+    expect(summarizeTerminalGroups(terminalState.terminalGroups)).toEqual([
+      { id: "group-default", activeTerminalId: "default", terminalIds: ["default"] },
+      { id: "group-terminal-2", activeTerminalId: "terminal-2", terminalIds: ["terminal-2"] },
     ]);
   });
 
-  it("ensures unknown server terminals are registered, opened, and activated", () => {
+  it("stores terminal labels and removes them when a terminal closes", () => {
     const store = useTerminalStateStore.getState();
-    store.ensureTerminal(THREAD_ID, "setup-setup", { open: true, active: true });
+    store.newTerminal(THREAD_ID, "terminal-2");
+    store.setTerminalMetadata(THREAD_ID, "terminal-2", {
+      cliKind: "codex",
+      label: "Codex CLI",
+    });
 
-    const terminalState = selectThreadTerminalState(
+    let terminalState = selectThreadTerminalState(
       useTerminalStateStore.getState().terminalStateByThreadId,
       THREAD_ID,
     );
-    expect(terminalState.terminalOpen).toBe(true);
-    expect(terminalState.terminalIds).toEqual(["default", "setup-setup"]);
-    expect(terminalState.activeTerminalId).toBe("setup-setup");
-    expect(terminalState.terminalGroups).toEqual([
-      { id: "group-default", terminalIds: ["default"] },
-      { id: "group-setup-setup", terminalIds: ["setup-setup"] },
-    ]);
+    expect(terminalState.terminalLabelsById).toEqual({
+      default: "Terminal 1",
+      "terminal-2": "Codex 1",
+    });
+    expect(terminalState.terminalCliKindsById).toEqual({ "terminal-2": "codex" });
+
+    store.closeTerminal(THREAD_ID, "terminal-2");
+
+    terminalState = selectThreadTerminalState(
+      useTerminalStateStore.getState().terminalStateByThreadId,
+      THREAD_ID,
+    );
+    expect(terminalState.terminalLabelsById).toEqual({ default: "Terminal 1" });
+    expect(terminalState.terminalCliKindsById).toEqual({});
   });
 
   it("allows unlimited groups while keeping each group capped at four terminals", () => {
@@ -171,23 +282,33 @@ describe("terminalStateStore actions", () => {
       "terminal-5",
       "terminal-6",
     ]);
-    expect(terminalState.terminalGroups).toEqual([
-      { id: "group-default", terminalIds: ["default", "terminal-2", "terminal-3", "terminal-4"] },
-      { id: "group-terminal-5", terminalIds: ["terminal-5"] },
-      { id: "group-terminal-6", terminalIds: ["terminal-6"] },
+    expect(summarizeTerminalGroups(terminalState.terminalGroups)).toEqual([
+      {
+        id: "group-default",
+        activeTerminalId: "terminal-4",
+        terminalIds: ["default", "terminal-2", "terminal-3", "terminal-4"],
+      },
+      { id: "group-terminal-5", activeTerminalId: "terminal-5", terminalIds: ["terminal-5"] },
+      { id: "group-terminal-6", activeTerminalId: "terminal-6", terminalIds: ["terminal-6"] },
     ]);
   });
 
   it("tracks and clears terminal subprocess activity", () => {
     const store = useTerminalStateStore.getState();
     store.splitTerminal(THREAD_ID, "terminal-2");
-    store.setTerminalActivity(THREAD_ID, "terminal-2", true);
+    store.setTerminalActivity(THREAD_ID, "terminal-2", {
+      hasRunningSubprocess: true,
+      agentState: null,
+    });
     expect(
       selectThreadTerminalState(useTerminalStateStore.getState().terminalStateByThreadId, THREAD_ID)
         .runningTerminalIds,
     ).toEqual(["terminal-2"]);
 
-    store.setTerminalActivity(THREAD_ID, "terminal-2", false);
+    store.setTerminalActivity(THREAD_ID, "terminal-2", {
+      hasRunningSubprocess: false,
+      agentState: null,
+    });
     expect(
       selectThreadTerminalState(useTerminalStateStore.getState().terminalStateByThreadId, THREAD_ID)
         .runningTerminalIds,
@@ -205,6 +326,21 @@ describe("terminalStateStore actions", () => {
     ).toEqual(["default"]);
   });
 
+  it("keeps terminal-first threads terminal-first after closing the last terminal", () => {
+    const store = useTerminalStateStore.getState();
+    store.openTerminalThreadPage(THREAD_ID, { terminalOnly: true });
+    store.closeTerminal(THREAD_ID, "default");
+
+    const terminalState = selectThreadTerminalState(
+      useTerminalStateStore.getState().terminalStateByThreadId,
+      THREAD_ID,
+    );
+    expect(useTerminalStateStore.getState().terminalStateByThreadId[THREAD_ID]).toBeDefined();
+    expect(terminalState.entryPoint).toBe("terminal");
+    expect(terminalState.terminalOpen).toBe(false);
+    expect(terminalState.terminalIds).toEqual(["default"]);
+  });
+
   it("keeps a valid active terminal after closing an active split terminal", () => {
     const store = useTerminalStateStore.getState();
     store.splitTerminal(THREAD_ID, "terminal-2");
@@ -217,125 +353,12 @@ describe("terminalStateStore actions", () => {
     );
     expect(terminalState.activeTerminalId).toBe("terminal-2");
     expect(terminalState.terminalIds).toEqual(["default", "terminal-2"]);
-    expect(terminalState.terminalGroups).toEqual([
-      { id: "group-default", terminalIds: ["default", "terminal-2"] },
+    expect(summarizeTerminalGroups(terminalState.terminalGroups)).toEqual([
+      {
+        id: "group-default",
+        activeTerminalId: "terminal-2",
+        terminalIds: ["default", "terminal-2"],
+      },
     ]);
-  });
-
-  it("buffers terminal events outside persisted terminal UI state", () => {
-    const store = useTerminalStateStore.getState();
-    store.recordTerminalEvent(makeTerminalEvent("output"));
-    store.recordTerminalEvent(makeTerminalEvent("activity"));
-
-    const entries = selectTerminalEventEntries(
-      useTerminalStateStore.getState().terminalEventEntriesByKey,
-      THREAD_ID,
-      "default",
-    );
-
-    expect(entries).toHaveLength(2);
-    expect(entries.map((entry) => entry.id)).toEqual([1, 2]);
-    expect(entries.map((entry) => entry.event.type)).toEqual(["output", "activity"]);
-  });
-
-  it("applies started terminal events to terminal state, launch context, and event buffer", () => {
-    const store = useTerminalStateStore.getState();
-    store.applyTerminalEvent(
-      makeTerminalEvent("started", {
-        terminalId: "setup-bootstrap",
-        snapshot: {
-          threadId: THREAD_ID,
-          terminalId: "setup-bootstrap",
-          cwd: "/tmp/worktree",
-          worktreePath: "/tmp/worktree",
-          status: "running",
-          pid: 123,
-          history: "",
-          exitCode: null,
-          exitSignal: null,
-          updatedAt: "2026-04-02T20:00:00.000Z",
-        },
-      }),
-    );
-
-    const terminalState = selectThreadTerminalState(
-      useTerminalStateStore.getState().terminalStateByThreadId,
-      THREAD_ID,
-    );
-    const entries = selectTerminalEventEntries(
-      useTerminalStateStore.getState().terminalEventEntriesByKey,
-      THREAD_ID,
-      "setup-bootstrap",
-    );
-
-    expect(terminalState.terminalOpen).toBe(true);
-    expect(terminalState.activeTerminalId).toBe("setup-bootstrap");
-    expect(terminalState.terminalIds).toEqual(["default", "setup-bootstrap"]);
-    expect(useTerminalStateStore.getState().terminalLaunchContextByThreadId[THREAD_ID]).toEqual({
-      cwd: "/tmp/worktree",
-      worktreePath: "/tmp/worktree",
-    });
-    expect(entries).toHaveLength(1);
-    expect(entries[0]?.event.type).toBe("started");
-  });
-
-  it("applies activity and exited terminal events to subprocess state while buffering events", () => {
-    const store = useTerminalStateStore.getState();
-    store.ensureTerminal(THREAD_ID, "terminal-2", { open: true, active: true });
-
-    store.applyTerminalEvent(
-      makeTerminalEvent("activity", {
-        terminalId: "terminal-2",
-        hasRunningSubprocess: true,
-      }),
-    );
-    expect(
-      selectThreadTerminalState(useTerminalStateStore.getState().terminalStateByThreadId, THREAD_ID)
-        .runningTerminalIds,
-    ).toEqual(["terminal-2"]);
-
-    store.applyTerminalEvent(
-      makeTerminalEvent("exited", {
-        terminalId: "terminal-2",
-        exitCode: 0,
-        exitSignal: null,
-      }),
-    );
-
-    const terminalState = selectThreadTerminalState(
-      useTerminalStateStore.getState().terminalStateByThreadId,
-      THREAD_ID,
-    );
-    const entries = selectTerminalEventEntries(
-      useTerminalStateStore.getState().terminalEventEntriesByKey,
-      THREAD_ID,
-      "terminal-2",
-    );
-
-    expect(terminalState.runningTerminalIds).toEqual([]);
-    expect(entries.map((entry) => entry.event.type)).toEqual(["activity", "exited"]);
-  });
-
-  it("clears buffered terminal events when a thread terminal state is removed", () => {
-    const store = useTerminalStateStore.getState();
-    store.recordTerminalEvent(makeTerminalEvent("output"));
-    store.removeTerminalState(THREAD_ID);
-
-    const entries = selectTerminalEventEntries(
-      useTerminalStateStore.getState().terminalEventEntriesByKey,
-      THREAD_ID,
-      "default",
-    );
-
-    expect(entries).toEqual([]);
-  });
-
-  it("is a no-op when clearing terminal state for a thread with no state or buffered events", () => {
-    const store = useTerminalStateStore.getState();
-    const before = useTerminalStateStore.getState();
-
-    store.clearTerminalState(THREAD_ID);
-
-    expect(useTerminalStateStore.getState()).toBe(before);
   });
 });

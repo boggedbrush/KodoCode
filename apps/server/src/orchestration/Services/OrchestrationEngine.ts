@@ -56,6 +56,19 @@ export interface OrchestrationEngineShape {
   ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError, never>;
 
   /**
+   * Repair project-facing projection state for older installs without clearing
+   * existing chat rows.
+   *
+   * Replays the snapshot-related projector cursors and refreshes the in-memory
+   * read model from the repaired projection snapshot.
+   */
+  readonly repairState: () => Effect.Effect<
+    OrchestrationReadModel,
+    OrchestrationDispatchError | OrchestrationEventStoreError,
+    never
+  >;
+
+  /**
    * Stream persisted domain events in dispatch order.
    *
    * This is a hot runtime stream (new events only), not a historical replay.
@@ -77,4 +90,4 @@ export interface OrchestrationEngineShape {
 export class OrchestrationEngineService extends ServiceMap.Service<
   OrchestrationEngineService,
   OrchestrationEngineShape
->()("t3/orchestration/Services/OrchestrationEngine/OrchestrationEngineService") {}
+>()("kodo/orchestration/Services/OrchestrationEngine/OrchestrationEngineService") {}

@@ -204,49 +204,4 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
 
       fs.rmSync(tempDir, { recursive: true, force: true });
     }));
-
-  it("keeps provider session runtime state pinned to the main persistence layer", () =>
-    Effect.gen(function* () {
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "t3-provider-directory-scope-"));
-      const mainDbPath = path.join(tempDir, "main.sqlite");
-      const competingDbPath = path.join(tempDir, "competing.sqlite");
-      const mainPersistenceLayer = makeSqlitePersistenceLive(mainDbPath);
-      const competingPersistenceLayer = makeSqlitePersistenceLive(competingDbPath);
-      const runtimeRepositoryLayer = ProviderSessionRuntimeRepositoryLive.pipe(
-        Layer.provide(mainPersistenceLayer),
-      );
-      const directoryLayer = Layer.mergeAll(
-        runtimeRepositoryLayer,
-        ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer)),
-      ).pipe(Layer.provideMerge(NodeServices.layer), Layer.provide(competingPersistenceLayer));
-
-      const threadId = ThreadId.makeUnsafe("thread-scoped-main-db");
-
-      yield* Effect.gen(function* () {
-        const directory = yield* ProviderSessionDirectory;
-        yield* directory.upsert({
-          provider: "codex",
-          threadId,
-        });
-      }).pipe(Effect.provide(directoryLayer));
-
-      const countRows = (dbPath: string) =>
-        Effect.gen(function* () {
-          const sql = yield* SqlClient.SqlClient;
-          const rows = yield* sql<{ readonly count: number }>`
-            SELECT count(*) AS count
-            FROM provider_session_runtime
-            WHERE thread_id = ${threadId}
-          `;
-          return rows[0]?.count ?? 0;
-        }).pipe(Effect.provide(makeSqlitePersistenceLive(dbPath)));
-
-      const mainCount = yield* countRows(mainDbPath);
-      const competingCount = yield* countRows(competingDbPath);
-
-      assert.equal(mainCount, 1);
-      assert.equal(competingCount, 0);
-
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }));
 });

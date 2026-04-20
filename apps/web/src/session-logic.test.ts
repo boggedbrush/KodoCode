@@ -8,9 +8,11 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
-  deriveCompletionDividerBeforeEntryId,
+  deriveActiveBackgroundTasksState,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  hasLiveLatestTurn,
+  hasLiveTurnTailWork,
   PROVIDER_OPTIONS,
   derivePendingApprovals,
   derivePendingUserInputs,
@@ -197,7 +199,6 @@ describe("derivePendingUserInputs", () => {
                   description: "Allow workspace writes only",
                 },
               ],
-              multiSelect: true,
             },
           ],
         },
@@ -234,7 +235,6 @@ describe("derivePendingUserInputs", () => {
                   description: "Continue execution",
                 },
               ],
-              multiSelect: false,
             },
           ],
         },
@@ -256,7 +256,6 @@ describe("derivePendingUserInputs", () => {
                 description: "Allow workspace writes only",
               },
             ],
-            multiSelect: true,
           },
         ],
       },
@@ -284,7 +283,6 @@ describe("derivePendingUserInputs", () => {
                   description: "Allow workspace writes only",
                 },
               ],
-              multiSelect: false,
             },
           ],
         },
@@ -341,6 +339,135 @@ describe("deriveActivePlanState", () => {
       turnId: "turn-1",
       explanation: "Refined plan",
       steps: [{ step: "Implement Codex user input", status: "inProgress" }],
+    });
+  });
+
+  it("falls back to the most recent plan from a previous turn", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "plan-from-turn-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "turn.plan.updated",
+        summary: "Plan updated",
+        tone: "info",
+        turnId: "turn-1",
+        payload: {
+          plan: [{ step: "Write tests", status: "inProgress" }],
+        },
+      }),
+    ];
+
+    expect(deriveActivePlanState(activities, TurnId.makeUnsafe("turn-2"))).toEqual({
+      createdAt: "2026-02-23T00:00:01.000Z",
+      turnId: "turn-1",
+      steps: [{ step: "Write tests", status: "inProgress" }],
+    });
+  });
+
+  it("does not revive a completed prior-turn plan on a new turn", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "completed-plan-from-turn-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "turn.plan.updated",
+        summary: "Plan updated",
+        tone: "info",
+        turnId: "turn-1",
+        payload: {
+          plan: [{ step: "Write tests", status: "completed" }],
+        },
+      }),
+    ];
+
+    expect(deriveActivePlanState(activities, TurnId.makeUnsafe("turn-2"))).toBeNull();
+  });
+
+  it("does not revive an unfinished prior-turn plan once that turn has completed", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "unfinished-plan-from-turn-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "turn.plan.updated",
+        summary: "Plan updated",
+        tone: "info",
+        turnId: "turn-1",
+        payload: {
+          plan: [
+            { step: "Inspect theme implementation", status: "pending" },
+            { step: "Patch token plumbing", status: "pending" },
+          ],
+        },
+      }),
+      makeActivity({
+        id: "turn-1-completed",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "turn.completed",
+        summary: "Turn completed",
+        tone: "info",
+        turnId: "turn-1",
+        payload: {
+          state: "completed",
+        },
+      }),
+    ];
+
+    expect(deriveActivePlanState(activities, TurnId.makeUnsafe("turn-2"))).toBeNull();
+  });
+});
+
+describe("deriveActiveBackgroundTasksState", () => {
+  it("counts only still-active non-plan background tasks for the current turn", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "plan-task-start",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "task.started",
+        summary: "Plan task started",
+        tone: "info",
+        turnId: "turn-1",
+        payload: {
+          taskId: "turn-1",
+          taskType: "plan",
+        },
+      }),
+      makeActivity({
+        id: "background-task-start",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "task.started",
+        summary: "Subagent task started",
+        tone: "info",
+        turnId: "turn-1",
+        payload: {
+          taskId: "task-subagent-1",
+          taskType: "subagent",
+        },
+      }),
+      makeActivity({
+        id: "background-task-progress",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "task.progress",
+        summary: "Subagent task update",
+        tone: "info",
+        turnId: "turn-1",
+        payload: {
+          taskId: "task-subagent-1",
+        },
+      }),
+      makeActivity({
+        id: "completed-other-turn",
+        createdAt: "2026-02-23T00:00:04.000Z",
+        kind: "task.completed",
+        summary: "Task completed",
+        tone: "info",
+        turnId: "turn-2",
+        payload: {
+          taskId: "task-other-turn",
+        },
+      }),
+    ];
+
+    expect(deriveActiveBackgroundTasksState(activities, TurnId.makeUnsafe("turn-1"))).toEqual({
+      activeCount: 1,
     });
   });
 });
@@ -634,6 +761,28 @@ describe("deriveWorkLogEntries", () => {
     expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
   });
 
+  it("omits passive rate-limit refresh entries from the chat work log", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "rate-limits-updated",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "account.rate-limits.updated",
+        summary: "Rate limits updated",
+        tone: "info",
+      }),
+      makeActivity({
+        id: "tool-complete",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        summary: "Ran command",
+        tone: "tool",
+        kind: "tool.completed",
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+    expect(entries.map((entry) => entry.id)).toEqual(["tool-complete"]);
+  });
+
   it("omits ExitPlanMode lifecycle entries once the plan card is shown", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -713,17 +862,39 @@ describe("deriveWorkLogEntries", () => {
     expect(entry?.command).toBe("bun run lint");
   });
 
-  it("unwraps PowerShell command wrappers for displayed command text", () => {
+  it("falls back to command-like detail when structured command metadata is missing", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
-        id: "command-tool-windows-wrapper",
+        id: "command-tool-detail-only",
         kind: "tool.completed",
         summary: "Ran command",
         payload: {
           itemType: "command_execution",
+          title: "Ran command",
+          detail: `/bin/zsh -lc "sed -n '240,520p' src/components/provider-card.tsx"`,
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.command).toBe(
+      `/bin/zsh -lc "sed -n '240,520p' src/components/provider-card.tsx"`,
+    );
+    expect(entry?.toolTitle).toBe("Read");
+  });
+
+  it("humanizes generic command titles for better readability", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "command-tool",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
           data: {
             item: {
-              command: "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -Command 'bun run lint'",
+              command: `/bin/zsh -lc 'rg -n "tool call" apps/web/src'`,
             },
           },
         },
@@ -731,77 +902,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const [entry] = deriveWorkLogEntries(activities, undefined);
-    expect(entry?.command).toBe("bun run lint");
-    expect(entry?.rawCommand).toBe(
-      "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -Command 'bun run lint'",
-    );
-  });
-
-  it("unwraps PowerShell command wrappers from argv-style command payloads", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({
-        id: "command-tool-windows-wrapper-argv",
-        kind: "tool.completed",
-        summary: "Ran command",
-        payload: {
-          itemType: "command_execution",
-          data: {
-            item: {
-              command: ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "-Command", "rg -n foo ."],
-            },
-          },
-        },
-      }),
-    ];
-
-    const [entry] = deriveWorkLogEntries(activities, undefined);
-    expect(entry?.command).toBe("rg -n foo .");
-    expect(entry?.rawCommand).toBe(
-      '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command "rg -n foo ."',
-    );
-  });
-
-  it("extracts command text from command detail when structured command metadata is missing", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({
-        id: "command-tool-windows-detail-fallback",
-        kind: "tool.completed",
-        summary: "Ran command",
-        payload: {
-          itemType: "command_execution",
-          detail:
-            '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoLogo -NoProfile -Command \'rg -n -F "new Date()" .\' <exited with exit code 0>',
-        },
-      }),
-    ];
-
-    const [entry] = deriveWorkLogEntries(activities, undefined);
-    expect(entry?.command).toBe('rg -n -F "new Date()" .');
-    expect(entry?.rawCommand).toBe(
-      `"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -NoLogo -NoProfile -Command 'rg -n -F "new Date()" .'`,
-    );
-  });
-
-  it("does not unwrap shell commands when no wrapper flag is present", () => {
-    const activities: OrchestrationThreadActivity[] = [
-      makeActivity({
-        id: "command-tool-shell-script",
-        kind: "tool.completed",
-        summary: "Ran command",
-        payload: {
-          itemType: "command_execution",
-          data: {
-            item: {
-              command: "bash script.sh",
-            },
-          },
-        },
-      }),
-    ];
-
-    const [entry] = deriveWorkLogEntries(activities, undefined);
-    expect(entry?.command).toBe("bash script.sh");
-    expect(entry?.rawCommand).toBeUndefined();
+    expect(entry?.toolTitle).toBe("Searched");
   });
 
   it("keeps compact Codex tool metadata used for icons and labels", () => {
@@ -920,6 +1021,120 @@ describe("deriveWorkLogEntries", () => {
     });
   });
 
+  it("uses MCP tool names from preserved payload data", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "mcp-progress",
+        kind: "tool.updated",
+        summary: "mcp__codex_apps__github_fetch_pr",
+        payload: {
+          itemType: "mcp_tool_call",
+          title: "MCP tool call",
+          detail: "Fetching PR details",
+          data: {
+            toolName: "mcp__codex_apps__github_fetch_pr",
+            summary: "Fetching PR details",
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry).toMatchObject({
+      id: "mcp-progress",
+      itemType: "mcp_tool_call",
+      toolTitle: "Codex Apps: Github Fetch Pr",
+      detail: "Fetching PR details",
+    });
+  });
+
+  it("uses present-tense command headings while the command is still running", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "running-command-tool",
+        kind: "tool.updated",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          title: "Ran command",
+          data: {
+            item: {
+              command: `/bin/zsh -lc 'rg -n "tool call" apps/web/src'`,
+            },
+          },
+        },
+      }),
+    ];
+
+    const [entry] = deriveWorkLogEntries(activities, undefined);
+    expect(entry?.toolTitle).toBe("Searching");
+  });
+
+  it("collapses Claude-style partial tool-input updates into the final lifecycle row", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "claude-update-1",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Read file",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Read file",
+          detail: 'Read: {"file_path":"',
+          data: {
+            toolName: "Read",
+            input: {},
+          },
+        },
+      }),
+      makeActivity({
+        id: "claude-update-2",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.updated",
+        summary: "Read file",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Read file",
+          detail: 'Read: {"file_path":"/tmp/app.ts"}',
+          data: {
+            toolName: "Read",
+            input: {
+              file_path: "/tmp/app.ts",
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "claude-complete",
+        createdAt: "2026-02-23T00:00:03.000Z",
+        kind: "tool.completed",
+        summary: "Read file",
+        payload: {
+          itemType: "dynamic_tool_call",
+          title: "Read file",
+          detail: 'Read: {"file_path":"/tmp/app.ts"}',
+          data: {
+            toolName: "Read",
+            input: {
+              file_path: "/tmp/app.ts",
+            },
+          },
+        },
+      }),
+    ];
+
+    const entries = deriveWorkLogEntries(activities, undefined);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      id: "claude-complete",
+      label: "Read file",
+      detail: 'Read: {"file_path":"/tmp/app.ts"}',
+      itemType: "dynamic_tool_call",
+      toolTitle: "Read file",
+    });
+  });
+
   it("keeps separate tool entries when an identical call starts after the prior one completed", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -1015,6 +1230,54 @@ describe("deriveWorkLogEntries", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]?.id).toBe("a-complete-same-timestamp");
   });
+
+  it("omits collab subagent tool lifecycle rows from the chat work log", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "collab-update",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "tool.updated",
+        summary: "Spawn subagents",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          title: "Spawn agent",
+          data: {
+            item: {
+              receiverAgents: [
+                {
+                  threadId: "subagent:thread-1:agent-1",
+                  agentNickname: "Locke",
+                  agentRole: "explorer",
+                },
+                {
+                  threadId: "subagent:thread-1:agent-2",
+                  agentNickname: "Ada",
+                  agentRole: "worker",
+                },
+              ],
+            },
+          },
+        },
+      }),
+      makeActivity({
+        id: "collab-complete",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "tool.completed",
+        summary: "Spawn subagents",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          title: "Spawn agent",
+          data: {
+            item: {
+              receiverThreadIds: ["subagent:thread-1:agent-1", "subagent:thread-1:agent-2"],
+            },
+          },
+        },
+      }),
+    ];
+
+    expect(deriveWorkLogEntries(activities, undefined)).toEqual([]);
+  });
 });
 
 describe("deriveTimelineEntries", () => {
@@ -1059,37 +1322,6 @@ describe("deriveTimelineEntries", () => {
         implementationThreadId: null,
       },
     });
-  });
-
-  it("anchors the completion divider to latestTurn.assistantMessageId before timestamp fallback", () => {
-    const entries = deriveTimelineEntries(
-      [
-        {
-          id: MessageId.makeUnsafe("assistant-earlier"),
-          role: "assistant",
-          text: "progress update",
-          createdAt: "2026-02-23T00:00:01.000Z",
-          streaming: false,
-        },
-        {
-          id: MessageId.makeUnsafe("assistant-final"),
-          role: "assistant",
-          text: "final answer",
-          createdAt: "2026-02-23T00:00:01.000Z",
-          streaming: false,
-        },
-      ],
-      [],
-      [],
-    );
-
-    expect(
-      deriveCompletionDividerBeforeEntryId(entries, {
-        assistantMessageId: MessageId.makeUnsafe("assistant-final"),
-        startedAt: "2026-02-23T00:00:00.000Z",
-        completedAt: "2026-02-23T00:00:02.000Z",
-      }),
-    ).toBe("assistant-final");
   });
 });
 
@@ -1136,6 +1368,23 @@ describe("deriveWorkLogEntries context window handling", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0]?.label).toBe("Context compacted");
   });
+
+  it("keeps thread-level compaction progress entries visible without a turn id", () => {
+    const entries = deriveWorkLogEntries(
+      [
+        makeActivity({
+          id: "compaction-progress-1",
+          kind: "context-compaction",
+          summary: "Compacting context",
+          tone: "info",
+        }),
+      ],
+      TurnId.makeUnsafe("turn-1"),
+    );
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.label).toBe("Compacting context");
+  });
 });
 
 describe("hasToolActivityForTurn", () => {
@@ -1162,11 +1411,12 @@ describe("hasToolActivityForTurn", () => {
 describe("isLatestTurnSettled", () => {
   const latestTurn = {
     turnId: TurnId.makeUnsafe("turn-1"),
+    state: "completed",
     startedAt: "2026-02-27T21:10:00.000Z",
     completedAt: "2026-02-27T21:10:06.000Z",
   } as const;
 
-  it("returns false while the same turn is still active in a running session", () => {
+  it("returns false while the session still reports the latest turn as running", () => {
     expect(
       isLatestTurnSettled(latestTurn, {
         orchestrationStatus: "running",
@@ -1175,7 +1425,7 @@ describe("isLatestTurnSettled", () => {
     ).toBe(false);
   });
 
-  it("returns false while any turn is running to avoid stale latest-turn banners", () => {
+  it("returns false while the session still reports another running turn", () => {
     expect(
       isLatestTurnSettled(latestTurn, {
         orchestrationStatus: "running",
@@ -1198,6 +1448,7 @@ describe("isLatestTurnSettled", () => {
       isLatestTurnSettled(
         {
           turnId: TurnId.makeUnsafe("turn-1"),
+          state: "completed",
           startedAt: null,
           completedAt: "2026-02-27T21:10:06.000Z",
         },
@@ -1205,16 +1456,47 @@ describe("isLatestTurnSettled", () => {
       ),
     ).toBe(false);
   });
+
+  it("returns true for interrupted turns even while the session is still running", () => {
+    expect(
+      isLatestTurnSettled(
+        {
+          ...latestTurn,
+          state: "interrupted",
+        },
+        {
+          orchestrationStatus: "running",
+          activeTurnId: TurnId.makeUnsafe("turn-1"),
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it("returns true for error turns even while the session is still running", () => {
+    expect(
+      isLatestTurnSettled(
+        {
+          ...latestTurn,
+          state: "error",
+        },
+        {
+          orchestrationStatus: "running",
+          activeTurnId: TurnId.makeUnsafe("turn-1"),
+        },
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("deriveActiveWorkStartedAt", () => {
   const latestTurn = {
     turnId: TurnId.makeUnsafe("turn-1"),
+    state: "completed",
     startedAt: "2026-02-27T21:10:00.000Z",
     completedAt: "2026-02-27T21:10:06.000Z",
   } as const;
 
-  it("prefers the in-flight turn start when the latest turn is not settled", () => {
+  it("prefers the latest-turn start while the running session still points at it", () => {
     expect(
       deriveActiveWorkStartedAt(
         latestTurn,
@@ -1227,24 +1509,25 @@ describe("deriveActiveWorkStartedAt", () => {
     ).toBe("2026-02-27T21:10:00.000Z");
   });
 
-  it("falls back to sendStartedAt once the latest turn is settled", () => {
+  it("falls back to sendStartedAt when a different turn is currently running", () => {
     expect(
       deriveActiveWorkStartedAt(
         latestTurn,
         {
-          orchestrationStatus: "ready",
-          activeTurnId: undefined,
+          orchestrationStatus: "running",
+          activeTurnId: TurnId.makeUnsafe("turn-2"),
         },
         "2026-02-27T21:11:00.000Z",
       ),
     ).toBe("2026-02-27T21:11:00.000Z");
   });
 
-  it("uses sendStartedAt for a fresh send after the prior turn completed", () => {
+  it("uses sendStartedAt once the prior turn is settled", () => {
     expect(
       deriveActiveWorkStartedAt(
         {
           turnId: TurnId.makeUnsafe("turn-1"),
+          state: "completed",
           startedAt: "2026-02-27T21:10:00.000Z",
           completedAt: "2026-02-27T21:10:06.000Z",
         },
@@ -1255,24 +1538,213 @@ describe("deriveActiveWorkStartedAt", () => {
   });
 });
 
+describe("hasLiveLatestTurn", () => {
+  const latestTurn = {
+    turnId: TurnId.makeUnsafe("turn-1"),
+    state: "completed",
+    startedAt: "2026-02-27T21:10:00.000Z",
+    completedAt: "2026-02-27T21:10:06.000Z",
+  } as const;
+
+  it("returns true while the session still reports the latest turn as running", () => {
+    expect(
+      hasLiveLatestTurn(latestTurn, {
+        orchestrationStatus: "running",
+        activeTurnId: TurnId.makeUnsafe("turn-1"),
+      }),
+    ).toBe(true);
+  });
+
+  it("returns false for interrupted turns because they are terminal locally", () => {
+    expect(
+      hasLiveLatestTurn(
+        {
+          ...latestTurn,
+          state: "interrupted",
+        },
+        {
+          orchestrationStatus: "running",
+          activeTurnId: TurnId.makeUnsafe("turn-1"),
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it("returns false for error turns because they are terminal locally", () => {
+    expect(
+      hasLiveLatestTurn(
+        {
+          ...latestTurn,
+          state: "error",
+        },
+        {
+          orchestrationStatus: "running",
+          activeTurnId: TurnId.makeUnsafe("turn-1"),
+        },
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("hasLiveTurnTailWork", () => {
+  const latestTurn = {
+    turnId: TurnId.makeUnsafe("turn-1"),
+    completedAt: null,
+  } as const;
+
+  it("keeps the turn live while assistant text is still streaming", () => {
+    expect(
+      hasLiveTurnTailWork({
+        latestTurn,
+        messages: [
+          {
+            role: "assistant",
+            streaming: true,
+            turnId: TurnId.makeUnsafe("turn-1"),
+          },
+        ],
+        activities: [],
+        session: { orchestrationStatus: "ready" },
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores stale assistant streaming flags once the turn is completed", () => {
+    expect(
+      hasLiveTurnTailWork({
+        latestTurn: {
+          ...latestTurn,
+          completedAt: "2026-04-13T00:00:05.000Z",
+        },
+        messages: [
+          {
+            role: "assistant",
+            streaming: true,
+            turnId: TurnId.makeUnsafe("turn-1"),
+          },
+        ],
+        activities: [],
+        session: { orchestrationStatus: "ready" },
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps the turn live while a background task is still open", () => {
+    expect(
+      hasLiveTurnTailWork({
+        latestTurn,
+        messages: [],
+        activities: [
+          makeActivity({
+            id: "task-started-1",
+            kind: "task.started",
+            summary: "Repo scan started",
+            turnId: "turn-1",
+            payload: {
+              taskId: "task-1",
+              taskType: "index",
+              title: "Repo scan",
+            },
+          }),
+        ],
+        session: { orchestrationStatus: "running" },
+      }),
+    ).toBe(true);
+  });
+
+  it("ignores tool lifecycle bookkeeping once the visible answer is done", () => {
+    expect(
+      hasLiveTurnTailWork({
+        latestTurn,
+        messages: [],
+        activities: [
+          makeActivity({
+            id: "tool-started-1",
+            kind: "tool.started",
+            summary: "Run shell command started",
+            turnId: "turn-1",
+            payload: {
+              itemType: "command_execution",
+              data: {
+                item: {
+                  id: "tool-1",
+                },
+              },
+            },
+          }),
+          makeActivity({
+            id: "tool-completed-1",
+            kind: "tool.completed",
+            summary: "Run shell command",
+            turnId: "turn-1",
+            payload: {
+              itemType: "command_execution",
+              data: {
+                item: {
+                  id: "tool-1",
+                },
+              },
+            },
+          }),
+        ],
+        session: { orchestrationStatus: "running" },
+      }),
+    ).toBe(false);
+  });
+
+  it("ignores stale background tasks once the provider session is idle", () => {
+    expect(
+      hasLiveTurnTailWork({
+        latestTurn,
+        messages: [],
+        activities: [
+          makeActivity({
+            id: "task-started-1",
+            kind: "task.started",
+            summary: "Repo scan started",
+            turnId: "turn-1",
+            payload: {
+              taskId: "task-1",
+              taskType: "index",
+              title: "Repo scan",
+            },
+          }),
+          makeActivity({
+            id: "task-progress-1",
+            kind: "task.progress",
+            summary: "Repo scan in progress",
+            turnId: "turn-1",
+            payload: {
+              taskId: "task-1",
+              taskType: "index",
+              summary: "Scanning files",
+            },
+          }),
+        ],
+        session: { orchestrationStatus: "ready" },
+      }),
+    ).toBe(false);
+  });
+});
+
 describe("PROVIDER_OPTIONS", () => {
-  it("advertises Claude as available while keeping Cursor as a placeholder", () => {
+  it("lists Codex, Claude, and Gemini as available providers", () => {
     const claude = PROVIDER_OPTIONS.find((option) => option.value === "claudeAgent");
-    const cursor = PROVIDER_OPTIONS.find((option) => option.value === "cursor");
+    const gemini = PROVIDER_OPTIONS.find((option) => option.value === "gemini");
     expect(PROVIDER_OPTIONS).toEqual([
       { value: "codex", label: "Codex", available: true },
       { value: "claudeAgent", label: "Claude", available: true },
-      { value: "cursor", label: "Cursor", available: false },
+      { value: "gemini", label: "Gemini", available: true },
     ]);
     expect(claude).toEqual({
       value: "claudeAgent",
       label: "Claude",
       available: true,
     });
-    expect(cursor).toEqual({
-      value: "cursor",
-      label: "Cursor",
-      available: false,
+    expect(gemini).toEqual({
+      value: "gemini",
+      label: "Gemini",
+      available: true,
     });
   });
 });

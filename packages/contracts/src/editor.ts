@@ -1,3 +1,8 @@
+// FILE: editor.ts
+// Purpose: Define editor ids and launch metadata shared by the client and server.
+// Layer: Shared contracts
+// Exports: EDITORS, EditorId, OpenInEditorInput
+
 import { Schema } from "effect";
 import { TrimmedNonEmptyString } from "./baseSchemas";
 
@@ -36,8 +41,3 @@ export const OpenInEditorInput = Schema.Struct({
   editor: EditorId,
 });
 export type OpenInEditorInput = typeof OpenInEditorInput.Type;
-
-export class OpenError extends Schema.TaggedErrorClass<OpenError>()("OpenError", {
-  message: Schema.String,
-  cause: Schema.optional(Schema.Defect),
-}) {}

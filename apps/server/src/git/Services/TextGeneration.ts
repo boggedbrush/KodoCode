@@ -8,24 +8,20 @@
  */
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
-import type { ChatAttachment, CommitMessageStyle, ModelSelection } from "@t3tools/contracts";
-import type { PromptEnhancePreset } from "@t3tools/contracts";
+import type { ChatAttachment } from "@t3tools/contracts";
 
-import type { TextGenerationError } from "@t3tools/contracts";
-
-/** Providers that support git text generation (commit messages, PR content, branch names). */
-export type TextGenerationProvider = "codex" | "claudeAgent";
+import type { TextGenerationError } from "../Errors.ts";
 
 export interface CommitMessageGenerationInput {
   cwd: string;
   branch: string | null;
   stagedSummary: string;
   stagedPatch: string;
-  commitMessageStyle: CommitMessageStyle;
+  codexHomePath?: string;
   /** When true, the model also returns a semantic branch name for the change. */
   includeBranch?: boolean;
-  /** What model and provider to use for generation. */
-  modelSelection: ModelSelection;
+  /** Model to use for generation. Defaults to gpt-5.4-mini if not specified. */
+  model?: string;
 }
 
 export interface CommitMessageGenerationResult {
@@ -42,8 +38,9 @@ export interface PrContentGenerationInput {
   commitSummary: string;
   diffSummary: string;
   diffPatch: string;
-  /** What model and provider to use for generation. */
-  modelSelection: ModelSelection;
+  codexHomePath?: string;
+  /** Model to use for generation. Defaults to gpt-5.4-mini if not specified. */
+  model?: string;
 }
 
 export interface PrContentGenerationResult {
@@ -51,12 +48,24 @@ export interface PrContentGenerationResult {
   body: string;
 }
 
+export interface DiffSummaryGenerationInput {
+  cwd: string;
+  patch: string;
+  codexHomePath?: string;
+  /** Model to use for generation. Defaults to gpt-5.4-mini if not specified. */
+  model?: string;
+}
+
+export interface DiffSummaryGenerationResult {
+  summary: string;
+}
+
 export interface BranchNameGenerationInput {
   cwd: string;
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
-  /** What model and provider to use for generation. */
-  modelSelection: ModelSelection;
+  /** Model to use for generation. Defaults to gpt-5.4-mini if not specified. */
+  model?: string;
 }
 
 export interface BranchNameGenerationResult {
@@ -67,24 +76,12 @@ export interface ThreadTitleGenerationInput {
   cwd: string;
   message: string;
   attachments?: ReadonlyArray<ChatAttachment> | undefined;
-  /** What model and provider to use for generation. */
-  modelSelection: ModelSelection;
+  /** Model to use for generation. Defaults to gpt-5.4-mini if not specified. */
+  model?: string;
 }
 
 export interface ThreadTitleGenerationResult {
   title: string;
-}
-
-export interface PromptEnhancementGenerationInput {
-  cwd: string;
-  prompt: string;
-  preset: PromptEnhancePreset;
-  workspaceContext?: string;
-  modelSelection: ModelSelection;
-}
-
-export interface PromptEnhancementGenerationResult {
-  prompt: string;
 }
 
 export interface TextGenerationService {
@@ -92,15 +89,13 @@ export interface TextGenerationService {
     input: CommitMessageGenerationInput,
   ): Promise<CommitMessageGenerationResult>;
   generatePrContent(input: PrContentGenerationInput): Promise<PrContentGenerationResult>;
+  generateDiffSummary(input: DiffSummaryGenerationInput): Promise<DiffSummaryGenerationResult>;
   generateBranchName(input: BranchNameGenerationInput): Promise<BranchNameGenerationResult>;
   generateThreadTitle(input: ThreadTitleGenerationInput): Promise<ThreadTitleGenerationResult>;
-  generatePromptEnhancement(
-    input: PromptEnhancementGenerationInput,
-  ): Promise<PromptEnhancementGenerationResult>;
 }
 
 /**
- * TextGenerationShape - Service API for commit/PR text generation.
+ * TextGenerationShape - Service API for AI-generated Git and thread text.
  */
 export interface TextGenerationShape {
   /**
@@ -118,6 +113,13 @@ export interface TextGenerationShape {
   ) => Effect.Effect<PrContentGenerationResult, TextGenerationError>;
 
   /**
+   * Generate a GitHub-style markdown summary for an existing diff patch.
+   */
+  readonly generateDiffSummary: (
+    input: DiffSummaryGenerationInput,
+  ) => Effect.Effect<DiffSummaryGenerationResult, TextGenerationError>;
+
+  /**
    * Generate a concise branch name from a user message.
    */
   readonly generateBranchName: (
@@ -125,23 +127,16 @@ export interface TextGenerationShape {
   ) => Effect.Effect<BranchNameGenerationResult, TextGenerationError>;
 
   /**
-   * Generate a concise thread title from a user's first message.
+   * Generate a concise chat-thread title from the first user message.
    */
   readonly generateThreadTitle: (
     input: ThreadTitleGenerationInput,
   ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>;
-
-  /**
-   * Rewrite a prompt for better coding-agent execution.
-   */
-  readonly generatePromptEnhancement: (
-    input: PromptEnhancementGenerationInput,
-  ) => Effect.Effect<PromptEnhancementGenerationResult, TextGenerationError>;
 }
 
 /**
  * TextGeneration - Service tag for commit and PR text generation.
  */
 export class TextGeneration extends ServiceMap.Service<TextGeneration, TextGenerationShape>()(
-  "t3/git/Services/TextGeneration",
+  "kodo/git/Services/TextGeneration",
 ) {}

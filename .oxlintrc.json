@@ -6,8 +6,7 @@
     "node_modules",
     "bun.lock",
     "*.tsbuildinfo",
-    "**/routeTree.gen.ts",
-    "apps/web/public/mockServiceWorker.js"
+    "**/routeTree.gen.ts"
   ],
   "plugins": ["eslint", "oxc", "react", "unicorn", "typescript"],
   "categories": {

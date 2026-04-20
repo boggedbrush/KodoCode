@@ -1,6 +1,13 @@
-import { CheckIcon, CopyIcon } from "lucide-react";
+// FILE: ChatMarkdown.tsx
+// Purpose: Renders assistant and plan markdown with syntax highlighting and local file links.
+// Layer: Web chat presentation component
+// Exports: ChatMarkdown
+
+import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
+import { CheckIcon, CopyIcon } from "~/lib/icons";
 import React, {
   Children,
+  type CSSProperties,
   Suspense,
   isValidElement,
   use,
@@ -17,17 +24,13 @@ import ReactMarkdown from "react-markdown";
 import { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openInPreferredEditor } from "../editorPreferences";
+import { copyTextToClipboard } from "../hooks/useCopyToClipboard";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
-import { useSettings } from "../hooks/useSettings";
 import { useTheme } from "../hooks/useTheme";
 import { resolveMarkdownFileLinkTarget, rewriteMarkdownFileUriHref } from "../markdown-links";
 import { readNativeApi } from "../nativeApi";
-import type { DiffsHighlighter, SupportedLanguages } from "@pierre/diffs";
-import { resolveChatReadabilityClassName } from "~/lib/chatReadability";
-import { cn } from "~/lib/utils";
-import { resolveTextDirection } from "~/lib/textDirection";
 
 class CodeHighlightErrorBoundary extends React.Component<
   { fallback: ReactNode; children: ReactNode },
@@ -54,6 +57,8 @@ interface ChatMarkdownProps {
   text: string;
   cwd: string | undefined;
   isStreaming?: boolean;
+  className?: string | undefined;
+  style?: CSSProperties | undefined;
 }
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -64,19 +69,6 @@ const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
-let sharedHighlighterLoaderPromise: Promise<
-  Pick<typeof import("@pierre/diffs"), "getSharedHighlighter">
-> | null = null;
-
-function loadSharedHighlighterModule() {
-  if (sharedHighlighterLoaderPromise) {
-    return sharedHighlighterLoaderPromise;
-  }
-
-  // Keep the heavy highlighter runtime out of the initial chat bundle.
-  sharedHighlighterLoaderPromise = import("@pierre/diffs");
-  return sharedHighlighterLoaderPromise;
-}
 
 function extractFenceLanguage(className: string | undefined): string {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX);
@@ -132,23 +124,19 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   const cached = highlighterPromiseCache.get(language);
   if (cached) return cached;
 
-  const promise = loadSharedHighlighterModule()
-    .then(({ getSharedHighlighter }) =>
-      getSharedHighlighter({
-        themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
-        langs: [language as SupportedLanguages],
-        preferredHighlighter: "shiki-js",
-      }),
-    )
-    .catch((err) => {
-      highlighterPromiseCache.delete(language);
-      if (language === "text") {
-        // "text" itself failed — Shiki cannot initialize at all, surface the error
-        throw err;
-      }
-      // Language not supported by Shiki — fall back to "text"
-      return getHighlighterPromise("text");
-    });
+  const promise = getSharedHighlighter({
+    themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
+    langs: [language as SupportedLanguages],
+    preferredHighlighter: "shiki-js",
+  }).catch((err) => {
+    highlighterPromiseCache.delete(language);
+    if (language === "text") {
+      // "text" itself failed — Shiki cannot initialize at all, surface the error
+      throw err;
+    }
+    // Language not supported by Shiki — fall back to "text"
+    return getHighlighterPromise("text");
+  });
   highlighterPromiseCache.set(language, promise);
   return promise;
 }
@@ -157,11 +145,7 @@ function MarkdownCodeBlock({ code, children }: { code: string; children: ReactNo
   const [copied, setCopied] = useState(false);
   const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleCopy = useCallback(() => {
-    if (typeof navigator === "undefined" || navigator.clipboard == null) {
-      return;
-    }
-    void navigator.clipboard
-      .writeText(code)
+    void copyTextToClipboard(code)
       .then(() => {
         if (copiedTimerRef.current != null) {
           clearTimeout(copiedTimerRef.current);
@@ -257,12 +241,15 @@ function SuspenseShikiCodeBlock({
   );
 }
 
-function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
+function ChatMarkdown({
+  text,
+  cwd,
+  isStreaming = false,
+  className = "text-sm leading-relaxed",
+  style,
+}: ChatMarkdownProps) {
   const { resolvedTheme } = useTheme();
-  const chatFontFamily = useSettings((settings) => settings.chatFontFamily);
-  const chatTextSize = useSettings((settings) => settings.chatTextSize);
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
-  const textDirection = useMemo(() => resolveTextDirection(text), [text]);
   const markdownUrlTransform = useCallback((href: string) => {
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href);
   }, []);
@@ -318,15 +305,8 @@ function ChatMarkdown({ text, cwd, isStreaming = false }: ChatMarkdownProps) {
 
   return (
     <div
-      dir={textDirection}
-      className={cn(
-        "chat-markdown w-full min-w-0 text-foreground/80",
-        resolveChatReadabilityClassName({
-          direction: textDirection,
-          fontFamily: chatFontFamily,
-          textSize: chatTextSize,
-        }),
-      )}
+      className={`chat-markdown w-full min-w-0 ${className} text-neutral-900 dark:text-foreground/80`}
+      style={style}
     >
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}

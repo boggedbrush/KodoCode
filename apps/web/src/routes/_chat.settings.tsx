@@ -1,0 +1,2375 @@
+// FILE: _chat.settings.tsx
+// Purpose: Render the dedicated settings experience with its own section sidebar and grouped panels.
+// Layer: Route screen
+// Exports: Settings route component for `/settings`
+
+import {
+  PROVIDER_DISPLAY_NAMES,
+  type ModelSelection,
+  type ProviderKind,
+  type ThreadId,
+  DEFAULT_GIT_TEXT_GENERATION_MODEL,
+} from "@t3tools/contracts";
+import { createFileRoute, useSearch } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  MAX_CHAT_FONT_SIZE_PX,
+  getAppModelOptions,
+  getCustomModelsByProvider,
+  getCustomModelsForProvider,
+  MAX_CUSTOM_MODEL_LENGTH,
+  MIN_CHAT_FONT_SIZE_PX,
+  MODEL_PROVIDER_SETTINGS,
+  normalizeChatFontSizePx,
+  patchCustomModels,
+  resolveAppModelSelection,
+  useAppSettings,
+} from "../appSettings";
+import { APP_VERSION } from "../branding";
+import { ClaudeAI, Gemini, OpenAI } from "../components/Icons";
+import { Button } from "../components/ui/button";
+import { Collapsible, CollapsibleContent } from "../components/ui/collapsible";
+import { Input } from "../components/ui/input";
+import {
+  Select,
+  SelectItem,
+  SelectPopup,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import { Switch } from "../components/ui/switch";
+import { toastManager } from "../components/ui/toast";
+import { SidebarHeaderTrigger, SidebarInset } from "../components/ui/sidebar";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
+import { resolveAndPersistPreferredEditor } from "../editorPreferences";
+import { isElectron } from "../env";
+import { useTheme } from "../hooks/useTheme";
+import { gitRemoveWorktreeMutationOptions } from "../lib/gitReactQuery";
+import {
+  ArchiveIcon,
+  ChevronDownIcon,
+  PlusIcon,
+  RotateCcwIcon,
+  Undo2Icon,
+  XIcon,
+} from "../lib/icons";
+import {
+  serverConfigQueryOptions,
+  serverQueryKeys,
+  serverWorktreesQueryOptions,
+} from "../lib/serverReactQuery";
+import { cn } from "../lib/utils";
+import { newCommandId } from "../lib/utils";
+import { ensureNativeApi, readNativeApi } from "../nativeApi";
+import {
+  buildNotificationSettingsSupportText,
+  readBrowserNotificationPermissionState,
+  requestBrowserNotificationPermission,
+} from "../notifications/taskCompletion";
+import { buildModelSelection } from "../providerModelOptions";
+import { getModeModelSelectionKey, type ModeModelSelectionKey } from "../modeModelSelection";
+import { normalizeSettingsSection, SETTINGS_NAV_ITEMS } from "../settingsNavigation";
+import { useStore } from "../store";
+import ReleaseHistoryDialog from "../components/ReleaseHistoryDialog";
+import { createAllThreadsSelector } from "../storeSelectors";
+import { formatRelativeTime } from "../components/Sidebar";
+import { formatWorktreePathForDisplay } from "../worktreeCleanup";
+
+// ── Settings taxonomy ──────────────────────────────────────────────────────
+
+const THEME_OPTIONS = [
+  {
+    value: "system",
+    label: "System",
+    description: "Match your OS appearance setting.",
+  },
+  {
+    value: "light",
+    label: "Light",
+    description: "Always use the light theme.",
+  },
+  {
+    value: "dark",
+    label: "Dark",
+    description: "Always use the dark theme.",
+  },
+] as const;
+
+const TIMESTAMP_FORMAT_LABELS = {
+  locale: "System default",
+  "12-hour": "12-hour",
+  "24-hour": "24-hour",
+} as const;
+
+const SIDEBAR_SIDE_LABELS = {
+  left: "Left",
+  right: "Right",
+} as const;
+
+const SIDEBAR_PROJECT_SORT_ORDER_LABELS = {
+  updated_at: "Recently active",
+  created_at: "Recently added",
+  manual: "Manual order",
+} as const;
+
+const SIDEBAR_THREAD_SORT_ORDER_LABELS = {
+  updated_at: "Recently active",
+  created_at: "Newest first",
+} as const;
+
+type InstallBinarySettingsKey = "claudeBinaryPath" | "codexBinaryPath" | "geminiBinaryPath";
+type InstallProviderSettings = {
+  provider: ProviderKind;
+  title: string;
+  binaryPathKey: InstallBinarySettingsKey;
+  binaryPlaceholder: string;
+  binaryDescription: ReactNode;
+  homePathKey?: "codexHomePath";
+  homePlaceholder?: string;
+  homeDescription?: ReactNode;
+};
+
+const INSTALL_PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
+  {
+    provider: "codex",
+    title: "Codex",
+    binaryPathKey: "codexBinaryPath",
+    binaryPlaceholder: "Codex binary path",
+    binaryDescription: (
+      <>
+        Leave blank to use <code>codex</code> from your PATH.
+      </>
+    ),
+    homePathKey: "codexHomePath",
+    homePlaceholder: "CODEX_HOME",
+    homeDescription: "Optional custom Codex home and config directory.",
+  },
+  {
+    provider: "claudeAgent",
+    title: "Claude",
+    binaryPathKey: "claudeBinaryPath",
+    binaryPlaceholder: "Claude binary path",
+    binaryDescription: (
+      <>
+        Leave blank to use <code>claude</code> from your PATH.
+      </>
+    ),
+  },
+  {
+    provider: "gemini",
+    title: "Gemini",
+    binaryPathKey: "geminiBinaryPath",
+    binaryPlaceholder: "Gemini binary path",
+    binaryDescription: (
+      <>
+        Leave blank to use <code>gemini</code> from your PATH.
+      </>
+    ),
+  },
+];
+
+const MODE_MODEL_SELECTION_SETTINGS = [
+  {
+    mode: "ask",
+    title: "Ask mode model",
+    description: "Applied when you switch a thread into Ask mode.",
+  },
+  {
+    mode: "plan",
+    title: "Plan mode model",
+    description: "Applied when you switch a thread into Plan mode.",
+  },
+  {
+    mode: "code",
+    title: "Code mode model",
+    description: "Applied for the default coding/chat workflow.",
+  },
+  {
+    mode: "review",
+    title: "Review mode model",
+    description: "Applied when you switch a thread into Review mode.",
+  },
+] as const satisfies ReadonlyArray<{
+  mode: "ask" | "plan" | "code" | "review";
+  title: string;
+  description: string;
+}>;
+
+function areModeModelSelectionsEqual(
+  left: ModelSelection | null | undefined,
+  right: ModelSelection | null | undefined,
+): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+// ── Settings UI primitives ────────────────────────────────────────────────
+
+function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="space-y-2">
+      <h2 className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground px-1">
+        {title}
+      </h2>
+      {children}
+    </section>
+  );
+}
+
+function SettingsRow({
+  title,
+  description,
+  status,
+  resetAction,
+  control,
+  children,
+  onClick,
+}: {
+  title: string;
+  description: string;
+  status?: ReactNode;
+  resetAction?: ReactNode;
+  control?: ReactNode;
+  children?: ReactNode;
+  onClick?: () => void;
+}) {
+  return (
+    <div
+      className="rounded-xl border border-border/50 bg-card/50 px-4 py-3.5 transition-colors hover:bg-accent"
+      data-slot="settings-row"
+    >
+      <div
+        className={cn(
+          "flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between",
+          onClick && "cursor-pointer",
+        )}
+        onClick={onClick}
+      >
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <div className="flex min-h-5 items-center gap-1.5">
+            <h3 className="text-sm font-medium text-foreground">{title}</h3>
+            <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+              {resetAction}
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">{description}</p>
+          {status ? <div className="pt-1 text-[11px] text-muted-foreground">{status}</div> : null}
+        </div>
+        {control ? (
+          <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+            {control}
+          </div>
+        ) : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SettingResetButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            aria-label={`Reset ${label} to default`}
+            className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
+            onClick={(event) => {
+              event.stopPropagation();
+              onClick();
+            }}
+          >
+            <Undo2Icon className="size-3" />
+          </Button>
+        }
+      />
+      <TooltipPopup side="top">Reset to default</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function normalizeManagedWorktreePath(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : null;
+}
+
+// ── Route screen ───────────────────────────────────────────────────────────
+
+function SettingsRouteView() {
+  const routeSearch = useSearch({ strict: false }) as Record<string, unknown>;
+  const activeSection = normalizeSettingsSection(routeSearch.section);
+  const activeSectionItem = SETTINGS_NAV_ITEMS.find((item) => item.id === activeSection)!;
+
+  const { theme, setTheme } = useTheme();
+  const { settings, defaults, updateSettings, resetSettings } = useAppSettings();
+  const queryClient = useQueryClient();
+  const serverConfigQuery = useQuery(serverConfigQueryOptions());
+  const serverWorktreesQuery = useQuery(serverWorktreesQueryOptions());
+  const removeWorktreeMutation = useMutation(gitRemoveWorktreeMutationOptions({ queryClient }));
+  const syncServerReadModel = useStore((store) => store.syncServerReadModel);
+  const threads = useStore(useMemo(() => createAllThreadsSelector(), []));
+  const projects = useStore((store) => store.projects);
+  const threadsHydrated = useStore((store) => store.threadsHydrated);
+  const archivedThreads = threads.filter((thread) => thread.archivedAt != null);
+  const shouldOfferRecoveryTools = useMemo(() => {
+    if (!threadsHydrated || projects.length === 0) {
+      return false;
+    }
+    return threads.length === 0 || threads.every((thread) => thread.messages.length === 0);
+  }, [projects.length, threads, threadsHydrated]);
+
+  const [isOpeningKeybindings, setIsOpeningKeybindings] = useState(false);
+  const [isRepairingLocalState, setIsRepairingLocalState] = useState(false);
+  const [showRecoveryTools, setShowRecoveryTools] = useState(false);
+  const [releaseHistoryOpen, setReleaseHistoryOpen] = useState(false);
+  const [openKeybindingsError, setOpenKeybindingsError] = useState<string | null>(null);
+  const [openInstallProviders, setOpenInstallProviders] = useState<Record<ProviderKind, boolean>>({
+    codex: Boolean(settings.codexBinaryPath || settings.codexHomePath),
+    claudeAgent: Boolean(settings.claudeBinaryPath),
+    gemini: Boolean(settings.geminiBinaryPath),
+  });
+  const [selectedCustomModelProvider, setSelectedCustomModelProvider] =
+    useState<ProviderKind>("codex");
+  const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
+    Record<ProviderKind, string>
+  >({
+    codex: "",
+    claudeAgent: "",
+    gemini: "",
+  });
+  const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
+    Partial<Record<ProviderKind, string | null>>
+  >({});
+  const [showAllCustomModels, setShowAllCustomModels] = useState(false);
+  const [browserNotificationPermission, setBrowserNotificationPermission] = useState(
+    readBrowserNotificationPermissionState(),
+  );
+
+  const codexBinaryPath = settings.codexBinaryPath;
+  const codexHomePath = settings.codexHomePath;
+  const claudeBinaryPath = settings.claudeBinaryPath;
+  const geminiBinaryPath = settings.geminiBinaryPath;
+  const keybindingsConfigPath = serverConfigQuery.data?.keybindingsConfigPath ?? null;
+  const availableEditors = serverConfigQuery.data?.availableEditors;
+  const managedWorktrees = serverWorktreesQuery.data?.worktrees ?? [];
+  const worktreesByWorkspaceRoot = managedWorktrees.reduce<
+    Array<{
+      workspaceRoot: string;
+      worktrees: Array<{
+        path: string;
+        linkedThreads: typeof threads;
+      }>;
+    }>
+  >((groups, worktree) => {
+    const linkedThreads = threads.filter((thread) => {
+      const candidatePaths = [
+        normalizeManagedWorktreePath(thread.worktreePath),
+        normalizeManagedWorktreePath(thread.associatedWorktreePath),
+      ];
+      return candidatePaths.includes(worktree.path);
+    });
+    const existingGroup = groups.find((group) => group.workspaceRoot === worktree.workspaceRoot);
+    const nextWorktree = {
+      path: worktree.path,
+      linkedThreads,
+    };
+    if (existingGroup) {
+      existingGroup.worktrees.push(nextWorktree);
+    } else {
+      groups.push({
+        workspaceRoot: worktree.workspaceRoot,
+        worktrees: [nextWorktree],
+      });
+    }
+    return groups;
+  }, []);
+
+  const gitTextGenerationModelOptions = getAppModelOptions(
+    "codex",
+    settings.customCodexModels,
+    settings.textGenerationModel,
+  );
+  const currentGitTextGenerationModel =
+    settings.textGenerationModel ?? DEFAULT_GIT_TEXT_GENERATION_MODEL;
+  const defaultGitTextGenerationModel =
+    defaults.textGenerationModel ?? DEFAULT_GIT_TEXT_GENERATION_MODEL;
+  const isGitTextGenerationModelDirty =
+    currentGitTextGenerationModel !== defaultGitTextGenerationModel;
+  const selectedGitTextGenerationModelLabel =
+    gitTextGenerationModelOptions.find((option) => option.slug === currentGitTextGenerationModel)
+      ?.name ?? currentGitTextGenerationModel;
+  const selectedCustomModelProviderSettings = MODEL_PROVIDER_SETTINGS.find(
+    (providerSettings) => providerSettings.provider === selectedCustomModelProvider,
+  )!;
+  const selectedCustomModelInput = customModelInputByProvider[selectedCustomModelProvider];
+  const selectedCustomModelError = customModelErrorByProvider[selectedCustomModelProvider] ?? null;
+  const customModelsByProvider = getCustomModelsByProvider(settings);
+  const totalCustomModels =
+    settings.customCodexModels.length +
+    settings.customClaudeModels.length +
+    settings.customGeminiModels.length;
+  const modeModelSelectionState = MODE_MODEL_SELECTION_SETTINGS.map((config) => {
+    const key = getModeModelSelectionKey(config.mode);
+    const selection = settings[key];
+    const defaultSelection = defaults[key];
+    const selectedProvider = selection?.provider ?? null;
+    const selectedModel =
+      selection && selectedProvider
+        ? (getAppModelOptions(
+            selectedProvider,
+            customModelsByProvider[selectedProvider],
+            selection.model,
+          ).find((option) => option.slug === selection.model)?.name ?? selection.model)
+        : null;
+    return {
+      ...config,
+      key,
+      selection,
+      defaultSelection,
+      isDirty: !areModeModelSelectionsEqual(selection, defaultSelection),
+      selectedProvider,
+      selectedModel,
+    };
+  });
+  const savedCustomModelRows = MODEL_PROVIDER_SETTINGS.flatMap((providerSettings) =>
+    getCustomModelsForProvider(settings, providerSettings.provider).map((slug) => ({
+      key: `${providerSettings.provider}:${slug}`,
+      provider: providerSettings.provider,
+      providerTitle: providerSettings.title,
+      slug,
+    })),
+  );
+  const visibleCustomModelRows = showAllCustomModels
+    ? savedCustomModelRows
+    : savedCustomModelRows.slice(0, 5);
+  const isInstallSettingsDirty =
+    settings.claudeBinaryPath !== defaults.claudeBinaryPath ||
+    settings.geminiBinaryPath !== defaults.geminiBinaryPath ||
+    settings.codexBinaryPath !== defaults.codexBinaryPath ||
+    settings.codexHomePath !== defaults.codexHomePath;
+
+  const changedSettingLabels = [
+    ...(theme !== "system" ? ["Theme"] : []),
+    ...(settings.defaultProvider !== defaults.defaultProvider ? ["Default provider"] : []),
+    ...(settings.defaultThreadEnvMode !== defaults.defaultThreadEnvMode ? ["New thread mode"] : []),
+    ...(settings.sidebarSide !== defaults.sidebarSide ? ["Sidebar position"] : []),
+    ...(settings.sidebarProjectSortOrder !== defaults.sidebarProjectSortOrder
+      ? ["Project sort order"]
+      : []),
+    ...(settings.sidebarThreadSortOrder !== defaults.sidebarThreadSortOrder
+      ? ["Thread sort order"]
+      : []),
+    ...(settings.uiFontFamily !== defaults.uiFontFamily ? ["UI font"] : []),
+    ...(settings.chatCodeFontFamily !== defaults.chatCodeFontFamily ? ["Code font"] : []),
+    ...(settings.chatFontSizePx !== defaults.chatFontSizePx ? ["Base font size"] : []),
+    ...(settings.timestampFormat !== defaults.timestampFormat ? ["Time format"] : []),
+    ...(settings.enableTaskCompletionToasts !== defaults.enableTaskCompletionToasts
+      ? ["Activity toasts"]
+      : []),
+    ...(settings.enableSystemTaskCompletionNotifications !==
+    defaults.enableSystemTaskCompletionNotifications
+      ? ["Desktop notifications"]
+      : []),
+    ...(settings.enableAssistantStreaming !== defaults.enableAssistantStreaming
+      ? ["Assistant output"]
+      : []),
+    ...(settings.diffWordWrap !== defaults.diffWordWrap ? ["Diff line wrapping"] : []),
+    ...(settings.confirmThreadDelete !== defaults.confirmThreadDelete
+      ? ["Delete confirmation"]
+      : []),
+    ...(settings.confirmThreadArchive !== defaults.confirmThreadArchive
+      ? ["Archive confirmation"]
+      : []),
+    ...(settings.confirmTerminalTabClose !== defaults.confirmTerminalTabClose
+      ? ["Terminal close confirmation"]
+      : []),
+    ...(isGitTextGenerationModelDirty ? ["Git writing model"] : []),
+    ...modeModelSelectionState.filter((entry) => entry.isDirty).map((entry) => entry.title),
+    ...(settings.customCodexModels.length > 0 ||
+    settings.customClaudeModels.length > 0 ||
+    settings.customGeminiModels.length > 0
+      ? ["Custom models"]
+      : []),
+    ...(isInstallSettingsDirty ? ["Provider installs"] : []),
+  ];
+
+  const openKeybindingsFile = useCallback(() => {
+    if (!keybindingsConfigPath) return;
+    setOpenKeybindingsError(null);
+    setIsOpeningKeybindings(true);
+    const api = ensureNativeApi();
+    const editor = resolveAndPersistPreferredEditor(availableEditors ?? []);
+    if (!editor) {
+      setOpenKeybindingsError("No available editors found.");
+      setIsOpeningKeybindings(false);
+      return;
+    }
+    void api.shell
+      .openInEditor(keybindingsConfigPath, editor)
+      .catch((error) => {
+        setOpenKeybindingsError(
+          error instanceof Error ? error.message : "Unable to open keybindings file.",
+        );
+      })
+      .finally(() => {
+        setIsOpeningKeybindings(false);
+      });
+  }, [availableEditors, keybindingsConfigPath]);
+
+  useEffect(() => {
+    setBrowserNotificationPermission(readBrowserNotificationPermissionState());
+  }, []);
+
+  const addCustomModel = useCallback(
+    (provider: ProviderKind) => {
+      const customModelInput = customModelInputByProvider[provider];
+      const customModels = getCustomModelsForProvider(settings, provider);
+      const normalized = normalizeModelSlug(customModelInput, provider);
+      if (!normalized) {
+        setCustomModelErrorByProvider((existing) => ({
+          ...existing,
+          [provider]: "Enter a model slug.",
+        }));
+        return;
+      }
+      if (getModelOptions(provider).some((option) => option.slug === normalized)) {
+        setCustomModelErrorByProvider((existing) => ({
+          ...existing,
+          [provider]: "That model is already built in.",
+        }));
+        return;
+      }
+      if (normalized.length > MAX_CUSTOM_MODEL_LENGTH) {
+        setCustomModelErrorByProvider((existing) => ({
+          ...existing,
+          [provider]: `Model slugs must be ${MAX_CUSTOM_MODEL_LENGTH} characters or less.`,
+        }));
+        return;
+      }
+      if (customModels.includes(normalized)) {
+        setCustomModelErrorByProvider((existing) => ({
+          ...existing,
+          [provider]: "That custom model is already saved.",
+        }));
+        return;
+      }
+
+      updateSettings(patchCustomModels(provider, [...customModels, normalized]));
+      setCustomModelInputByProvider((existing) => ({
+        ...existing,
+        [provider]: "",
+      }));
+      setCustomModelErrorByProvider((existing) => ({
+        ...existing,
+        [provider]: null,
+      }));
+    },
+    [customModelInputByProvider, settings, updateSettings],
+  );
+
+  const removeCustomModel = useCallback(
+    (provider: ProviderKind, slug: string) => {
+      const customModels = getCustomModelsForProvider(settings, provider);
+      updateSettings(
+        patchCustomModels(
+          provider,
+          customModels.filter((model) => model !== slug),
+        ),
+      );
+      setCustomModelErrorByProvider((existing) => ({
+        ...existing,
+        [provider]: null,
+      }));
+    },
+    [settings, updateSettings],
+  );
+
+  async function restoreDefaults() {
+    if (changedSettingLabels.length === 0) return;
+
+    const api = readNativeApi();
+    const confirmed = await (api ?? ensureNativeApi()).dialogs.confirm(
+      ["Restore default settings?", `This will reset: ${changedSettingLabels.join(", ")}.`].join(
+        "\n",
+      ),
+    );
+    if (!confirmed) return;
+
+    setTheme("system");
+    resetSettings();
+    setOpenInstallProviders({
+      codex: false,
+      claudeAgent: false,
+      gemini: false,
+    });
+    setSelectedCustomModelProvider("codex");
+    setCustomModelInputByProvider({
+      codex: "",
+      claudeAgent: "",
+      gemini: "",
+    });
+    setCustomModelErrorByProvider({});
+    setShowAllCustomModels(false);
+    setShowRecoveryTools(false);
+    setOpenKeybindingsError(null);
+  }
+
+  async function setSystemNotificationsEnabled(nextEnabled: boolean) {
+    if (!nextEnabled) {
+      updateSettings({ enableSystemTaskCompletionNotifications: false });
+      return;
+    }
+
+    if (isElectron) {
+      updateSettings({ enableSystemTaskCompletionNotifications: true });
+      return;
+    }
+
+    const permission = await requestBrowserNotificationPermission();
+    setBrowserNotificationPermission(permission);
+
+    if (permission === "granted") {
+      updateSettings({ enableSystemTaskCompletionNotifications: true });
+      return;
+    }
+
+    updateSettings({ enableSystemTaskCompletionNotifications: false });
+    toastManager.add({
+      type: permission === "denied" ? "warning" : "error",
+      title: "Desktop notifications unavailable",
+      description: buildNotificationSettingsSupportText(permission),
+    });
+  }
+
+  async function sendTestNotification() {
+    const title = "Activity notification";
+    const body = "Notification test for chats and terminal agents.";
+
+    if (window.desktopBridge) {
+      const shown = await window.desktopBridge.notifications.show({ title, body, silent: false });
+      toastManager.add({
+        type: shown ? "success" : "warning",
+        title: shown ? "Test notification sent" : "Notifications unavailable",
+        description: shown
+          ? "Your operating system should show the notification."
+          : "Desktop notifications are not supported on this device.",
+      });
+      return;
+    }
+
+    const permission = await requestBrowserNotificationPermission();
+    setBrowserNotificationPermission(permission);
+    if (permission !== "granted") {
+      toastManager.add({
+        type: permission === "denied" ? "warning" : "error",
+        title: "Desktop notifications unavailable",
+        description: buildNotificationSettingsSupportText(permission),
+      });
+      return;
+    }
+
+    const notification = new Notification(title, { body, tag: "t3code:test-notification" });
+    notification.addEventListener("click", () => {
+      window.focus();
+    });
+    toastManager.add({
+      type: "success",
+      title: "Test notification sent",
+      description: "Your browser should show the notification.",
+    });
+  }
+
+  // Rebuild the local project indexes after an older install leaves them out of sync.
+  const repairLocalState = useCallback(async () => {
+    if (isRepairingLocalState) {
+      return;
+    }
+
+    const api = readNativeApi() ?? ensureNativeApi();
+    const confirmed = await api.dialogs.confirm(
+      [
+        "Repair local state?",
+        "This rebuilds local project indexes and refreshes project snapshots.",
+        "It keeps existing chats in place, but it may take a moment.",
+      ].join("\n"),
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setIsRepairingLocalState(true);
+    try {
+      const snapshot = await api.orchestration.repairState();
+      syncServerReadModel(snapshot);
+      toastManager.add({
+        type: "success",
+        title: "Local state repaired",
+        description: "Project indexes were rebuilt without clearing existing chats.",
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Repair failed",
+        description: error instanceof Error ? error.message : "Unable to repair local state.",
+      });
+    } finally {
+      setIsRepairingLocalState(false);
+    }
+  }, [isRepairingLocalState, syncServerReadModel]);
+
+  const deleteManagedWorktree = useCallback(
+    async (input: { workspaceRoot: string; worktreePath: string }) => {
+      const api = readNativeApi() ?? ensureNativeApi();
+      const displayName = formatWorktreePathForDisplay(input.worktreePath);
+      const snapshot = await api.orchestration.getSnapshot().catch(() => null);
+      if (snapshot === null) {
+        toastManager.add({
+          type: "error",
+          title: "Could not verify linked conversations",
+          description: "Retry once the app reconnects to the server.",
+        });
+        return;
+      }
+
+      const linkedThreadsFromSnapshot = snapshot.threads.filter((thread) => {
+        if (thread.deletedAt !== null) {
+          return false;
+        }
+        const candidatePaths = [
+          normalizeManagedWorktreePath(thread.worktreePath),
+          normalizeManagedWorktreePath(thread.associatedWorktreePath ?? null),
+        ];
+        return candidatePaths.includes(input.worktreePath);
+      });
+      const linkedArchivedThreadIds = linkedThreadsFromSnapshot
+        .filter((thread) => (thread.archivedAt ?? null) !== null)
+        .map((thread) => thread.id);
+      const linkedActiveThreadCount = linkedThreadsFromSnapshot.filter(
+        (thread) => (thread.archivedAt ?? null) === null,
+      ).length;
+      const linkedConversationCount = linkedActiveThreadCount + linkedArchivedThreadIds.length;
+      const confirmed = await api.dialogs.confirm(
+        linkedConversationCount > 0
+          ? [
+              `Delete worktree "${displayName}"?`,
+              "",
+              `${linkedActiveThreadCount} active and ${linkedArchivedThreadIds.length} archived conversation${linkedConversationCount === 1 ? " is" : "s are"} linked to this worktree.`,
+              linkedArchivedThreadIds.length > 0
+                ? "Archived conversations will be deleted first."
+                : "Deleting it can break reopening those chats in the same workspace.",
+              "",
+              "Delete the worktree anyway?",
+            ].join("\n")
+          : [`Delete worktree "${displayName}"?`, "This removes the Git worktree from disk."].join(
+              "\n",
+            ),
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        for (const archivedThreadId of linkedArchivedThreadIds) {
+          await api.orchestration.dispatchCommand({
+            type: "thread.delete",
+            commandId: newCommandId(),
+            threadId: archivedThreadId,
+          });
+        }
+
+        await removeWorktreeMutation.mutateAsync({
+          cwd: input.workspaceRoot,
+          path: input.worktreePath,
+          force: true,
+        });
+        await queryClient.invalidateQueries({
+          queryKey: serverQueryKeys.worktrees(),
+        });
+        toastManager.add({
+          type: "success",
+          title: "Worktree deleted",
+          description:
+            linkedArchivedThreadIds.length > 0
+              ? `${displayName} was removed and ${linkedArchivedThreadIds.length} archived conversation${linkedArchivedThreadIds.length === 1 ? "" : "s"} were deleted.`
+              : `${displayName} was removed.`,
+        });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not delete worktree",
+          description: error instanceof Error ? error.message : "Unable to delete the worktree.",
+        });
+      }
+    },
+    [queryClient, removeWorktreeMutation],
+  );
+
+  const unarchiveThread = useCallback(async (threadId: ThreadId) => {
+    const api = readNativeApi();
+    if (!api) return;
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.unarchive",
+        commandId: newCommandId(),
+        threadId,
+      });
+      toastManager.add({
+        type: "success",
+        title: "Thread restored",
+        description: "The thread has been moved back to the sidebar.",
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not restore thread",
+        description: error instanceof Error ? error.message : "Unable to restore the thread.",
+      });
+    }
+  }, []);
+
+  const deleteArchivedThread = useCallback(async (threadId: ThreadId, threadTitle: string) => {
+    const api = readNativeApi();
+    if (!api) return;
+
+    const confirmed = await api.dialogs.confirm(
+      `Permanently delete "${threadTitle}"?\n\nThis will remove the thread and its conversation history forever.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      await api.orchestration.dispatchCommand({
+        type: "thread.delete",
+        commandId: newCommandId(),
+        threadId,
+      });
+      toastManager.add({
+        type: "success",
+        title: "Thread deleted",
+        description: "The archived thread has been permanently removed.",
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not delete thread",
+        description: error instanceof Error ? error.message : "Unable to delete the thread.",
+      });
+    }
+  }, []);
+
+  const handleArchivedThreadContextMenu = useCallback(
+    async (threadId: ThreadId, threadTitle: string, position: { x: number; y: number }) => {
+      const api = readNativeApi();
+      if (!api) return;
+
+      const clicked = await api.contextMenu.show(
+        [
+          { id: "restore", label: "Restore" },
+          { id: "delete", label: "Delete", destructive: true },
+        ],
+        position,
+      );
+
+      if (clicked === "restore") {
+        await unarchiveThread(threadId);
+        return;
+      }
+
+      if (clicked === "delete") {
+        await deleteArchivedThread(threadId, threadTitle);
+      }
+    },
+    [deleteArchivedThread, unarchiveThread],
+  );
+
+  const renderGeneralPanel = () => (
+    <div className="space-y-6">
+      <SettingsSection title="Core defaults">
+        <div className="space-y-2">
+          <SettingsRow
+            title="Default provider"
+            description="Choose the provider used for new chats."
+            resetAction={
+              settings.defaultProvider !== defaults.defaultProvider ? (
+                <SettingResetButton
+                  label="default provider"
+                  onClick={() => updateSettings({ defaultProvider: defaults.defaultProvider })}
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={settings.defaultProvider}
+                onValueChange={(value) => {
+                  if (value !== "codex" && value !== "claudeAgent" && value !== "gemini") return;
+                  updateSettings({ defaultProvider: value });
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-44" aria-label="Default provider">
+                  <SelectValue>
+                    <span className="flex items-center gap-2">
+                      {settings.defaultProvider === "claudeAgent" ? (
+                        <ClaudeAI className="size-3.5 text-foreground" />
+                      ) : settings.defaultProvider === "gemini" ? (
+                        <Gemini className="size-3.5 text-foreground" />
+                      ) : (
+                        <OpenAI className="size-3.5" />
+                      )}
+                      {settings.defaultProvider === "claudeAgent"
+                        ? PROVIDER_DISPLAY_NAMES.claudeAgent
+                        : settings.defaultProvider === "gemini"
+                          ? PROVIDER_DISPLAY_NAMES.gemini
+                          : PROVIDER_DISPLAY_NAMES.codex}
+                    </span>
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="codex">
+                    <span className="flex items-center gap-2">
+                      <OpenAI className="size-3.5" />
+                      Codex
+                    </span>
+                  </SelectItem>
+                  <SelectItem hideIndicator value="claudeAgent">
+                    <span className="flex items-center gap-2">
+                      <ClaudeAI className="size-3.5 text-foreground" />
+                      Claude
+                    </span>
+                  </SelectItem>
+                  <SelectItem hideIndicator value="gemini">
+                    <span className="flex items-center gap-2">
+                      <Gemini className="size-3.5 text-foreground" />
+                      Gemini
+                    </span>
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+
+          <SettingsRow
+            title="New threads"
+            description="Pick the default workspace mode for newly created draft threads."
+            resetAction={
+              settings.defaultThreadEnvMode !== defaults.defaultThreadEnvMode ? (
+                <SettingResetButton
+                  label="new threads"
+                  onClick={() =>
+                    updateSettings({
+                      defaultThreadEnvMode: defaults.defaultThreadEnvMode,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={settings.defaultThreadEnvMode}
+                onValueChange={(value) => {
+                  if (value !== "local" && value !== "worktree") return;
+                  updateSettings({
+                    defaultThreadEnvMode: value,
+                  });
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-44" aria-label="Default thread mode">
+                  <SelectValue>
+                    {settings.defaultThreadEnvMode === "worktree" ? "New worktree" : "Local"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="local">
+                    Local
+                  </SelectItem>
+                  <SelectItem hideIndicator value="worktree">
+                    New worktree
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Sidebar organization">
+        <div className="space-y-2">
+          <SettingsRow
+            title="Position"
+            description="Choose which side of the screen the sidebar appears on."
+            resetAction={
+              settings.sidebarSide !== defaults.sidebarSide ? (
+                <SettingResetButton
+                  label="sidebar position"
+                  onClick={() =>
+                    updateSettings({
+                      sidebarSide: defaults.sidebarSide,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={settings.sidebarSide}
+                onValueChange={(value) => {
+                  if (value !== "left" && value !== "right") {
+                    return;
+                  }
+                  updateSettings({ sidebarSide: value });
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-44" aria-label="Sidebar position">
+                  <SelectValue>{SIDEBAR_SIDE_LABELS[settings.sidebarSide]}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="left">
+                    {SIDEBAR_SIDE_LABELS.left}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="right">
+                    {SIDEBAR_SIDE_LABELS.right}
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+
+          <SettingsRow
+            title="Project order"
+            description="Controls how projects are arranged in the main sidebar."
+            resetAction={
+              settings.sidebarProjectSortOrder !== defaults.sidebarProjectSortOrder ? (
+                <SettingResetButton
+                  label="project order"
+                  onClick={() =>
+                    updateSettings({
+                      sidebarProjectSortOrder: defaults.sidebarProjectSortOrder,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={settings.sidebarProjectSortOrder}
+                onValueChange={(value) => {
+                  if (value !== "updated_at" && value !== "created_at" && value !== "manual") {
+                    return;
+                  }
+                  updateSettings({ sidebarProjectSortOrder: value });
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-44" aria-label="Project sort order">
+                  <SelectValue>
+                    {SIDEBAR_PROJECT_SORT_ORDER_LABELS[settings.sidebarProjectSortOrder]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="updated_at">
+                    {SIDEBAR_PROJECT_SORT_ORDER_LABELS.updated_at}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="created_at">
+                    {SIDEBAR_PROJECT_SORT_ORDER_LABELS.created_at}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="manual">
+                    {SIDEBAR_PROJECT_SORT_ORDER_LABELS.manual}
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+
+          <SettingsRow
+            title="Thread order"
+            description="Controls how threads are arranged inside each project in the main sidebar."
+            resetAction={
+              settings.sidebarThreadSortOrder !== defaults.sidebarThreadSortOrder ? (
+                <SettingResetButton
+                  label="thread order"
+                  onClick={() =>
+                    updateSettings({
+                      sidebarThreadSortOrder: defaults.sidebarThreadSortOrder,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={settings.sidebarThreadSortOrder}
+                onValueChange={(value) => {
+                  if (value !== "updated_at" && value !== "created_at") {
+                    return;
+                  }
+                  updateSettings({ sidebarThreadSortOrder: value });
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-44" aria-label="Thread sort order">
+                  <SelectValue>
+                    {SIDEBAR_THREAD_SORT_ORDER_LABELS[settings.sidebarThreadSortOrder]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="updated_at">
+                    {SIDEBAR_THREAD_SORT_ORDER_LABELS.updated_at}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="created_at">
+                    {SIDEBAR_THREAD_SORT_ORDER_LABELS.created_at}
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+        </div>
+      </SettingsSection>
+    </div>
+  );
+
+  const renderAppearancePanel = () => (
+    <div className="space-y-6">
+      <SettingsSection title="Theme and typography">
+        <div className="space-y-2">
+          <SettingsRow
+            title="Theme"
+            description="Choose how DP Code looks across the app."
+            resetAction={
+              theme !== "system" ? (
+                <SettingResetButton label="theme" onClick={() => setTheme("system")} />
+              ) : null
+            }
+            control={
+              <Select
+                value={theme}
+                onValueChange={(value) => {
+                  if (value !== "system" && value !== "light" && value !== "dark") return;
+                  setTheme(value);
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-40" aria-label="Theme preference">
+                  <SelectValue>
+                    {THEME_OPTIONS.find((option) => option.value === theme)?.label ?? "System"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {THEME_OPTIONS.map((option) => (
+                    <SelectItem hideIndicator key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
+
+          <SettingsRow
+            title="UI font"
+            description="Set a custom font for the interface. Leave empty for the default system font."
+            resetAction={
+              settings.uiFontFamily !== defaults.uiFontFamily ? (
+                <SettingResetButton
+                  label="UI font"
+                  onClick={() => updateSettings({ uiFontFamily: defaults.uiFontFamily })}
+                />
+              ) : null
+            }
+            control={
+              <Input
+                className="w-full text-right sm:w-48"
+                value={settings.uiFontFamily}
+                onChange={(event) => updateSettings({ uiFontFamily: event.target.value })}
+                placeholder="-apple-system, BlinkM…"
+                spellCheck={false}
+                aria-label="Custom UI font family"
+              />
+            }
+          />
+
+          <SettingsRow
+            title="Code font"
+            description="Set a custom font for code blocks and inline code in chat. Leave empty for the default coding font."
+            resetAction={
+              settings.chatCodeFontFamily !== defaults.chatCodeFontFamily ? (
+                <SettingResetButton
+                  label="code font"
+                  onClick={() =>
+                    updateSettings({ chatCodeFontFamily: defaults.chatCodeFontFamily })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Input
+                className="w-full text-right sm:w-48"
+                value={settings.chatCodeFontFamily}
+                onChange={(event) => updateSettings({ chatCodeFontFamily: event.target.value })}
+                placeholder={'"JetBrains Mono"'}
+                spellCheck={false}
+                aria-label="Custom chat code font family"
+              />
+            }
+          />
+
+          <SettingsRow
+            title="Base font size"
+            description="Adjust the app text base in pixels. Chat and UI typography scale proportionally from this value."
+            resetAction={
+              settings.chatFontSizePx !== defaults.chatFontSizePx ? (
+                <SettingResetButton
+                  label="base font size"
+                  onClick={() =>
+                    updateSettings({
+                      chatFontSizePx: defaults.chatFontSizePx,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+                <Input
+                  type="number"
+                  min={MIN_CHAT_FONT_SIZE_PX}
+                  max={MAX_CHAT_FONT_SIZE_PX}
+                  step={1}
+                  inputMode="numeric"
+                  className="w-full text-right sm:w-20"
+                  value={String(settings.chatFontSizePx)}
+                  onChange={(event) => {
+                    const nextValue = event.target.value.trim();
+                    if (nextValue.length === 0) return;
+                    updateSettings({
+                      chatFontSizePx: normalizeChatFontSizePx(Number(nextValue)),
+                    });
+                  }}
+                  aria-label="Base font size in pixels"
+                />
+                <span className="text-xs text-muted-foreground">px</span>
+              </div>
+            }
+          />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Time and reading">
+        <div className="space-y-2">
+          <SettingsRow
+            title="Time format"
+            description="System default follows your browser or OS clock preference."
+            resetAction={
+              settings.timestampFormat !== defaults.timestampFormat ? (
+                <SettingResetButton
+                  label="time format"
+                  onClick={() =>
+                    updateSettings({
+                      timestampFormat: defaults.timestampFormat,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={settings.timestampFormat}
+                onValueChange={(value) => {
+                  if (value !== "locale" && value !== "12-hour" && value !== "24-hour") {
+                    return;
+                  }
+                  updateSettings({
+                    timestampFormat: value,
+                  });
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-40" aria-label="Timestamp format">
+                  <SelectValue>{TIMESTAMP_FORMAT_LABELS[settings.timestampFormat]}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  <SelectItem hideIndicator value="locale">
+                    {TIMESTAMP_FORMAT_LABELS.locale}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="12-hour">
+                    {TIMESTAMP_FORMAT_LABELS["12-hour"]}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="24-hour">
+                    {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                  </SelectItem>
+                </SelectPopup>
+              </Select>
+            }
+          />
+        </div>
+      </SettingsSection>
+    </div>
+  );
+
+  const renderNotificationsPanel = () => (
+    <div className="space-y-6">
+      <SettingsSection title="Activity alerts">
+        <div className="space-y-2">
+          <SettingsRow
+            title="Activity toasts"
+            description="Show an in-app toast when a chat or managed terminal agent finishes or needs input."
+            resetAction={
+              settings.enableTaskCompletionToasts !== defaults.enableTaskCompletionToasts ? (
+                <SettingResetButton
+                  label="activity toasts"
+                  onClick={() =>
+                    updateSettings({
+                      enableTaskCompletionToasts: defaults.enableTaskCompletionToasts,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.enableTaskCompletionToasts}
+                onCheckedChange={(checked) =>
+                  updateSettings({ enableTaskCompletionToasts: Boolean(checked) })
+                }
+                aria-label="Activity toast notifications"
+              />
+            }
+          />
+
+          <SettingsRow
+            title="Desktop notifications"
+            description="Show an OS notification when a chat or managed terminal agent finishes or needs input while the app is in the background."
+            status={buildNotificationSettingsSupportText(browserNotificationPermission)}
+            resetAction={
+              settings.enableSystemTaskCompletionNotifications !==
+              defaults.enableSystemTaskCompletionNotifications ? (
+                <SettingResetButton
+                  label="desktop notifications"
+                  onClick={() =>
+                    updateSettings({
+                      enableSystemTaskCompletionNotifications:
+                        defaults.enableSystemTaskCompletionNotifications,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <div className="flex w-full items-center gap-2 sm:w-auto sm:justify-end">
+                <Button size="xs" variant="outline" onClick={() => void sendTestNotification()}>
+                  Test
+                </Button>
+                <Switch
+                  checked={settings.enableSystemTaskCompletionNotifications}
+                  onCheckedChange={(checked) => {
+                    void setSystemNotificationsEnabled(Boolean(checked));
+                  }}
+                  aria-label="Desktop activity notifications"
+                />
+              </div>
+            }
+          />
+        </div>
+      </SettingsSection>
+    </div>
+  );
+
+  const renderBehaviorPanel = () => (
+    <div className="space-y-6">
+      <SettingsSection title="Runtime behavior">
+        <div className="space-y-2">
+          <SettingsRow
+            title="Assistant output"
+            description="Show token-by-token output while a response is in progress."
+            resetAction={
+              settings.enableAssistantStreaming !== defaults.enableAssistantStreaming ? (
+                <SettingResetButton
+                  label="assistant output"
+                  onClick={() =>
+                    updateSettings({
+                      enableAssistantStreaming: defaults.enableAssistantStreaming,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.enableAssistantStreaming}
+                onCheckedChange={(checked) =>
+                  updateSettings({
+                    enableAssistantStreaming: Boolean(checked),
+                  })
+                }
+                aria-label="Stream assistant messages"
+              />
+            }
+          />
+
+          <SettingsRow
+            title="Diff line wrapping"
+            description="Set the default wrap state when the diff panel opens. The in-panel wrap toggle only affects the current diff session."
+            resetAction={
+              settings.diffWordWrap !== defaults.diffWordWrap ? (
+                <SettingResetButton
+                  label="diff line wrapping"
+                  onClick={() =>
+                    updateSettings({
+                      diffWordWrap: defaults.diffWordWrap,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.diffWordWrap}
+                onCheckedChange={(checked) =>
+                  updateSettings({
+                    diffWordWrap: Boolean(checked),
+                  })
+                }
+                aria-label="Wrap diff lines by default"
+              />
+            }
+          />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Safety confirmations">
+        <div className="space-y-2">
+          <SettingsRow
+            title="Delete confirmation"
+            description="Ask before deleting a thread and its chat history."
+            resetAction={
+              settings.confirmThreadDelete !== defaults.confirmThreadDelete ? (
+                <SettingResetButton
+                  label="delete confirmation"
+                  onClick={() =>
+                    updateSettings({
+                      confirmThreadDelete: defaults.confirmThreadDelete,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.confirmThreadDelete}
+                onCheckedChange={(checked) =>
+                  updateSettings({
+                    confirmThreadDelete: Boolean(checked),
+                  })
+                }
+                aria-label="Confirm thread deletion"
+              />
+            }
+          />
+
+          <SettingsRow
+            title="Archive confirmation"
+            description="Ask before archiving a thread."
+            resetAction={
+              settings.confirmThreadArchive !== defaults.confirmThreadArchive ? (
+                <SettingResetButton
+                  label="archive confirmation"
+                  onClick={() =>
+                    updateSettings({
+                      confirmThreadArchive: defaults.confirmThreadArchive,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.confirmThreadArchive}
+                onCheckedChange={(checked) =>
+                  updateSettings({
+                    confirmThreadArchive: Boolean(checked),
+                  })
+                }
+                aria-label="Confirm thread archive"
+              />
+            }
+          />
+
+          <SettingsRow
+            title="Terminal close confirmation"
+            description="Ask before closing a terminal tab and clearing its history."
+            resetAction={
+              settings.confirmTerminalTabClose !== defaults.confirmTerminalTabClose ? (
+                <SettingResetButton
+                  label="terminal close confirmation"
+                  onClick={() =>
+                    updateSettings({
+                      confirmTerminalTabClose: defaults.confirmTerminalTabClose,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Switch
+                checked={settings.confirmTerminalTabClose}
+                onCheckedChange={(checked) =>
+                  updateSettings({
+                    confirmTerminalTabClose: Boolean(checked),
+                  })
+                }
+                aria-label="Confirm terminal tab close"
+              />
+            }
+          />
+        </div>
+      </SettingsSection>
+    </div>
+  );
+
+  const renderWorktreesPanel = () => (
+    <div className="space-y-6">
+      <SettingsSection title="Managed worktrees">
+        <div className="space-y-4">
+          {serverWorktreesQuery.isLoading ? (
+            <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
+              Loading managed worktrees...
+            </div>
+          ) : serverWorktreesQuery.isError ? (
+            <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-6 text-sm text-destructive">
+              {serverWorktreesQuery.error instanceof Error
+                ? serverWorktreesQuery.error.message
+                : "Unable to load worktrees."}
+            </div>
+          ) : worktreesByWorkspaceRoot.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border/70 px-4 py-6 text-sm text-muted-foreground">
+              No app-managed worktrees found yet.
+            </div>
+          ) : (
+            worktreesByWorkspaceRoot.map((group) => (
+              <section key={group.workspaceRoot} className="space-y-2">
+                <h3 className="px-1 font-mono text-[11px] text-muted-foreground">
+                  {group.workspaceRoot}
+                </h3>
+
+                <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/50">
+                  {group.worktrees.map((worktree, index) => {
+                    const deleteDisabled = removeWorktreeMutation.isPending;
+                    return (
+                      <div
+                        key={worktree.path}
+                        className={cn(
+                          "flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-start sm:justify-between",
+                          index > 0 && "border-t border-border/60",
+                        )}
+                      >
+                        <div className="min-w-0 flex-1 space-y-2">
+                          <div className="space-y-0.5">
+                            <div className="text-sm font-medium text-foreground">Worktree</div>
+                            <div className="font-mono text-[11px] text-muted-foreground">
+                              {worktree.path}
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                              Conversations
+                            </div>
+                            {worktree.linkedThreads.length > 0 ? (
+                              <div className="space-y-1">
+                                {worktree.linkedThreads.map((thread) => (
+                                  <div key={thread.id} className="text-sm text-foreground">
+                                    {thread.title}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="text-sm text-muted-foreground">
+                                No conversations linked to this worktree.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex shrink-0 flex-col items-end gap-2">
+                          <Button
+                            size="xs"
+                            variant="destructive"
+                            disabled={deleteDisabled}
+                            onClick={() =>
+                              void deleteManagedWorktree({
+                                workspaceRoot: group.workspaceRoot,
+                                worktreePath: worktree.path,
+                              })
+                            }
+                          >
+                            Delete
+                          </Button>
+                          {worktree.linkedThreads.length > 0 ? (
+                            <p className="max-w-40 text-right text-[11px] text-muted-foreground">
+                              Linked conversations exist. Deleting will ask for confirmation.
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            ))
+          )}
+        </div>
+      </SettingsSection>
+    </div>
+  );
+
+  const renderArchivedPanel = () => {
+    const archivedGroups = [
+      ...projects.map((project) => ({
+        project,
+        threads: archivedThreads
+          .filter((thread) => thread.projectId === project.id)
+          .toSorted((left, right) => {
+            const leftKey = left.archivedAt ?? left.updatedAt ?? left.createdAt;
+            const rightKey = right.archivedAt ?? right.updatedAt ?? right.createdAt;
+            return rightKey.localeCompare(leftKey) || right.id.localeCompare(left.id);
+          }),
+      })),
+      ...(() => {
+        const knownProjectIds = new Set(projects.map((project) => project.id));
+        const orphanedThreads = archivedThreads
+          .filter((thread) => !knownProjectIds.has(thread.projectId))
+          .toSorted((left, right) => {
+            const leftKey = left.archivedAt ?? left.updatedAt ?? left.createdAt;
+            const rightKey = right.archivedAt ?? right.updatedAt ?? right.createdAt;
+            return rightKey.localeCompare(leftKey) || right.id.localeCompare(left.id);
+          });
+        return orphanedThreads.length > 0
+          ? [
+              {
+                project: null,
+                threads: orphanedThreads,
+              },
+            ]
+          : [];
+      })(),
+    ].filter((group) => group.threads.length > 0);
+
+    return (
+      <div className="space-y-6">
+        {archivedGroups.length === 0 ? (
+          <SettingsSection title="Archived threads">
+            <div className="rounded-2xl border border-dashed border-border/70 bg-card/35 px-5 py-10 text-center">
+              <div className="mx-auto mb-3 flex size-11 items-center justify-center rounded-full border border-border/70 bg-background/70 text-muted-foreground">
+                <ArchiveIcon className="size-5" />
+              </div>
+              <div className="text-sm font-medium text-foreground">No archived threads</div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                Archived threads will appear here and can be restored to the sidebar.
+              </div>
+            </div>
+          </SettingsSection>
+        ) : (
+          archivedGroups.map(({ project, threads: projectThreads }) => (
+            <SettingsSection
+              key={project?.id ?? "unknown-project"}
+              title={project?.name ?? "Unknown project"}
+            >
+              <div className="overflow-hidden rounded-2xl border border-border/70 bg-card/50">
+                {projectThreads.map((thread, index) => (
+                  <div
+                    key={thread.id}
+                    className={cn(
+                      "flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between",
+                      index > 0 && "border-t border-border/60",
+                    )}
+                    onContextMenu={(event) => {
+                      event.preventDefault();
+                      void handleArchivedThreadContextMenu(thread.id, thread.title, {
+                        x: event.clientX,
+                        y: event.clientY,
+                      });
+                    }}
+                  >
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="truncate text-sm font-medium text-foreground">
+                        {thread.title}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        Archived {formatRelativeTime(thread.archivedAt ?? thread.createdAt)}
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        onClick={() => void unarchiveThread(thread.id)}
+                      >
+                        Restore
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="destructive"
+                        onClick={() => void deleteArchivedThread(thread.id, thread.title)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </SettingsSection>
+          ))
+        )}
+      </div>
+    );
+  };
+
+  const renderModelsPanel = () => (
+    <div className="space-y-6">
+      <SettingsSection title="Generation defaults">
+        <div className="space-y-2">
+          <SettingsRow
+            title="Git writing model"
+            description="Used for generated commit messages, PR titles, and branch names."
+            resetAction={
+              isGitTextGenerationModelDirty ? (
+                <SettingResetButton
+                  label="git writing model"
+                  onClick={() =>
+                    updateSettings({
+                      textGenerationModel: defaults.textGenerationModel,
+                    })
+                  }
+                />
+              ) : null
+            }
+            control={
+              <Select
+                value={currentGitTextGenerationModel}
+                onValueChange={(value) => {
+                  if (!value) return;
+                  updateSettings({
+                    textGenerationModel: value,
+                  });
+                }}
+              >
+                <SelectTrigger className="w-full sm:w-52" aria-label="Git text generation model">
+                  <SelectValue>{selectedGitTextGenerationModelLabel}</SelectValue>
+                </SelectTrigger>
+                <SelectPopup align="end" alignItemWithTrigger={false}>
+                  {gitTextGenerationModelOptions.map((option) => (
+                    <SelectItem hideIndicator key={option.slug} value={option.slug}>
+                      {option.name}
+                    </SelectItem>
+                  ))}
+                </SelectPopup>
+              </Select>
+            }
+          />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Workflow modes">
+        <div className="space-y-2">
+          {modeModelSelectionState.map((entry) => {
+            const modelOptions = entry.selectedProvider
+              ? getAppModelOptions(
+                  entry.selectedProvider,
+                  customModelsByProvider[entry.selectedProvider],
+                  entry.selection?.model,
+                )
+              : [];
+
+            return (
+              <SettingsRow
+                key={entry.key}
+                title={entry.title}
+                description={`${entry.description} Leave unset to inherit the active thread or project model.`}
+                status={
+                  entry.selection && entry.selectedProvider
+                    ? `${PROVIDER_DISPLAY_NAMES[entry.selectedProvider]} • ${entry.selectedModel ?? entry.selection.model}`
+                    : "Unset. Inherit the active thread or project model."
+                }
+                resetAction={
+                  entry.isDirty ? (
+                    <SettingResetButton
+                      label={entry.title.toLowerCase()}
+                      onClick={() =>
+                        updateSettings({
+                          [entry.key]: entry.defaultSelection,
+                        } as Partial<Record<ModeModelSelectionKey, ModelSelection | null>>)
+                      }
+                    />
+                  ) : null
+                }
+                control={
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                    <Select
+                      value={entry.selectedProvider ?? "__inherit__"}
+                      onValueChange={(value) => {
+                        if (!value) return;
+                        if (value === "__inherit__") {
+                          updateSettings({
+                            [entry.key]: null,
+                          } as Partial<Record<ModeModelSelectionKey, ModelSelection | null>>);
+                          return;
+                        }
+
+                        const provider = value as ProviderKind;
+                        const nextModel = resolveAppModelSelection(
+                          provider,
+                          customModelsByProvider,
+                          entry.selection?.provider === provider ? entry.selection.model : null,
+                        );
+                        updateSettings({
+                          [entry.key]: buildModelSelection(
+                            provider,
+                            nextModel,
+                            entry.selection?.provider === provider
+                              ? entry.selection.options
+                              : undefined,
+                          ),
+                        } as Partial<Record<ModeModelSelectionKey, ModelSelection | null>>);
+                      }}
+                    >
+                      <SelectTrigger
+                        className="w-full sm:w-40"
+                        aria-label={`${entry.title} provider`}
+                      >
+                        <SelectValue>
+                          {entry.selectedProvider
+                            ? PROVIDER_DISPLAY_NAMES[entry.selectedProvider]
+                            : "Inherit"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup align="end" alignItemWithTrigger={false}>
+                        <SelectItem hideIndicator value="__inherit__">
+                          Inherit
+                        </SelectItem>
+                        {(["codex", "claudeAgent", "gemini"] as const).map((provider) => (
+                          <SelectItem hideIndicator key={provider} value={provider}>
+                            {PROVIDER_DISPLAY_NAMES[provider]}
+                          </SelectItem>
+                        ))}
+                      </SelectPopup>
+                    </Select>
+
+                    <Select
+                      disabled={!entry.selectedProvider}
+                      value={entry.selection?.model ?? "__inherit__"}
+                      onValueChange={(value) => {
+                        if (!value || !entry.selectedProvider) return;
+                        updateSettings({
+                          [entry.key]: buildModelSelection(
+                            entry.selectedProvider,
+                            value,
+                            entry.selection?.options,
+                          ),
+                        } as Partial<Record<ModeModelSelectionKey, ModelSelection | null>>);
+                      }}
+                    >
+                      <SelectTrigger className="w-full sm:w-52" aria-label={entry.title}>
+                        <SelectValue>{entry.selectedModel ?? "Choose model"}</SelectValue>
+                      </SelectTrigger>
+                      <SelectPopup align="end" alignItemWithTrigger={false}>
+                        {modelOptions.map((option) => (
+                          <SelectItem
+                            hideIndicator
+                            key={`${entry.key}:${option.slug}`}
+                            value={option.slug}
+                          >
+                            {option.name}
+                          </SelectItem>
+                        ))}
+                      </SelectPopup>
+                    </Select>
+                  </div>
+                }
+              />
+            );
+          })}
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Custom models">
+        <div className="space-y-2">
+          <SettingsRow
+            title="Saved model slugs"
+            description="Add custom model slugs for supported providers."
+            resetAction={
+              totalCustomModels > 0 ? (
+                <SettingResetButton
+                  label="custom models"
+                  onClick={() => {
+                    updateSettings({
+                      customCodexModels: defaults.customCodexModels,
+                      customClaudeModels: defaults.customClaudeModels,
+                      customGeminiModels: defaults.customGeminiModels,
+                    });
+                    setCustomModelErrorByProvider({});
+                    setShowAllCustomModels(false);
+                  }}
+                />
+              ) : null
+            }
+          >
+            <div className="mt-4 border-t border-border pt-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Select
+                  value={selectedCustomModelProvider}
+                  onValueChange={(value) => {
+                    if (value !== "codex" && value !== "claudeAgent" && value !== "gemini") {
+                      return;
+                    }
+                    setSelectedCustomModelProvider(value);
+                  }}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="w-full sm:w-40"
+                    aria-label="Custom model provider"
+                  >
+                    <SelectValue>{selectedCustomModelProviderSettings.title}</SelectValue>
+                  </SelectTrigger>
+                  <SelectPopup align="start" alignItemWithTrigger={false}>
+                    {MODEL_PROVIDER_SETTINGS.map((providerSettings) => (
+                      <SelectItem
+                        hideIndicator
+                        className="min-h-7 text-sm"
+                        key={providerSettings.provider}
+                        value={providerSettings.provider}
+                      >
+                        {providerSettings.title}
+                      </SelectItem>
+                    ))}
+                  </SelectPopup>
+                </Select>
+                <Input
+                  id="custom-model-slug"
+                  value={selectedCustomModelInput}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setCustomModelInputByProvider((existing) => ({
+                      ...existing,
+                      [selectedCustomModelProvider]: value,
+                    }));
+                    if (selectedCustomModelError) {
+                      setCustomModelErrorByProvider((existing) => ({
+                        ...existing,
+                        [selectedCustomModelProvider]: null,
+                      }));
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    addCustomModel(selectedCustomModelProvider);
+                  }}
+                  placeholder={selectedCustomModelProviderSettings.example}
+                  spellCheck={false}
+                />
+                <Button
+                  className="shrink-0"
+                  variant="outline"
+                  onClick={() => addCustomModel(selectedCustomModelProvider)}
+                >
+                  <PlusIcon className="size-3.5" />
+                  Add
+                </Button>
+              </div>
+
+              {selectedCustomModelError ? (
+                <p className="mt-2 text-xs text-destructive">{selectedCustomModelError}</p>
+              ) : null}
+
+              {totalCustomModels > 0 ? (
+                <div className="mt-3">
+                  <div>
+                    {visibleCustomModelRows.map((row) => (
+                      <div
+                        key={row.key}
+                        className="group grid grid-cols-[minmax(5rem,6rem)_minmax(0,1fr)_auto] items-center gap-3 border-t border-border/60 px-4 py-2 first:border-t-0"
+                      >
+                        <span className="truncate text-xs text-muted-foreground">
+                          {row.providerTitle}
+                        </span>
+                        <code className="min-w-0 truncate text-sm text-foreground">{row.slug}</code>
+                        <button
+                          type="button"
+                          className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100 hover:opacity-100"
+                          aria-label={`Remove ${row.slug}`}
+                          onClick={() => removeCustomModel(row.provider, row.slug)}
+                        >
+                          <XIcon className="size-3.5 text-muted-foreground hover:text-foreground" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  {savedCustomModelRows.length > 5 ? (
+                    <button
+                      type="button"
+                      className="mt-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                      onClick={() => setShowAllCustomModels((value) => !value)}
+                    >
+                      {showAllCustomModels
+                        ? "Show less"
+                        : `Show more (${savedCustomModelRows.length - 5})`}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </SettingsRow>
+        </div>
+      </SettingsSection>
+    </div>
+  );
+
+  const renderAdvancedPanel = () => (
+    <div className="space-y-6">
+      <SettingsSection title="Provider installs">
+        <div className="space-y-2">
+          <SettingsRow
+            title="CLI overrides"
+            description="Override the CLI used for new sessions."
+            resetAction={
+              isInstallSettingsDirty ? (
+                <SettingResetButton
+                  label="provider installs"
+                  onClick={() => {
+                    updateSettings({
+                      claudeBinaryPath: defaults.claudeBinaryPath,
+                      codexBinaryPath: defaults.codexBinaryPath,
+                      codexHomePath: defaults.codexHomePath,
+                      geminiBinaryPath: defaults.geminiBinaryPath,
+                    });
+                    setOpenInstallProviders({
+                      codex: false,
+                      claudeAgent: false,
+                      gemini: false,
+                    });
+                  }}
+                />
+              ) : null
+            }
+          >
+            <div className="mt-4">
+              <div className="space-y-2">
+                {INSTALL_PROVIDER_SETTINGS.map((providerSettings) => {
+                  const isOpen = openInstallProviders[providerSettings.provider];
+                  const isDirty =
+                    providerSettings.provider === "codex"
+                      ? settings.codexBinaryPath !== defaults.codexBinaryPath ||
+                        settings.codexHomePath !== defaults.codexHomePath
+                      : providerSettings.provider === "claudeAgent"
+                        ? settings.claudeBinaryPath !== defaults.claudeBinaryPath
+                        : settings.geminiBinaryPath !== defaults.geminiBinaryPath;
+                  const binaryPathValue =
+                    providerSettings.binaryPathKey === "claudeBinaryPath"
+                      ? claudeBinaryPath
+                      : providerSettings.binaryPathKey === "geminiBinaryPath"
+                        ? geminiBinaryPath
+                        : codexBinaryPath;
+
+                  return (
+                    <Collapsible
+                      key={providerSettings.provider}
+                      open={isOpen}
+                      onOpenChange={(open) =>
+                        setOpenInstallProviders((existing) => ({
+                          ...existing,
+                          [providerSettings.provider]: open,
+                        }))
+                      }
+                    >
+                      <div className="overflow-hidden rounded-xl border border-border/70">
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-3 px-4 py-3 text-left"
+                          onClick={() =>
+                            setOpenInstallProviders((existing) => ({
+                              ...existing,
+                              [providerSettings.provider]: !existing[providerSettings.provider],
+                            }))
+                          }
+                        >
+                          <span className="min-w-0 flex-1 text-sm font-medium text-foreground">
+                            {providerSettings.title}
+                          </span>
+                          {isDirty ? (
+                            <span className="text-[11px] text-muted-foreground">Custom</span>
+                          ) : null}
+                          <ChevronDownIcon
+                            className={cn(
+                              "size-4 shrink-0 text-muted-foreground transition-transform",
+                              isOpen && "rotate-180",
+                            )}
+                          />
+                        </button>
+
+                        <CollapsibleContent>
+                          <div className="border-t border-border/70 px-4 py-4">
+                            <div className="space-y-3">
+                              <label
+                                htmlFor={`provider-install-${providerSettings.binaryPathKey}`}
+                                className="block"
+                              >
+                                <span className="block text-xs font-medium text-foreground">
+                                  {providerSettings.title} binary path
+                                </span>
+                                <Input
+                                  id={`provider-install-${providerSettings.binaryPathKey}`}
+                                  className="mt-1"
+                                  value={binaryPathValue}
+                                  onChange={(event) =>
+                                    updateSettings(
+                                      providerSettings.binaryPathKey === "claudeBinaryPath"
+                                        ? { claudeBinaryPath: event.target.value }
+                                        : providerSettings.binaryPathKey === "geminiBinaryPath"
+                                          ? { geminiBinaryPath: event.target.value }
+                                          : { codexBinaryPath: event.target.value },
+                                    )
+                                  }
+                                  placeholder={providerSettings.binaryPlaceholder}
+                                  spellCheck={false}
+                                />
+                                <span className="mt-1 block text-xs text-muted-foreground">
+                                  {providerSettings.binaryDescription}
+                                </span>
+                              </label>
+
+                              {providerSettings.homePathKey ? (
+                                <label
+                                  htmlFor={`provider-install-${providerSettings.homePathKey}`}
+                                  className="block"
+                                >
+                                  <span className="block text-xs font-medium text-foreground">
+                                    CODEX_HOME path
+                                  </span>
+                                  <Input
+                                    id={`provider-install-${providerSettings.homePathKey}`}
+                                    className="mt-1"
+                                    value={codexHomePath}
+                                    onChange={(event) =>
+                                      updateSettings({
+                                        codexHomePath: event.target.value,
+                                      })
+                                    }
+                                    placeholder={providerSettings.homePlaceholder}
+                                    spellCheck={false}
+                                  />
+                                  {providerSettings.homeDescription ? (
+                                    <span className="mt-1 block text-xs text-muted-foreground">
+                                      {providerSettings.homeDescription}
+                                    </span>
+                                  ) : null}
+                                </label>
+                              ) : null}
+                            </div>
+                          </div>
+                        </CollapsibleContent>
+                      </div>
+                    </Collapsible>
+                  );
+                })}
+              </div>
+            </div>
+          </SettingsRow>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="Developer tools">
+        <div className="space-y-2">
+          <SettingsRow
+            title="Keybindings"
+            description="Open the persisted `keybindings.json` file to edit advanced bindings directly."
+            status={
+              <>
+                <span className="block break-all font-mono text-[11px] text-foreground">
+                  {keybindingsConfigPath ?? "Resolving keybindings path..."}
+                </span>
+                {openKeybindingsError ? (
+                  <span className="mt-1 block text-destructive">{openKeybindingsError}</span>
+                ) : (
+                  <span className="mt-1 block">Opens in your preferred editor.</span>
+                )}
+              </>
+            }
+            control={
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!keybindingsConfigPath || isOpeningKeybindings}
+                onClick={openKeybindingsFile}
+              >
+                {isOpeningKeybindings ? "Opening..." : "Open file"}
+              </Button>
+            }
+          />
+
+          <SettingsRow
+            title="Recovery tools"
+            description="Rebuild local project indexes without clearing existing chats when the local state gets out of sync."
+            status={
+              shouldOfferRecoveryTools
+                ? "Visible because projects exist but no chat history is currently available."
+                : "Shown automatically only when recovery actions are relevant."
+            }
+            control={
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!shouldOfferRecoveryTools || isRepairingLocalState}
+                onClick={() => void repairLocalState()}
+              >
+                {isRepairingLocalState ? "Repairing..." : "Repair state"}
+              </Button>
+            }
+          >
+            {shouldOfferRecoveryTools ? (
+              <div className="mt-3 border-t border-border/70 pt-3">
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between text-left"
+                  onClick={() => setShowRecoveryTools((current) => !current)}
+                >
+                  <span className="text-xs font-medium text-muted-foreground">What this does</span>
+                  <ChevronDownIcon
+                    className={cn(
+                      "size-4 shrink-0 text-muted-foreground transition-transform",
+                      showRecoveryTools && "rotate-180",
+                    )}
+                  />
+                </button>
+                {showRecoveryTools ? (
+                  <div className="mt-3 rounded-xl border border-border/70 px-3 py-3 text-xs text-muted-foreground">
+                    Rebuilds local project indexes and refreshes project snapshots. Existing chats
+                    stay in place.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </SettingsRow>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection title="About">
+        <div className="space-y-2">
+          <SettingsRow
+            title="Version"
+            description="Current application version."
+            control={
+              <code className="text-xs font-medium text-muted-foreground">{APP_VERSION}</code>
+            }
+          />
+          <SettingsRow
+            title="Release history"
+            description="A running log of every update, newest first. Same notes the post-update dialog shows, kept here so you can revisit them any time."
+            control={
+              <Button size="sm" variant="outline" onClick={() => setReleaseHistoryOpen(true)}>
+                View release history
+              </Button>
+            }
+          />
+        </div>
+      </SettingsSection>
+    </div>
+  );
+
+  const renderActivePanel = () => {
+    switch (activeSection) {
+      case "general":
+        return renderGeneralPanel();
+      case "appearance":
+        return renderAppearancePanel();
+      case "notifications":
+        return renderNotificationsPanel();
+      case "behavior":
+        return renderBehaviorPanel();
+      case "worktrees":
+        return renderWorktreesPanel();
+      case "archived":
+        return renderArchivedPanel();
+      case "models":
+        return renderModelsPanel();
+      case "advanced":
+        return renderAdvancedPanel();
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        {/* Header */}
+        {isElectron ? (
+          <div
+            className={cn(
+              "drag-region flex h-[52px] shrink-0 items-center border-b border-border/70 px-5",
+              settings.sidebarSide === "right" && "pl-[90px]",
+            )}
+          >
+            <SidebarHeaderTrigger className="size-7 shrink-0" />
+            <span className="text-xs font-medium tracking-wide text-muted-foreground/70">
+              Settings
+            </span>
+            <div className="ms-auto flex items-center gap-2">
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={changedSettingLabels.length === 0}
+                onClick={() => void restoreDefaults()}
+              >
+                <RotateCcwIcon className="size-3.5" />
+                Restore defaults
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <header className="border-b border-border/70 px-3 py-2 sm:px-5">
+            <div className="flex items-center gap-2">
+              <SidebarHeaderTrigger className="size-7 shrink-0" />
+              <span className="text-sm font-medium text-foreground">Settings</span>
+              <div className="ms-auto flex items-center gap-2">
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={changedSettingLabels.length === 0}
+                  onClick={() => void restoreDefaults()}
+                >
+                  <RotateCcwIcon className="size-3.5" />
+                  Restore defaults
+                </Button>
+              </div>
+            </div>
+          </header>
+        )}
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-2xl px-6 py-6">
+            {/* Section header */}
+            <div className="mb-6">
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+                {activeSectionItem.label}
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">{activeSectionItem.description}</p>
+            </div>
+
+            {renderActivePanel()}
+          </div>
+        </div>
+      </div>
+      {/* Mounted at the route level (outside the scrollable panel) so the
+          dialog portal can overlay the entire settings view without being
+          clipped by the content wrapper's overflow. */}
+      <ReleaseHistoryDialog
+        open={releaseHistoryOpen}
+        onOpenChange={setReleaseHistoryOpen}
+        defaultExpandedVersion={APP_VERSION}
+      />
+    </SidebarInset>
+  );
+}
+
+export const Route = createFileRoute("/_chat/settings")({
+  component: SettingsRouteView,
+});

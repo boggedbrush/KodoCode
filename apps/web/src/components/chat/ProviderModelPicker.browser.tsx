@@ -1,155 +1,42 @@
-import { type ProviderKind, type ServerProvider } from "@t3tools/contracts";
+import { type ModelSlug, type ProviderKind, type ServerProviderStatus } from "@t3tools/contracts";
 import { page } from "vitest/browser";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
-import { COMPOSER_AUTO_MODEL_VALUE, ProviderModelPicker } from "./ProviderModelPicker";
-import { getCustomModelOptionsByProvider } from "../../modelSelection";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import { ProviderModelPicker } from "./ProviderModelPicker";
 
-function effort(value: string, isDefault = false) {
-  return {
-    value,
-    label: value,
-    ...(isDefault ? { isDefault: true } : {}),
-  };
-}
-
-const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
-  {
-    provider: "codex",
-    enabled: true,
-    installed: true,
-    version: "0.116.0",
-    status: "ready",
-    auth: { status: "authenticated" },
-    checkedAt: new Date().toISOString(),
-    models: [
-      {
-        slug: "gpt-5-codex",
-        name: "GPT-5 Codex",
-        isCustom: false,
-        capabilities: {
-          reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-          supportsFastMode: true,
-          supportsThinkingToggle: false,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
-        },
-      },
-      {
-        slug: "gpt-5.3-codex",
-        name: "GPT-5.3 Codex",
-        isCustom: false,
-        capabilities: {
-          reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-          supportsFastMode: true,
-          supportsThinkingToggle: false,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
-        },
-      },
-    ],
-  },
-  {
-    provider: "claudeAgent",
-    enabled: true,
-    installed: true,
-    version: "1.0.0",
-    status: "ready",
-    auth: { status: "authenticated" },
-    checkedAt: new Date().toISOString(),
-    models: [
-      {
-        slug: "claude-opus-4-6",
-        name: "Claude Opus 4.6",
-        isCustom: false,
-        capabilities: {
-          reasoningEffortLevels: [
-            effort("low"),
-            effort("medium", true),
-            effort("high"),
-            effort("max"),
-          ],
-          supportsFastMode: false,
-          supportsThinkingToggle: true,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
-        },
-      },
-      {
-        slug: "claude-sonnet-4-6",
-        name: "Claude Sonnet 4.6",
-        isCustom: false,
-        capabilities: {
-          reasoningEffortLevels: [
-            effort("low"),
-            effort("medium", true),
-            effort("high"),
-            effort("max"),
-          ],
-          supportsFastMode: false,
-          supportsThinkingToggle: true,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
-        },
-      },
-      {
-        slug: "claude-haiku-4-5",
-        name: "Claude Haiku 4.5",
-        isCustom: false,
-        capabilities: {
-          reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-          supportsFastMode: false,
-          supportsThinkingToggle: true,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
-        },
-      },
-    ],
-  },
-];
-
-function buildCodexProvider(models: ServerProvider["models"]): ServerProvider {
-  return {
-    provider: "codex",
-    enabled: true,
-    installed: true,
-    version: "0.116.0",
-    status: "ready",
-    auth: { status: "authenticated" },
-    checkedAt: new Date().toISOString(),
-    models,
-  };
-}
+const MODEL_OPTIONS_BY_PROVIDER = {
+  claudeAgent: [
+    { slug: "claude-opus-4-6", name: "Claude Opus 4.6" },
+    { slug: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+    { slug: "claude-haiku-4-5", name: "Claude Haiku 4.5" },
+  ],
+  codex: [
+    { slug: "gpt-5-codex", name: "GPT-5 Codex" },
+    { slug: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
+  ],
+  gemini: [
+    { slug: "auto-gemini-3", name: "Auto Gemini 3" },
+    { slug: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+  ],
+} as const satisfies Record<ProviderKind, ReadonlyArray<{ slug: ModelSlug; name: string }>>;
 
 async function mountPicker(props: {
   provider: ProviderKind;
-  model: string;
+  model: ModelSlug;
   lockedProvider: ProviderKind | null;
-  providers?: ReadonlyArray<ServerProvider>;
-  triggerVariant?: "ghost" | "outline";
-  showAsAuto?: boolean;
+  providers?: ReadonlyArray<ServerProviderStatus>;
 }) {
   const host = document.createElement("div");
   document.body.append(host);
   const onProviderModelChange = vi.fn();
-  const providers = props.providers ?? TEST_PROVIDERS;
-  const modelOptionsByProvider = getCustomModelOptionsByProvider(
-    DEFAULT_UNIFIED_SETTINGS,
-    providers,
-    props.provider,
-    props.model,
-  );
   const screen = await render(
     <ProviderModelPicker
       provider={props.provider}
       model={props.model}
       lockedProvider={props.lockedProvider}
-      providers={providers}
-      modelOptionsByProvider={modelOptionsByProvider}
-      {...(props.showAsAuto !== undefined ? { showAsAuto: props.showAsAuto } : {})}
-      triggerVariant={props.triggerVariant}
+      modelOptionsByProvider={MODEL_OPTIONS_BY_PROVIDER}
+      {...(props.providers ? { providers: props.providers } : {})}
       onProviderModelChange={onProviderModelChange}
     />,
     { container: host },
@@ -190,51 +77,6 @@ describe("ProviderModelPicker", () => {
     }
   });
 
-  it("opens provider submenus with a visible gap from the parent menu", async () => {
-    const mounted = await mountPicker({
-      provider: "claudeAgent",
-      model: "claude-opus-4-6",
-      lockedProvider: null,
-    });
-
-    try {
-      await page.getByRole("button").click();
-      const providerTrigger = page.getByRole("menuitem", { name: "Codex" });
-      await providerTrigger.hover();
-
-      await vi.waitFor(() => {
-        expect(document.body.textContent ?? "").toContain("GPT-5 Codex");
-      });
-
-      const providerTriggerElement = Array.from(
-        document.querySelectorAll<HTMLElement>('[role="menuitem"]'),
-      ).find((element) => element.textContent?.includes("Codex"));
-      if (!providerTriggerElement) {
-        throw new Error("Expected the Codex provider trigger to be mounted.");
-      }
-
-      const providerTriggerRect = providerTriggerElement.getBoundingClientRect();
-      const modelElement = Array.from(
-        document.querySelectorAll<HTMLElement>('[role="menuitemradio"]'),
-      ).find((element) => element.textContent?.includes("GPT-5 Codex"));
-      if (!modelElement) {
-        throw new Error("Expected the submenu model option to be mounted.");
-      }
-
-      const submenuPopup = modelElement.closest('[data-slot="menu-sub-content"]');
-      if (!(submenuPopup instanceof HTMLElement)) {
-        throw new Error("Expected submenu popup to be mounted.");
-      }
-
-      const submenuRect = submenuPopup.getBoundingClientRect();
-
-      expect(submenuRect.left).toBeGreaterThanOrEqual(providerTriggerRect.right);
-      expect(submenuRect.left - providerTriggerRect.right).toBeGreaterThanOrEqual(2);
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
   it("shows models directly when the provider is locked mid-thread", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
@@ -253,118 +95,6 @@ describe("ProviderModelPicker", () => {
       });
     } finally {
       await mounted.cleanup();
-    }
-  });
-
-  it("shows and dispatches Auto when selected", async () => {
-    const mounted = await mountPicker({
-      provider: "claudeAgent",
-      model: "claude-opus-4-6",
-      lockedProvider: "claudeAgent",
-      showAsAuto: true,
-    });
-
-    try {
-      await page.getByRole("button").click();
-
-      await vi.waitFor(() => {
-        expect(document.body.textContent ?? "").toContain("Auto");
-      });
-
-      await page.getByRole("menuitemradio", { name: "Auto" }).click();
-      expect(mounted.onProviderModelChange).toHaveBeenCalledWith(
-        "claudeAgent",
-        COMPOSER_AUTO_MODEL_VALUE,
-      );
-    } finally {
-      await mounted.cleanup();
-    }
-  });
-
-  it("only shows codex spark when the server reports it for the account", async () => {
-    const providersWithoutSpark: ReadonlyArray<ServerProvider> = [
-      buildCodexProvider([
-        {
-          slug: "gpt-5.3-codex",
-          name: "GPT-5.3 Codex",
-          isCustom: false,
-          capabilities: {
-            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-            supportsFastMode: true,
-            supportsThinkingToggle: false,
-            contextWindowOptions: [],
-            promptInjectedEffortLevels: [],
-          },
-        },
-      ]),
-      TEST_PROVIDERS[1]!,
-    ];
-    const providersWithSpark: ReadonlyArray<ServerProvider> = [
-      buildCodexProvider([
-        {
-          slug: "gpt-5.3-codex",
-          name: "GPT-5.3 Codex",
-          isCustom: false,
-          capabilities: {
-            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-            supportsFastMode: true,
-            supportsThinkingToggle: false,
-            contextWindowOptions: [],
-            promptInjectedEffortLevels: [],
-          },
-        },
-        {
-          slug: "gpt-5.3-codex-spark",
-          name: "GPT-5.3 Codex Spark",
-          isCustom: false,
-          capabilities: {
-            reasoningEffortLevels: [effort("low"), effort("medium", true), effort("high")],
-            supportsFastMode: true,
-            supportsThinkingToggle: false,
-            contextWindowOptions: [],
-            promptInjectedEffortLevels: [],
-          },
-        },
-      ]),
-      TEST_PROVIDERS[1]!,
-    ];
-
-    const hidden = await mountPicker({
-      provider: "claudeAgent",
-      model: "claude-opus-4-6",
-      lockedProvider: null,
-      providers: providersWithoutSpark,
-    });
-
-    try {
-      await page.getByRole("button").click();
-      await page.getByRole("menuitem", { name: "Codex" }).hover();
-
-      await vi.waitFor(() => {
-        const text = document.body.textContent ?? "";
-        expect(text).toContain("GPT-5.3 Codex");
-        expect(text).not.toContain("GPT-5.3 Codex Spark");
-      });
-    } finally {
-      await hidden.cleanup();
-    }
-
-    const visible = await mountPicker({
-      provider: "claudeAgent",
-      model: "claude-opus-4-6",
-      lockedProvider: null,
-      providers: providersWithSpark,
-    });
-
-    try {
-      await page.getByRole("button").click();
-      await page.getByRole("menuitem", { name: "Codex" }).hover();
-
-      await vi.waitFor(() => {
-        expect(document.body.textContent ?? "").toContain("GPT-5.3 Codex Spark");
-      });
-    } finally {
-      await visible.cleanup();
     }
   });
 
@@ -388,24 +118,27 @@ describe("ProviderModelPicker", () => {
     }
   });
 
-  it("shows disabled providers as non-selectable entries", async () => {
-    const disabledProviders = TEST_PROVIDERS.slice();
-    const claudeIndex = disabledProviders.findIndex(
-      (provider) => provider.provider === "claudeAgent",
-    );
-    if (claudeIndex >= 0) {
-      const claudeProvider = disabledProviders[claudeIndex]!;
-      disabledProviders[claudeIndex] = {
-        ...claudeProvider,
-        enabled: false,
-        status: "disabled",
-      };
-    }
+  it("shows unavailable providers as disabled rows", async () => {
     const mounted = await mountPicker({
       provider: "codex",
       model: "gpt-5-codex",
       lockedProvider: null,
-      providers: disabledProviders,
+      providers: [
+        {
+          provider: "codex",
+          status: "ready",
+          available: true,
+          authStatus: "authenticated",
+          checkedAt: "2026-04-10T10:00:00.000Z",
+        },
+        {
+          provider: "claudeAgent",
+          status: "error",
+          available: false,
+          authStatus: "unauthenticated",
+          checkedAt: "2026-04-10T10:00:00.000Z",
+        },
+      ],
     });
 
     try {
@@ -413,30 +146,48 @@ describe("ProviderModelPicker", () => {
 
       await vi.waitFor(() => {
         const text = document.body.textContent ?? "";
+        expect(text).toContain("Codex");
         expect(text).toContain("Claude");
-        expect(text).toContain("Disabled");
-        expect(text).not.toContain("Claude Sonnet 4.6");
+        expect(text).toContain("Sign in");
       });
     } finally {
       await mounted.cleanup();
     }
   });
 
-  it("accepts outline trigger styling", async () => {
+  it("keeps warning providers selectable when they are still available", async () => {
     const mounted = await mountPicker({
       provider: "codex",
       model: "gpt-5-codex",
       lockedProvider: null,
-      triggerVariant: "outline",
+      providers: [
+        {
+          provider: "codex",
+          status: "ready",
+          available: true,
+          authStatus: "authenticated",
+          checkedAt: "2026-04-10T10:00:00.000Z",
+        },
+        {
+          provider: "claudeAgent",
+          status: "warning",
+          available: true,
+          authStatus: "unknown",
+          checkedAt: "2026-04-10T10:00:00.000Z",
+          message: "Could not verify auth status.",
+        },
+      ],
     });
 
     try {
-      const button = document.querySelector("button");
-      if (!(button instanceof HTMLButtonElement)) {
-        throw new Error("Expected picker trigger button to be rendered.");
-      }
-      expect(button.className).toContain("border-input");
-      expect(button.className).toContain("bg-popover");
+      await page.getByRole("button").click();
+
+      await vi.waitFor(() => {
+        expect(document.body.textContent ?? "").toContain("Claude");
+      });
+
+      await expect.element(page.getByText("Sign in")).not.toBeInTheDocument();
+      await expect.element(page.getByText("Unavailable")).not.toBeInTheDocument();
     } finally {
       await mounted.cleanup();
     }

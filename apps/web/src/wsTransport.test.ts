@@ -1,26 +1,10 @@
-import { DEFAULT_SERVER_SETTINGS, EnvironmentId, WS_METHODS } from "@t3tools/contracts";
-import { Stream } from "effect";
+import { WS_CHANNELS } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  __resetClientTracingForTests,
-  configureClientTracing,
-} from "./observability/clientTracing";
-import {
-  getSlowRpcAckRequests,
-  resetRequestLatencyStateForTests,
-  setSlowRpcAckThresholdMsForTests,
-} from "./rpc/requestLatencyState";
-import {
-  getWsConnectionStatus,
-  getWsConnectionUiState,
-  resetWsConnectionStateForTests,
-} from "./rpc/wsConnectionState";
 import { WsTransport } from "./wsTransport";
 
 type WsEventType = "open" | "message" | "close" | "error";
-type WsEvent = { code?: number; data?: unknown; reason?: string; type?: string };
-type WsListener = (event?: WsEvent) => void;
+type WsListener = (event?: { data?: unknown }) => void;
 
 const sockets: MockWebSocket[] = [];
 
@@ -32,11 +16,9 @@ class MockWebSocket {
 
   readyState = MockWebSocket.CONNECTING;
   readonly sent: string[] = [];
-  readonly url: string;
   private readonly listeners = new Map<WsEventType, Set<WsListener>>();
 
-  constructor(url: string) {
-    this.url = url;
+  constructor(_url: string) {
     sockets.push(this);
   }
 
@@ -46,33 +28,25 @@ class MockWebSocket {
     this.listeners.set(type, listeners);
   }
 
-  removeEventListener(type: WsEventType, listener: WsListener) {
-    this.listeners.get(type)?.delete(listener);
-  }
-
   send(data: string) {
     this.sent.push(data);
   }
 
-  close(code = 1000, reason = "") {
+  close() {
     this.readyState = MockWebSocket.CLOSED;
-    this.emit("close", { code, reason, type: "close" });
+    this.emit("close");
   }
 
   open() {
     this.readyState = MockWebSocket.OPEN;
-    this.emit("open", { type: "open" });
+    this.emit("open");
   }
 
   serverMessage(data: unknown) {
-    this.emit("message", { data, type: "message" });
+    this.emit("message", { data });
   }
 
-  error() {
-    this.emit("error", { type: "error" });
-  }
-
-  private emit(type: WsEventType, event?: WsEvent) {
+  private emit(type: WsEventType, event?: { data?: unknown }) {
     const listeners = this.listeners.get(type);
     if (!listeners) return;
     for (const listener of listeners) {
@@ -82,19 +56,6 @@ class MockWebSocket {
 }
 
 const originalWebSocket = globalThis.WebSocket;
-const originalFetch = globalThis.fetch;
-const baseEnvironment = {
-  environmentId: EnvironmentId.makeUnsafe("env-local"),
-  label: "Local environment",
-  platform: {
-    os: "darwin" as const,
-    arch: "arm64" as const,
-  },
-  serverVersion: "0.0.0-test",
-  capabilities: {
-    repositoryIdentity: true,
-  },
-};
 
 function getSocket(): MockWebSocket {
   const socket = sockets.at(-1);
@@ -104,851 +65,192 @@ function getSocket(): MockWebSocket {
   return socket;
 }
 
-async function waitFor(assertion: () => void, timeoutMs = 1_000): Promise<void> {
-  const startedAt = Date.now();
-  for (;;) {
-    try {
-      assertion();
-      return;
-    } catch (error) {
-      if (Date.now() - startedAt >= timeoutMs) {
-        throw error;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-  }
-}
-
 beforeEach(() => {
-  vi.useRealTimers();
   sockets.length = 0;
-  resetRequestLatencyStateForTests();
-  resetWsConnectionStateForTests();
 
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
-      location: {
-        origin: "http://localhost:3020",
-        hostname: "localhost",
-        port: "3020",
-        protocol: "http:",
-      },
+      location: { hostname: "localhost", port: "3020" },
       desktopBridge: undefined,
     },
-  });
-  Object.defineProperty(globalThis, "navigator", {
-    configurable: true,
-    value: { onLine: true },
   });
 
   globalThis.WebSocket = MockWebSocket as unknown as typeof WebSocket;
 });
 
-afterEach(async () => {
+afterEach(() => {
   globalThis.WebSocket = originalWebSocket;
-  globalThis.fetch = originalFetch;
-  resetRequestLatencyStateForTests();
-  resetWsConnectionStateForTests();
-  await __resetClientTracingForTests();
   vi.restoreAllMocks();
 });
 
 describe("WsTransport", () => {
-  it("normalizes root websocket urls to /ws and preserves query params", async () => {
-    const transport = new WsTransport("ws://localhost:3020/?token=secret-token");
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    expect(getSocket().url).toBe("ws://localhost:3020/ws?token=secret-token");
-    await transport.dispose();
-  });
-
-  it("mints a websocket token through the page origin for cross-origin browser sessions", async () => {
-    globalThis.fetch = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            token: "issued-session-token",
-            expiresAt: "2026-04-10T12:00:00.000Z",
-          }),
-          {
-            headers: {
-              "content-type": "application/json",
-            },
-            status: 200,
-          },
-        ),
-    );
-
-    const transport = new WsTransport("ws://127.0.0.1:3773/?client=web");
-
-    await waitFor(() => {
-      expect(globalThis.fetch).toHaveBeenCalledWith("http://localhost:3020/api/auth/ws-token", {
-        credentials: "include",
-        method: "POST",
-      });
-    });
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    expect(getSocket().url).toBe("ws://127.0.0.1:3773/ws?client=web&wsToken=issued-session-token");
-    await transport.dispose();
-  });
-
-  it("uses wss when falling back to an https page origin", async () => {
-    Object.assign(window.location, {
-      origin: "https://app.example.com",
-      hostname: "app.example.com",
-      port: "",
-      protocol: "https:",
-    });
-
-    const transport = new WsTransport();
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    expect(getSocket().url).toBe("wss://app.example.com/ws");
-    await transport.dispose();
-  });
-
-  it("tracks initial connection failures for the app error state", async () => {
+  it("routes valid push envelopes to channel listeners", () => {
     const transport = new WsTransport("ws://localhost:3020");
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    const socket = getSocket();
-    expect(getWsConnectionStatus()).toMatchObject({
-      attemptCount: 1,
-      phase: "connecting",
-      socketUrl: "ws://localhost:3020/ws",
-    });
-
-    socket.error();
-    socket.close(1006, "server unavailable");
-
-    await waitFor(() => {
-      expect(getWsConnectionStatus()).toMatchObject({
-        closeCode: 1006,
-        closeReason: "server unavailable",
-        hasConnected: false,
-        lastError: "Unable to connect to the Kodo server WebSocket.",
-        phase: "disconnected",
-      });
-    });
-    expect(getWsConnectionUiState(getWsConnectionStatus())).toBe("error");
-
-    await transport.dispose();
-  });
-
-  it("surfaces reconnecting state after a live socket disconnects", async () => {
-    const transport = new WsTransport("ws://localhost:3020");
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
     const socket = getSocket();
     socket.open();
 
-    await waitFor(() => {
-      expect(getWsConnectionStatus()).toMatchObject({
-        hasConnected: true,
-        phase: "connected",
-      });
-    });
-
-    socket.close(1013, "try again later");
-
-    await waitFor(() => {
-      expect(getWsConnectionStatus()).toMatchObject({
-        closeReason: "try again later",
-        hasConnected: true,
-      });
-    });
-    expect(getWsConnectionUiState(getWsConnectionStatus())).toBe("reconnecting");
-
-    await transport.dispose();
-  });
-
-  it("reconnects the websocket session without disposing the transport", async () => {
-    const transport = new WsTransport("ws://localhost:3020");
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    const firstSocket = getSocket();
-    firstSocket.open();
-
-    await waitFor(() => {
-      expect(getWsConnectionStatus()).toMatchObject({
-        hasConnected: true,
-        phase: "connected",
-      });
-    });
-
-    await transport.reconnect();
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(2);
-    });
-
-    const secondSocket = getSocket();
-    expect(secondSocket).not.toBe(firstSocket);
-    expect(firstSocket.readyState).toBe(MockWebSocket.CLOSED);
-
-    const requestPromise = transport.request((client) =>
-      client[WS_METHODS.serverUpsertKeybinding]({
-        command: "terminal.toggle",
-        key: "ctrl+k",
-      }),
-    );
-
-    secondSocket.open();
-
-    await waitFor(() => {
-      expect(secondSocket.sent).toHaveLength(1);
-    });
-
-    const requestMessage = JSON.parse(secondSocket.sent[0] ?? "{}") as { id: string };
-    secondSocket.serverMessage(
-      JSON.stringify({
-        _tag: "Exit",
-        requestId: requestMessage.id,
-        exit: {
-          _tag: "Success",
-          value: {
-            keybindings: [],
-            issues: [],
-          },
-        },
-      }),
-    );
-
-    await expect(requestPromise).resolves.toEqual({
-      keybindings: [],
-      issues: [],
-    });
-
-    await transport.dispose();
-  });
-
-  it("marks unary requests as slow until the first server ack arrives", async () => {
-    const slowAckThresholdMs = 25;
-    setSlowRpcAckThresholdMsForTests(slowAckThresholdMs);
-    const transport = new WsTransport("ws://localhost:3020");
-
-    const requestPromise = transport.request((client) =>
-      client[WS_METHODS.serverUpsertKeybinding]({
-        command: "terminal.toggle",
-        key: "ctrl+k",
-      }),
-    );
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    const socket = getSocket();
-    socket.open();
-
-    await waitFor(() => {
-      expect(socket.sent).toHaveLength(1);
-    });
-
-    const requestMessage = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
-    await waitFor(() => {
-      expect(getSlowRpcAckRequests()).toMatchObject([
-        {
-          requestId: requestMessage.id,
-          tag: WS_METHODS.serverUpsertKeybinding,
-        },
-      ]);
-    }, 1_000);
-
-    socket.serverMessage(
-      JSON.stringify({
-        _tag: "Exit",
-        requestId: requestMessage.id,
-        exit: {
-          _tag: "Success",
-          value: {
-            keybindings: [],
-            issues: [],
-          },
-        },
-      }),
-    );
-
-    await expect(requestPromise).resolves.toEqual({
-      keybindings: [],
-      issues: [],
-    });
-    expect(getSlowRpcAckRequests()).toEqual([]);
-
-    await transport.dispose();
-  }, 5_000);
-
-  it("sends unary RPC requests and resolves successful exits", async () => {
-    const transport = new WsTransport("ws://localhost:3020");
-
-    const requestPromise = transport.request((client) =>
-      client[WS_METHODS.serverUpsertKeybinding]({
-        command: "terminal.toggle",
-        key: "ctrl+k",
-      }),
-    );
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    const socket = getSocket();
-    socket.open();
-
-    await waitFor(() => {
-      expect(socket.sent).toHaveLength(1);
-    });
-
-    const requestMessage = JSON.parse(socket.sent[0] ?? "{}") as {
-      _tag: string;
-      id: string;
-      payload: unknown;
-      tag: string;
-    };
-    expect(requestMessage).toMatchObject({
-      _tag: "Request",
-      tag: WS_METHODS.serverUpsertKeybinding,
-      payload: {
-        command: "terminal.toggle",
-        key: "ctrl+k",
-      },
-    });
-
-    socket.serverMessage(
-      JSON.stringify({
-        _tag: "Exit",
-        requestId: requestMessage.id,
-        exit: {
-          _tag: "Success",
-          value: {
-            keybindings: [],
-            issues: [],
-          },
-        },
-      }),
-    );
-
-    await expect(requestPromise).resolves.toEqual({
-      keybindings: [],
-      issues: [],
-    });
-
-    await transport.dispose();
-  });
-
-  it("delivers stream chunks to subscribers", async () => {
-    const transport = new WsTransport("ws://localhost:3020");
     const listener = vi.fn();
+    transport.subscribe(WS_CHANNELS.serverConfigUpdated, listener);
 
-    const unsubscribe = transport.subscribe(
-      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
-      listener,
+    socket.serverMessage(
+      JSON.stringify({
+        type: "push",
+        sequence: 1,
+        channel: WS_CHANNELS.serverConfigUpdated,
+        data: { issues: [], providers: [] },
+      }),
     );
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
 
-    const socket = getSocket();
-    socket.open();
-
-    await waitFor(() => {
-      expect(socket.sent).toHaveLength(1);
-    });
-
-    const requestMessage = JSON.parse(socket.sent[0] ?? "{}") as { id: string; tag: string };
-    expect(requestMessage.tag).toBe(WS_METHODS.subscribeServerLifecycle);
-
-    const welcomeEvent = {
-      version: 1,
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith({
+      type: "push",
       sequence: 1,
-      type: "welcome",
-      payload: {
-        environment: baseEnvironment,
-        cwd: "/tmp/workspace",
-        projectName: "workspace",
-      },
-    };
-
-    socket.serverMessage(
-      JSON.stringify({
-        _tag: "Chunk",
-        requestId: requestMessage.id,
-        values: [welcomeEvent],
-      }),
-    );
-
-    await waitFor(() => {
-      expect(listener).toHaveBeenCalledWith(welcomeEvent);
+      channel: WS_CHANNELS.serverConfigUpdated,
+      data: { issues: [], providers: [] },
     });
 
-    unsubscribe();
-    await transport.dispose();
+    transport.dispose();
   });
 
-  it("re-subscribes stream listeners after the stream exits", async () => {
+  it("resolves pending requests for valid response envelopes", async () => {
     const transport = new WsTransport("ws://localhost:3020");
-    const listener = vi.fn();
-    const onResubscribe = vi.fn();
-
-    const unsubscribe = transport.subscribe(
-      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
-      listener,
-      { onResubscribe },
-    );
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
     const socket = getSocket();
     socket.open();
 
-    await waitFor(() => {
-      expect(socket.sent).toHaveLength(1);
-    });
-
-    const firstRequest = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
-    socket.serverMessage(
-      JSON.stringify({
-        _tag: "Chunk",
-        requestId: firstRequest.id,
-        values: [
-          {
-            version: 1,
-            sequence: 1,
-            type: "welcome",
-            payload: {
-              environment: baseEnvironment,
-              cwd: "/tmp/one",
-              projectName: "one",
-            },
-          },
-        ],
-      }),
-    );
-    socket.serverMessage(
-      JSON.stringify({
-        _tag: "Exit",
-        requestId: firstRequest.id,
-        exit: {
-          _tag: "Success",
-          value: null,
-        },
-      }),
-    );
-
-    await waitFor(() => {
-      const nextRequest = socket.sent
-        .map((message) => JSON.parse(message) as { _tag?: string; id?: string })
-        .find((message) => message._tag === "Request" && message.id !== firstRequest.id);
-      expect(nextRequest).toBeDefined();
-    });
-    expect(onResubscribe).toHaveBeenCalledOnce();
-
-    const secondRequest = socket.sent
-      .map((message) => JSON.parse(message) as { _tag?: string; id?: string; tag?: string })
-      .find(
-        (message): message is { _tag: "Request"; id: string; tag: string } =>
-          message._tag === "Request" && message.id !== firstRequest.id,
-      );
-    if (!secondRequest) {
-      throw new Error("Expected a resubscribe request");
+    const requestPromise = transport.request("projects.list");
+    const sent = socket.sent.at(-1);
+    if (!sent) {
+      throw new Error("Expected request envelope to be sent");
     }
-    expect(secondRequest.tag).toBe(WS_METHODS.subscribeServerLifecycle);
-    expect(secondRequest.id).not.toBe(firstRequest.id);
 
-    const secondEvent = {
-      version: 1,
-      sequence: 2,
-      type: "welcome",
-      payload: {
-        environment: baseEnvironment,
-        cwd: "/tmp/two",
-        projectName: "two",
-      },
-    };
+    const requestEnvelope = JSON.parse(sent) as { id: string };
     socket.serverMessage(
       JSON.stringify({
-        _tag: "Chunk",
-        requestId: secondRequest.id,
-        values: [secondEvent],
+        id: requestEnvelope.id,
+        result: { projects: [] },
       }),
     );
 
-    await waitFor(() => {
-      expect(listener).toHaveBeenLastCalledWith(secondEvent);
-    });
+    await expect(requestPromise).resolves.toEqual({ projects: [] });
 
-    unsubscribe();
-    await transport.dispose();
+    transport.dispose();
   });
 
-  it("does not fire onResubscribe when the first stream attempt exits before any value", async () => {
+  it("drops malformed envelopes without crashing transport", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const transport = new WsTransport("ws://localhost:3020");
+    const socket = getSocket();
+    socket.open();
+
     const listener = vi.fn();
-    const onResubscribe = vi.fn();
+    transport.subscribe(WS_CHANNELS.serverConfigUpdated, listener);
 
-    const unsubscribe = transport.subscribe(
-      (client) => client[WS_METHODS.subscribeServerLifecycle]({}),
-      listener,
-      { onResubscribe },
+    socket.serverMessage("{ invalid-json");
+    socket.serverMessage(
+      JSON.stringify({
+        type: "push",
+        sequence: 2,
+        channel: 42,
+        data: { bad: true },
+      }),
     );
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
+    socket.serverMessage(
+      JSON.stringify({
+        type: "push",
+        sequence: 3,
+        channel: WS_CHANNELS.serverConfigUpdated,
+        data: { issues: [], providers: [] },
+      }),
+    );
 
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(listener).toHaveBeenCalledWith({
+      type: "push",
+      sequence: 3,
+      channel: WS_CHANNELS.serverConfigUpdated,
+      data: { issues: [], providers: [] },
+    });
+    expect(warnSpy).toHaveBeenCalledTimes(2);
+    expect(warnSpy).toHaveBeenNthCalledWith(
+      1,
+      "Dropped inbound WebSocket envelope",
+      "SyntaxError: Expected property name or '}' in JSON at position 2 (line 1 column 3)",
+    );
+    expect(warnSpy).toHaveBeenNthCalledWith(
+      2,
+      "Dropped inbound WebSocket envelope",
+      expect.stringContaining('Expected "server.configUpdated"'),
+    );
+
+    transport.dispose();
+  });
+
+  it("queues requests until the websocket opens", async () => {
+    const transport = new WsTransport("ws://localhost:3020");
+    const socket = getSocket();
+
+    const requestPromise = transport.request("projects.list");
+    expect(socket.sent).toHaveLength(0);
+
+    socket.open();
+    expect(socket.sent).toHaveLength(1);
+    const requestEnvelope = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
+    socket.serverMessage(
+      JSON.stringify({
+        id: requestEnvelope.id,
+        result: { projects: [] },
+      }),
+    );
+
+    await expect(requestPromise).resolves.toEqual({ projects: [] });
+    transport.dispose();
+  });
+
+  it("does not create a timeout for requests with timeoutMs null", async () => {
+    const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    const transport = new WsTransport("ws://localhost:3020");
     const socket = getSocket();
     socket.open();
 
-    await waitFor(() => {
-      expect(socket.sent).toHaveLength(1);
-    });
+    const requestPromise = transport.request(
+      "git.runStackedAction",
+      { cwd: "/repo" },
+      { timeoutMs: null },
+    );
+    const sent = socket.sent.at(-1);
+    if (!sent) {
+      throw new Error("Expected request envelope to be sent");
+    }
+    const requestEnvelope = JSON.parse(sent) as { id: string };
 
-    const firstRequest = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
     socket.serverMessage(
       JSON.stringify({
-        _tag: "Exit",
-        requestId: firstRequest.id,
-        exit: {
-          _tag: "Success",
-          value: null,
-        },
+        id: requestEnvelope.id,
+        result: { ok: true },
       }),
     );
 
-    await waitFor(() => {
-      const nextRequest = socket.sent
-        .map((message) => JSON.parse(message) as { _tag?: string; id?: string })
-        .find((message) => message._tag === "Request" && message.id !== firstRequest.id);
-      expect(nextRequest).toBeDefined();
-    });
-    expect(onResubscribe).not.toHaveBeenCalled();
-    expect(listener).not.toHaveBeenCalled();
+    await expect(requestPromise).resolves.toEqual({ ok: true });
+    expect(timeoutSpy.mock.calls.some(([callback]) => typeof callback === "function")).toBe(false);
 
-    unsubscribe();
-    await transport.dispose();
+    transport.dispose();
   });
 
-  it("does not retry stream subscriptions after application-level failures", async () => {
+  it("rejects pending requests when the websocket closes", async () => {
     const transport = new WsTransport("ws://localhost:3020");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    let attempts = 0;
-
-    const unsubscribe = transport.subscribe(
-      () =>
-        Stream.suspend(() => {
-          attempts += 1;
-          return Stream.fail(new Error("Git command failed in GitCore.statusDetails"));
-        }),
-      vi.fn(),
-      { retryDelay: 10 },
-    );
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    getSocket().open();
-
-    await waitFor(() => {
-      expect(attempts).toBe(1);
-    });
-    await new Promise((resolve) => setTimeout(resolve, 50));
-
-    expect(attempts).toBe(1);
-    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription failed", {
-      error: "Git command failed in GitCore.statusDetails",
-    });
-    expect(warnSpy).not.toHaveBeenCalledWith(
-      "WebSocket RPC subscription disconnected",
-      expect.anything(),
-    );
-
-    unsubscribe();
-    await transport.dispose();
-  });
-
-  it("keeps retrying stream subscriptions after transport failures", async () => {
-    const transport = new WsTransport("ws://localhost:3020");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    let attempts = 0;
-
-    const unsubscribe = transport.subscribe(
-      () =>
-        Stream.suspend(() => {
-          attempts += 1;
-          return Stream.fail(new Error("SocketCloseError: WebSocket closed"));
-        }),
-      vi.fn(),
-      { retryDelay: 10 },
-    );
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    getSocket().open();
-
-    await waitFor(() => {
-      expect(attempts).toBeGreaterThanOrEqual(2);
-    });
-
-    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription disconnected", {
-      error: "SocketCloseError: WebSocket closed",
-    });
-
-    unsubscribe();
-    await transport.dispose();
-  });
-
-  it("keeps retrying when transport failures arrive as structured objects", async () => {
-    const transport = new WsTransport("ws://localhost:3020");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    let attempts = 0;
-
-    const unsubscribe = transport.subscribe(
-      () =>
-        Stream.suspend(() => {
-          attempts += 1;
-          return Stream.fail({
-            _tag: "FiberFailure",
-            cause: {
-              _tag: "SocketCloseError",
-              message: "SocketCloseError: WebSocket closed",
-            },
-          } as unknown as Error);
-        }),
-      vi.fn(),
-      { retryDelay: 10 },
-    );
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    getSocket().open();
-
-    await waitFor(() => {
-      expect(attempts).toBeGreaterThanOrEqual(2);
-    });
-
-    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription disconnected", {
-      error: "SocketCloseError: WebSocket closed",
-    });
-
-    unsubscribe();
-    await transport.dispose();
-  });
-
-  it("logs a transport disconnect once even when multiple subscriptions fail together", async () => {
-    const transport = new WsTransport("ws://localhost:3020");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-
-    const unsubscribeA = transport.subscribe(
-      () => Stream.fail(new Error("SocketCloseError: 1006")),
-      vi.fn(),
-      { retryDelay: 10 },
-    );
-    const unsubscribeB = transport.subscribe(
-      () => Stream.fail(new Error("SocketCloseError: 1006")),
-      vi.fn(),
-      { retryDelay: 10 },
-    );
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    getSocket().open();
-
-    await waitFor(() => {
-      expect(warnSpy).toHaveBeenCalledTimes(1);
-    });
-    expect(warnSpy).toHaveBeenCalledWith("WebSocket RPC subscription disconnected", {
-      error: "SocketCloseError: 1006",
-    });
-
-    unsubscribeA();
-    unsubscribeB();
-    await transport.dispose();
-  });
-  it("streams finite request events without re-subscribing", async () => {
-    const transport = new WsTransport("ws://localhost:3020");
-    const listener = vi.fn();
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
     const socket = getSocket();
     socket.open();
 
-    const requestPromise = transport.requestStream(
-      (client) =>
-        client[WS_METHODS.gitRunStackedAction]({
-          actionId: "action-1",
-          cwd: "/repo",
-          action: "commit",
-        }),
-      listener,
+    const requestPromise = transport.request(
+      "git.runStackedAction",
+      { cwd: "/repo" },
+      { timeoutMs: null },
     );
 
-    await waitFor(() => {
-      expect(socket.sent).toHaveLength(1);
-    });
+    socket.close();
 
-    const requestMessage = JSON.parse(socket.sent[0] ?? "{}") as { id: string };
-    const progressEvent = {
-      actionId: "action-1",
-      cwd: "/repo",
-      action: "commit",
-      kind: "phase_started",
-      phase: "commit",
-      label: "Committing...",
-    } as const;
-
-    socket.serverMessage(
-      JSON.stringify({
-        _tag: "Chunk",
-        requestId: requestMessage.id,
-        values: [progressEvent],
-      }),
-    );
-    socket.serverMessage(
-      JSON.stringify({
-        _tag: "Exit",
-        requestId: requestMessage.id,
-        exit: {
-          _tag: "Success",
-          value: null,
-        },
-      }),
-    );
-
-    await expect(requestPromise).resolves.toBeUndefined();
-    expect(listener).toHaveBeenCalledWith(progressEvent);
-    expect(
-      socket.sent.filter((message) => {
-        const parsed = JSON.parse(message) as { _tag?: string; tag?: string };
-        return parsed._tag === "Request" && parsed.tag === WS_METHODS.gitRunStackedAction;
-      }),
-    ).toHaveLength(1);
-    await transport.dispose();
-  });
-
-  it("closes the client scope on the transport runtime before disposing the runtime", async () => {
-    const callOrder: string[] = [];
-    let resolveClose!: () => void;
-    const closePromise = new Promise<void>((resolve) => {
-      resolveClose = resolve;
-    });
-
-    const runtime = {
-      runPromise: vi.fn(async () => {
-        callOrder.push("close:start");
-        await closePromise;
-        callOrder.push("close:done");
-        return undefined;
-      }),
-      dispose: vi.fn(async () => {
-        callOrder.push("runtime:dispose");
-      }),
-    };
-    const transport = {
-      disposed: false,
-      session: {
-        initializedPromise: Promise.resolve({
-          clientPromise: Promise.resolve({} as never),
-          clientScope: {} as never,
-          runtime,
-        }),
-      },
-      closeSession: (
-        WsTransport.prototype as unknown as {
-          closeSession: (session: {
-            initializedPromise: Promise<{
-              clientScope: unknown;
-              runtime: { dispose: () => Promise<void>; runPromise: () => Promise<void> };
-            }>;
-          }) => Promise<void>;
-        }
-      ).closeSession,
-    } as unknown as WsTransport;
-
-    const disposePromise = WsTransport.prototype.dispose.call(transport);
-
-    await waitFor(() => {
-      expect(runtime.runPromise).toHaveBeenCalledTimes(1);
-    });
-    expect(runtime.dispose).not.toHaveBeenCalled();
-    expect((transport as unknown as { disposed: boolean }).disposed).toBe(true);
-
-    resolveClose();
-    await disposePromise;
-
-    await waitFor(() => {
-      expect(runtime.dispose).toHaveBeenCalledTimes(1);
-    });
-
-    expect(callOrder).toEqual(["close:start", "close:done", "runtime:dispose"]);
-  });
-
-  it("propagates OTLP trace ids for ws transport requests when client tracing is enabled", async () => {
-    await configureClientTracing({
-      exportIntervalMs: 10,
-    });
-
-    const transport = new WsTransport("ws://localhost:3020");
-    const requestPromise = transport.request((client) => client[WS_METHODS.serverGetSettings]({}));
-
-    await waitFor(() => {
-      expect(sockets).toHaveLength(1);
-    });
-
-    const socket = getSocket();
-    socket.open();
-
-    await waitFor(() => {
-      expect(socket.sent).toHaveLength(1);
-    });
-
-    const requestMessage = JSON.parse(socket.sent[0] ?? "{}") as {
-      id: string;
-      spanId?: string;
-      traceId?: string;
-    };
-    expect(requestMessage.traceId).toMatch(/^[0-9a-f]{32}$/);
-    expect(requestMessage.spanId).toMatch(/^[0-9a-f]{16}$/);
-
-    socket.serverMessage(
-      JSON.stringify({
-        _tag: "Exit",
-        requestId: requestMessage.id,
-        exit: {
-          _tag: "Success",
-          value: DEFAULT_SERVER_SETTINGS,
-        },
-      }),
-    );
-
-    await expect(requestPromise).resolves.toEqual(DEFAULT_SERVER_SETTINGS);
-    await transport.dispose();
+    await expect(requestPromise).rejects.toThrow("WebSocket connection closed.");
+    transport.dispose();
   });
 });

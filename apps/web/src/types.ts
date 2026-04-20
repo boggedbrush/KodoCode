@@ -1,9 +1,17 @@
+// FILE: types.ts
+// Purpose: Shared web-app view models for threads, projects, terminal layout, and sidebar rows.
+// Exports: Runtime UI types consumed across store, routes, and components.
+
 import type {
   ModelSelection,
+  OrchestrationMessageSource,
+  TurnDispatchMode,
   OrchestrationLatestTurn,
+  OrchestrationThreadPullRequest,
   OrchestrationProposedPlanId,
   OrchestrationSessionStatus,
   OrchestrationThreadActivity,
+  ThreadHandoff,
   ProjectScript as ContractProjectScript,
   ThreadId,
   ProjectId,
@@ -12,7 +20,9 @@ import type {
   ProviderKind,
   CheckpointRef,
   ProviderInteractionMode,
+  ProjectKind,
   RuntimeMode,
+  ThreadEnvironmentMode,
 } from "@t3tools/contracts";
 
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
@@ -21,12 +31,37 @@ export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 export const DEFAULT_INTERACTION_MODE: ProviderInteractionMode = "default";
 export const DEFAULT_THREAD_TERMINAL_HEIGHT = 280;
 export const DEFAULT_THREAD_TERMINAL_ID = "default";
-export const MAX_TERMINALS_PER_GROUP = 4;
+export const MAX_TERMINALS_PER_GROUP = 6;
+export type ThreadTerminalPresentationMode = "drawer" | "workspace";
+export type ThreadTerminalWorkspaceTab = "terminal" | "chat";
+export type ThreadTerminalWorkspaceLayout = "both" | "terminal-only";
+export type ThreadPrimarySurface = "chat" | "terminal";
 export type ProjectScript = ContractProjectScript;
+
+export type ThreadTerminalSplitDirection = "horizontal" | "vertical";
+export type ThreadTerminalSplitPosition = "top" | "right" | "bottom" | "left";
+
+export interface ThreadTerminalLeafNode {
+  type: "terminal";
+  paneId: string;
+  terminalIds: string[];
+  activeTerminalId: string;
+}
+
+export interface ThreadTerminalSplitNode {
+  type: "split";
+  id: string;
+  direction: ThreadTerminalSplitDirection;
+  children: ThreadTerminalLayoutNode[];
+  weights: number[];
+}
+
+export type ThreadTerminalLayoutNode = ThreadTerminalLeafNode | ThreadTerminalSplitNode;
 
 export interface ThreadTerminalGroup {
   id: string;
-  terminalIds: string[];
+  activeTerminalId: string;
+  layout: ThreadTerminalLayoutNode;
 }
 
 export interface ChatImageAttachment {
@@ -38,17 +73,26 @@ export interface ChatImageAttachment {
   previewUrl?: string;
 }
 
-export type ChatAttachment = ChatImageAttachment;
+export interface ChatAssistantSelectionAttachment {
+  type: "assistant-selection";
+  id: string;
+  assistantMessageId: string;
+  text: string;
+}
+
+export type ChatAttachment = ChatImageAttachment | ChatAssistantSelectionAttachment;
 
 export interface ChatMessage {
   id: MessageId;
   role: "user" | "assistant" | "system";
   text: string;
   attachments?: ChatAttachment[];
+  dispatchMode?: TurnDispatchMode;
   turnId?: TurnId | null;
   createdAt: string;
   completedAt?: string | undefined;
   streaming: boolean;
+  source?: OrchestrationMessageSource;
 }
 
 export interface ProposedPlan {
@@ -59,24 +103,6 @@ export interface ProposedPlan {
   implementationThreadId: ThreadId | null;
   createdAt: string;
   updatedAt: string;
-}
-
-export type ReviewSeverity = "critical" | "high" | "medium" | "low" | "info";
-
-export interface ReviewFinding {
-  severity: ReviewSeverity;
-  title: string;
-  affectedFiles: string[];
-  rationale: string;
-  suggestedFix: string;
-  canImplement: boolean;
-}
-
-export interface ReviewReport {
-  summary: string;
-  findings: ReviewFinding[];
-  openQuestions: string[];
-  verdict: string;
 }
 
 export interface TurnDiffFileChange {
@@ -98,15 +124,38 @@ export interface TurnDiffSummary {
 
 export interface Project {
   id: ProjectId;
+  kind: ProjectKind;
   name: string;
+  remoteName: string;
+  folderName: string;
+  localName: string | null;
   cwd: string;
   defaultModelSelection: ModelSelection | null;
+  expanded: boolean;
   createdAt?: string | undefined;
   updatedAt?: string | undefined;
   scripts: ProjectScript[];
 }
 
-export interface Thread {
+export interface ThreadWorkspaceState {
+  envMode?: ThreadEnvironmentMode | undefined;
+  branch: string | null;
+  worktreePath: string | null;
+  associatedWorktreePath?: string | null;
+  associatedWorktreeBranch?: string | null;
+  associatedWorktreeRef?: string | null;
+}
+
+export interface ThreadWorkspacePatch {
+  envMode?: ThreadEnvironmentMode | undefined;
+  branch?: string | null;
+  worktreePath?: string | null;
+  associatedWorktreePath?: string | null;
+  associatedWorktreeBranch?: string | null;
+  associatedWorktreeRef?: string | null;
+}
+
+export interface Thread extends ThreadWorkspaceState {
   id: ThreadId;
   codexThreadId: string | null;
   projectId: ProjectId;
@@ -119,32 +168,84 @@ export interface Thread {
   proposedPlans: ProposedPlan[];
   error: string | null;
   createdAt: string;
-  archivedAt: string | null;
+  archivedAt?: string | null;
   updatedAt?: string | undefined;
   latestTurn: OrchestrationLatestTurn | null;
   pendingSourceProposedPlan?: OrchestrationLatestTurn["sourceProposedPlan"];
-  branch: string | null;
-  worktreePath: string | null;
+  lastVisitedAt?: string | undefined;
+  parentThreadId?: ThreadId | null;
+  subagentAgentId?: string | null;
+  subagentNickname?: string | null;
+  subagentRole?: string | null;
+  forkSourceThreadId?: ThreadId | null;
+  handoff?: ThreadHandoff | null;
+  lastKnownPr?: OrchestrationThreadPullRequest | null;
+  latestUserMessageAt?: string | null;
+  hasPendingApprovals?: boolean;
+  hasPendingUserInput?: boolean;
+  hasActionableProposedPlan?: boolean;
   turnDiffSummaries: TurnDiffSummary[];
   activities: OrchestrationThreadActivity[];
+}
+
+export interface ThreadShell extends ThreadWorkspaceState {
+  id: ThreadId;
+  codexThreadId: string | null;
+  projectId: ProjectId;
+  title: string;
+  modelSelection: ModelSelection;
+  runtimeMode: RuntimeMode;
+  interactionMode: ProviderInteractionMode;
+  error: string | null;
+  createdAt: string;
+  archivedAt?: string | null;
+  updatedAt?: string | undefined;
+  parentThreadId?: ThreadId | null;
+  subagentAgentId?: string | null;
+  subagentNickname?: string | null;
+  subagentRole?: string | null;
+  forkSourceThreadId?: ThreadId | null;
+  handoff?: ThreadHandoff | null;
+  lastKnownPr?: OrchestrationThreadPullRequest | null;
+  latestUserMessageAt?: string | null;
+  hasPendingApprovals?: boolean;
+  hasPendingUserInput?: boolean;
+  hasActionableProposedPlan?: boolean;
+  lastVisitedAt?: string | undefined;
+}
+
+export interface ThreadTurnState {
+  latestTurn: OrchestrationLatestTurn | null;
+  pendingSourceProposedPlan?: OrchestrationLatestTurn["sourceProposedPlan"];
 }
 
 export interface SidebarThreadSummary {
   id: ThreadId;
   projectId: ProjectId;
   title: string;
+  modelSelection: ModelSelection;
   interactionMode: ProviderInteractionMode;
-  session: ThreadSession | null;
-  createdAt: string;
-  archivedAt: string | null;
-  updatedAt?: string | undefined;
-  latestTurn: OrchestrationLatestTurn | null;
+  envMode?: ThreadEnvironmentMode | undefined;
   branch: string | null;
   worktreePath: string | null;
+  session: ThreadSession | null;
+  createdAt: string;
+  archivedAt?: string | null;
+  updatedAt?: string | undefined;
+  latestTurn: OrchestrationLatestTurn | null;
+  lastVisitedAt?: string | undefined;
+  parentThreadId?: ThreadId | null;
+  subagentAgentId?: string | null;
+  subagentNickname?: string | null;
+  subagentRole?: string | null;
   latestUserMessageAt: string | null;
   hasPendingApprovals: boolean;
   hasPendingUserInput: boolean;
   hasActionableProposedPlan: boolean;
+  hasLiveTailWork: boolean;
+  forkSourceThreadId?: ThreadId | null;
+  handoff?: ThreadHandoff | null;
+  lastKnownPr?: OrchestrationThreadPullRequest | null;
 }
 
 export interface ThreadSession {

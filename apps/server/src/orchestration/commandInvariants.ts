@@ -6,6 +6,7 @@ import type {
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
+import { normalizeWorkspaceRootForComparison } from "@t3tools/shared/threadWorkspace";
 import { Effect } from "effect";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
@@ -29,6 +30,24 @@ export function findProjectById(
   projectId: ProjectId,
 ): OrchestrationProject | undefined {
   return readModel.projects.find((project) => project.id === projectId);
+}
+
+// Finds an active project by workspace root using the same comparison rules as import flows.
+export function findActiveProjectByWorkspaceRoot(
+  readModel: OrchestrationReadModel,
+  workspaceRoot: string,
+): OrchestrationProject | undefined {
+  const normalizedWorkspaceRoot = normalizeWorkspaceRootForComparison(workspaceRoot, {
+    platform: process.platform,
+  });
+  return readModel.projects.find(
+    (project) =>
+      project.deletedAt === null &&
+      project.kind === "project" &&
+      normalizeWorkspaceRootForComparison(project.workspaceRoot, {
+        platform: process.platform,
+      }) === normalizedWorkspaceRoot,
+  );
 }
 
 export function listThreadsByProjectId(
@@ -71,6 +90,43 @@ export function requireProjectAbsent(input: {
   );
 }
 
+export function requireProjectWorkspaceRootAvailable(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly workspaceRoot: string;
+  readonly excludeProjectId?: ProjectId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const existingProject = findActiveProjectByWorkspaceRoot(input.readModel, input.workspaceRoot);
+  if (!existingProject || existingProject.id === input.excludeProjectId) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Project '${existingProject.id}' already uses workspace root '${existingProject.workspaceRoot}'.`,
+    ),
+  );
+}
+
+export function requireProjectHasNoThreads(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly projectId: ProjectId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  const remainingThreads = listThreadsByProjectId(input.readModel, input.projectId).filter(
+    (thread) => thread.deletedAt === null,
+  );
+  if (remainingThreads.length === 0) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Project '${input.projectId}' still has ${remainingThreads.length} thread${remainingThreads.length === 1 ? "" : "s"} and cannot be deleted.`,
+    ),
+  );
+}
+
 export function requireThread(input: {
   readonly readModel: OrchestrationReadModel;
   readonly command: OrchestrationCommand;
@@ -88,6 +144,22 @@ export function requireThread(input: {
   );
 }
 
+export function requireThreadAbsent(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly threadId: ThreadId;
+}): Effect.Effect<void, OrchestrationCommandInvariantError> {
+  if (!findThreadById(input.readModel, input.threadId)) {
+    return Effect.void;
+  }
+  return Effect.fail(
+    invariantError(
+      input.command.type,
+      `Thread '${input.threadId}' already exists and cannot be created twice.`,
+    ),
+  );
+}
+
 export function requireThreadArchived(input: {
   readonly readModel: OrchestrationReadModel;
   readonly command: OrchestrationCommand;
@@ -95,7 +167,7 @@ export function requireThreadArchived(input: {
 }): Effect.Effect<OrchestrationThread, OrchestrationCommandInvariantError> {
   return requireThread(input).pipe(
     Effect.flatMap((thread) =>
-      thread.archivedAt !== null
+      thread.archivedAt != null
         ? Effect.succeed(thread)
         : Effect.fail(
             invariantError(
@@ -114,7 +186,7 @@ export function requireThreadNotArchived(input: {
 }): Effect.Effect<OrchestrationThread, OrchestrationCommandInvariantError> {
   return requireThread(input).pipe(
     Effect.flatMap((thread) =>
-      thread.archivedAt === null
+      thread.archivedAt == null
         ? Effect.succeed(thread)
         : Effect.fail(
             invariantError(
@@ -122,22 +194,6 @@ export function requireThreadNotArchived(input: {
               `Thread '${input.threadId}' is already archived and cannot handle command '${input.command.type}'.`,
             ),
           ),
-    ),
-  );
-}
-
-export function requireThreadAbsent(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly threadId: ThreadId;
-}): Effect.Effect<void, OrchestrationCommandInvariantError> {
-  if (!findThreadById(input.readModel, input.threadId)) {
-    return Effect.void;
-  }
-  return Effect.fail(
-    invariantError(
-      input.command.type,
-      `Thread '${input.threadId}' already exists and cannot be created twice.`,
     ),
   );
 }

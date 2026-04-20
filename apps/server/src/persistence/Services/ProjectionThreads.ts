@@ -9,9 +9,13 @@
 import {
   IsoDateTime,
   ModelSelection,
+  NonNegativeInt,
+  OrchestrationThreadPullRequest,
+  ThreadHandoff,
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
+  ThreadEnvironmentMode,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -27,12 +31,29 @@ export const ProjectionThread = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
+  envMode: ThreadEnvironmentMode,
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
+  associatedWorktreePath: Schema.NullOr(Schema.String),
+  associatedWorktreeBranch: Schema.NullOr(Schema.String),
+  associatedWorktreeRef: Schema.NullOr(Schema.String),
+  parentThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  subagentAgentId: Schema.optional(Schema.NullOr(Schema.String)),
+  subagentNickname: Schema.optional(Schema.NullOr(Schema.String)),
+  subagentRole: Schema.optional(Schema.NullOr(Schema.String)),
+  forkSourceThreadId: Schema.optional(Schema.NullOr(ThreadId)),
+  lastKnownPr: Schema.NullOr(OrchestrationThreadPullRequest),
   latestTurnId: Schema.NullOr(TurnId),
+  handoff: Schema.NullOr(ThreadHandoff),
+  latestUserMessageAt: Schema.NullOr(IsoDateTime),
+  pendingApprovalCount: NonNegativeInt,
+  pendingUserInputCount: NonNegativeInt,
+  hasActionableProposedPlan: NonNegativeInt,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
-  archivedAt: Schema.NullOr(IsoDateTime),
+  archivedAt: Schema.optional(Schema.NullOr(IsoDateTime)).pipe(
+    Schema.withDecodingDefault(() => null),
+  ),
   deletedAt: Schema.NullOr(IsoDateTime),
 });
 export type ProjectionThread = typeof ProjectionThread.Type;
@@ -93,4 +114,4 @@ export interface ProjectionThreadRepositoryShape {
 export class ProjectionThreadRepository extends ServiceMap.Service<
   ProjectionThreadRepository,
   ProjectionThreadRepositoryShape
->()("t3/persistence/Services/ProjectionThreads/ProjectionThreadRepository") {}
+>()("kodo/persistence/Services/ProjectionThreads/ProjectionThreadRepository") {}

@@ -5,7 +5,7 @@ This document covers how to run desktop releases from one tag, first without sig
 ## What the workflow does
 
 - Trigger: push tag matching `v*.*.*`.
-- Runs quality gates first: format check, lint, typecheck, test, browser test.
+- Runs quality gates first: lint, typecheck, test.
 - Builds four artifacts in parallel:
   - macOS `arm64` DMG
   - macOS `x64` DMG
@@ -15,7 +15,7 @@ This document covers how to run desktop releases from one tag, first without sig
   - Versions with a suffix after `X.Y.Z` (for example `1.2.3-alpha.1`) are published as GitHub prereleases.
   - Only plain `X.Y.Z` releases are marked as the repository's latest release.
 - Includes Electron auto-update metadata (for example `latest*.yml` and `*.blockmap`) in release assets.
-- Optionally publishes the CLI package (`apps/server`, npm package `@boggedbrush/kodo`) with OIDC trusted publishing.
+- Publishes the CLI package (`apps/server`, npm package `t3`) with OIDC trusted publishing.
 - Signing is optional and auto-detected per platform from secrets.
 
 ## Desktop auto-update notes
@@ -40,32 +40,34 @@ This document covers how to run desktop releases from one tag, first without sig
   - `electron-updater` reads `latest-mac.yml` for both Intel and Apple Silicon.
   - The workflow merges the per-arch mac manifests into one `latest-mac.yml` before publishing the GitHub Release.
 
-## 0) npm OIDC trusted publishing setup (CLI, optional)
+## 0) npm OIDC trusted publishing setup (CLI)
 
-The workflow can publish the CLI via `node apps/server/scripts/cli.ts publish`
-from `apps/server` after bumping the package version to the release tag version.
-It is disabled by default and only runs when repository variable
-`KODO_RELEASE_PUBLISH_CLI` is set to `true`.
+The workflow publishes the CLI with `bun publish` from `apps/server` after bumping
+the package version to the release tag version.
 
 Checklist:
 
-1. Confirm npm user `boggedbrush` owns scope `@boggedbrush` and can publish package `@boggedbrush/kodo`.
+1. Confirm npm org/user owns package `t3` (or rename package first if needed).
 2. In npm package settings, configure Trusted Publisher:
    - Provider: GitHub Actions
    - Repository: this repo
    - Workflow file: `.github/workflows/release.yml`
    - Environment (if used): match your npm trusted publishing config
 3. Ensure npm account and org policies allow trusted publishing for the package.
-4. Set repository variable `KODO_RELEASE_PUBLISH_CLI=true`.
-5. Create release tag `vX.Y.Z` and push; workflow will:
+4. Create release tag `vX.Y.Z` and push; workflow will:
    - set `apps/server/package.json` version to `X.Y.Z`
    - build web + server
-   - run the CLI publish command (which calls `npm publish --access public`)
+   - run `bun publish --access public`
 
-Notes:
+## DP Code notes
 
-- `NPM_TOKEN` is not required for the release workflow when trusted publishing is configured.
-- The workflow relies on GitHub Actions OIDC (`id-token: write`) plus `--provenance`.
+- `DP Code` keeps the same release architecture as upstream `T3Code`, but publishes desktop artifacts under the DP branding.
+- The desktop updater expects the GitHub Release in this repository to include the generated updater metadata files, not just the installers.
+- The published release title should read `DP Code vX.Y.Z`.
+- By default, the first-party desktop release path does not require CLI publish or post-release version-bump automation.
+- Optional jobs stay disabled unless repository variables enable them:
+  - `DPCODE_PUBLISH_CLI=1`
+  - `DPCODE_FINALIZE_RELEASE=1`
 
 ## 1) Dry-run release without signing
 

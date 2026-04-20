@@ -9,9 +9,14 @@
 import {
   type CanonicalItemType,
   type CanonicalRequestType,
-  type ModelSelection,
+  type ProviderComposerCapabilities,
   type ProviderEvent,
+  type ProviderListModelsResult,
+  type ProviderListPluginsResult,
+  type ProviderReadPluginResult,
+  type ProviderListSkillsResult,
   type ProviderRuntimeEvent,
+  type ServerVoiceTranscriptionResult,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
   RuntimeItemId,
@@ -21,9 +26,7 @@ import {
   ProviderItemId,
   ThreadId,
   TurnId,
-  ProviderSendTurnInput,
 } from "@t3tools/contracts";
-import { resolveModelSelectionDefault } from "@t3tools/shared/model";
 import { Effect, FileSystem, Layer, Queue, Schema, ServiceMap, Stream } from "effect";
 
 import {
@@ -40,8 +43,8 @@ import {
   type CodexAppServerStartSessionInput,
 } from "../../codexAppServerManager.ts";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
+import { isNonFatalCodexErrorMessage } from "../../codexErrorClassification.ts";
 import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "codex" as const;
@@ -55,9 +58,20 @@ export interface CodexAdapterLiveOptions {
 
 function toMessage(cause: unknown, fallback: string): string {
   if (cause instanceof Error && cause.message.length > 0) {
-    return cause.message;
+    return sanitizeUserFacingErrorMessage(cause.message, fallback);
   }
   return fallback;
+}
+
+function sanitizeUserFacingErrorMessage(message: string, fallback: string): string {
+  const normalized = message.trim();
+  if (normalized.length === 0) {
+    return fallback;
+  }
+
+  const firstLine = normalized.split("\n")[0]?.trim() ?? "";
+  const withoutInlineStack = firstLine.replace(/\s+at file:\/\/.*$/s, "").trim();
+  return withoutInlineStack.length > 0 ? withoutInlineStack : fallback;
 }
 
 function toSessionError(
@@ -95,18 +109,6 @@ function toRequestError(threadId: ThreadId, method: string, cause: unknown): Pro
   });
 }
 
-function resolveCodexModelSelection(
-  modelSelection: ModelSelection | undefined,
-): Extract<ModelSelection, { provider: "codex" }> | undefined {
-  if (modelSelection?.provider !== "codex") {
-    return undefined;
-  }
-
-  // Normalize frontend sentinels like `auto` before invoking Codex runtime APIs.
-  const resolved = resolveModelSelectionDefault(modelSelection);
-  return resolved.provider === "codex" ? resolved : undefined;
-}
-
 function asObject(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== "object") {
     return undefined;
@@ -126,11 +128,15 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-const FATAL_CODEX_STDERR_SNIPPETS = ["failed to connect to websocket"];
-
-function isFatalCodexProcessStderrMessage(message: string): boolean {
-  const normalized = message.toLowerCase();
-  return FATAL_CODEX_STDERR_SNIPPETS.some((snippet) => normalized.includes(snippet));
+// Keep manager-emitted stderr lines visible without escalating them into a fatal thread error.
+function providerErrorMapsToWarning(event: ProviderEvent): boolean {
+  return (
+    event.kind === "error" &&
+    (event.method === "process/stderr" ||
+      (event.method === "error" &&
+        typeof event.message === "string" &&
+        isNonFatalCodexErrorMessage(event.message)))
+  );
 }
 
 function normalizeCodexTokenUsage(value: unknown): ThreadTokenUsageSnapshot | undefined {
@@ -265,6 +271,7 @@ function itemDetail(
     asString(item.command),
     asString(item.title),
     asString(item.summary),
+    asString(item.review),
     asString(item.text),
     asString(item.path),
     asString(item.prompt),
@@ -396,7 +403,6 @@ function toUserInputQuestions(payload: Record<string, unknown> | undefined) {
         header,
         question: prompt,
         options,
-        multiSelect: question.multiSelect === true,
       };
     })
     .filter(
@@ -407,7 +413,6 @@ function toUserInputQuestions(payload: Record<string, unknown> | undefined) {
         header: string;
         question: string;
         options: Array<{ label: string; description: string }>;
-        multiSelect: boolean;
       } => question !== undefined,
     );
 
@@ -525,7 +530,10 @@ function providerRefsFromEvent(
   event: ProviderEvent,
 ): ProviderRuntimeEvent["providerRefs"] | undefined {
   const refs: Record<string, string> = {};
+  if (event.providerThreadId) refs.providerThreadId = event.providerThreadId;
+  if (event.providerParentThreadId) refs.providerParentThreadId = event.providerParentThreadId;
   if (event.turnId) refs.providerTurnId = event.turnId;
+  if (event.parentTurnId) refs.parentProviderTurnId = event.parentTurnId;
   if (event.itemId) refs.providerItemId = event.itemId;
   if (event.requestId) refs.providerRequestId = event.requestId;
 
@@ -543,6 +551,7 @@ function runtimeEventBase(
     threadId: canonicalThreadId,
     createdAt: event.createdAt,
     ...(event.turnId ? { turnId: event.turnId } : {}),
+    ...(event.parentTurnId ? { parentTurnId: event.parentTurnId } : {}),
     ...(event.itemId ? { itemId: asRuntimeItemId(event.itemId) } : {}),
     ...(event.requestId ? { requestId: asRuntimeRequestId(event.requestId) } : {}),
     ...(refs ? { providerRefs: refs } : {}),
@@ -571,6 +580,9 @@ function mapItemLifecycle(
     return undefined;
   }
 
+  const canonicalItemType =
+    lifecycle === "item.completed" && itemType === "review_exited" ? "assistant_message" : itemType;
+
   const detail = itemDetail(source, payload ?? {});
   const status =
     lifecycle === "item.started"
@@ -583,9 +595,9 @@ function mapItemLifecycle(
     ...runtimeEventBase(event, canonicalThreadId),
     type: lifecycle,
     payload: {
-      itemType,
+      itemType: canonicalItemType,
       ...(status ? { status } : {}),
-      ...(itemTitle(itemType) ? { title: itemTitle(itemType) } : {}),
+      ...(itemTitle(canonicalItemType) ? { title: itemTitle(canonicalItemType) } : {}),
       ...(detail ? { detail } : {}),
       ...(event.payload !== undefined ? { data: event.payload } : {}),
     },
@@ -603,13 +615,14 @@ function mapToRuntimeEvents(
     if (!event.message) {
       return [];
     }
+    const treatAsWarning = providerErrorMapsToWarning(event);
     return [
       {
         ...runtimeEventBase(event, canonicalThreadId),
-        type: "runtime.error",
+        type: treatAsWarning ? "runtime.warning" : "runtime.error",
         payload: {
           message: event.message,
-          class: "provider_error",
+          ...(!treatAsWarning ? { class: "provider_error" as const } : {}),
           ...(event.payload !== undefined ? { detail: event.payload } : {}),
         },
       },
@@ -731,6 +744,22 @@ function mapToRuntimeEvents(
         type: "thread.started",
         payload: {
           providerThreadId,
+        },
+      },
+    ];
+  }
+
+  if (event.method === "thread/compacting") {
+    return [
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        type: "item.updated",
+        payload: {
+          itemType: "context_compaction",
+          status: "inProgress",
+          title: "Context compaction",
+          detail: event.message ?? "Compacting context",
+          ...(event.payload !== undefined ? { data: event.payload } : {}),
         },
       },
     ];
@@ -1278,41 +1307,17 @@ function mapToRuntimeEvents(
     const message =
       asString(asObject(payload?.error)?.message) ?? event.message ?? "Provider runtime error";
     const willRetry = payload?.willRetry === true;
+    const treatAsWarning = willRetry || isNonFatalCodexErrorMessage(message);
     return [
       {
-        type: willRetry ? "runtime.warning" : "runtime.error",
+        type: treatAsWarning ? "runtime.warning" : "runtime.error",
         ...runtimeEventBase(event, canonicalThreadId),
         payload: {
           message,
-          ...(!willRetry ? { class: "provider_error" as const } : {}),
+          ...(!treatAsWarning ? { class: "provider_error" as const } : {}),
           ...(event.payload !== undefined ? { detail: event.payload } : {}),
         },
       },
-    ];
-  }
-
-  if (event.method === "process/stderr") {
-    const message = event.message ?? "Codex process stderr";
-    const isFatal = isFatalCodexProcessStderrMessage(message);
-    return [
-      isFatal
-        ? {
-            type: "runtime.error",
-            ...runtimeEventBase(event, canonicalThreadId),
-            payload: {
-              message,
-              class: "provider_error" as const,
-              ...(event.payload !== undefined ? { detail: event.payload } : {}),
-            },
-          }
-        : {
-            type: "runtime.warning",
-            ...runtimeEventBase(event, canonicalThreadId),
-            payload: {
-              message,
-              ...(event.payload !== undefined ? { detail: event.payload } : {}),
-            },
-          },
     ];
   }
 
@@ -1363,76 +1368,63 @@ function mapToRuntimeEvents(
   return [];
 }
 
-const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
-  options?: CodexAdapterLiveOptions,
-) {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const serverConfig = yield* Effect.service(ServerConfig);
-  const nativeEventLogger =
-    options?.nativeEventLogger ??
-    (options?.nativeEventLogPath !== undefined
-      ? yield* makeEventNdjsonLogger(options.nativeEventLogPath, {
-          stream: "native",
-        })
-      : undefined);
+const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const serverConfig = yield* Effect.service(ServerConfig);
+    const nativeEventLogger =
+      options?.nativeEventLogger ??
+      (options?.nativeEventLogPath !== undefined
+        ? yield* makeEventNdjsonLogger(options.nativeEventLogPath, {
+            stream: "native",
+          })
+        : undefined);
 
-  const acquireManager = Effect.fn("acquireManager")(function* () {
-    if (options?.manager) {
-      return options.manager;
-    }
-    const services = yield* Effect.services<never>();
-    return options?.makeManager?.(services) ?? new CodexAppServerManager(services);
-  });
+    const manager = yield* Effect.acquireRelease(
+      Effect.gen(function* () {
+        if (options?.manager) {
+          return options.manager;
+        }
+        const services = yield* Effect.services<never>();
+        return options?.makeManager?.(services) ?? new CodexAppServerManager(services);
+      }),
+      (manager) =>
+        Effect.sync(() => {
+          try {
+            manager.stopAll();
+          } catch {
+            // Finalizers should never fail and block shutdown.
+          }
+        }),
+    );
 
-  const manager = yield* Effect.acquireRelease(acquireManager(), (manager) =>
-    Effect.sync(() => {
-      try {
-        manager.stopAll();
-      } catch {
-        // Finalizers should never fail and block shutdown.
-      }
-    }),
-  );
-  const serverSettingsService = yield* ServerSettingsService;
-
-  const startSession: CodexAdapterShape["startSession"] = Effect.fn("startSession")(
-    function* (input) {
+    const startSession: CodexAdapterShape["startSession"] = (input) => {
       if (input.provider !== undefined && input.provider !== PROVIDER) {
-        return yield* new ProviderAdapterValidationError({
-          provider: PROVIDER,
-          operation: "startSession",
-          issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
-        });
+        return Effect.fail(
+          new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
+          }),
+        );
       }
 
-      const codexSettings = yield* serverSettingsService.getSettings.pipe(
-        Effect.map((settings) => settings.providers.codex),
-        Effect.mapError(
-          (error) =>
-            new ProviderAdapterProcessError({
-              provider: PROVIDER,
-              threadId: input.threadId,
-              detail: error.message,
-              cause: error,
-            }),
-        ),
-      );
-      const binaryPath = codexSettings.binaryPath;
-      const homePath = codexSettings.homePath;
-      const resolvedCodexModelSelection = resolveCodexModelSelection(input.modelSelection);
       const managerInput: CodexAppServerStartSessionInput = {
         threadId: input.threadId,
         provider: "codex",
         ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
         ...(input.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+        ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
         runtimeMode: input.runtimeMode,
-        binaryPath,
-        ...(homePath ? { homePath } : {}),
-        ...(resolvedCodexModelSelection ? { model: resolvedCodexModelSelection.model } : {}),
-        ...(resolvedCodexModelSelection?.options?.fastMode ? { serviceTier: "fast" } : {}),
+        ...(input.modelSelection?.provider === "codex"
+          ? { model: input.modelSelection.model }
+          : {}),
+        ...(input.modelSelection?.provider === "codex" && input.modelSelection.options?.fastMode
+          ? { serviceTier: "fast" }
+          : {}),
       };
 
-      return yield* Effect.tryPromise({
+      return Effect.tryPromise({
         try: () => manager.startSession(managerInput),
         catch: (cause) =>
           new ProviderAdapterProcessError({
@@ -1441,210 +1433,431 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             detail: toMessage(cause, "Failed to start Codex adapter session."),
             cause,
           }),
-      });
-    },
-  );
-
-  const resolveAttachment = Effect.fn("resolveAttachment")(function* (
-    input: ProviderSendTurnInput,
-    attachment: NonNullable<ProviderSendTurnInput["attachments"]>[number],
-  ) {
-    const attachmentPath = resolveAttachmentPath({
-      attachmentsDir: serverConfig.attachmentsDir,
-      attachment,
-    });
-    if (!attachmentPath) {
-      return yield* toRequestError(
-        input.threadId,
-        "turn/start",
-        new Error(`Invalid attachment id '${attachment.id}'.`),
-      );
-    }
-    const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
-      Effect.mapError(
-        (cause) =>
-          new ProviderAdapterRequestError({
-            provider: PROVIDER,
-            method: "turn/start",
-            detail: toMessage(cause, "Failed to read attachment file."),
-            cause,
-          }),
-      ),
-    );
-    return {
-      type: "image" as const,
-      url: `data:${attachment.mimeType};base64,${Buffer.from(bytes).toString("base64")}`,
+      }).pipe(Effect.map((session) => session));
     };
-  });
 
-  const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
-    const codexAttachments = yield* Effect.forEach(
-      input.attachments ?? [],
-      (attachment) => resolveAttachment(input, attachment),
-      { concurrency: 1 },
-    );
-
-    return yield* Effect.tryPromise({
-      try: () => {
-        const resolvedCodexModelSelection = resolveCodexModelSelection(input.modelSelection);
+    const sendTurn: CodexAdapterShape["sendTurn"] = (input) =>
+      Effect.gen(function* () {
+        const codexAttachments = yield* Effect.forEach(
+          input.attachments ?? [],
+          (attachment) =>
+            Effect.gen(function* () {
+              if (attachment.type !== "image") {
+                return null;
+              }
+              const attachmentPath = resolveAttachmentPath({
+                attachmentsDir: serverConfig.attachmentsDir,
+                attachment,
+              });
+              if (!attachmentPath) {
+                return yield* toRequestError(
+                  input.threadId,
+                  "turn/start",
+                  new Error(`Invalid attachment id '${attachment.id}'.`),
+                );
+              }
+              const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapterRequestError({
+                      provider: PROVIDER,
+                      method: "turn/start",
+                      detail: toMessage(cause, "Failed to read attachment file."),
+                      cause,
+                    }),
+                ),
+              );
+              return {
+                type: "image" as const,
+                url: `data:${attachment.mimeType};base64,${Buffer.from(bytes).toString("base64")}`,
+              };
+            }),
+          { concurrency: 1 },
+        );
         const managerInput = {
           threadId: input.threadId,
           ...(input.input !== undefined ? { input: input.input } : {}),
-          ...(resolvedCodexModelSelection ? { model: resolvedCodexModelSelection.model } : {}),
-          ...(resolvedCodexModelSelection?.options?.reasoningEffort !== undefined
-            ? { effort: resolvedCodexModelSelection.options.reasoningEffort }
+          ...(input.skills !== undefined ? { skills: input.skills } : {}),
+          ...(input.mentions !== undefined ? { mentions: input.mentions } : {}),
+          ...(input.modelSelection?.provider === "codex"
+            ? { model: input.modelSelection.model }
             : {}),
-          ...(resolvedCodexModelSelection?.options?.fastMode ? { serviceTier: "fast" } : {}),
+          ...(input.modelSelection?.provider === "codex" &&
+          input.modelSelection.options?.reasoningEffort !== undefined
+            ? { effort: input.modelSelection.options.reasoningEffort }
+            : {}),
+          ...(input.modelSelection?.provider === "codex" && input.modelSelection.options?.fastMode
+            ? { serviceTier: "fast" }
+            : {}),
           ...(input.interactionMode !== undefined
             ? { interactionMode: input.interactionMode }
             : {}),
-          ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
+          ...(codexAttachments.length > 0
+            ? { attachments: codexAttachments.filter((attachment) => attachment !== null) }
+            : {}),
         };
-        return manager.sendTurn(managerInput);
-      },
-      catch: (cause) => toRequestError(input.threadId, "turn/start", cause),
-    }).pipe(
-      Effect.map((result) => ({
-        ...result,
-        threadId: input.threadId,
-      })),
-    );
-  });
 
-  const interruptTurn: CodexAdapterShape["interruptTurn"] = (threadId, turnId) =>
-    Effect.tryPromise({
-      try: () => manager.interruptTurn(threadId, turnId),
-      catch: (cause) => toRequestError(threadId, "turn/interrupt", cause),
-    });
+        return yield* Effect.tryPromise({
+          try: () => manager.sendTurn(managerInput),
+          catch: (cause) => toRequestError(input.threadId, "turn/start", cause),
+        }).pipe(
+          Effect.map((result) => ({
+            ...result,
+            threadId: input.threadId,
+          })),
+        );
+      });
 
-  const readThread: CodexAdapterShape["readThread"] = (threadId) =>
-    Effect.tryPromise({
-      try: () => manager.readThread(threadId),
-      catch: (cause) => toRequestError(threadId, "thread/read", cause),
-    }).pipe(
-      Effect.map((snapshot) => ({
-        threadId,
-        turns: snapshot.turns,
-      })),
-    );
+    const steerTurn: CodexAdapterShape["steerTurn"] = (input) =>
+      Effect.gen(function* () {
+        const codexAttachments = yield* Effect.forEach(
+          input.attachments ?? [],
+          (attachment) =>
+            Effect.gen(function* () {
+              if (attachment.type !== "image") {
+                return null;
+              }
+              const attachmentPath = resolveAttachmentPath({
+                attachmentsDir: serverConfig.attachmentsDir,
+                attachment,
+              });
+              if (!attachmentPath) {
+                return yield* toRequestError(
+                  input.threadId,
+                  "turn/steer",
+                  new Error(`Invalid attachment id '${attachment.id}'.`),
+                );
+              }
+              const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapterRequestError({
+                      provider: PROVIDER,
+                      method: "turn/steer",
+                      detail: toMessage(cause, "Failed to read attachment file."),
+                      cause,
+                    }),
+                ),
+              );
+              return {
+                type: "image" as const,
+                url: `data:${attachment.mimeType};base64,${Buffer.from(bytes).toString("base64")}`,
+              };
+            }),
+          { concurrency: 1 },
+        );
+        const managerInput = {
+          threadId: input.threadId,
+          ...(input.input !== undefined ? { input: input.input } : {}),
+          ...(input.skills !== undefined ? { skills: input.skills } : {}),
+          ...(input.mentions !== undefined ? { mentions: input.mentions } : {}),
+          ...(input.modelSelection?.provider === "codex"
+            ? { model: input.modelSelection.model }
+            : {}),
+          ...(input.modelSelection?.provider === "codex" &&
+          input.modelSelection.options?.reasoningEffort !== undefined
+            ? { effort: input.modelSelection.options.reasoningEffort }
+            : {}),
+          ...(input.modelSelection?.provider === "codex" && input.modelSelection.options?.fastMode
+            ? { serviceTier: "fast" }
+            : {}),
+          ...(input.interactionMode !== undefined
+            ? { interactionMode: input.interactionMode }
+            : {}),
+          ...(codexAttachments.length > 0
+            ? { attachments: codexAttachments.filter((attachment) => attachment !== null) }
+            : {}),
+        };
 
-  const rollbackThread: CodexAdapterShape["rollbackThread"] = (threadId, numTurns) => {
-    if (!Number.isInteger(numTurns) || numTurns < 1) {
-      return Effect.fail(
-        new ProviderAdapterValidationError({
-          provider: PROVIDER,
-          operation: "rollbackThread",
-          issue: "numTurns must be an integer >= 1.",
-        }),
+        return yield* Effect.tryPromise({
+          try: () => manager.steerTurn(managerInput),
+          catch: (cause) => toRequestError(input.threadId, "turn/steer", cause),
+        }).pipe(
+          Effect.map((result) => ({
+            ...result,
+            threadId: input.threadId,
+          })),
+        );
+      });
+
+    const startReview: CodexAdapterShape["startReview"] = (input) =>
+      Effect.tryPromise({
+        try: () => manager.startReview(input),
+        catch: (cause) => toRequestError(input.threadId, "review/start", cause),
+      }).pipe(
+        Effect.map((result) => ({
+          ...result,
+          threadId: input.threadId,
+        })),
       );
-    }
 
-    return Effect.tryPromise({
-      try: () => manager.rollbackThread(threadId, numTurns),
-      catch: (cause) => toRequestError(threadId, "thread/rollback", cause),
-    }).pipe(
-      Effect.map((snapshot) => ({
-        threadId,
-        turns: snapshot.turns,
-      })),
-    );
-  };
+    const interruptTurn: CodexAdapterShape["interruptTurn"] = (
+      threadId,
+      turnId,
+      providerThreadId,
+    ) =>
+      Effect.tryPromise({
+        try: () => manager.interruptTurn(threadId, turnId, providerThreadId),
+        catch: (cause) => toRequestError(threadId, "turn/interrupt", cause),
+      });
 
-  const respondToRequest: CodexAdapterShape["respondToRequest"] = (threadId, requestId, decision) =>
-    Effect.tryPromise({
-      try: () => manager.respondToRequest(threadId, requestId, decision),
-      catch: (cause) => toRequestError(threadId, "item/requestApproval/decision", cause),
-    });
+    const readThread: CodexAdapterShape["readThread"] = (threadId) =>
+      Effect.tryPromise({
+        try: () => manager.readThread(threadId),
+        catch: (cause) => toRequestError(threadId, "thread/read", cause),
+      }).pipe(
+        Effect.map((snapshot) => ({
+          threadId,
+          turns: snapshot.turns,
+          cwd: snapshot.cwd ?? null,
+        })),
+      );
 
-  const respondToUserInput: CodexAdapterShape["respondToUserInput"] = (
-    threadId,
-    requestId,
-    answers,
-  ) =>
-    Effect.tryPromise({
-      try: () => manager.respondToUserInput(threadId, requestId, answers),
-      catch: (cause) => toRequestError(threadId, "item/tool/requestUserInput", cause),
-    });
+    const readExternalThread: NonNullable<CodexAdapterShape["readExternalThread"]> = (input) =>
+      Effect.tryPromise({
+        try: () => manager.readExternalThread(input),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "thread/read",
+            detail: toMessage(cause, "Failed to read external Codex thread."),
+            cause,
+          }),
+      }).pipe(
+        Effect.map((snapshot) => ({
+          threadId: ThreadId.makeUnsafe(snapshot.threadId),
+          turns: snapshot.turns,
+          cwd: snapshot.cwd ?? null,
+        })),
+      );
 
-  const stopSession: CodexAdapterShape["stopSession"] = (threadId) =>
-    Effect.sync(() => {
-      manager.stopSession(threadId);
-    });
-
-  const listSessions: CodexAdapterShape["listSessions"] = () =>
-    Effect.sync(() => manager.listSessions());
-
-  const hasSession: CodexAdapterShape["hasSession"] = (threadId) =>
-    Effect.sync(() => manager.hasSession(threadId));
-
-  const stopAll: CodexAdapterShape["stopAll"] = () =>
-    Effect.sync(() => {
-      manager.stopAll();
-    });
-
-  const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
-
-  const writeNativeEvent = Effect.fn("writeNativeEvent")(function* (event: ProviderEvent) {
-    if (!nativeEventLogger) {
-      return;
-    }
-    yield* nativeEventLogger.write(event, event.threadId);
-  });
-
-  const registerListener = Effect.fn("registerListener")(function* () {
-    const services = yield* Effect.services<never>();
-    const listenerEffect = Effect.fn("listener")(function* (event: ProviderEvent) {
-      yield* writeNativeEvent(event);
-      const runtimeEvents = mapToRuntimeEvents(event, event.threadId);
-      if (runtimeEvents.length === 0) {
-        yield* Effect.logDebug("ignoring unhandled Codex provider event", {
-          method: event.method,
-          threadId: event.threadId,
-          turnId: event.turnId,
-          itemId: event.itemId,
-        });
-        return;
+    const rollbackThread: CodexAdapterShape["rollbackThread"] = (threadId, numTurns) => {
+      if (!Number.isInteger(numTurns) || numTurns < 1) {
+        return Effect.fail(
+          new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "rollbackThread",
+            issue: "numTurns must be an integer >= 1.",
+          }),
+        );
       }
-      yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
-    });
-    const listener = (event: ProviderEvent) =>
-      listenerEffect(event).pipe(Effect.runPromiseWith(services));
-    manager.on("event", listener);
-    return listener;
+
+      return Effect.tryPromise({
+        try: () => manager.rollbackThread(threadId, numTurns),
+        catch: (cause) => toRequestError(threadId, "thread/rollback", cause),
+      }).pipe(
+        Effect.map((snapshot) => ({
+          threadId,
+          turns: snapshot.turns,
+        })),
+      );
+    };
+
+    const compactThread: NonNullable<CodexAdapterShape["compactThread"]> = (threadId) =>
+      Effect.tryPromise({
+        try: () => manager.compactThread(threadId),
+        catch: (cause) => toRequestError(threadId, "thread/compact/start", cause),
+      });
+
+    const forkThread: CodexAdapterShape["forkThread"] = (input) =>
+      Effect.tryPromise({
+        try: () => manager.forkThread(input),
+        catch: (cause) => toRequestError(input.sourceThreadId, "thread/fork", cause),
+      });
+
+    const respondToRequest: CodexAdapterShape["respondToRequest"] = (
+      threadId,
+      requestId,
+      decision,
+    ) =>
+      Effect.tryPromise({
+        try: () => manager.respondToRequest(threadId, requestId, decision),
+        catch: (cause) => toRequestError(threadId, "item/requestApproval/decision", cause),
+      });
+
+    const respondToUserInput: CodexAdapterShape["respondToUserInput"] = (
+      threadId,
+      requestId,
+      answers,
+    ) =>
+      Effect.tryPromise({
+        try: () => manager.respondToUserInput(threadId, requestId, answers),
+        catch: (cause) => toRequestError(threadId, "item/tool/requestUserInput", cause),
+      });
+
+    const stopSession: CodexAdapterShape["stopSession"] = (threadId) =>
+      Effect.sync(() => {
+        manager.stopSession(threadId);
+      });
+
+    const listSessions: CodexAdapterShape["listSessions"] = () =>
+      Effect.sync(() => manager.listSessions());
+
+    const hasSession: CodexAdapterShape["hasSession"] = (threadId) =>
+      Effect.sync(() => manager.hasSession(threadId));
+
+    const stopAll: CodexAdapterShape["stopAll"] = () =>
+      Effect.sync(() => {
+        manager.stopAll();
+      });
+
+    const getComposerCapabilities: NonNullable<CodexAdapterShape["getComposerCapabilities"]> = () =>
+      Effect.succeed(manager.getComposerCapabilities() satisfies ProviderComposerCapabilities);
+
+    const listSkills: NonNullable<CodexAdapterShape["listSkills"]> = (input) =>
+      Effect.tryPromise({
+        try: () =>
+          manager.listSkills({
+            cwd: input.cwd,
+            ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
+            ...(input.forceReload !== undefined ? { forceReload: input.forceReload } : {}),
+          }),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "skills/list",
+            detail: toMessage(cause, "skills/list failed"),
+            cause,
+          }),
+      }).pipe(Effect.map((result) => result satisfies ProviderListSkillsResult));
+
+    const listPlugins: NonNullable<CodexAdapterShape["listPlugins"]> = (input) =>
+      Effect.tryPromise({
+        try: () =>
+          manager.listPlugins({
+            ...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
+            ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
+            ...(input.forceRemoteSync !== undefined
+              ? { forceRemoteSync: input.forceRemoteSync }
+              : {}),
+            ...(input.forceReload !== undefined ? { forceReload: input.forceReload } : {}),
+          }),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "plugin/list",
+            detail: toMessage(cause, "plugin/list failed"),
+            cause,
+          }),
+      }).pipe(Effect.map((result) => result satisfies ProviderListPluginsResult));
+
+    const readPlugin: NonNullable<CodexAdapterShape["readPlugin"]> = (input) =>
+      Effect.tryPromise({
+        try: () =>
+          manager.readPlugin({
+            marketplacePath: input.marketplacePath,
+            pluginName: input.pluginName,
+          }),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "plugin/read",
+            detail: toMessage(cause, "plugin/read failed"),
+            cause,
+          }),
+      }).pipe(Effect.map((result) => result satisfies ProviderReadPluginResult));
+
+    const listModels: NonNullable<CodexAdapterShape["listModels"]> = (_input) =>
+      Effect.tryPromise({
+        try: () => manager.listModels(),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "model/list",
+            detail: toMessage(cause, "model/list failed"),
+            cause,
+          }),
+      }).pipe(Effect.map((result) => result satisfies ProviderListModelsResult));
+
+    const transcribeVoice: NonNullable<CodexAdapterShape["transcribeVoice"]> = (input) =>
+      Effect.tryPromise({
+        try: () => manager.transcribeVoice(input),
+        catch: (cause) =>
+          new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "voice/transcribe",
+            detail: toMessage(cause, "voice/transcribe failed"),
+            cause,
+          }),
+      }).pipe(Effect.map((result) => result satisfies ServerVoiceTranscriptionResult));
+
+    const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+
+    yield* Effect.acquireRelease(
+      Effect.gen(function* () {
+        const writeNativeEvent = (event: ProviderEvent) =>
+          Effect.gen(function* () {
+            if (!nativeEventLogger) {
+              return;
+            }
+            yield* nativeEventLogger.write(event, event.threadId);
+          });
+
+        const services = yield* Effect.services<never>();
+        const listener = (event: ProviderEvent) =>
+          Effect.gen(function* () {
+            yield* writeNativeEvent(event);
+            const runtimeEvents = mapToRuntimeEvents(event, event.threadId);
+            if (runtimeEvents.length === 0) {
+              yield* Effect.logDebug("ignoring unhandled Codex provider event", {
+                method: event.method,
+                threadId: event.threadId,
+                turnId: event.turnId,
+                itemId: event.itemId,
+              });
+              return;
+            }
+            yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
+          }).pipe(Effect.runPromiseWith(services));
+        manager.on("event", listener);
+        return listener;
+      }),
+      (listener) =>
+        Effect.gen(function* () {
+          yield* Effect.sync(() => {
+            manager.off("event", listener);
+          });
+          yield* Queue.shutdown(runtimeEventQueue);
+        }),
+    );
+
+    return {
+      provider: PROVIDER,
+      capabilities: {
+        sessionModelSwitch: "in-session",
+        supportsSkillMentions: true,
+        supportsSkillDiscovery: true,
+        supportsNativeSlashCommandDiscovery: false,
+        supportsPluginMentions: true,
+        supportsPluginDiscovery: true,
+        supportsRuntimeModelList: true,
+        supportsTurnSteering: true,
+      },
+      startSession,
+      sendTurn,
+      steerTurn,
+      startReview,
+      interruptTurn,
+      readThread,
+      readExternalThread,
+      rollbackThread,
+      compactThread,
+      forkThread,
+      respondToRequest,
+      respondToUserInput,
+      stopSession,
+      listSessions,
+      hasSession,
+      stopAll,
+      getComposerCapabilities,
+      listSkills,
+      listPlugins,
+      readPlugin,
+      listModels,
+      transcribeVoice,
+      streamEvents: Stream.fromQueue(runtimeEventQueue),
+    } satisfies CodexAdapterShape;
   });
-
-  const unregisterListener = Effect.fn("unregisterListener")(function* (
-    listener: (event: ProviderEvent) => Promise<void>,
-  ) {
-    yield* Effect.sync(() => {
-      manager.off("event", listener);
-    });
-    yield* Queue.shutdown(runtimeEventQueue);
-  });
-
-  yield* Effect.acquireRelease(registerListener(), unregisterListener);
-
-  return {
-    provider: PROVIDER,
-    capabilities: {
-      sessionModelSwitch: "in-session",
-    },
-    startSession,
-    sendTurn,
-    interruptTurn,
-    readThread,
-    rollbackThread,
-    respondToRequest,
-    respondToUserInput,
-    stopSession,
-    listSessions,
-    hasSession,
-    stopAll,
-    get streamEvents() {
-      return Stream.fromQueue(runtimeEventQueue);
-    },
-  } satisfies CodexAdapterShape;
-});
 
 export const CodexAdapterLive = Layer.effect(CodexAdapter, makeCodexAdapter());
 

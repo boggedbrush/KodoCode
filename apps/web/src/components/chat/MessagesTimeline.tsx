@@ -1,4 +1,9 @@
-import { type MessageId, type ProviderInteractionMode, type TurnId } from "@t3tools/contracts";
+// FILE: MessagesTimeline.tsx
+// Purpose: Renders the virtualized chat transcript, including user bubbles, assistant markdown, and work logs.
+// Layer: Web chat presentation component
+// Exports: MessagesTimeline
+
+import { type MessageId, ThreadId, type TurnId } from "@t3tools/contracts";
 import {
   memo,
   useCallback,
@@ -7,6 +12,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import {
@@ -17,98 +23,181 @@ import {
 import { deriveTimelineEntries, formatElapsed } from "../../session-logic";
 import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX } from "../../chat-scroll";
 import { type TurnDiffSummary } from "../../types";
-import { summarizeTurnDiffStats } from "../../lib/turnDiffTree";
 import ChatMarkdown from "../ChatMarkdown";
 import {
   BotIcon,
   CheckIcon,
   CircleAlertIcon,
   EyeIcon,
+  GitHubIcon,
   GlobeIcon,
   HammerIcon,
   type LucideIcon,
+  McpIcon,
+  QueueArrow,
   SquarePenIcon,
   TerminalIcon,
   Undo2Icon,
-  WrenchIcon,
   ZapIcon,
-} from "lucide-react";
+} from "~/lib/icons";
 import { Button } from "../ui/button";
 import { clamp } from "effect/Number";
+import { estimateTimelineMessageHeight, estimateTimelineWorkGroupHeight } from "../timelineHeight";
 import { buildExpandedImagePreview, ExpandedImagePreview } from "./ExpandedImagePreview";
 import { ProposedPlanCard } from "./ProposedPlanCard";
-import { ChangedFilesTree } from "./ChangedFilesTree";
-import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
+import { DiffStatLabel } from "./DiffStatLabel";
+import { VscodeEntryIcon } from "./VscodeEntryIcon";
 import { MessageCopyButton } from "./MessageCopyButton";
+import { AssistantSelectionsSummaryChip } from "./AssistantSelectionsSummaryChip";
 import {
-  MAX_VISIBLE_WORK_LOG_ENTRIES,
+  computeStableMessagesTimelineRows,
   deriveMessagesTimelineRows,
-  estimateMessagesTimelineRowHeight,
-  normalizeCompactToolLabel,
   type MessagesTimelineRow,
+  normalizeCompactToolLabel,
+  resolveAssistantMessageCopyState,
+  type StableMessagesTimelineRowsState,
 } from "./MessagesTimeline.logic";
-import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
+import { deriveReadableCommandDisplay } from "../../lib/toolCallLabel";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import {
   deriveDisplayedUserMessageState,
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
-import { useSettings } from "../../hooks/useSettings";
-import { type TimestampFormat } from "@t3tools/contracts/settings";
-import { formatTimestamp } from "../../timestampFormat";
-import { parseReviewReport, type ReviewFinding } from "../../review";
-import { ReviewReportCard } from "./ReviewReportCard";
+import {
+  DEFAULT_CHAT_FONT_SIZE_PX,
+  normalizeChatFontSizePx,
+  type TimestampFormat,
+} from "../../appSettings";
+import { formatShortTimestamp } from "../../timestampFormat";
 import {
   buildInlineTerminalContextText,
   formatInlineTerminalContextLabel,
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
-import { resolveChatReadabilityClassName } from "~/lib/chatReadability";
-import { resolveTextDirection } from "~/lib/textDirection";
+import { splitPromptIntoDisplaySegments } from "~/composer-editor-mentions";
+import {
+  COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME,
+  COMPOSER_INLINE_AGENT_CHIP_CLASS_NAME,
+  COMPOSER_INLINE_AGENT_CHIP_ICON_CLASS_NAME,
+  COMPOSER_INLINE_SKILL_CHIP_CLASS_NAME,
+  COMPOSER_INLINE_SKILL_CHIP_ICON_CLASS_NAME,
+  COMPOSER_INLINE_SKILL_CHIP_ICON_SVG,
+  formatComposerSkillChipLabel,
+} from "../composerInlineChip";
+import { getChatTranscriptLineHeightPx, getChatTranscriptTextStyle } from "./chatTypography";
+import { DisclosureChevron } from "../ui/DisclosureChevron";
+import { getAppTypographyScale } from "../../lib/appTypography";
+import {
+  formatSubagentModelLabel,
+  humanizeSubagentStatus,
+  normalizeSubagentStatusKind,
+  resolveSubagentPresentation,
+} from "../../lib/subagentPresentation";
+import { RiRobot3Line } from "react-icons/ri";
+import { deriveUserMessagePreviewState } from "./userMessagePreview";
 
+const MAX_VISIBLE_WORK_LOG_ENTRIES = 6;
+const MAX_VISIBLE_INLINE_TOOL_ENTRIES = 4;
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
+
+const SkillCubeIcon: LucideIcon = (props) => (
+  <svg {...props} viewBox="0 0 24 24" fill="none">
+    <path
+      d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="m3.3 7 8.7 5 8.7-5"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M12 22V12"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
+
+const AgentTaskIcon: LucideIcon = (props) => (
+  <RiRobot3Line className={props.className} style={props.style} />
+);
+
+const DEFAULT_AGENT_COLOR = { bg: "rgb(245 158 11 / 0.15)", text: "rgb(245 158 11)" };
+const AGENT_COLOR_STYLES: Record<string, { bg: string; text: string }> = {
+  violet: { bg: "rgb(139 92 246 / 0.15)", text: "rgb(139 92 246)" },
+  fuchsia: { bg: "rgb(217 70 239 / 0.15)", text: "rgb(217 70 239)" },
+  teal: { bg: "rgb(20 184 166 / 0.15)", text: "rgb(20 184 166)" },
+  cyan: { bg: "rgb(6 182 212 / 0.15)", text: "rgb(6 182 212)" },
+  amber: DEFAULT_AGENT_COLOR,
+  orange: { bg: "rgb(249 115 22 / 0.15)", text: "rgb(249 115 22)" },
+};
+
+// Keeps the steer marker visually attached to the whole sent-message stack.
+function UserDispatchModeChip({
+  dispatchMode,
+  hasLeadingMedia,
+}: {
+  dispatchMode: TimelineMessage["dispatchMode"];
+  hasLeadingMedia: boolean;
+}) {
+  if (dispatchMode !== "steer") {
+    return null;
+  }
+
+  return (
+    <div
+      className={cn(
+        "inline-flex items-center gap-1.5 self-end px-0 text-[11px] font-normal tracking-[0.01em] text-muted-foreground/78",
+        hasLeadingMedia ? "mb-3" : "mb-1.5",
+      )}
+    >
+      <QueueArrow className="size-3 shrink-0 text-muted-foreground/75" />
+      <span>Steering conversation</span>
+    </div>
+  );
+}
+
+function basename(value: string): string {
+  const slash = Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+  return slash >= 0 ? value.slice(slash + 1) : value;
+}
 
 interface MessagesTimelineProps {
   hasMessages: boolean;
   isWorking: boolean;
   activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
+  emptyStateContent?: ReactNode;
   scrollContainer: HTMLDivElement | null;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
-  nowIso: string;
+  nowIso?: string;
   expandedWorkGroups: Record<string, boolean>;
   onToggleWorkGroup: (groupId: string) => void;
-  changedFilesExpandedByTurnId: Record<string, boolean>;
-  onSetChangedFilesExpanded: (turnId: TurnId, expanded: boolean) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
+  onOpenThread?: (threadId: ThreadId) => void;
   revertTurnCountByUserMessageId: Map<MessageId, number>;
   onRevertUserMessage: (messageId: MessageId) => void;
   isRevertingCheckpoint: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
+  onTimelineHeightChange?: () => void;
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
+  chatFontSizePx?: number;
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
-  interactionMode?: ProviderInteractionMode | null;
-  onReviewImplementFinding?: (finding: ReviewFinding) => void;
-  onReviewImplementAll?: (findings: ReviewFinding[]) => void;
-  onReviewDismissAll?: () => void;
-  onVirtualizerSnapshot?: (snapshot: {
-    measurementScopeKey: string;
-    totalSize: number;
-    measurements: ReadonlyArray<{
-      id: string;
-      kind: MessagesTimelineRow["kind"];
-      index: number;
-      size: number;
-      start: number;
-      end: number;
-    }>;
-  }) => void;
 }
 
 export const MessagesTimeline = memo(function MessagesTimeline({
@@ -124,74 +213,102 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   nowIso,
   expandedWorkGroups,
   onToggleWorkGroup,
-  changedFilesExpandedByTurnId,
-  onSetChangedFilesExpanded,
   onOpenTurnDiff,
+  onOpenThread,
   revertTurnCountByUserMessageId,
   onRevertUserMessage,
   isRevertingCheckpoint,
   onImageExpand,
+  onTimelineHeightChange,
   markdownCwd,
   resolvedTheme,
+  chatFontSizePx = DEFAULT_CHAT_FONT_SIZE_PX,
   timestampFormat,
   workspaceRoot,
-  interactionMode,
-  onReviewImplementFinding,
-  onReviewImplementAll,
-  onReviewDismissAll,
-  onVirtualizerSnapshot,
+  emptyStateContent,
 }: MessagesTimelineProps) {
+  const normalizedChatFontSizePx = normalizeChatFontSizePx(chatFontSizePx);
+  const appTypographyScale = useMemo(
+    () => getAppTypographyScale(normalizedChatFontSizePx),
+    [normalizedChatFontSizePx],
+  );
+  const chatTypographyStyle = useMemo(
+    () => getChatTranscriptTextStyle(normalizedChatFontSizePx),
+    [normalizedChatFontSizePx],
+  );
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
-  const pendingMeasureFrameRef = useRef<number | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
-  const chatFontFamily = useSettings((settings) => settings.chatFontFamily);
-  const chatTextSize = useSettings((settings) => settings.chatTextSize);
-  const typographyMeasurementScopeKey = `${chatFontFamily}:${chatTextSize}`;
+  const [expandedFileChangesByMessageId, setExpandedFileChangesByMessageId] = useState<
+    Record<string, boolean>
+  >({});
+  const [expandedUserMessagesById, setExpandedUserMessagesById] = useState<Record<string, boolean>>(
+    {},
+  );
 
   useLayoutEffect(() => {
     const timelineRoot = timelineRootRef.current;
     if (!timelineRoot) return;
 
-    const updateWidth = (nextWidth: number) => {
+    let lastHeight = -1;
+    const syncRootSize = () => {
+      const { width: nextWidth, height: nextHeight } = timelineRoot.getBoundingClientRect();
       setTimelineWidthPx((previousWidth) => {
         if (previousWidth !== null && Math.abs(previousWidth - nextWidth) < 0.5) {
           return previousWidth;
         }
         return nextWidth;
       });
+
+      // Notify ChatView when async row measurement changes the rendered height so
+      // stick-to-bottom can settle again after images or virtual rows expand.
+      const heightChanged = lastHeight >= 0 && Math.abs(nextHeight - lastHeight) >= 0.5;
+      lastHeight = nextHeight;
+      if (heightChanged) {
+        onTimelineHeightChange?.();
+      }
     };
 
-    updateWidth(timelineRoot.getBoundingClientRect().width);
+    syncRootSize();
 
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      updateWidth(timelineRoot.getBoundingClientRect().width);
+      syncRootSize();
     });
     observer.observe(timelineRoot);
     return () => {
       observer.disconnect();
     };
-  }, [hasMessages, isWorking]);
+  }, [hasMessages, isWorking, onTimelineHeightChange]);
 
-  const rows = useMemo(
+  const rawRows = useMemo(
     () =>
       deriveMessagesTimelineRows({
         timelineEntries,
         completionDividerBeforeEntryId,
         isWorking,
         activeTurnStartedAt,
+        turnDiffSummaryByAssistantMessageId,
+        revertTurnCountByUserMessageId,
       }),
-    [timelineEntries, completionDividerBeforeEntryId, isWorking, activeTurnStartedAt],
+    [
+      timelineEntries,
+      completionDividerBeforeEntryId,
+      isWorking,
+      activeTurnStartedAt,
+      turnDiffSummaryByAssistantMessageId,
+      revertTurnCountByUserMessageId,
+    ],
   );
-  const shouldDefaultExpandProposedPlan = useMemo(
-    () => rows.filter((row) => row.kind === "proposed-plan").length === 1,
-    [rows],
-  );
+  const rows = useStableRows(rawRows);
 
   const firstUnvirtualizedRowIndex = useMemo(() => {
     const firstTailRowIndex = Math.max(rows.length - ALWAYS_UNVIRTUALIZED_TAIL_ROWS, 0);
     if (!activeTurnInProgress) return firstTailRowIndex;
 
+    // We intentionally keep a small live tail outside virtualization so the
+    // currently active turn can expand without the user seeing rows jump in and
+    // out of measurement. If this area ever becomes the next perf bottleneck,
+    // this is the pivot point to shrink first.
     const turnStartedAtMs =
       typeof activeTurnStartedAt === "string" ? Date.parse(activeTurnStartedAt) : Number.NaN;
     let firstCurrentTurnRowIndex = -1;
@@ -230,79 +347,138 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     minimum: 0,
     maximum: rows.length,
   });
-  const virtualMeasurementScopeKey =
-    timelineWidthPx === null
-      ? `width:unknown:typography:${typographyMeasurementScopeKey}`
-      : `width:${Math.round(timelineWidthPx)}:typography:${typographyMeasurementScopeKey}`;
+  const [allDirectoriesExpandedByTurnId] = useState<Record<string, boolean>>({});
+  const userMessageIdByAssistantMessageId = useMemo(() => {
+    const map = new Map<MessageId, MessageId>();
+    let lastUserMessageId: MessageId | null = null;
+    for (const row of rows) {
+      if (row.kind !== "message") continue;
+      if (row.message.role === "user") {
+        lastUserMessageId = row.message.id;
+      } else if (row.message.role === "assistant" && lastUserMessageId) {
+        map.set(row.message.id, lastUserMessageId);
+      }
+    }
+    return map;
+  }, [rows]);
 
   const rowVirtualizer = useVirtualizer({
     count: virtualizedRowCount,
     getScrollElement: () => scrollContainer,
-    // Scope cached row measurements to the current timeline width so offscreen
-    // rows do not keep stale heights after wrapping changes.
-    getItemKey: (index: number) => {
-      const rowId = rows[index]?.id ?? String(index);
-      return `${virtualMeasurementScopeKey}:${rowId}`;
-    },
+    // Use stable row ids so virtual measurements do not leak across thread switches.
+    getItemKey: (index: number) => rows[index]?.id ?? index,
+    // Keep pre-measure placements close to the final layout so fast scrolls do not visually stack rows.
     estimateSize: (index: number) => {
       const row = rows[index];
       if (!row) return 96;
-      return estimateMessagesTimelineRowHeight(row, {
-        chatTextSize,
-        expandedWorkGroups,
+      if (row.kind === "work") {
+        return estimateTimelineWorkGroupHeight(row.groupedEntries, {
+          expanded: expandedWorkGroups[row.id] ?? false,
+          maxVisibleEntries: MAX_VISIBLE_WORK_LOG_ENTRIES,
+        });
+      }
+      if (row.kind === "proposed-plan") {
+        return estimateTimelineProposedPlanHeight(row.proposedPlan, normalizedChatFontSizePx);
+      }
+      if (row.kind === "working") return 40;
+      const turnSummary = row.assistantTurnDiffSummary;
+      const messageHeightInput = {
+        ...row.message,
+        showCompletionDivider: row.showCompletionDivider,
+      };
+      if (row.message.role === "assistant" && hasOnlyToolToneEntries(row.inlineWorkEntries)) {
+        Object.assign(messageHeightInput, {
+          inlineToolEntries: row.inlineWorkEntries,
+          inlineToolExpanded: row.inlineWorkGroupId
+            ? (expandedWorkGroups[row.inlineWorkGroupId] ?? false)
+            : false,
+        });
+      }
+      if (turnSummary) {
+        Object.assign(messageHeightInput, {
+          diffSummaryFiles: turnSummary.files,
+          diffSummaryAllDirectoriesExpanded:
+            allDirectoriesExpandedByTurnId[turnSummary.turnId] ?? true,
+        });
+      }
+      return estimateTimelineMessageHeight(messageHeightInput, {
         timelineWidthPx,
-        turnDiffSummaryByAssistantMessageId,
+        chatFontSizePx: normalizedChatFontSizePx,
       });
     },
+    // We still dynamically measure rows because assistant markdown, images and
+    // diff cards do not have stable heights. If we revisit the virtualizer
+    // strategy, this ref is the main seam where we can switch to fixed or
+    // selectively measured rows.
     measureElement: measureVirtualElement,
     useAnimationFrameWithResizeObserver: true,
-    overscan: 8,
+    overscan: 4,
   });
+  const pendingMeasureFrameRef = useRef<number | null>(null);
+  // Coalesce all local "please remeasure" triggers into one RAF. The hot path
+  // here is less about any single measure and more about several observers
+  // firing back-to-back while the user is scrolling.
   const scheduleVirtualizerMeasure = useCallback(() => {
     if (pendingMeasureFrameRef.current !== null) return;
     pendingMeasureFrameRef.current = window.requestAnimationFrame(() => {
       pendingMeasureFrameRef.current = null;
       rowVirtualizer.measure();
+      onTimelineHeightChange?.();
     });
-  }, [rowVirtualizer]);
+  }, [onTimelineHeightChange, rowVirtualizer]);
   useEffect(() => {
     if (timelineWidthPx === null) return;
-    rowVirtualizer.measure();
-  }, [rowVirtualizer, timelineWidthPx]);
+    scheduleVirtualizerMeasure();
+  }, [scheduleVirtualizerMeasure, timelineWidthPx]);
   useEffect(() => {
     scheduleVirtualizerMeasure();
-  }, [scheduleVirtualizerMeasure, typographyMeasurementScopeKey]);
-  useEffect(() => {
-    if (typeof document === "undefined" || document.fonts === undefined) {
-      return;
-    }
+  }, [expandedUserMessagesById, scheduleVirtualizerMeasure]);
+  useLayoutEffect(() => {
+    if (!scrollContainer || typeof ResizeObserver === "undefined") return;
 
-    const fontSet = document.fonts;
-    let active = true;
-    const handleFontSettle = () => {
-      if (!active) return;
+    let lastViewportWidth = -1;
+    let lastViewportHeight = -1;
+    // Re-measure when the scroll viewport changes because composer/panel chrome
+    // can steal vertical space without remounting the timeline.
+    const syncViewportSize = () => {
+      const nextViewportWidth = scrollContainer.clientWidth;
+      const nextViewportHeight = scrollContainer.clientHeight;
+      if (
+        Math.abs(nextViewportWidth - lastViewportWidth) < 0.5 &&
+        Math.abs(nextViewportHeight - lastViewportHeight) < 0.5
+      ) {
+        return;
+      }
+      lastViewportWidth = nextViewportWidth;
+      lastViewportHeight = nextViewportHeight;
       scheduleVirtualizerMeasure();
     };
 
-    void fontSet.ready.then(handleFontSettle, () => {});
-    fontSet.addEventListener("loadingdone", handleFontSettle);
-    fontSet.addEventListener("loadingerror", handleFontSettle);
-
+    syncViewportSize();
+    const observer = new ResizeObserver(() => {
+      syncViewportSize();
+    });
+    observer.observe(scrollContainer);
     return () => {
-      active = false;
-      fontSet.removeEventListener("loadingdone", handleFontSettle);
-      fontSet.removeEventListener("loadingerror", handleFontSettle);
+      observer.disconnect();
     };
-  }, [scheduleVirtualizerMeasure, typographyMeasurementScopeKey]);
+  }, [scheduleVirtualizerMeasure, scrollContainer]);
   useEffect(() => {
-    rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+    scheduleVirtualizerMeasure();
+  }, [
+    expandedWorkGroups,
+    expandedFileChangesByMessageId,
+    allDirectoriesExpandedByTurnId,
+    normalizedChatFontSizePx,
+    scheduleVirtualizerMeasure,
+  ]);
+  useEffect(() => {
+    // TanStack can compensate for late measurements by shifting scroll
+    // position. This keeps the bottom anchored, but it is also one of the
+    // places to revisit if future "scroll fights the user" regressions appear.
+    rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (_item, _delta, instance) => {
       const viewportHeight = instance.scrollRect?.height ?? 0;
       const scrollOffset = instance.scrollOffset ?? 0;
-      const itemIntersectsViewport =
-        item.end > scrollOffset && item.start < scrollOffset + viewportHeight;
-      if (itemIntersectsViewport) {
-        return false;
-      }
       const remainingDistance = instance.getTotalSize() - (scrollOffset + viewportHeight);
       return remainingDistance > AUTO_SCROLL_BOTTOM_THRESHOLD_PX;
     };
@@ -312,7 +488,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }, [rowVirtualizer]);
   const onTimelineImageLoad = useCallback(() => {
     scheduleVirtualizerMeasure();
-  }, [scheduleVirtualizerMeasure]);
+    onTimelineHeightChange?.();
+  }, [onTimelineHeightChange, scheduleVirtualizerMeasure]);
   useEffect(() => {
     return () => {
       const frame = pendingMeasureFrameRef.current;
@@ -321,47 +498,24 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       }
     };
   }, []);
-  useLayoutEffect(() => {
-    if (!onVirtualizerSnapshot) {
-      return;
-    }
-    onVirtualizerSnapshot({
-      measurementScopeKey: typographyMeasurementScopeKey,
-      totalSize: rowVirtualizer.getTotalSize(),
-      measurements: rowVirtualizer.measurementsCache
-        .slice(0, virtualizedRowCount)
-        .flatMap((measurement) => {
-          const row = rows[measurement.index];
-          if (!row) {
-            return [];
-          }
-          return [
-            {
-              id: row.id,
-              kind: row.kind,
-              index: measurement.index,
-              size: measurement.size,
-              start: measurement.start,
-              end: measurement.end,
-            },
-          ];
-        }),
-    });
-  }, [
-    onVirtualizerSnapshot,
-    rowVirtualizer,
-    rows,
-    typographyMeasurementScopeKey,
-    virtualizedRowCount,
-  ]);
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
+  const toggleFileChangesExpanded = useCallback((messageId: MessageId) => {
+    setExpandedFileChangesByMessageId((current) => ({
+      ...current,
+      [messageId]: !(current[messageId] ?? true),
+    }));
+  }, []);
 
-  const renderRowContent = (row: TimelineRow) => (
+  const renderRowContent = (row: MessagesTimelineRow) => (
     <div
-      className="pb-4"
-      data-timeline-row-id={row.id}
+      className={cn(
+        row.kind === "work" || (row.kind === "message" && row.message.role === "assistant")
+          ? "pb-2"
+          : "pb-4",
+        row.kind === "message" && row.message.role === "assistant" ? "group/assistant" : null,
+      )}
       data-timeline-row-kind={row.kind}
       data-message-id={row.kind === "message" ? row.message.id : undefined}
       data-message-role={row.kind === "message" ? row.message.role : undefined}
@@ -377,33 +531,34 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               ? groupedEntries.slice(-MAX_VISIBLE_WORK_LOG_ENTRIES)
               : groupedEntries;
           const hiddenCount = groupedEntries.length - visibleEntries.length;
-          const onlyToolEntries = groupedEntries.every((entry) => entry.tone === "tool");
-          const showHeader = hasOverflow || !onlyToolEntries;
-          const groupLabel = onlyToolEntries ? "Tool calls" : "Work log";
+          const showOverflowToggle = hasOverflow;
 
           return (
-            <div className="rounded-xl border border-border/45 bg-card/25 px-2 py-1.5">
-              {showHeader && (
-                <div className="mb-1.5 flex items-center justify-between gap-2 px-0.5">
-                  <p className="text-[9px] uppercase tracking-[0.16em] text-muted-foreground/55">
-                    {groupLabel} ({groupedEntries.length})
-                  </p>
-                  {hasOverflow && (
-                    <button
-                      type="button"
-                      className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
-                      onClick={() => onToggleWorkGroup(groupId)}
-                    >
-                      {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
-                    </button>
-                  )}
-                </div>
-              )}
+            <div>
               <div className="space-y-0.5">
                 {visibleEntries.map((workEntry) => (
-                  <SimpleWorkEntryRow key={`work-row:${workEntry.id}`} workEntry={workEntry} />
+                  <SimpleWorkEntryRow
+                    key={`work-row:${workEntry.id}`}
+                    workEntry={workEntry}
+                    chatMetaFontSizePx={appTypographyScale.chatMetaPx}
+                    textFontSizePx={appTypographyScale.uiSmPx}
+                    density={prefersCompactWorkEntryRow(workEntry) ? "compact" : "default"}
+                    {...(onOpenThread ? { onOpenThread } : {})}
+                  />
                 ))}
               </div>
+              {showOverflowToggle && (
+                <div className="mt-1.5 flex items-center justify-start gap-2 px-0.5">
+                  <button
+                    type="button"
+                    className="font-system-ui text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/75"
+                    style={{ fontSize: `${appTypographyScale.uiSmPx}px` }}
+                    onClick={() => onToggleWorkGroup(groupId)}
+                  >
+                    {isExpanded ? "Show less" : `Show ${hiddenCount} more`}
+                  </button>
+                </div>
+              )}
             </div>
           );
         })()}
@@ -411,77 +566,137 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       {row.kind === "message" &&
         row.message.role === "user" &&
         (() => {
-          const userImages = row.message.attachments ?? [];
-          const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text);
+          const userImages = (row.message.attachments ?? []).filter(
+            (
+              attachment,
+            ): attachment is Extract<
+              NonNullable<TimelineMessage["attachments"]>[number],
+              { type: "image" }
+            > => attachment.type === "image",
+          );
+          const assistantSelections = (row.message.attachments ?? []).filter(
+            (
+              attachment,
+            ): attachment is Extract<
+              NonNullable<TimelineMessage["attachments"]>[number],
+              { type: "assistant-selection" }
+            > => attachment.type === "assistant-selection",
+          );
+          const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text, {
+            hideImageOnlyBootstrapPrompt: userImages.length > 0 || assistantSelections.length > 0,
+          });
+          const renderedAssistantSelections =
+            assistantSelections.length > 0
+              ? assistantSelections
+              : displayedUserMessage.assistantSelections.map((selection, index) => ({
+                  type: "assistant-selection" as const,
+                  id: `fallback-selection-${row.message.id}-${index}`,
+                  assistantMessageId: selection.assistantMessageId,
+                  text: selection.text,
+                }));
           const terminalContexts = displayedUserMessage.contexts;
-          const canRevertAgentWork = revertTurnCountByUserMessageId.has(row.message.id);
+          const userMessagePreview = deriveUserMessagePreviewState(
+            displayedUserMessage.visibleText,
+            {
+              expanded: expandedUserMessagesById[row.message.id] ?? false,
+            },
+          );
+          const showUserText =
+            userMessagePreview.text.trim().length > 0 || terminalContexts.length > 0;
+          const bubbleIsChipOnly =
+            showUserText &&
+            terminalContexts.length === 0 &&
+            hasOnlyInlineSkillChips(userMessagePreview.text);
+          const canRevertAgentWork = typeof row.revertTurnCount === "number";
+          const hasLeadingMedia = renderedAssistantSelections.length > 0 || userImages.length > 0;
           return (
-            <div className="flex flex-col items-end gap-2">
-              {userImages.length > 0 && (
-                <div className="grid max-w-[420px] grid-cols-2 gap-2">
-                  {userImages.map((image: NonNullable<TimelineMessage["attachments"]>[number]) => (
-                    <div
-                      key={image.id}
-                      className="only:col-start-2 overflow-hidden rounded-lg border border-border/80 bg-background/70"
-                    >
-                      {image.previewUrl ? (
-                        <button
-                          type="button"
-                          className="h-full w-full cursor-zoom-in"
-                          aria-label={`Preview ${image.name}`}
-                          onClick={() => {
-                            const preview = buildExpandedImagePreview(userImages, image.id);
-                            if (!preview) return;
-                            onImageExpand(preview);
-                          }}
-                        >
-                          <img
-                            src={image.previewUrl}
-                            alt={image.name}
-                            className="block h-auto max-h-[220px] w-full object-cover"
-                            onLoad={onTimelineImageLoad}
-                            onError={onTimelineImageLoad}
-                          />
-                        </button>
-                      ) : (
-                        <div className="flex min-h-[72px] items-center justify-center px-2 py-3 text-center text-[11px] text-muted-foreground/70">
-                          {image.name}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="group relative max-w-[80%]">
-                {(displayedUserMessage.visibleText.trim().length > 0 ||
-                  terminalContexts.length > 0) && (
-                  <div className="rounded-2xl rounded-br-sm border border-border bg-secondary px-4 py-3">
+            <div className="flex w-full justify-end">
+              <div className="group flex max-w-[80%] flex-col items-end gap-px">
+                {/* Keep user-message chrome outside the bubble so the message reads as one simple block. */}
+                <UserDispatchModeChip
+                  dispatchMode={row.message.dispatchMode}
+                  hasLeadingMedia={hasLeadingMedia}
+                />
+                {renderedAssistantSelections.length > 0 && (
+                  <div className="mb-1 flex max-w-[240px] flex-wrap justify-end gap-1.5 self-end">
+                    <AssistantSelectionsSummaryChip selections={renderedAssistantSelections} />
+                  </div>
+                )}
+                {userImages.length > 0 && (
+                  <div
+                    className={cn(
+                      "flex max-w-[240px] flex-wrap justify-end gap-2 self-end",
+                      showUserText && "mb-1",
+                    )}
+                  >
+                    {userImages.map((image) => (
+                      <UserImageAttachmentThumbnail
+                        key={image.id}
+                        image={image}
+                        userImages={userImages}
+                        onImageExpand={onImageExpand}
+                        onTimelineImageLoad={onTimelineImageLoad}
+                        resolvedTheme={resolvedTheme}
+                      />
+                    ))}
+                  </div>
+                )}
+                {showUserText && (
+                  <div
+                    className={cn(
+                      "w-max max-w-full min-w-0 self-end rounded-lg bg-secondary px-3.5",
+                      bubbleIsChipOnly ? "py-1" : "pt-[5px] pb-[7px]",
+                    )}
+                  >
                     <UserMessageBody
-                      text={displayedUserMessage.visibleText}
+                      text={userMessagePreview.text}
                       terminalContexts={terminalContexts}
+                      chatTypographyStyle={chatTypographyStyle}
                     />
                   </div>
                 )}
-                <div className="mt-1 flex items-center justify-end gap-2 px-1">
-                  <div className="flex items-center gap-1.5 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
+                {userMessagePreview.collapsible && (
+                  <button
+                    type="button"
+                    className="pr-0.5 text-right text-muted-foreground/55 transition-colors duration-150 hover:text-foreground/72"
+                    style={{ fontSize: `${normalizedChatFontSizePx}px` }}
+                    onClick={() => {
+                      setExpandedUserMessagesById((previous) => ({
+                        ...previous,
+                        [row.message.id]: !(previous[row.message.id] ?? false),
+                      }));
+                    }}
+                  >
+                    {(expandedUserMessagesById[row.message.id] ?? false)
+                      ? "Show less"
+                      : "Show more"}
+                  </button>
+                )}
+                <div className="flex items-center justify-end gap-1.5 pr-0.5">
+                  <div className="flex items-center gap-1 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100">
                     {displayedUserMessage.copyText && (
                       <MessageCopyButton text={displayedUserMessage.copyText} />
                     )}
                     {canRevertAgentWork && (
                       <Button
                         type="button"
-                        size="xs"
-                        variant="outline"
+                        size="icon-xs"
+                        variant="ghost"
+                        className="size-auto rounded-none border-0 bg-transparent p-0 text-muted-foreground/55 shadow-none hover:bg-transparent hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
                         disabled={isRevertingCheckpoint || isWorking}
                         onClick={() => onRevertUserMessage(row.message.id)}
                         title="Revert to this message"
+                        aria-label="Revert to this message"
                       >
                         <Undo2Icon className="size-3" />
                       </Button>
                     )}
                   </div>
-                  <p className="text-right text-[10px] text-muted-foreground/40">
-                    {formatTimestamp(row.message.createdAt, timestampFormat)}
+                  <p
+                    className="font-chat-code text-right text-muted-foreground/45"
+                    style={{ fontSize: `${appTypographyScale.uiTimestampPx}px` }}
+                  >
+                    {formatShortTimestamp(row.message.createdAt, timestampFormat)}
                   </p>
                 </div>
               </div>
@@ -493,106 +708,312 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         row.message.role === "assistant" &&
         (() => {
           const messageText = row.message.text || (row.message.streaming ? "" : "(empty response)");
-          const reviewReport =
-            interactionMode === "review" && !row.message.streaming
-              ? parseReviewReport(messageText)
-              : null;
+          const inlineToolEntries = hasOnlyToolToneEntries(row.inlineWorkEntries)
+            ? row.inlineWorkEntries
+            : [];
+          const inlineToolGroupId =
+            inlineToolEntries.length > 0 ? (row.inlineWorkGroupId ?? null) : null;
+          const inlineToolExpanded =
+            inlineToolGroupId !== null ? (expandedWorkGroups[inlineToolGroupId] ?? false) : false;
+          const visibleInlineToolEntries =
+            inlineToolExpanded || inlineToolEntries.length <= MAX_VISIBLE_INLINE_TOOL_ENTRIES
+              ? inlineToolEntries
+              : activeTurnInProgress
+                ? inlineToolEntries.slice(-MAX_VISIBLE_INLINE_TOOL_ENTRIES)
+                : inlineToolEntries.slice(0, MAX_VISIBLE_INLINE_TOOL_ENTRIES);
+          const hiddenInlineToolCount = inlineToolEntries.length - visibleInlineToolEntries.length;
+          const inlineWorkSummary =
+            inlineToolEntries.length > 0
+              ? null
+              : formatInlineWorkSummary(row.inlineWorkEntries ?? []);
+          const assistantCopyState = resolveAssistantMessageCopyState({
+            text: row.message.text ?? null,
+            showCopyButton: row.showAssistantCopyButton,
+            streaming: row.message.streaming,
+          });
+          const turnSummary = row.assistantTurnDiffSummary;
+          const fileDiffStatByPath = new Map(
+            (turnSummary?.files ?? []).map((file) => [
+              file.path,
+              {
+                additions: file.additions ?? 0,
+                deletions: file.deletions ?? 0,
+              },
+            ]),
+          );
+          const hasGenericInlineFileChangeEntry = inlineToolEntries.some(
+            (workEntry) =>
+              isFileChangeWorkEntry(workEntry) && (workEntry.changedFiles?.length ?? 0) === 0,
+          );
+          const visibleRenderableInlineToolEntries = visibleInlineToolEntries.filter(
+            (workEntry) =>
+              !(
+                hasGenericInlineFileChangeEntry &&
+                isFileChangeWorkEntry(workEntry) &&
+                (workEntry.changedFiles?.length ?? 0) === 0
+              ),
+          );
+          const inlineEditedFilesFromTurnSummary =
+            hasGenericInlineFileChangeEntry && (turnSummary?.files.length ?? 0) > 0
+              ? turnSummary!.files
+              : [];
+          const assistantMeta = row.message.streaming ? (
+            nowIso ? (
+              [
+                formatMessageMeta(
+                  row.message.createdAt,
+                  formatElapsed(row.durationStart, nowIso),
+                  timestampFormat,
+                ),
+                inlineWorkSummary,
+              ]
+                .filter((value): value is string => Boolean(value))
+                .join(" • ")
+            ) : (
+              <>
+                <LiveMessageMeta
+                  createdAt={row.message.createdAt}
+                  durationStart={row.durationStart}
+                  timestampFormat={timestampFormat}
+                />
+                {inlineWorkSummary ? <> • {inlineWorkSummary}</> : null}
+              </>
+            )
+          ) : (
+            [
+              formatMessageMeta(
+                row.message.createdAt,
+                formatElapsed(row.durationStart, row.message.completedAt),
+                timestampFormat,
+              ),
+              inlineWorkSummary,
+            ]
+              .filter((value): value is string => Boolean(value))
+              .join(" • ")
+          );
           return (
             <>
               {row.showCompletionDivider && (
                 <div className="my-3 flex items-center gap-3">
                   <span className="h-px flex-1 bg-border" />
-                  <span className="rounded-full border border-border bg-background px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground/80">
+                  <span
+                    className="text-muted-foreground/80"
+                    style={{ fontSize: chatTypographyStyle.fontSize }}
+                  >
                     {completionSummary ? `Response • ${completionSummary}` : "Response"}
                   </span>
                   <span className="h-px flex-1 bg-border" />
                 </div>
               )}
               <div className="min-w-0 px-1 py-0.5">
-                {reviewReport ? (
-                  <ReviewReportCard
-                    report={reviewReport}
-                    {...(onReviewImplementFinding
-                      ? { onImplementFinding: onReviewImplementFinding }
-                      : {})}
-                    {...(onReviewImplementAll ? { onImplementAll: onReviewImplementAll } : {})}
-                    {...(onReviewDismissAll ? { onDismissAll: onReviewDismissAll } : {})}
-                  />
-                ) : (
+                <div data-assistant-message-id={row.message.id}>
                   <ChatMarkdown
                     text={messageText}
                     cwd={markdownCwd}
                     isStreaming={Boolean(row.message.streaming)}
+                    style={chatTypographyStyle}
                   />
+                </div>
+                {visibleRenderableInlineToolEntries.length > 0 && (
+                  <div className="mt-2.5">
+                    <div className="space-y-px">
+                      {visibleRenderableInlineToolEntries.map((workEntry) => (
+                        <SimpleWorkEntryRow
+                          key={`inline-tool-row:${row.message.id}:${workEntry.id}`}
+                          workEntry={workEntry}
+                          chatMetaFontSizePx={appTypographyScale.chatMetaPx}
+                          textFontSizePx={normalizedChatFontSizePx}
+                          density="compact"
+                          fileDiffStatByPath={fileDiffStatByPath}
+                          onOpenTurnDiff={onOpenTurnDiff}
+                          {...(onOpenThread ? { onOpenThread } : {})}
+                          {...(turnSummary?.turnId ? { turnId: turnSummary.turnId } : {})}
+                        />
+                      ))}
+                    </div>
+                    {inlineToolGroupId &&
+                      inlineToolEntries.length > MAX_VISIBLE_INLINE_TOOL_ENTRIES && (
+                        <div className="py-0.5">
+                          <button
+                            type="button"
+                            className="text-muted-foreground/50 transition-colors duration-150 hover:text-foreground/72"
+                            style={{ fontSize: `${normalizedChatFontSizePx}px` }}
+                            onClick={() => onToggleWorkGroup(inlineToolGroupId)}
+                          >
+                            {inlineToolExpanded
+                              ? "Show less"
+                              : `+${hiddenInlineToolCount} more tool calls`}
+                          </button>
+                        </div>
+                      )}
+                  </div>
+                )}
+                {inlineEditedFilesFromTurnSummary.length > 0 && (
+                  <div className="mt-2 space-y-0.5">
+                    {inlineEditedFilesFromTurnSummary.map((file) => (
+                      <button
+                        key={`inline-summary-edit:${row.message.id}:${file.path}`}
+                        type="button"
+                        className="group flex w-full max-w-full items-baseline gap-1 px-0 py-[1px] text-left transition-opacity duration-150 hover:opacity-95"
+                        title={file.path}
+                        onClick={() => onOpenTurnDiff(turnSummary!.turnId, file.path)}
+                      >
+                        <span
+                          className="font-system-ui shrink-0 text-[#7b7b84]"
+                          style={{ fontSize: `${normalizedChatFontSizePx}px` }}
+                        >
+                          Edited
+                        </span>
+                        <span
+                          className="font-system-ui max-w-[28rem] truncate group-hover:opacity-90"
+                          style={{
+                            fontSize: `${normalizedChatFontSizePx}px`,
+                            color: "var(--info-foreground)",
+                          }}
+                        >
+                          {basename(file.path)}
+                        </span>
+                        {(file.additions ?? 0) + (file.deletions ?? 0) > 0 ? (
+                          <span
+                            className="font-chat-code shrink-0 tabular-nums whitespace-nowrap"
+                            style={{ fontSize: `${normalizedChatFontSizePx}px` }}
+                          >
+                            <DiffStatLabel
+                              additions={file.additions ?? 0}
+                              deletions={file.deletions ?? 0}
+                            />
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
                 )}
                 {(() => {
-                  const turnSummary = turnDiffSummaryByAssistantMessageId.get(row.message.id);
                   if (!turnSummary) return null;
                   const checkpointFiles = turnSummary.files;
                   if (checkpointFiles.length === 0) return null;
-                  const summaryStat = summarizeTurnDiffStats(checkpointFiles);
-                  const changedFileCountLabel = String(checkpointFiles.length);
-                  const allDirectoriesExpanded =
-                    changedFilesExpandedByTurnId[turnSummary.turnId] ?? true;
+                  const fileChangesExpanded =
+                    expandedFileChangesByMessageId[row.message.id] ?? true;
+                  const correspondingUserMessageId = userMessageIdByAssistantMessageId.get(
+                    row.message.id,
+                  );
+                  const canUndo =
+                    correspondingUserMessageId != null &&
+                    revertTurnCountByUserMessageId.has(correspondingUserMessageId);
                   return (
-                    <div className="mt-2 rounded-lg border border-border/80 bg-card/45 p-2.5">
-                      <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground/65">
-                          <span>Changed files ({changedFileCountLabel})</span>
-                          {hasNonZeroStat(summaryStat) && (
-                            <>
-                              <span className="mx-1">•</span>
-                              <DiffStatLabel
-                                additions={summaryStat.additions}
-                                deletions={summaryStat.deletions}
-                              />
-                            </>
+                    <div className="mt-5 overflow-hidden rounded-lg border border-border bg-neutral-50 dark:bg-neutral-900">
+                      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+                        <span
+                          className="truncate font-normal text-foreground"
+                          style={{ fontSize: chatTypographyStyle.fontSize }}
+                        >
+                          {checkpointFiles.length === 1
+                            ? "1 File changed"
+                            : `${checkpointFiles.length} Files changed`}
+                        </span>
+                        <div className="flex items-center gap-4">
+                          <button
+                            type="button"
+                            className="inline-flex items-center justify-center rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-background/60 hover:text-foreground/80"
+                            aria-expanded={fileChangesExpanded}
+                            aria-label={
+                              fileChangesExpanded
+                                ? "Collapse changed files list"
+                                : "Expand changed files list"
+                            }
+                            onClick={() => toggleFileChangesExpanded(row.message.id)}
+                          >
+                            <DisclosureChevron
+                              open={fileChangesExpanded}
+                              className="dark:text-muted-foreground/50"
+                            />
+                          </button>
+                          {canUndo && (
+                            <button
+                              type="button"
+                              className="flex items-center gap-1 text-muted-foreground transition-colors hover:text-foreground"
+                              style={{ fontSize: chatTypographyStyle.fontSize }}
+                              onClick={() => onRevertUserMessage(correspondingUserMessageId)}
+                            >
+                              Undo
+                              <Undo2Icon className="size-3" />
+                            </button>
                           )}
-                        </p>
-                        <div className="flex items-center gap-1.5">
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            data-scroll-anchor-ignore
-                            onClick={() =>
-                              onSetChangedFilesExpanded(turnSummary.turnId, !allDirectoriesExpanded)
-                            }
-                          >
-                            {allDirectoriesExpanded ? "Collapse all" : "Expand all"}
-                          </Button>
-                          <Button
-                            type="button"
-                            size="xs"
-                            variant="outline"
-                            onClick={() =>
-                              onOpenTurnDiff(turnSummary.turnId, checkpointFiles[0]?.path)
-                            }
-                          >
-                            View diff
-                          </Button>
                         </div>
                       </div>
-                      <ChangedFilesTree
-                        key={`changed-files-tree:${turnSummary.turnId}`}
-                        turnId={turnSummary.turnId}
-                        files={checkpointFiles}
-                        allDirectoriesExpanded={allDirectoriesExpanded}
-                        resolvedTheme={resolvedTheme}
-                        onOpenTurnDiff={onOpenTurnDiff}
-                      />
+                      <div
+                        className={cn(
+                          "grid transition-[grid-template-rows,opacity] duration-220 ease-out",
+                          fileChangesExpanded
+                            ? "grid-rows-[1fr] opacity-100"
+                            : "grid-rows-[0fr] opacity-0",
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            "min-h-0 overflow-hidden transition-transform duration-220 ease-out",
+                            fileChangesExpanded
+                              ? "translate-y-0"
+                              : "-translate-y-1 pointer-events-none",
+                          )}
+                        >
+                          <div className="bg-neutral-100 dark:bg-neutral-800/40">
+                            {checkpointFiles.map((file) => (
+                              <button
+                                key={file.path}
+                                type="button"
+                                className="flex w-full items-center gap-2 px-3 py-1.5 text-left transition-colors hover:bg-muted/60"
+                                onClick={() => onOpenTurnDiff(turnSummary.turnId, file.path)}
+                              >
+                                <VscodeEntryIcon
+                                  pathValue={file.path}
+                                  kind="file"
+                                  theme={resolvedTheme}
+                                  className="size-4 shrink-0 opacity-50 dark:opacity-30"
+                                />
+                                <span
+                                  className="font-chat-code truncate font-normal text-neutral-900 dark:text-foreground dark:hover:text-foreground"
+                                  style={{ fontSize: `${appTypographyScale.chatCodePx}px` }}
+                                >
+                                  {file.path}
+                                </span>
+                                {(file.additions ?? 0) + (file.deletions ?? 0) > 0 && (
+                                  <span
+                                    className="font-chat-code ml-auto shrink-0 tabular-nums"
+                                    style={{ fontSize: `${appTypographyScale.chatMetaPx}px` }}
+                                  >
+                                    <DiffStatLabel
+                                      additions={file.additions ?? 0}
+                                      deletions={file.deletions ?? 0}
+                                    />
+                                  </span>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   );
                 })()}
-                <p className="mt-1.5 text-[10px] text-muted-foreground/30">
-                  {formatMessageMeta(
-                    row.message.createdAt,
-                    row.message.streaming
-                      ? formatElapsed(row.durationStart, nowIso)
-                      : formatElapsed(row.durationStart, row.message.completedAt),
-                    timestampFormat,
-                  )}
-                </p>
+                <div className="mt-0.5 flex items-center gap-2">
+                  <p
+                    className="font-chat-code text-muted-foreground/45"
+                    style={{ fontSize: `${appTypographyScale.uiTimestampPx}px` }}
+                  >
+                    {assistantMeta}
+                  </p>
+                  {assistantCopyState.visible ? (
+                    <div className="flex items-center opacity-0 transition-opacity duration-200 group-hover/assistant:opacity-100 focus-within:opacity-100">
+                      <MessageCopyButton
+                        text={assistantCopyState.text ?? ""}
+                        size="icon-xs"
+                        variant="outline"
+                        className="border-border/50 bg-background/35 text-muted-foreground/45 shadow-none hover:border-border/70 hover:bg-background/55 hover:text-muted-foreground/70"
+                      />
+                    </div>
+                  ) : null}
+                </div>
               </div>
             </>
           );
@@ -604,31 +1025,69 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             planMarkdown={row.proposedPlan.planMarkdown}
             cwd={markdownCwd}
             workspaceRoot={workspaceRoot}
-            defaultExpanded={shouldDefaultExpandProposedPlan}
+            chatTypographyStyle={chatTypographyStyle}
           />
         </div>
       )}
 
       {row.kind === "working" && (
-        <div className="py-0.5 pl-1.5">
-          <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70">
-            <span className="inline-flex items-center gap-[3px]">
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
-            </span>
-            <span>
-              {row.createdAt
-                ? `Working for ${formatWorkingTimer(row.createdAt, nowIso) ?? "0s"}`
-                : "Working..."}
-            </span>
-          </div>
+        <div>
+          {row.label && isCompactionWorkingLabel(row.label) ? (
+            <div className="my-3 flex items-center gap-3">
+              <span className="h-px flex-1 bg-border" />
+              <span
+                className="inline-flex items-center gap-1 text-muted-foreground/80 font-system-ui"
+                style={{ fontSize: `${appTypographyScale.uiSmPx}px` }}
+              >
+                <span>
+                  {formatWorkingLabel(row.label)}
+                  {row.createdAt
+                    ? ` ${nowIso ? (formatWorkingTimer(row.createdAt, nowIso) ?? "0s") : ""}`
+                    : null}
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
+                  <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
+                  <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
+                </span>
+              </span>
+              <span className="h-px flex-1 bg-border" />
+            </div>
+          ) : (
+            <div
+              className="flex items-center gap-1 pt-1 pl-1 text-muted-foreground/70 font-system-ui"
+              style={{ fontSize: `${appTypographyScale.uiSmPx}px` }}
+            >
+              <span>
+                {row.createdAt ? (
+                  <>
+                    Working for{" "}
+                    {nowIso ? (
+                      (formatWorkingTimer(row.createdAt, nowIso) ?? "0s")
+                    ) : (
+                      <WorkingTimer createdAt={row.createdAt} />
+                    )}
+                  </>
+                ) : (
+                  "Working..."
+                )}
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
+                <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
+                <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 
   if (!hasMessages && !isWorking) {
+    if (emptyStateContent) {
+      return <div className="flex h-full items-center justify-center">{emptyStateContent}</div>;
+    }
     return (
       <div className="flex h-full items-center justify-center">
         <p className="text-sm text-muted-foreground/30">
@@ -654,10 +1113,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               <div
                 key={`virtual-row:${row.id}`}
                 data-index={virtualRow.index}
-                data-virtual-row-id={row.id}
-                data-virtual-row-kind={row.kind}
-                data-virtual-row-size={virtualRow.size}
-                data-virtual-row-start={virtualRow.start}
                 ref={rowVirtualizer.measureElement}
                 className="absolute left-0 top-0 w-full"
                 style={{ transform: `translateY(${virtualRow.start}px)` }}
@@ -676,10 +1131,77 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   );
 });
 
-type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
-type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
+type TimelineMessage = Extract<MessagesTimelineRow, { kind: "message" }>["message"];
+type TimelineProposedPlan = Extract<MessagesTimelineRow, { kind: "proposed-plan" }>["proposedPlan"];
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: "work" }>["groupedEntries"][number];
-type TimelineRow = MessagesTimelineRow;
+
+// Reuse stable row references so streaming updates only force React work for
+// rows whose visible content actually changed.
+function useStableRows(rows: MessagesTimelineRow[]): MessagesTimelineRow[] {
+  const previousStateRef = useRef<StableMessagesTimelineRowsState>({
+    byId: new Map<string, MessagesTimelineRow>(),
+    result: [],
+  });
+
+  return useMemo(() => {
+    const nextState = computeStableMessagesTimelineRows(rows, previousStateRef.current);
+    previousStateRef.current = nextState;
+    return nextState.result;
+  }, [rows]);
+}
+
+function estimateTimelineProposedPlanHeight(
+  proposedPlan: TimelineProposedPlan,
+  chatFontSizePx: number,
+): number {
+  const estimatedLines = Math.max(1, Math.ceil(proposedPlan.planMarkdown.length / 72));
+  return 120 + Math.min(estimatedLines * getChatTranscriptLineHeightPx(chatFontSizePx), 880);
+}
+
+// Keep the live clock scoped to tiny leaf components so active Claude turns do
+// not force the full transcript tree to re-render every second.
+function WorkingTimer({ createdAt }: { createdAt: string }) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [createdAt]);
+  return <>{formatWorkingTimer(createdAt, new Date(nowMs).toISOString()) ?? "0s"}</>;
+}
+
+function LiveMessageMeta({
+  createdAt,
+  durationStart,
+  timestampFormat,
+}: {
+  createdAt: string;
+  durationStart: string;
+  timestampFormat: TimestampFormat;
+}) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => {
+      window.clearInterval(id);
+    };
+  }, [durationStart]);
+
+  return (
+    <>
+      {formatMessageMeta(
+        createdAt,
+        formatElapsed(durationStart, new Date(nowMs).toISOString()),
+        timestampFormat,
+      )}
+    </>
+  );
+}
 
 function formatWorkingTimer(startIso: string, endIso: string): string | null {
   const startedAtMs = Date.parse(startIso);
@@ -704,13 +1226,39 @@ function formatWorkingTimer(startIso: string, endIso: string): string | null {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
+function formatWorkingLabel(label: string): string {
+  const normalized = normalizeCompactToolLabel(label).trim();
+  if (normalized === "Compacting context") {
+    return "Compacting conversation...";
+  }
+  return normalized.endsWith("...") ? normalized : `${normalized}...`;
+}
+
+function isCompactionWorkingLabel(label: string): boolean {
+  const normalized = normalizeCompactToolLabel(label).trim().toLowerCase();
+  return normalized === "compacting context" || normalized === "compacting conversation...";
+}
+
 function formatMessageMeta(
   createdAt: string,
   duration: string | null,
   timestampFormat: TimestampFormat,
 ): string {
-  if (!duration) return formatTimestamp(createdAt, timestampFormat);
-  return `${formatTimestamp(createdAt, timestampFormat)} • ${duration}`;
+  if (!duration) return formatShortTimestamp(createdAt, timestampFormat);
+  return `${formatShortTimestamp(createdAt, timestampFormat)} • ${duration}`;
+}
+
+function formatInlineWorkSummary(_groupedEntries: TimelineWorkEntry[]): string | null {
+  return null;
+}
+
+function hasOnlyToolToneEntries<T extends { tone: TimelineWorkEntry["tone"] }>(
+  entries: ReadonlyArray<T> | undefined,
+): entries is ReadonlyArray<T> {
+  if (!entries || entries.length === 0) {
+    return false;
+  }
+  return entries.every((entry) => entry.tone === "tool");
 }
 
 const UserMessageTerminalContextInlineLabel = memo(
@@ -724,23 +1272,115 @@ const UserMessageTerminalContextInlineLabel = memo(
   },
 );
 
+const UserMessageInlineSkillChip = memo(function UserMessageInlineSkillChip(props: {
+  skillName: string;
+}) {
+  return (
+    <span className={COMPOSER_INLINE_SKILL_CHIP_CLASS_NAME}>
+      <span
+        aria-hidden="true"
+        className={COMPOSER_INLINE_SKILL_CHIP_ICON_CLASS_NAME}
+        dangerouslySetInnerHTML={{ __html: COMPOSER_INLINE_SKILL_CHIP_ICON_SVG }}
+      />
+      <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>
+        {formatComposerSkillChipLabel(props.skillName)}
+      </span>
+    </span>
+  );
+});
+
+const UserImageAttachmentThumbnail = memo(function UserImageAttachmentThumbnail(props: {
+  image: Extract<NonNullable<TimelineMessage["attachments"]>[number], { type: "image" }>;
+  userImages: Array<
+    Extract<NonNullable<TimelineMessage["attachments"]>[number], { type: "image" }>
+  >;
+  onImageExpand: (preview: ExpandedImagePreview) => void;
+  onTimelineImageLoad: () => void;
+  resolvedTheme: "light" | "dark";
+}) {
+  return (
+    <button
+      type="button"
+      className="flex size-15 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border/70 bg-background/82 text-left shadow-[0_1px_0_rgba(255,255,255,0.2)_inset] transition-colors hover:bg-background/94"
+      aria-label={`Preview ${props.image.name}`}
+      title={props.image.name}
+      onClick={() => {
+        const preview = buildExpandedImagePreview(props.userImages, props.image.id);
+        if (!preview) return;
+        props.onImageExpand(preview);
+      }}
+    >
+      {props.image.previewUrl ? (
+        <img
+          src={props.image.previewUrl}
+          alt={props.image.name}
+          className="size-full object-cover"
+          onLoad={props.onTimelineImageLoad}
+          onError={props.onTimelineImageLoad}
+        />
+      ) : (
+        <div className="flex size-full items-center justify-center">
+          <VscodeEntryIcon
+            pathValue={props.image.name}
+            kind="file"
+            theme={props.resolvedTheme}
+            className="size-4 opacity-70"
+          />
+        </div>
+      )}
+    </button>
+  );
+});
+
+// Renders read-only user text with the same inline skill pill treatment as the composer.
+function renderUserMessageInlineText(text: string, keyPrefix: string): ReactNode[] {
+  return splitPromptIntoDisplaySegments(text).flatMap((segment, index) => {
+    const key = `${keyPrefix}:${index}`;
+    if (segment.type === "text") {
+      return segment.text.length > 0 ? [<span key={`${key}:text`}>{segment.text}</span>] : [];
+    }
+    if (segment.type === "skill") {
+      return [<UserMessageInlineSkillChip key={`${key}:skill`} skillName={segment.name} />];
+    }
+    if (segment.type === "mention") {
+      return [<span key={`${key}:mention`}>{`@${segment.path}`}</span>];
+    }
+    if (segment.type === "agent-mention") {
+      return [
+        <UserMessageInlineAgentChip
+          key={`${key}:agent`}
+          alias={segment.alias}
+          color={segment.color}
+        />,
+      ];
+    }
+    return [];
+  });
+}
+
+function hasOnlyInlineSkillChips(text: string): boolean {
+  const segments = splitPromptIntoDisplaySegments(text);
+  let skillCount = 0;
+
+  for (const segment of segments) {
+    if (segment.type === "skill") {
+      skillCount += 1;
+      continue;
+    }
+    if (segment.type === "text" && segment.text.trim().length === 0) {
+      continue;
+    }
+    return false;
+  }
+
+  return skillCount > 0;
+}
+
 const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
+  chatTypographyStyle: CSSProperties;
 }) {
-  const chatTextSize = useSettings((settings) => settings.chatTextSize);
-  const textDirection = resolveTextDirection(props.text);
-  const bodyClassName = cn(
-    "chat-message-inline-body whitespace-pre-wrap font-mono text-foreground",
-    resolveChatReadabilityClassName({
-      direction: textDirection,
-      // Terminal-context bubbles stay monospaced even when chat copy uses a
-      // proportional font override.
-      fontFamily: "auto",
-      textSize: chatTextSize,
-    }),
-  );
-
   if (props.terminalContexts.length > 0) {
     const hasEmbeddedInlineLabels = textContainsInlineTerminalContextLabels(
       props.text,
@@ -761,9 +1401,10 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         }
         if (matchIndex > cursor) {
           inlineNodes.push(
-            <span key={`user-terminal-context-inline-before:${context.header}:${cursor}`}>
-              {props.text.slice(cursor, matchIndex)}
-            </span>,
+            ...renderUserMessageInlineText(
+              props.text.slice(cursor, matchIndex),
+              `user-terminal-context-inline-before:${context.header}:${cursor}`,
+            ),
           );
         }
         inlineNodes.push(
@@ -778,14 +1419,18 @@ const UserMessageBody = memo(function UserMessageBody(props: {
       if (inlineNodes.length > 0) {
         if (cursor < props.text.length) {
           inlineNodes.push(
-            <span key={`user-message-terminal-context-inline-rest:${cursor}`}>
-              {props.text.slice(cursor)}
-            </span>,
+            ...renderUserMessageInlineText(
+              props.text.slice(cursor),
+              `user-message-terminal-context-inline-rest:${cursor}`,
+            ),
           );
         }
 
         return (
-          <div dir={textDirection} className={bodyClassName}>
+          <div
+            className="inline-block max-w-full min-w-0 wrap-break-word whitespace-pre-wrap font-system-ui text-foreground"
+            style={props.chatTypographyStyle}
+          >
             {inlineNodes}
           </div>
         );
@@ -807,13 +1452,18 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     }
 
     if (props.text.length > 0) {
-      inlineNodes.push(<span key="user-message-terminal-context-inline-text">{props.text}</span>);
+      inlineNodes.push(
+        ...renderUserMessageInlineText(props.text, "user-message-terminal-context-inline-text"),
+      );
     } else if (inlinePrefix.length === 0) {
       return null;
     }
 
     return (
-      <div dir={textDirection} className={bodyClassName}>
+      <div
+        className="inline-block max-w-full min-w-0 wrap-break-word whitespace-pre-wrap font-system-ui text-foreground"
+        style={props.chatTypographyStyle}
+      >
         {inlineNodes}
       </div>
     );
@@ -823,7 +1473,45 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     return null;
   }
 
-  return <ChatMarkdown text={props.text} cwd={undefined} />;
+  if (props.terminalContexts.length === 0 && hasOnlyInlineSkillChips(props.text)) {
+    return (
+      <div
+        className="flex max-w-full min-w-0 items-center leading-none text-foreground [&>span]:translate-y-0"
+        style={props.chatTypographyStyle}
+      >
+        {renderUserMessageInlineText(props.text, "user-message-inline-chip-only")}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="inline-block max-w-full min-w-0 whitespace-pre-wrap break-words font-system-ui text-foreground"
+      style={props.chatTypographyStyle}
+    >
+      {renderUserMessageInlineText(props.text, "user-message-inline")}
+    </div>
+  );
+});
+
+const UserMessageInlineAgentChip = memo(function UserMessageInlineAgentChip(props: {
+  alias: string;
+  color: string;
+}) {
+  const colors = AGENT_COLOR_STYLES[props.color] ?? DEFAULT_AGENT_COLOR;
+
+  return (
+    <span
+      className={COMPOSER_INLINE_AGENT_CHIP_CLASS_NAME}
+      style={{
+        backgroundColor: colors.bg,
+        color: colors.text,
+      }}
+    >
+      <RiRobot3Line className={COMPOSER_INLINE_AGENT_CHIP_ICON_CLASS_NAME} />
+      <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>{`@${props.alias}`}</span>
+    </span>
+  );
 });
 
 function workToneIcon(tone: TimelineWorkEntry["tone"]): {
@@ -833,55 +1521,115 @@ function workToneIcon(tone: TimelineWorkEntry["tone"]): {
   if (tone === "error") {
     return {
       icon: CircleAlertIcon,
-      className: "text-foreground/92",
+      className: "text-muted-foreground/50",
     };
   }
   if (tone === "thinking") {
     return {
       icon: BotIcon,
-      className: "text-foreground/92",
+      className: "text-muted-foreground/40",
     };
   }
   if (tone === "info") {
     return {
       icon: CheckIcon,
-      className: "text-foreground/92",
+      className: "text-muted-foreground/50",
     };
   }
   return {
     icon: ZapIcon,
-    className: "text-foreground/92",
+    className: "text-muted-foreground/45",
   };
 }
 
 function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
-  if (tone === "error") return "text-rose-300/50 dark:text-rose-300/50";
-  if (tone === "tool") return "text-muted-foreground/70";
-  if (tone === "thinking") return "text-muted-foreground/50";
-  return "text-muted-foreground/40";
+  if (tone === "error") return "text-rose-400/70 dark:text-rose-300/70";
+  if (tone === "tool") return "text-muted-foreground/80";
+  if (tone === "thinking") return "text-muted-foreground/60";
+  return "text-muted-foreground/55";
+}
+
+/**
+ * Try to extract a clean file path from a detail string that may contain JSON.
+ * Handles patterns like:
+ *   Read {"file_path":"/Users/foo/bar.ts","offset":10}
+ *   {"file_path":"/path/to/file.ts"}
+ */
+function extractFilePathFromDetail(detail: string): string | null {
+  // Try to find a JSON-like object in the detail
+  const jsonStart = detail.indexOf("{");
+  if (jsonStart < 0) return null;
+  const jsonEnd = detail.lastIndexOf("}");
+  if (jsonEnd <= jsonStart) return null;
+  try {
+    const parsed = JSON.parse(detail.slice(jsonStart, jsonEnd + 1));
+    const filePath = parsed.file_path ?? parsed.filePath ?? parsed.path ?? parsed.filename ?? null;
+    if (typeof filePath === "string" && filePath.trim().length > 0) {
+      return filePath.trim();
+    }
+  } catch {
+    // Not valid JSON — try regex fallback
+    const match = /"(?:file_path|filePath|path|filename)"\s*:\s*"([^"]+)"/i.exec(detail);
+    if (match?.[1]) return match[1];
+  }
+  return null;
 }
 
 function workEntryPreview(
-  workEntry: Pick<TimelineWorkEntry, "detail" | "command" | "changedFiles">,
-) {
-  if (workEntry.command) return workEntry.command;
-  if (workEntry.detail) return workEntry.detail;
-  if ((workEntry.changedFiles?.length ?? 0) === 0) return null;
-  const [firstPath] = workEntry.changedFiles ?? [];
-  if (!firstPath) return null;
-  return workEntry.changedFiles!.length === 1
-    ? firstPath
-    : `${firstPath} +${workEntry.changedFiles!.length - 1} more`;
-}
-
-function workEntryRawCommand(
-  workEntry: Pick<TimelineWorkEntry, "command" | "rawCommand">,
+  workEntry: Pick<
+    TimelineWorkEntry,
+    | "detail"
+    | "command"
+    | "changedFiles"
+    | "requestKind"
+    | "itemType"
+    | "subagents"
+    | "subagentAction"
+  >,
 ): string | null {
-  const rawCommand = workEntry.rawCommand?.trim();
-  if (!rawCommand || !workEntry.command) {
-    return null;
+  const isFileRelated =
+    workEntry.requestKind === "file-read" ||
+    workEntry.requestKind === "file-change" ||
+    workEntry.itemType === "file_change";
+
+  // Prefer clean basenames from changedFiles
+  if (workEntry.changedFiles && workEntry.changedFiles.length > 0) {
+    const names = workEntry.changedFiles.map((p) => basename(p));
+    if (names.length === 1) return names[0]!;
+    return `${names.length} files`;
   }
-  return rawCommand === workEntry.command.trim() ? null : rawCommand;
+
+  // Command rows stay human-readable inline and keep the raw invocation for hover details.
+  if (workEntry.command) return deriveReadableCommandDisplay(workEntry.command).target;
+
+  if (workEntry.itemType === "collab_agent_tool_call" && (workEntry.subagents?.length ?? 0) > 0) {
+    if (workEntry.subagentAction?.summaryText) {
+      return workEntry.subagentAction.summaryText;
+    }
+    const labels = workEntry.subagents!.map((subagent) => {
+      const presentation = subagentPrimaryLabel(subagent);
+      return presentation.nickname ?? presentation.primaryLabel ?? basename(subagent.threadId);
+    });
+    return labels.length === 1 ? labels[0]! : `${labels.length} subagents`;
+  }
+
+  // For detail, try to extract a clean file path first
+  if (workEntry.detail) {
+    const filePath = extractFilePathFromDetail(workEntry.detail);
+    if (filePath) return basename(filePath);
+
+    // For file-related entries, the heading alone is enough — don't show raw JSON
+    if (isFileRelated) return null;
+
+    // For other entries, if the detail looks like raw JSON, skip it
+    const trimmedDetail = workEntry.detail.trim();
+    if (trimmedDetail.startsWith("{") || trimmedDetail.startsWith("[")) return null;
+
+    // Clean, non-JSON detail — show it
+    return trimmedDetail;
+  }
+
+  return null;
 }
 
 function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
@@ -900,13 +1648,30 @@ function workEntryIcon(workEntry: TimelineWorkEntry): LucideIcon {
 
   switch (workEntry.itemType) {
     case "mcp_tool_call":
-      return WrenchIcon;
+      return SkillCubeIcon;
     case "dynamic_tool_call":
-    case "collab_agent_tool_call":
       return HammerIcon;
+    case "collab_agent_tool_call":
+      return AgentTaskIcon;
   }
 
   return workToneIcon(workEntry.tone).icon;
+}
+
+function isGitHubMcpToolCall(workEntry: TimelineWorkEntry): boolean {
+  const toolName = workEntry.toolName?.trim().toLowerCase();
+  return Boolean(toolName?.startsWith("mcp__codex_apps__github"));
+}
+
+// Keep command, agent-task, and file-change rows visually compact so their icon can trail the label.
+function prefersCompactWorkEntryRow(workEntry: TimelineWorkEntry): boolean {
+  const EntryIcon = workEntryIcon(workEntry);
+  return (
+    EntryIcon === TerminalIcon ||
+    EntryIcon === HammerIcon ||
+    EntryIcon === AgentTaskIcon ||
+    EntryIcon === SquarePenIcon
+  );
 }
 
 function capitalizePhrase(value: string): string {
@@ -924,87 +1689,438 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string {
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle));
 }
 
-const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
-  workEntry: TimelineWorkEntry;
-}) {
-  const { workEntry } = props;
-  const iconConfig = workToneIcon(workEntry.tone);
-  const EntryIcon = workEntryIcon(workEntry);
-  const heading = toolWorkEntryHeading(workEntry);
-  const preview = workEntryPreview(workEntry);
-  const rawCommand = workEntryRawCommand(workEntry);
-  const displayText = preview ? `${heading} - ${preview}` : heading;
-  const hasChangedFiles = (workEntry.changedFiles?.length ?? 0) > 0;
-  const previewIsChangedFiles = hasChangedFiles && !workEntry.command && !workEntry.detail;
-
+function isFileChangeWorkEntry(workEntry: TimelineWorkEntry): boolean {
   return (
-    <div className="rounded-lg px-1 py-1">
-      <div className="flex items-center gap-2 transition-[opacity,translate] duration-200">
-        <span
-          className={cn("flex size-5 shrink-0 items-center justify-center", iconConfig.className)}
-        >
-          <EntryIcon className="size-3" />
-        </span>
-        <div className="min-w-0 flex-1 overflow-hidden">
-          <div className="max-w-full">
-            <p
-              className={cn(
-                "truncate text-[11px] leading-5",
-                workToneClass(workEntry.tone),
-                preview ? "text-muted-foreground/70" : "",
-              )}
-              title={rawCommand ? undefined : displayText}
-            >
-              <span className={cn("text-foreground/80", workToneClass(workEntry.tone))}>
-                {heading}
-              </span>
-              {preview &&
-                (rawCommand ? (
-                  <Tooltip>
-                    <TooltipTrigger
-                      closeDelay={0}
-                      delay={75}
-                      render={
-                        <span className="max-w-full cursor-default text-muted-foreground/55 transition-colors hover:text-muted-foreground/75 focus-visible:text-muted-foreground/75">
-                          {" "}
-                          - {preview}
-                        </span>
-                      }
-                    />
-                    <TooltipPopup
-                      align="start"
-                      className="max-w-[min(56rem,calc(100vw-2rem))] px-0 py-0"
-                      side="top"
-                    >
-                      <div className="max-w-[min(56rem,calc(100vw-2rem))] overflow-x-auto px-1.5 py-1 font-mono text-[11px] leading-4 whitespace-nowrap">
-                        {rawCommand}
-                      </div>
-                    </TooltipPopup>
-                  </Tooltip>
-                ) : (
-                  <span className="text-muted-foreground/55"> - {preview}</span>
-                ))}
-            </p>
+    workEntry.requestKind === "file-change" ||
+    workEntry.itemType === "file_change" ||
+    (workEntry.changedFiles?.length ?? 0) > 0
+  );
+}
+
+function subagentPrimaryLabel(
+  subagent: NonNullable<TimelineWorkEntry["subagents"]>[number],
+): ReturnType<typeof resolveSubagentPresentation> {
+  return resolveSubagentPresentation({
+    nickname: subagent.nickname,
+    role: subagent.role,
+    title: subagent.title,
+    fallbackId: subagent.threadId,
+  });
+}
+
+function subagentSecondaryLabel(
+  subagent: NonNullable<TimelineWorkEntry["subagents"]>[number],
+  primaryLabel: string,
+): string | null {
+  const parts = [subagent.title, formatSubagentModelLabel(subagent.model)]
+    .filter((value): value is string => Boolean(value))
+    .filter((value) => value !== primaryLabel);
+  if (parts.length === 0) {
+    return null;
+  }
+  return parts.join(" • ");
+}
+
+function subagentStatusClasses(
+  statusLabel: string | undefined,
+  rawStatus: string | undefined,
+  isActive: boolean | undefined,
+): string {
+  switch (normalizeSubagentStatusKind(statusLabel ?? rawStatus, isActive)) {
+    case "running":
+      return "border-sky-500/18 bg-sky-500/8 text-sky-200/90";
+    case "completed":
+      return "border-emerald-500/18 bg-emerald-500/8 text-emerald-200/90";
+    case "failed":
+      return "border-rose-500/18 bg-rose-500/8 text-rose-200/90";
+    case "stopped":
+      return "border-amber-500/18 bg-amber-500/8 text-amber-200/90";
+    case "queued":
+      return "border-violet-500/18 bg-violet-500/8 text-violet-200/90";
+    case "idle":
+    default:
+      return "border-border/45 bg-background/85 text-muted-foreground/68";
+  }
+}
+
+function subagentCardSummary(workEntry: TimelineWorkEntry): string {
+  return (
+    workEntry.subagentAction?.summaryText ??
+    workEntryPreview(workEntry) ??
+    toolWorkEntryHeading(workEntry)
+  );
+}
+
+function subagentCardMeta(workEntry: TimelineWorkEntry): string | null {
+  const modelLabel = formatSubagentModelLabel(workEntry.subagentAction?.model);
+  if (modelLabel && workEntry.subagentAction?.prompt) {
+    return `${modelLabel} • ${workEntry.subagentAction.prompt}`;
+  }
+  return modelLabel ?? workEntry.subagentAction?.prompt ?? null;
+}
+
+function commandTooltipContent(command: string, displayText: string) {
+  return (
+    <div className="max-w-96 whitespace-pre-wrap leading-tight">
+      <div className="space-y-2">
+        <div className="space-y-0.5">
+          <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
+            Summary
           </div>
+          <div>{displayText}</div>
+        </div>
+        <div className="space-y-0.5">
+          <div className="text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground/70">
+            Raw call
+          </div>
+          <code className="block whitespace-pre-wrap break-words font-chat-code text-[11px] text-foreground/92">
+            {command}
+          </code>
         </div>
       </div>
-      {hasChangedFiles && !previewIsChangedFiles && (
-        <div className="mt-1 flex flex-wrap gap-1 pl-6">
-          {workEntry.changedFiles?.slice(0, 4).map((filePath) => (
-            <span
-              key={`${workEntry.id}:${filePath}`}
-              className="rounded-md border border-border/55 bg-background/75 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/75"
-              title={filePath}
-            >
-              {filePath}
-            </span>
-          ))}
-          {(workEntry.changedFiles?.length ?? 0) > 4 && (
-            <span className="px-1 text-[10px] text-muted-foreground/55">
-              +{(workEntry.changedFiles?.length ?? 0) - 4}
-            </span>
-          )}
+    </div>
+  );
+}
+
+const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
+  workEntry: TimelineWorkEntry;
+  chatMetaFontSizePx: number;
+  textFontSizePx?: number;
+  density?: "default" | "compact";
+  fileDiffStatByPath?: ReadonlyMap<string, { additions: number; deletions: number }>;
+  turnId?: TurnId;
+  onOpenTurnDiff?: (turnId: TurnId, filePath?: string) => void;
+  onOpenThread?: (threadId: ThreadId) => void;
+}) {
+  const {
+    workEntry,
+    chatMetaFontSizePx,
+    textFontSizePx = chatMetaFontSizePx,
+    density = "default",
+    fileDiffStatByPath,
+    turnId,
+    onOpenTurnDiff,
+    onOpenThread,
+  } = props;
+  const compact = density === "compact";
+  const EntryIcon = workEntryIcon(workEntry);
+  const usesTrailingCompactIcon =
+    EntryIcon === TerminalIcon || EntryIcon === HammerIcon || EntryIcon === AgentTaskIcon;
+  const showIconRight = compact && usesTrailingCompactIcon;
+  const showIconLeft = !compact;
+  const showInlineWebSearchIcon = compact && workEntry.itemType === "web_search";
+  const showInlineGitHubIcon = compact && isGitHubMcpToolCall(workEntry);
+  const showInlineMcpIcon =
+    compact && workEntry.itemType === "mcp_tool_call" && !showInlineGitHubIcon;
+  const heading = toolWorkEntryHeading(workEntry);
+  const preview = workEntryPreview(workEntry);
+  const displayText = preview ? `${heading} ${preview}` : heading;
+  const hoverText = workEntry.command ?? displayText;
+  const changedFiles = workEntry.changedFiles ?? [];
+  const showEditedRows = isFileChangeWorkEntry(workEntry) && changedFiles.length > 0;
+  const showSubagentRows =
+    workEntry.itemType === "collab_agent_tool_call" &&
+    ((workEntry.subagents?.length ?? 0) > 0 || Boolean(workEntry.subagentAction));
+  const visibleSubagents = workEntry.subagents?.slice(0, 3) ?? [];
+  const hiddenSubagentCount = Math.max(
+    0,
+    (workEntry.subagents?.length ?? 0) - visibleSubagents.length,
+  );
+  const subagentSummary = subagentCardSummary(workEntry);
+  const subagentMeta = subagentCardMeta(workEntry);
+
+  // Use the text font size (matching the UI settings) for tool call rows
+  const rowFontSizePx = textFontSizePx;
+
+  return (
+    <div className={cn(compact ? "py-0.5" : "rounded-lg py-1")}>
+      {showEditedRows ? (
+        <div className="space-y-0.5">
+          {changedFiles.map((changedFilePath) => {
+            const changedFileStat = fileDiffStatByPath?.get(changedFilePath);
+            const canOpenEditedDiff = Boolean(turnId && onOpenTurnDiff);
+            return (
+              <button
+                key={`${workEntry.id}:${changedFilePath}`}
+                type="button"
+                className={cn(
+                  "group flex w-full max-w-full items-baseline gap-1 text-left transition-opacity duration-150",
+                  compact
+                    ? "px-0 py-[1px] hover:opacity-95"
+                    : "rounded-md border border-border/45 bg-background/65 px-2 py-1 hover:bg-background/80",
+                  canOpenEditedDiff ? "cursor-pointer" : "cursor-default",
+                )}
+                title={changedFilePath}
+                disabled={!canOpenEditedDiff}
+                onClick={() => {
+                  if (!turnId || !onOpenTurnDiff) return;
+                  onOpenTurnDiff(turnId, changedFilePath);
+                }}
+              >
+                <span
+                  className="font-system-ui shrink-0 text-muted-foreground/60"
+                  style={{ fontSize: `${rowFontSizePx}px` }}
+                >
+                  Edited
+                </span>
+                <span
+                  className="font-system-ui max-w-[28rem] truncate group-hover:opacity-90"
+                  style={{
+                    fontSize: `${rowFontSizePx}px`,
+                    color: "var(--info-foreground)",
+                  }}
+                >
+                  {basename(changedFilePath)}
+                </span>
+                {changedFileStat ? (
+                  <span
+                    className="font-chat-code shrink-0 tabular-nums whitespace-nowrap"
+                    style={{ fontSize: `${rowFontSizePx}px` }}
+                  >
+                    <DiffStatLabel
+                      additions={changedFileStat.additions}
+                      deletions={changedFileStat.deletions}
+                    />
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
         </div>
+      ) : showSubagentRows ? (
+        <div className="space-y-1.5">
+          <div
+            className={cn(
+              "flex items-center transition-[opacity,translate] duration-200",
+              compact ? "gap-1.5" : "gap-2",
+            )}
+          >
+            <span
+              className={cn(
+                "flex shrink-0 items-center justify-center text-muted-foreground/40",
+                compact ? "size-4" : "size-5",
+              )}
+            >
+              <EntryIcon className={compact ? "size-2.5" : "size-3"} />
+            </span>
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <p
+                className={cn(
+                  compact ? "truncate leading-5" : "truncate leading-6",
+                  "font-medium text-foreground/72",
+                )}
+                style={{ fontSize: `${rowFontSizePx}px` }}
+                title={hoverText}
+              >
+                <span>{subagentSummary}</span>
+              </p>
+              {subagentMeta ? (
+                <p
+                  className="truncate leading-4 text-muted-foreground/32"
+                  style={{ fontSize: `${Math.max(11, rowFontSizePx - 1)}px` }}
+                  title={subagentMeta}
+                >
+                  {subagentMeta}
+                </p>
+              ) : null}
+            </div>
+          </div>
+          {visibleSubagents.length > 0 || hiddenSubagentCount > 0 ? (
+            <div
+              className={cn(
+                "space-y-[5px] rounded-[14px] border border-border/45 bg-background/50 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]",
+                compact ? "px-2.5 py-2" : "px-3 py-[9px]",
+              )}
+            >
+              {visibleSubagents.map((subagent) => {
+                const presentation = subagentPrimaryLabel(subagent);
+                const primaryLabel = presentation.primaryLabel;
+                const secondaryLabel = subagentSecondaryLabel(subagent, primaryLabel);
+                const displayStatusLabel =
+                  subagent.statusLabel ??
+                  humanizeSubagentStatus(subagent.rawStatus, subagent.isActive);
+                const canOpenThread = Boolean(onOpenThread);
+                return (
+                  <div
+                    key={`${workEntry.id}:${subagent.threadId}`}
+                    className="flex items-start gap-2.5 rounded-xl border border-border/28 bg-background/82 px-[11px] py-2"
+                  >
+                    <span
+                      className={cn(
+                        "mt-1.5 size-1.5 shrink-0 rounded-full",
+                        subagent.isActive ? "bg-sky-300/95" : "bg-muted-foreground/22",
+                      )}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div
+                        className="truncate font-semibold leading-[18px] text-foreground/90"
+                        style={{ fontSize: `${rowFontSizePx}px` }}
+                        title={presentation.fullLabel}
+                      >
+                        <span style={{ color: presentation.accentColor }}>
+                          {presentation.nickname ?? primaryLabel}
+                        </span>
+                        {presentation.role ? (
+                          <span className="ml-1 text-[11px] font-medium text-muted-foreground/48">
+                            ({presentation.role})
+                          </span>
+                        ) : null}
+                      </div>
+                      {secondaryLabel ? (
+                        <div
+                          className="truncate pt-0.5 leading-4 text-muted-foreground/56"
+                          style={{ fontSize: `${Math.max(11, rowFontSizePx - 1)}px` }}
+                          title={secondaryLabel}
+                        >
+                          {secondaryLabel}
+                        </div>
+                      ) : null}
+                      {subagent.latestUpdate ? (
+                        <div
+                          className="flex items-baseline gap-1.5 pt-1 text-muted-foreground/42"
+                          style={{ fontSize: `${Math.max(10, rowFontSizePx - 2)}px` }}
+                          title={subagent.latestUpdate}
+                        >
+                          <span className="shrink-0 uppercase tracking-[0.14em] text-muted-foreground/30">
+                            Latest
+                          </span>
+                          <span className="truncate">{subagent.latestUpdate}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      {displayStatusLabel ? (
+                        <span
+                          className={cn(
+                            "shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-medium tracking-[0.08em]",
+                            subagentStatusClasses(
+                              displayStatusLabel,
+                              subagent.rawStatus,
+                              subagent.isActive,
+                            ),
+                          )}
+                        >
+                          {displayStatusLabel}
+                        </span>
+                      ) : null}
+                      <button
+                        type="button"
+                        className={cn(
+                          "shrink-0 rounded-full border border-border/45 px-2.5 py-1 text-[9px] font-medium uppercase tracking-[0.12em] text-muted-foreground/62 transition-colors",
+                          canOpenThread
+                            ? "hover:border-foreground/15 hover:text-foreground/84"
+                            : "cursor-default opacity-50",
+                        )}
+                        disabled={!canOpenThread}
+                        onClick={() =>
+                          onOpenThread?.(
+                            ThreadId.makeUnsafe(subagent.resolvedThreadId ?? subagent.threadId),
+                          )
+                        }
+                      >
+                        Open thread
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {hiddenSubagentCount > 0 ? (
+                <div className="pl-4 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/46">
+                  +{hiddenSubagentCount} more
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      ) : (
+        (() => {
+          const rowContent = (
+            <div
+              className={cn(
+                "flex items-center transition-[opacity,translate] duration-200",
+                compact ? "gap-1.5" : "gap-2",
+              )}
+              title={hoverText}
+            >
+              {showIconLeft && (
+                <span
+                  className={cn(
+                    "flex shrink-0 items-center justify-center text-muted-foreground/40",
+                    compact ? "size-4" : "size-5",
+                  )}
+                >
+                  <EntryIcon className={compact ? "size-2.5" : "size-3"} />
+                </span>
+              )}
+              <div className="min-w-0 flex-1 overflow-hidden">
+                <p
+                  className={cn(
+                    compact ? "truncate leading-5" : "truncate leading-6",
+                    "text-muted-foreground/50",
+                  )}
+                  style={{ fontSize: `${rowFontSizePx}px` }}
+                >
+                  {showInlineWebSearchIcon || showInlineGitHubIcon || showInlineMcpIcon ? (
+                    <span
+                      className="mr-1 inline-flex align-[-0.125em] text-muted-foreground/38"
+                      data-inline-tool-icon={
+                        showInlineGitHubIcon ? "github" : showInlineMcpIcon ? "mcp" : "web-search"
+                      }
+                    >
+                      {showInlineGitHubIcon ? (
+                        <GitHubIcon
+                          style={{
+                            width: `${rowFontSizePx}px`,
+                            height: `${rowFontSizePx}px`,
+                          }}
+                        />
+                      ) : null}
+                      {showInlineMcpIcon ? (
+                        <McpIcon
+                          style={{
+                            width: `${rowFontSizePx}px`,
+                            height: `${rowFontSizePx}px`,
+                          }}
+                        />
+                      ) : null}
+                      {showInlineWebSearchIcon ? (
+                        <GlobeIcon
+                          style={{
+                            width: `${rowFontSizePx}px`,
+                            height: `${rowFontSizePx}px`,
+                          }}
+                        />
+                      ) : null}
+                    </span>
+                  ) : null}
+                  <span className="text-muted-foreground/50">{heading}</span>
+                  {preview && <span className="text-muted-foreground/25"> {preview}</span>}
+                </p>
+              </div>
+              {showIconRight && (
+                <span
+                  className="flex shrink-0 items-center justify-center text-muted-foreground/40"
+                  style={{ width: rowFontSizePx, height: rowFontSizePx }}
+                >
+                  <EntryIcon style={{ width: rowFontSizePx, height: rowFontSizePx }} />
+                </span>
+              )}
+            </div>
+          );
+
+          if (!workEntry.command) {
+            return rowContent;
+          }
+
+          return (
+            <Tooltip>
+              <TooltipTrigger render={rowContent} />
+              <TooltipPopup side="top" align="start" className="max-w-96 whitespace-normal">
+                {commandTooltipContent(workEntry.command, displayText)}
+              </TooltipPopup>
+            </Tooltip>
+          );
+        })()
       )}
     </div>
   );

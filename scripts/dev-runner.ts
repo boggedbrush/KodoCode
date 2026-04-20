@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 
-import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
@@ -14,14 +13,9 @@ const BASE_SERVER_PORT = 3773;
 const BASE_WEB_PORT = 5733;
 const MAX_HASH_OFFSET = 3000;
 const MAX_PORT = 65535;
-const DESKTOP_DEV_RUNNER_PID_ENV = "KODOCODE_DEV_RUNNER_PID";
-const DESKTOP_DEV_SHUTDOWN_SIGNAL_ENV = "KODOCODE_DEV_SHUTDOWN_SIGNAL";
 
-export const DESKTOP_DEV_SHUTDOWN_SIGNAL: NodeJS.Signals =
-  process.platform === "win32" ? "SIGTERM" : "SIGUSR2";
-
-export const DEFAULT_KODO_HOME = Effect.map(Effect.service(Path.Path), (path) =>
-  path.join(homedir(), ".kodo-code"),
+export const DEFAULT_T3_HOME = Effect.map(Effect.service(Path.Path), (path) =>
+  path.join(homedir(), ".dpcode"),
 );
 
 const MODE_ARGS = {
@@ -116,7 +110,7 @@ function resolveBaseDir(baseDir: string | undefined): Effect.Effect<string, neve
       return path.resolve(configured);
     }
 
-    return yield* DEFAULT_KODO_HOME;
+    return yield* DEFAULT_T3_HOME;
   });
 }
 
@@ -133,8 +127,6 @@ interface CreateDevRunnerEnvInput {
   readonly host: string | undefined;
   readonly port: number | undefined;
   readonly devUrl: URL | undefined;
-  readonly desktopDevRunnerPid?: number | undefined;
-  readonly desktopDevShutdownSignal?: NodeJS.Signals | undefined;
 }
 
 export function createDevRunnerEnv({
@@ -150,49 +142,35 @@ export function createDevRunnerEnv({
   host,
   port,
   devUrl,
-  desktopDevRunnerPid,
-  desktopDevShutdownSignal,
 }: CreateDevRunnerEnvInput): Effect.Effect<NodeJS.ProcessEnv, never, Path.Path> {
   return Effect.gen(function* () {
     const serverPort = port ?? BASE_SERVER_PORT + serverOffset;
     const webPort = BASE_WEB_PORT + webOffset;
     const resolvedBaseDir = yield* resolveBaseDir(t3Home);
-    const isDesktopMode = mode === "dev:desktop";
 
     const output: NodeJS.ProcessEnv = {
       ...baseEnv,
+      T3CODE_PORT: String(serverPort),
       PORT: String(webPort),
       ELECTRON_RENDERER_PORT: String(webPort),
+      VITE_WS_URL: `ws://localhost:${serverPort}`,
       VITE_DEV_SERVER_URL: devUrl?.toString() ?? `http://localhost:${webPort}`,
-      KODOCODE_HOME: resolvedBaseDir,
       T3CODE_HOME: resolvedBaseDir,
     };
 
-    if (!isDesktopMode) {
-      output.T3CODE_PORT = String(serverPort);
-      output.VITE_WS_URL = `ws://localhost:${serverPort}`;
-    } else {
-      delete output.T3CODE_PORT;
-      delete output.VITE_WS_URL;
-      delete output.T3CODE_AUTH_TOKEN;
-      delete output.T3CODE_MODE;
-      delete output.T3CODE_NO_BROWSER;
-      delete output.T3CODE_HOST;
-    }
-
-    if (!isDesktopMode && host !== undefined) {
+    if (host !== undefined) {
       output.T3CODE_HOST = host;
     }
 
-    if (!isDesktopMode && authToken !== undefined) {
+    if (authToken !== undefined) {
       output.T3CODE_AUTH_TOKEN = authToken;
-    } else if (!isDesktopMode) {
+    } else {
       delete output.T3CODE_AUTH_TOKEN;
     }
 
-    if (!isDesktopMode && noBrowser !== undefined) {
+    if (noBrowser !== undefined) {
       output.T3CODE_NO_BROWSER = noBrowser ? "1" : "0";
-    } else if (!isDesktopMode) {
+    } else {
       delete output.T3CODE_NO_BROWSER;
     }
 
@@ -218,74 +196,8 @@ export function createDevRunnerEnv({
       delete output.T3CODE_DESKTOP_WS_URL;
     }
 
-    if (isDesktopMode) {
-      delete output.T3CODE_DESKTOP_WS_URL;
-      if (desktopDevRunnerPid !== undefined) {
-        output[DESKTOP_DEV_RUNNER_PID_ENV] = String(desktopDevRunnerPid);
-      } else {
-        delete output[DESKTOP_DEV_RUNNER_PID_ENV];
-      }
-      if (desktopDevShutdownSignal !== undefined) {
-        output[DESKTOP_DEV_SHUTDOWN_SIGNAL_ENV] = desktopDevShutdownSignal;
-      } else {
-        delete output[DESKTOP_DEV_SHUTDOWN_SIGNAL_ENV];
-      }
-    } else {
-      delete output[DESKTOP_DEV_RUNNER_PID_ENV];
-      delete output[DESKTOP_DEV_SHUTDOWN_SIGNAL_ENV];
-    }
-
     return output;
   });
-}
-
-function signalExitCode(signal: NodeJS.Signals): number {
-  switch (signal) {
-    case "SIGHUP":
-      return 129;
-    case "SIGINT":
-      return 130;
-    case "SIGTERM":
-      return 143;
-    default:
-      return 0;
-  }
-}
-
-export function getWindowsTaskkillArgs(
-  pid: number,
-  signal: NodeJS.Signals,
-): ReadonlyArray<string> | null {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return null;
-  }
-
-  return ["/PID", String(pid), "/T", ...(signal === "SIGKILL" ? ["/F"] : [])];
-}
-
-function terminateProcessTree(pid: number, signal: NodeJS.Signals): void {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return;
-  }
-
-  if (process.platform === "win32") {
-    const taskkillArgs = getWindowsTaskkillArgs(pid, signal);
-    if (taskkillArgs === null) {
-      return;
-    }
-
-    spawnSync("taskkill", taskkillArgs, { stdio: "ignore", windowsHide: true });
-    return;
-  }
-
-  try {
-    process.kill(pid, signal);
-  } catch {
-    // Best-effort shutdown. The child may have already exited.
-  }
-
-  const pkillSignal = signal.replace(/^SIG/, "");
-  spawnSync("pkill", [`-${pkillSignal}`, "-P", String(pid)], { stdio: "ignore" });
 }
 
 function portPairForOffset(offset: number): {
@@ -434,36 +346,6 @@ interface DevRunnerCliInput {
   readonly turboArgs: ReadonlyArray<string>;
 }
 
-export function isInheritedDesktopDevUrl(
-  baseEnv: NodeJS.ProcessEnv,
-  devUrl: URL | undefined,
-): devUrl is URL {
-  if (devUrl === undefined) {
-    return false;
-  }
-
-  const port = baseEnv.PORT?.trim();
-  const rendererPort = baseEnv.ELECTRON_RENDERER_PORT?.trim();
-  const rawDevUrl = baseEnv.VITE_DEV_SERVER_URL?.trim();
-  if (!port || !rendererPort || !rawDevUrl || port !== rendererPort) {
-    return false;
-  }
-
-  let envDevUrl: URL;
-  try {
-    envDevUrl = new URL(rawDevUrl);
-  } catch {
-    return false;
-  }
-
-  return (
-    devUrl.toString() === envDevUrl.toString() &&
-    devUrl.hostname === "localhost" &&
-    devUrl.port === port &&
-    (devUrl.pathname === "/" || devUrl.pathname === "")
-  );
-}
-
 const readOptionalBooleanEnv = (name: string): boolean | undefined => {
   const value = process.env[name];
   if (value === undefined) {
@@ -520,15 +402,11 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       logWebSocketEvents: readOptionalBooleanEnv("T3CODE_LOG_WS_EVENTS"),
     };
 
-    const inheritedDesktopDevUrl =
-      input.mode === "dev:desktop" && isInheritedDesktopDevUrl(process.env, input.devUrl);
-    const effectiveDevUrl = inheritedDesktopDevUrl ? undefined : input.devUrl;
-
     const { serverOffset, webOffset } = yield* resolveModePortOffsets({
       mode: input.mode,
       startOffset: offset,
       hasExplicitServerPort: input.port !== undefined,
-      hasExplicitDevUrl: effectiveDevUrl !== undefined,
+      hasExplicitDevUrl: input.devUrl !== undefined,
     });
 
     const env = yield* createDevRunnerEnv({
@@ -549,10 +427,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       ),
       host: input.host,
       port: input.port,
-      devUrl: effectiveDevUrl,
-      desktopDevRunnerPid: input.mode === "dev:desktop" ? process.pid : undefined,
-      desktopDevShutdownSignal:
-        input.mode === "dev:desktop" ? DESKTOP_DEV_SHUTDOWN_SIGNAL : undefined,
+      devUrl: input.devUrl,
     });
 
     const selectionSuffix =
@@ -561,7 +436,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
         : "";
 
     yield* Effect.logInfo(
-      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.T3CODE_PORT)} webPort=${String(env.PORT)} baseDir=${String(env.KODOCODE_HOME ?? env.T3CODE_HOME)}`,
+      `[dev-runner] mode=${input.mode} source=${source}${selectionSuffix} serverPort=${String(env.T3CODE_PORT)} webPort=${String(env.PORT)} baseDir=${String(env.T3CODE_HOME)}`,
     );
 
     if (input.dryRun) {
@@ -587,52 +462,11 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
       },
     );
 
-    const childPid = Number(child.pid);
-    const signalHandlers: Array<readonly [NodeJS.Signals, () => void]> = [];
-    const registerSignalHandler = (
-      signal: NodeJS.Signals,
-      options?: {
-        readonly childSignal?: NodeJS.Signals | undefined;
-        readonly exitCode?: number | undefined;
-      },
-    ): void => {
-      const handler = () => {
-        terminateProcessTree(childPid, options?.childSignal ?? signal);
-
-        setTimeout(() => {
-          terminateProcessTree(childPid, "SIGKILL");
-        }, 1_500).unref();
-
-        process.exit(options?.exitCode ?? signalExitCode(signal));
-      };
-
-      process.once(signal, handler);
-      signalHandlers.push([signal, handler]);
-    };
-
-    registerSignalHandler("SIGINT");
-    registerSignalHandler("SIGTERM");
-    registerSignalHandler("SIGHUP");
-    if (DESKTOP_DEV_SHUTDOWN_SIGNAL === "SIGUSR2") {
-      // Internal clean-shutdown request sent by the dev Electron launcher when
-      // the user closes the app window or quits the app.
-      registerSignalHandler("SIGUSR2", {
-        childSignal: "SIGTERM",
-        exitCode: 0,
+    const exitCode = yield* child.exitCode;
+    if (exitCode !== 0) {
+      return yield* new DevRunnerError({
+        message: `turbo exited with code ${exitCode}`,
       });
-    }
-
-    try {
-      const exitCode = yield* child.exitCode;
-      if (exitCode !== 0) {
-        return yield* new DevRunnerError({
-          message: `turbo exited with code ${exitCode}`,
-        });
-      }
-    } finally {
-      for (const [signal, handler] of signalHandlers) {
-        process.removeListener(signal, handler);
-      }
     }
   }).pipe(
     Effect.mapError((cause) =>
@@ -651,8 +485,8 @@ const devRunnerCli = Command.make("dev-runner", {
     Argument.withDescription("Development mode to run."),
   ),
   t3Home: Flag.string("home-dir").pipe(
-    Flag.withDescription("Base directory for all Kodo Code data (equivalent to KODOCODE_HOME)."),
-    Flag.withFallbackConfig(optionalStringConfig("KODOCODE_HOME")),
+    Flag.withDescription("Base directory for all DP Code data (equivalent to T3CODE_HOME)."),
+    Flag.withFallbackConfig(optionalStringConfig("T3CODE_HOME")),
   ),
   authToken: Flag.string("auth-token").pipe(
     Flag.withDescription("Auth token (forwards to T3CODE_AUTH_TOKEN)."),

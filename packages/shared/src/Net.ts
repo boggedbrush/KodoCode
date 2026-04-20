@@ -89,45 +89,6 @@ export class NetService extends ServiceMap.Service<NetService, NetServiceShape>(
   "@t3tools/shared/Net/NetService",
 ) {
   static readonly layer = Layer.sync(NetService, () => {
-    const canConnectToHost = (port: number, host: string): Effect.Effect<boolean> =>
-      Effect.callback<boolean>((resume) => {
-        const socket = new Net.Socket();
-        let settled = false;
-
-        const settle = (value: boolean) => {
-          if (settled) return;
-          settled = true;
-          socket.destroy();
-          resume(Effect.succeed(value));
-        };
-
-        socket.unref();
-        socket.setTimeout(150);
-
-        socket.once("connect", () => {
-          settle(true);
-        });
-        socket.once("timeout", () => {
-          settle(false);
-        });
-        socket.once("error", (cause) => {
-          if (
-            isErrnoExceptionWithCode(cause) &&
-            (cause.code === "ECONNREFUSED" || cause.code === "EADDRNOTAVAIL")
-          ) {
-            settle(false);
-            return;
-          }
-          settle(false);
-        });
-
-        socket.connect({ host, port });
-
-        return Effect.sync(() => {
-          socket.destroy();
-        });
-      });
-
     /**
      * Returns true when a TCP server can bind to {host, port}.
      * `EADDRNOTAVAIL` is treated as available so IPv6-absent hosts don't fail
@@ -206,21 +167,11 @@ export class NetService extends ServiceMap.Service<NetService, NetServiceShape>(
     return {
       canListenOnHost,
       isPortAvailableOnLoopback: (port) =>
-        Effect.gen(function* () {
-          const [ipv4Reachable, ipv6Reachable] = yield* Effect.all([
-            canConnectToHost(port, "127.0.0.1"),
-            canConnectToHost(port, "::1"),
-          ]);
-          if (ipv4Reachable || ipv6Reachable) {
-            return false;
-          }
-
-          const [ipv4Available, ipv6Available] = yield* Effect.all([
-            canListenOnHost(port, "127.0.0.1"),
-            canListenOnHost(port, "::1"),
-          ]);
-          return ipv4Available && ipv6Available;
-        }),
+        Effect.zipWith(
+          canListenOnHost(port, "127.0.0.1"),
+          canListenOnHost(port, "::1"),
+          (ipv4, ipv6) => ipv4 && ipv6,
+        ),
       reserveLoopbackPort,
       findAvailablePort: (preferred) =>
         Effect.catch(tryReservePort(preferred), () => tryReservePort(0)),

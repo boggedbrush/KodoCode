@@ -1,22 +1,129 @@
-import { ProjectId, ThreadId, TurnId } from "@t3tools/contracts";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { useStore } from "../store";
+import { ThreadId } from "@t3tools/contracts";
+import { describe, expect, it } from "vitest";
 
 import {
-  MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
-  buildExpiredTerminalContextToastCopy,
-  createLocalDispatchSnapshot,
-  deriveComposerSendState,
+  appendVoiceTranscriptToPrompt,
+  deriveComposerVoiceState,
+  describeVoiceRecordingStartError,
   hasServerAcknowledgedLocalDispatch,
-  reconcileMountedTerminalThreadIds,
-  waitForStartedServerThread,
+  isVoiceAuthExpiredMessage,
+  resolveActiveThreadTitle,
+  sanitizeVoiceErrorMessage,
+  shouldAutoDeleteTerminalThreadOnLastClose,
+  buildExpiredTerminalContextToastCopy,
+  type LocalDispatchSnapshot,
+  deriveComposerSendState,
+  shouldStartActiveTurnLayoutGrace,
+  shouldRenderTerminalWorkspace,
 } from "./ChatView.logic";
+
+describe("voice helpers", () => {
+  it("keeps manual titles visible for empty home chats", () => {
+    expect(
+      resolveActiveThreadTitle({
+        title: "Roadmap scratchpad",
+        subagentTitle: null,
+        isHomeChat: true,
+        isEmpty: true,
+      }),
+    ).toBe("Roadmap scratchpad");
+  });
+
+  it("maps untouched empty home chats to the friendly header label", () => {
+    expect(
+      resolveActiveThreadTitle({
+        title: "New thread",
+        subagentTitle: null,
+        isHomeChat: true,
+        isEmpty: true,
+      }),
+    ).toBe("New Chat");
+  });
+
+  it("prefers the resolved subagent label when present", () => {
+    expect(
+      resolveActiveThreadTitle({
+        title: "Ignored raw title",
+        subagentTitle: "Reviewer / Fix follow-up",
+        isHomeChat: false,
+        isEmpty: false,
+      }),
+    ).toBe("Reviewer / Fix follow-up");
+  });
+
+  it("appends a transcript to the existing prompt without disturbing spacing", () => {
+    expect(appendVoiceTranscriptToPrompt("Hello there   ", "  next line  ")).toBe(
+      "Hello there\nnext line",
+    );
+  });
+
+  it("returns null when the transcript is empty", () => {
+    expect(appendVoiceTranscriptToPrompt("Hello", "   ")).toBeNull();
+  });
+
+  it("sanitizes inline stack traces from voice errors", () => {
+    expect(
+      sanitizeVoiceErrorMessage(
+        "Your ChatGPT login has expired. Sign in again. at file:///Users/test/app.mjs:12:3",
+      ),
+    ).toBe("Your ChatGPT login has expired. Sign in again.");
+  });
+
+  it("strips desktop bridge wrappers from voice errors", () => {
+    expect(
+      sanitizeVoiceErrorMessage(
+        "Error invoking remote method 'desktop:server-transcribe-voice': Error: The transcription response did not include any text.",
+      ),
+    ).toBe("The transcription response did not include any text.");
+  });
+
+  it("detects auth-expired copy in sanitized voice errors", () => {
+    expect(isVoiceAuthExpiredMessage("Sign in again to ChatGPT")).toBe(true);
+    expect(isVoiceAuthExpiredMessage("The microphone could not be opened.")).toBe(false);
+  });
+
+  it("maps microphone permission errors to clearer copy", () => {
+    const error = new Error("Permission denied");
+    error.name = "NotAllowedError";
+
+    expect(describeVoiceRecordingStartError(error)).toContain("Microphone access was denied");
+  });
+
+  it("derives voice-note availability from provider auth and runtime state", () => {
+    expect(
+      deriveComposerVoiceState({
+        authStatus: "authenticated",
+        voiceTranscriptionAvailable: true,
+        isRecording: false,
+        isTranscribing: false,
+      }),
+    ).toEqual({
+      canRenderVoiceNotes: true,
+      canStartVoiceNotes: true,
+      showVoiceNotesControl: true,
+    });
+
+    expect(
+      deriveComposerVoiceState({
+        authStatus: "unauthenticated",
+        voiceTranscriptionAvailable: true,
+        isRecording: true,
+        isTranscribing: false,
+      }),
+    ).toEqual({
+      canRenderVoiceNotes: false,
+      canStartVoiceNotes: false,
+      showVoiceNotesControl: true,
+    });
+  });
+});
 
 describe("deriveComposerSendState", () => {
   it("treats expired terminal pills as non-sendable content", () => {
     const state = deriveComposerSendState({
       prompt: "\uFFFC",
       imageCount: 0,
+      assistantSelectionCount: 0,
       terminalContexts: [
         {
           id: "ctx-expired",
@@ -41,6 +148,7 @@ describe("deriveComposerSendState", () => {
     const state = deriveComposerSendState({
       prompt: `yoo \uFFFC waddup`,
       imageCount: 0,
+      assistantSelectionCount: 0,
       terminalContexts: [
         {
           id: "ctx-expired",
@@ -57,6 +165,17 @@ describe("deriveComposerSendState", () => {
 
     expect(state.trimmedPrompt).toBe("yoo  waddup");
     expect(state.expiredTerminalContextCount).toBe(1);
+    expect(state.hasSendableContent).toBe(true);
+  });
+
+  it("treats assistant selections as sendable content", () => {
+    const state = deriveComposerSendState({
+      prompt: "",
+      imageCount: 0,
+      assistantSelectionCount: 1,
+      terminalContexts: [],
+    });
+
     expect(state.hasSendableContent).toBe(true);
   });
 });
@@ -77,293 +196,112 @@ describe("buildExpiredTerminalContextToastCopy", () => {
   });
 });
 
-describe("reconcileMountedTerminalThreadIds", () => {
-  it("keeps previously mounted open threads and adds the active open thread", () => {
+describe("shouldRenderTerminalWorkspace", () => {
+  it("requires an active project to render workspace mode", () => {
     expect(
-      reconcileMountedTerminalThreadIds({
-        currentThreadIds: [
-          ThreadId.makeUnsafe("thread-hidden"),
-          ThreadId.makeUnsafe("thread-stale"),
-        ],
-        openThreadIds: [ThreadId.makeUnsafe("thread-hidden"), ThreadId.makeUnsafe("thread-active")],
-        activeThreadId: ThreadId.makeUnsafe("thread-active"),
-        activeThreadTerminalOpen: true,
+      shouldRenderTerminalWorkspace({
+        activeProjectExists: false,
+        presentationMode: "workspace",
+        terminalOpen: true,
       }),
-    ).toEqual([ThreadId.makeUnsafe("thread-hidden"), ThreadId.makeUnsafe("thread-active")]);
+    ).toBe(false);
   });
 
-  it("drops mounted threads once their terminal drawer is no longer open", () => {
+  it("renders only for an open workspace terminal", () => {
     expect(
-      reconcileMountedTerminalThreadIds({
-        currentThreadIds: [ThreadId.makeUnsafe("thread-closed")],
-        openThreadIds: [],
-        activeThreadId: ThreadId.makeUnsafe("thread-closed"),
-        activeThreadTerminalOpen: false,
+      shouldRenderTerminalWorkspace({
+        activeProjectExists: true,
+        presentationMode: "workspace",
+        terminalOpen: true,
       }),
-    ).toEqual([]);
-  });
-
-  it("keeps only the most recently active hidden terminal threads", () => {
+    ).toBe(true);
     expect(
-      reconcileMountedTerminalThreadIds({
-        currentThreadIds: [
-          ThreadId.makeUnsafe("thread-1"),
-          ThreadId.makeUnsafe("thread-2"),
-          ThreadId.makeUnsafe("thread-3"),
-        ],
-        openThreadIds: [
-          ThreadId.makeUnsafe("thread-1"),
-          ThreadId.makeUnsafe("thread-2"),
-          ThreadId.makeUnsafe("thread-3"),
-          ThreadId.makeUnsafe("thread-4"),
-        ],
-        activeThreadId: ThreadId.makeUnsafe("thread-4"),
-        activeThreadTerminalOpen: true,
-        maxHiddenThreadCount: 2,
+      shouldRenderTerminalWorkspace({
+        activeProjectExists: true,
+        presentationMode: "drawer",
+        terminalOpen: true,
       }),
-    ).toEqual([
-      ThreadId.makeUnsafe("thread-2"),
-      ThreadId.makeUnsafe("thread-3"),
-      ThreadId.makeUnsafe("thread-4"),
-    ]);
-  });
-
-  it("moves the active thread to the end so it is treated as most recently used", () => {
-    expect(
-      reconcileMountedTerminalThreadIds({
-        currentThreadIds: [
-          ThreadId.makeUnsafe("thread-a"),
-          ThreadId.makeUnsafe("thread-b"),
-          ThreadId.makeUnsafe("thread-c"),
-        ],
-        openThreadIds: [
-          ThreadId.makeUnsafe("thread-a"),
-          ThreadId.makeUnsafe("thread-b"),
-          ThreadId.makeUnsafe("thread-c"),
-        ],
-        activeThreadId: ThreadId.makeUnsafe("thread-a"),
-        activeThreadTerminalOpen: true,
-        maxHiddenThreadCount: 2,
-      }),
-    ).toEqual([
-      ThreadId.makeUnsafe("thread-b"),
-      ThreadId.makeUnsafe("thread-c"),
-      ThreadId.makeUnsafe("thread-a"),
-    ]);
-  });
-
-  it("defaults to the hidden mounted terminal cap", () => {
-    const currentThreadIds = Array.from(
-      { length: MAX_HIDDEN_MOUNTED_TERMINAL_THREADS + 2 },
-      (_, index) => ThreadId.makeUnsafe(`thread-${index + 1}`),
-    );
-
-    expect(
-      reconcileMountedTerminalThreadIds({
-        currentThreadIds,
-        openThreadIds: currentThreadIds,
-        activeThreadId: null,
-        activeThreadTerminalOpen: false,
-      }),
-    ).toEqual(currentThreadIds.slice(-MAX_HIDDEN_MOUNTED_TERMINAL_THREADS));
+    ).toBe(false);
   });
 });
 
-const makeThread = (input?: {
-  id?: ThreadId;
-  latestTurn?: {
-    turnId: TurnId;
-    state: "running" | "completed";
-    requestedAt: string;
-    startedAt: string | null;
-    completedAt: string | null;
-  } | null;
-}) => ({
-  id: input?.id ?? ThreadId.makeUnsafe("thread-1"),
-  codexThreadId: null,
-  projectId: ProjectId.makeUnsafe("project-1"),
-  title: "Thread",
-  modelSelection: { provider: "codex" as const, model: "gpt-5.4" },
-  runtimeMode: "full-access" as const,
-  interactionMode: "default" as const,
-  session: null,
-  messages: [],
-  proposedPlans: [],
-  error: null,
-  createdAt: "2026-03-29T00:00:00.000Z",
-  archivedAt: null,
-  updatedAt: "2026-03-29T00:00:00.000Z",
-  latestTurn: input?.latestTurn
-    ? {
-        ...input.latestTurn,
-        assistantMessageId: null,
-      }
-    : null,
-  branch: null,
-  worktreePath: null,
-  turnDiffSummaries: [],
-  activities: [],
-});
-
-afterEach(() => {
-  vi.useRealTimers();
-  vi.restoreAllMocks();
-  useStore.setState((state) => ({
-    ...state,
-    projects: [],
-    threads: [],
-    bootstrapComplete: true,
-  }));
-});
-
-describe("waitForStartedServerThread", () => {
-  it("resolves immediately when the thread is already started", async () => {
-    const threadId = ThreadId.makeUnsafe("thread-started");
-    useStore.setState((state) => ({
-      ...state,
-      threads: [
-        makeThread({
-          id: threadId,
-          latestTurn: {
-            turnId: TurnId.makeUnsafe("turn-started"),
-            state: "running",
-            requestedAt: "2026-03-29T00:00:01.000Z",
-            startedAt: "2026-03-29T00:00:01.000Z",
-            completedAt: null,
-          },
-        }),
-      ],
-    }));
-
-    await expect(waitForStartedServerThread(threadId)).resolves.toBe(true);
+describe("shouldStartActiveTurnLayoutGrace", () => {
+  it("starts the grace window when a live turn just became settled", () => {
+    expect(
+      shouldStartActiveTurnLayoutGrace({
+        previousTurnLayoutLive: true,
+        currentTurnLayoutLive: false,
+        latestTurnStartedAt: "2026-04-13T00:00:00.000Z",
+      }),
+    ).toBe(true);
   });
 
-  it("waits for the thread to start via subscription updates", async () => {
-    const threadId = ThreadId.makeUnsafe("thread-wait");
-    useStore.setState((state) => ({
-      ...state,
-      threads: [makeThread({ id: threadId })],
-    }));
-
-    const promise = waitForStartedServerThread(threadId, 500);
-
-    useStore.setState((state) => ({
-      ...state,
-      threads: [
-        makeThread({
-          id: threadId,
-          latestTurn: {
-            turnId: TurnId.makeUnsafe("turn-started"),
-            state: "running",
-            requestedAt: "2026-03-29T00:00:01.000Z",
-            startedAt: "2026-03-29T00:00:01.000Z",
-            completedAt: null,
-          },
-        }),
-      ],
-    }));
-
-    await expect(promise).resolves.toBe(true);
+  it("does not start the grace window for already-idle threads", () => {
+    expect(
+      shouldStartActiveTurnLayoutGrace({
+        previousTurnLayoutLive: false,
+        currentTurnLayoutLive: false,
+        latestTurnStartedAt: "2026-04-13T00:00:00.000Z",
+      }),
+    ).toBe(false);
   });
 
-  it("handles the thread starting between the initial read and subscription setup", async () => {
-    const threadId = ThreadId.makeUnsafe("thread-race");
-    useStore.setState((state) => ({
-      ...state,
-      threads: [makeThread({ id: threadId })],
-    }));
-
-    const originalSubscribe = useStore.subscribe.bind(useStore);
-    let raced = false;
-    vi.spyOn(useStore, "subscribe").mockImplementation((listener) => {
-      if (!raced) {
-        raced = true;
-        useStore.setState((state) => ({
-          ...state,
-          threads: [
-            makeThread({
-              id: threadId,
-              latestTurn: {
-                turnId: TurnId.makeUnsafe("turn-race"),
-                state: "running",
-                requestedAt: "2026-03-29T00:00:01.000Z",
-                startedAt: "2026-03-29T00:00:01.000Z",
-                completedAt: null,
-              },
-            }),
-          ],
-        }));
-      }
-      return originalSubscribe(listener);
-    });
-
-    await expect(waitForStartedServerThread(threadId, 500)).resolves.toBe(true);
+  it("does not start the grace window while work is still live", () => {
+    expect(
+      shouldStartActiveTurnLayoutGrace({
+        previousTurnLayoutLive: true,
+        currentTurnLayoutLive: true,
+        latestTurnStartedAt: "2026-04-13T00:00:00.000Z",
+      }),
+    ).toBe(false);
   });
 
-  it("returns false after the timeout when the thread never starts", async () => {
-    vi.useFakeTimers();
-
-    const threadId = ThreadId.makeUnsafe("thread-timeout");
-    useStore.setState((state) => ({
-      ...state,
-      threads: [makeThread({ id: threadId })],
-    }));
-    const promise = waitForStartedServerThread(threadId, 500);
-
-    await vi.advanceTimersByTimeAsync(500);
-
-    await expect(promise).resolves.toBe(false);
+  it("does not start the grace window when the turn never started", () => {
+    expect(
+      shouldStartActiveTurnLayoutGrace({
+        previousTurnLayoutLive: true,
+        currentTurnLayoutLive: false,
+        latestTurnStartedAt: null,
+      }),
+    ).toBe(false);
   });
 });
 
 describe("hasServerAcknowledgedLocalDispatch", () => {
-  const projectId = ProjectId.makeUnsafe("project-1");
-  const previousLatestTurn = {
-    turnId: TurnId.makeUnsafe("turn-1"),
-    state: "completed" as const,
-    requestedAt: "2026-03-29T00:00:00.000Z",
-    startedAt: "2026-03-29T00:00:01.000Z",
-    completedAt: "2026-03-29T00:00:10.000Z",
-    assistantMessageId: null,
+  const localDispatch: LocalDispatchSnapshot = {
+    startedAt: "2026-04-13T00:00:00.000Z",
+    preparingWorktree: false,
+    latestTurnTurnId: null,
+    latestTurnRequestedAt: null,
+    latestTurnStartedAt: null,
+    latestTurnCompletedAt: null,
+    sessionOrchestrationStatus: "ready",
+    sessionUpdatedAt: "2026-04-13T00:00:00.000Z",
+  };
+  const firstTurnLocalDispatch: LocalDispatchSnapshot = {
+    startedAt: "2026-04-13T00:00:00.000Z",
+    preparingWorktree: false,
+    latestTurnTurnId: null,
+    latestTurnRequestedAt: null,
+    latestTurnStartedAt: null,
+    latestTurnCompletedAt: null,
+    sessionOrchestrationStatus: null,
+    sessionUpdatedAt: null,
   };
 
-  const previousSession = {
-    provider: "codex" as const,
-    status: "ready" as const,
-    createdAt: "2026-03-29T00:00:00.000Z",
-    updatedAt: "2026-03-29T00:00:10.000Z",
-    orchestrationStatus: "idle" as const,
-  };
-
-  it("does not clear local dispatch before server state changes", () => {
-    const localDispatch = createLocalDispatchSnapshot({
-      id: ThreadId.makeUnsafe("thread-1"),
-      codexThreadId: null,
-      projectId,
-      title: "Thread",
-      modelSelection: { provider: "codex", model: "gpt-5.4" },
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      session: previousSession,
-      messages: [],
-      proposedPlans: [],
-      error: null,
-      createdAt: "2026-03-29T00:00:00.000Z",
-      archivedAt: null,
-      updatedAt: "2026-03-29T00:00:10.000Z",
-      latestTurn: previousLatestTurn,
-      branch: null,
-      worktreePath: null,
-      turnDiffSummaries: [],
-      activities: [],
-    });
-
+  it("stays pending until the server-side thread/session snapshot changes", () => {
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: "ready",
-        latestTurn: previousLatestTurn,
-        session: previousSession,
+        latestTurn: null,
+        session: {
+          provider: "codex",
+          status: "ready",
+          orchestrationStatus: "ready",
+          createdAt: "2026-04-13T00:00:00.000Z",
+          updatedAt: "2026-04-13T00:00:00.000Z",
+        },
         hasPendingApproval: false,
         hasPendingUserInput: false,
         threadError: null,
@@ -371,43 +309,26 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     ).toBe(false);
   });
 
-  it("clears local dispatch when a new turn is already settled", () => {
-    const localDispatch = createLocalDispatchSnapshot({
-      id: ThreadId.makeUnsafe("thread-1"),
-      codexThreadId: null,
-      projectId,
-      title: "Thread",
-      modelSelection: { provider: "codex", model: "gpt-5.4" },
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      session: previousSession,
-      messages: [],
-      proposedPlans: [],
-      error: null,
-      createdAt: "2026-03-29T00:00:00.000Z",
-      archivedAt: null,
-      updatedAt: "2026-03-29T00:00:10.000Z",
-      latestTurn: previousLatestTurn,
-      branch: null,
-      worktreePath: null,
-      turnDiffSummaries: [],
-      activities: [],
-    });
-
+  it("acknowledges the local send once the latest turn snapshot changes", () => {
     expect(
       hasServerAcknowledgedLocalDispatch({
         localDispatch,
         phase: "ready",
         latestTurn: {
-          ...previousLatestTurn,
-          turnId: TurnId.makeUnsafe("turn-2"),
-          requestedAt: "2026-03-29T00:01:00.000Z",
-          startedAt: "2026-03-29T00:01:01.000Z",
-          completedAt: "2026-03-29T00:01:30.000Z",
+          turnId: "turn-1" as never,
+          state: "running",
+          requestedAt: "2026-04-13T00:00:01.000Z",
+          startedAt: null,
+          completedAt: null,
+          assistantMessageId: null,
+          sourceProposedPlan: undefined,
         },
         session: {
-          ...previousSession,
-          updatedAt: "2026-03-29T00:01:30.000Z",
+          provider: "codex",
+          status: "ready",
+          orchestrationStatus: "ready",
+          createdAt: "2026-04-13T00:00:00.000Z",
+          updatedAt: "2026-04-13T00:00:01.000Z",
         },
         hasPendingApproval: false,
         hasPendingUserInput: false,
@@ -416,42 +337,99 @@ describe("hasServerAcknowledgedLocalDispatch", () => {
     ).toBe(true);
   });
 
-  it("clears local dispatch when the session changes without an observed running phase", () => {
-    const localDispatch = createLocalDispatchSnapshot({
-      id: ThreadId.makeUnsafe("thread-1"),
-      codexThreadId: null,
-      projectId,
-      title: "Thread",
-      modelSelection: { provider: "codex", model: "gpt-5.4" },
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      session: previousSession,
-      messages: [],
-      proposedPlans: [],
-      error: null,
-      createdAt: "2026-03-29T00:00:00.000Z",
-      archivedAt: null,
-      updatedAt: "2026-03-29T00:00:10.000Z",
-      latestTurn: previousLatestTurn,
-      branch: null,
-      worktreePath: null,
-      turnDiffSummaries: [],
-      activities: [],
-    });
-
+  it("keeps the first-turn optimistic timer alive through a null-to-ready session bootstrap", () => {
     expect(
       hasServerAcknowledgedLocalDispatch({
-        localDispatch,
+        localDispatch: firstTurnLocalDispatch,
         phase: "ready",
-        latestTurn: previousLatestTurn,
+        latestTurn: null,
         session: {
-          ...previousSession,
-          updatedAt: "2026-03-29T00:00:11.000Z",
+          provider: "claudeAgent",
+          status: "ready",
+          orchestrationStatus: "ready",
+          createdAt: "2026-04-13T00:00:00.000Z",
+          updatedAt: "2026-04-13T00:00:01.000Z",
         },
         hasPendingApproval: false,
         hasPendingUserInput: false,
         threadError: null,
       }),
+    ).toBe(false);
+  });
+
+  it("still acknowledges non-ready session transitions without a latest turn snapshot", () => {
+    expect(
+      hasServerAcknowledgedLocalDispatch({
+        localDispatch: firstTurnLocalDispatch,
+        phase: "disconnected",
+        latestTurn: null,
+        session: null,
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+        threadError: "provider failed",
+      }),
     ).toBe(true);
+  });
+});
+
+describe("shouldAutoDeleteTerminalThreadOnLastClose", () => {
+  it("deletes untouched terminal-first placeholder threads when the last terminal closes", () => {
+    expect(
+      shouldAutoDeleteTerminalThreadOnLastClose({
+        isLastTerminal: true,
+        isServerThread: true,
+        terminalEntryPoint: "terminal",
+        thread: {
+          title: "New terminal",
+          messages: [],
+          latestTurn: null,
+          session: null,
+          activities: [],
+          proposedPlans: [],
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps non-placeholder or already-used threads", () => {
+    expect(
+      shouldAutoDeleteTerminalThreadOnLastClose({
+        isLastTerminal: true,
+        isServerThread: true,
+        terminalEntryPoint: "terminal",
+        thread: {
+          title: "Manual rename",
+          messages: [],
+          latestTurn: null,
+          session: null,
+          activities: [],
+          proposedPlans: [],
+        },
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldAutoDeleteTerminalThreadOnLastClose({
+        isLastTerminal: true,
+        isServerThread: true,
+        terminalEntryPoint: "terminal",
+        thread: {
+          title: "New terminal",
+          messages: [
+            {
+              id: "msg-1" as never,
+              role: "user",
+              text: "hello",
+              createdAt: "2026-04-06T12:00:00.000Z",
+              streaming: false,
+            },
+          ],
+          latestTurn: null,
+          session: null,
+          activities: [],
+          proposedPlans: [],
+        },
+      }),
+    ).toBe(false);
   });
 });

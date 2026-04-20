@@ -12,12 +12,16 @@
  * @module ProviderService
  */
 import type {
+  ProviderForkThreadInput,
+  ProviderForkThreadResult,
   ProviderInterruptTurnInput,
   ProviderKind,
   ProviderRespondToRequestInput,
   ProviderRespondToUserInputInput,
   ProviderRuntimeEvent,
   ProviderSendTurnInput,
+  ProviderStartReviewInput,
+  ProviderSteerTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
@@ -48,6 +52,30 @@ export interface ProviderServiceShape {
   readonly sendTurn: (
     input: ProviderSendTurnInput,
   ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
+
+  /**
+   * Redirect an active provider turn toward a new prompt when supported.
+   */
+  readonly steerTurn: (
+    input: ProviderSteerTurnInput,
+  ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
+
+  /**
+   * Start a native provider review run when supported by the routed adapter.
+   */
+  readonly startReview: (
+    input: ProviderStartReviewInput,
+  ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
+
+  /**
+   * Fork a provider thread natively when the underlying adapter supports it.
+   *
+   * Returns a persisted provider-native fork binding when available, otherwise
+   * `null` so callers can fall back to orchestration-only history.
+   */
+  readonly forkThread?: (
+    input: ProviderForkThreadInput,
+  ) => Effect.Effect<ProviderForkThreadResult | null, ProviderServiceError>;
 
   /**
    * Interrupt a running provider turn.
@@ -100,6 +128,13 @@ export interface ProviderServiceShape {
   }) => Effect.Effect<void, ProviderServiceError>;
 
   /**
+   * Trigger provider-native context compaction for a thread.
+   */
+  readonly compactThread: (input: {
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
    * Canonical provider runtime event stream.
    *
    * Fan-out is owned by ProviderService (not by a standalone event-bus service).
@@ -111,5 +146,5 @@ export interface ProviderServiceShape {
  * ProviderService - Service tag for provider orchestration.
  */
 export class ProviderService extends ServiceMap.Service<ProviderService, ProviderServiceShape>()(
-  "t3/provider/Services/ProviderService",
+  "kodo/provider/Services/ProviderService",
 ) {}

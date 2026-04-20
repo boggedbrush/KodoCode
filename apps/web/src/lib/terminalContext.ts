@@ -1,4 +1,8 @@
 import { type ThreadId } from "@t3tools/contracts";
+import {
+  extractTrailingAssistantSelections,
+  type ParsedAssistantSelectionEntry,
+} from "./assistantSelections";
 
 export interface TerminalContextSelection {
   terminalId: string;
@@ -27,6 +31,7 @@ export interface DisplayedUserMessageState {
   contextCount: number;
   previewTitle: string | null;
   contexts: ParsedTerminalContextEntry[];
+  assistantSelections: ParsedAssistantSelectionEntry[];
 }
 
 export interface ParsedTerminalContextEntry {
@@ -35,9 +40,16 @@ export interface ParsedTerminalContextEntry {
 }
 
 export const INLINE_TERMINAL_CONTEXT_PLACEHOLDER = "\uFFFC";
+export const IMAGE_ONLY_BOOTSTRAP_PROMPT =
+  "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
+export const IMAGE_ONLY_VISIBLE_PLACEHOLDER = "(No Content)";
 
 const TRAILING_TERMINAL_CONTEXT_BLOCK_PATTERN =
   /\n*<terminal_context>\n([\s\S]*?)\n<\/terminal_context>\s*$/;
+
+interface DisplayedUserMessageOptions {
+  hideImageOnlyBootstrapPrompt?: boolean;
+}
 
 export function normalizeTerminalContextText(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
@@ -234,14 +246,28 @@ export function extractTrailingTerminalContexts(prompt: string): ExtractedTermin
   };
 }
 
-export function deriveDisplayedUserMessageState(prompt: string): DisplayedUserMessageState {
+export function deriveDisplayedUserMessageState(
+  prompt: string,
+  options?: DisplayedUserMessageOptions,
+): DisplayedUserMessageState {
   const extractedContexts = extractTrailingTerminalContexts(prompt);
+  const extractedAssistantSelections = extractTrailingAssistantSelections(
+    extractedContexts.promptText,
+  );
+  const hidePrompt =
+    options?.hideImageOnlyBootstrapPrompt === true &&
+    extractedAssistantSelections.promptText.trim() === IMAGE_ONLY_BOOTSTRAP_PROMPT;
   return {
-    visibleText: extractedContexts.promptText,
-    copyText: prompt,
+    // Keep the internal bootstrap prompt hidden while still giving image-only
+    // user messages a visible bubble in the transcript.
+    visibleText: hidePrompt
+      ? IMAGE_ONLY_VISIBLE_PLACEHOLDER
+      : extractedAssistantSelections.promptText,
+    copyText: hidePrompt ? "" : extractedAssistantSelections.promptText,
     contextCount: extractedContexts.contextCount,
     previewTitle: extractedContexts.previewTitle,
     contexts: extractedContexts.contexts,
+    assistantSelections: extractedAssistantSelections.selections,
   };
 }
 

@@ -1,7 +1,6 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
   "ignorePatterns": [
-    ".reference",
     ".plans",
     "dist",
     "dist-electron",
@@ -9,8 +8,7 @@
     "bun.lock",
     "*.tsbuildinfo",
     "**/routeTree.gen.ts",
-    "apps/web/public/mockServiceWorker.js",
-    "apps/web/src/lib/vendor/qrcodegen.ts"
+    "apps/web/public/mockServiceWorker.js"
   ],
   "sortPackageJson": {}
 }

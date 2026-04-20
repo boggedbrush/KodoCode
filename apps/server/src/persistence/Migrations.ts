@@ -29,12 +29,20 @@ import Migration0013 from "./Migrations/013_ProjectionThreadProposedPlans.ts";
 import Migration0014 from "./Migrations/014_ProjectionThreadProposedPlanImplementation.ts";
 import Migration0015 from "./Migrations/015_ProjectionTurnsSourceProposedPlan.ts";
 import Migration0016 from "./Migrations/016_CanonicalizeModelSelections.ts";
-import Migration0017 from "./Migrations/017_ProjectionThreadsArchivedAt.ts";
-import Migration0018 from "./Migrations/018_ProjectionThreadsArchivedAtIndex.ts";
-import Migration0019 from "./Migrations/019_ProjectionSnapshotLookupIndexes.ts";
-import Migration0020 from "./Migrations/020_AuthAccessManagement.ts";
-import Migration0021 from "./Migrations/021_AuthSessionClientMetadata.ts";
-import Migration0022 from "./Migrations/022_AuthSessionLastConnectedAt.ts";
+import Migration0017 from "./Migrations/017_ThreadHandoffMetadata.ts";
+import Migration0018 from "./Migrations/018_ProjectionThreadMessageMentions.ts";
+import Migration0019 from "./Migrations/019_ProjectionThreadsEnvMode.ts";
+import Migration0020 from "./Migrations/020_ProjectionThreadsForkSource.ts";
+import Migration0021 from "./Migrations/021_ProjectionThreadsAssociatedWorktree.ts";
+import Migration0022 from "./Migrations/022_ProjectionThreadsAssociatedWorktreeBranch.ts";
+import Migration0023 from "./Migrations/023_ProjectionThreadsAssociatedWorktreeRef.ts";
+import Migration0024 from "./Migrations/024_ProjectionThreadsArchivedAt.ts";
+import Migration0025 from "./Migrations/025_ProjectionThreadsSubagents.ts";
+import Migration0026 from "./Migrations/026_ProjectionThreadShellSummary.ts";
+import Migration0027 from "./Migrations/027_BackfillProjectionThreadShellSummary.ts";
+import Migration0028 from "./Migrations/028_ProjectionProjectsKind.ts";
+import Migration0029 from "./Migrations/029_ProjectionThreadsLastKnownPr.ts";
+import Migration0030 from "./Migrations/030_ProjectionThreadMessagesDispatchMode.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -63,12 +71,20 @@ export const migrationEntries = [
   [14, "ProjectionThreadProposedPlanImplementation", Migration0014],
   [15, "ProjectionTurnsSourceProposedPlan", Migration0015],
   [16, "CanonicalizeModelSelections", Migration0016],
-  [17, "ProjectionThreadsArchivedAt", Migration0017],
-  [18, "ProjectionThreadsArchivedAtIndex", Migration0018],
-  [19, "ProjectionSnapshotLookupIndexes", Migration0019],
-  [20, "AuthAccessManagement", Migration0020],
-  [21, "AuthSessionClientMetadata", Migration0021],
-  [22, "AuthSessionLastConnectedAt", Migration0022],
+  [17, "ThreadHandoffMetadata", Migration0017],
+  [18, "ProjectionThreadMessageMentions", Migration0018],
+  [19, "ProjectionThreadsEnvMode", Migration0019],
+  [20, "ProjectionThreadsForkSource", Migration0020],
+  [21, "ProjectionThreadsAssociatedWorktree", Migration0021],
+  [22, "ProjectionThreadsAssociatedWorktreeBranch", Migration0022],
+  [23, "ProjectionThreadsAssociatedWorktreeRef", Migration0023],
+  [24, "ProjectionThreadsArchivedAt", Migration0024],
+  [25, "ProjectionThreadsSubagents", Migration0025],
+  [26, "ProjectionThreadShellSummary", Migration0026],
+  [27, "BackfillProjectionThreadShellSummary", Migration0027],
+  [28, "ProjectionProjectsKind", Migration0028],
+  [29, "ProjectionThreadsLastKnownPr", Migration0029],
+  [30, "ProjectionThreadMessagesDispatchMode", Migration0030],
 ] as const;
 
 export const makeMigrationLoader = (throughId?: number) =>
@@ -100,20 +116,19 @@ export interface RunMigrationsOptions {
  *
  * @returns Effect containing array of executed migrations
  */
-export const runMigrations = Effect.fn("runMigrations")(function* ({
-  toMigrationInclusive,
-}: RunMigrationsOptions = {}) {
-  yield* Effect.log(
-    toMigrationInclusive === undefined
-      ? "Running all migrations..."
-      : `Running migrations 1 through ${toMigrationInclusive}...`,
-  );
-  const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
-  yield* Effect.log("Migrations ran successfully").pipe(
-    Effect.annotateLogs({ migrations: executedMigrations.map(([id, name]) => `${id}_${name}`) }),
-  );
-  return executedMigrations;
-});
+export const runMigrations = ({ toMigrationInclusive }: RunMigrationsOptions = {}) =>
+  Effect.gen(function* () {
+    yield* Effect.log(
+      toMigrationInclusive === undefined
+        ? "Running all migrations..."
+        : `Running migrations 1 through ${toMigrationInclusive}...`,
+    );
+    const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) });
+    yield* Effect.log("Migrations ran successfully").pipe(
+      Effect.annotateLogs({ migrations: executedMigrations.map(([id, name]) => `${id}_${name}`) }),
+    );
+    return executedMigrations;
+  });
 
 /**
  * Layer that runs migrations when the layer is built.
