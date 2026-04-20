@@ -50,6 +50,12 @@ export function useSettingsRestore(onRestored?: () => void) {
   const changedSettingLabels = useMemo(
     () => [
       ...(theme !== "system" ? ["Theme"] : []),
+      ...(settings.chatFontFamily !== DEFAULT_UNIFIED_SETTINGS.chatFontFamily
+        ? ["Chat typography"]
+        : []),
+      ...(settings.chatTextSize !== DEFAULT_UNIFIED_SETTINGS.chatTextSize
+        ? ["Chat text size"]
+        : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
@@ -87,6 +93,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       isGitWritingModelDirty,
       isPromptEnhanceModelDirty,
       settings.askModelSelection,
+      settings.chatFontFamily,
+      settings.chatTextSize,
       settings.codeModelSelection,
       settings.commitMessageStyle,
       settings.confirmThreadArchive,

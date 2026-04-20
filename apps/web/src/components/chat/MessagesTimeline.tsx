@@ -54,6 +54,7 @@ import {
   type ParsedTerminalContextEntry,
 } from "~/lib/terminalContext";
 import { cn } from "~/lib/utils";
+import { useSettings } from "../../hooks/useSettings";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 import { formatTimestamp } from "../../timestampFormat";
 import { parseReviewReport, type ReviewFinding } from "../../review";
@@ -63,6 +64,8 @@ import {
   formatInlineTerminalContextLabel,
   textContainsInlineTerminalContextLabels,
 } from "./userMessageTerminalContexts";
+import { resolveChatReadabilityClassName } from "~/lib/chatReadability";
+import { resolveTextDirection } from "~/lib/textDirection";
 
 const ALWAYS_UNVIRTUALIZED_TAIL_ROWS = 8;
 
@@ -95,6 +98,7 @@ interface MessagesTimelineProps {
   onReviewImplementAll?: (findings: ReviewFinding[]) => void;
   onReviewDismissAll?: () => void;
   onVirtualizerSnapshot?: (snapshot: {
+    measurementScopeKey: string;
     totalSize: number;
     measurements: ReadonlyArray<{
       id: string;
@@ -140,6 +144,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const pendingMeasureFrameRef = useRef<number | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
+  const chatFontFamily = useSettings((settings) => settings.chatFontFamily);
+  const chatTextSize = useSettings((settings) => settings.chatTextSize);
+  const typographyMeasurementScopeKey = `${chatFontFamily}:${chatTextSize}`;
 
   useLayoutEffect(() => {
     const timelineRoot = timelineRootRef.current;
@@ -224,7 +231,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     maximum: rows.length,
   });
   const virtualMeasurementScopeKey =
-    timelineWidthPx === null ? "width:unknown" : `width:${Math.round(timelineWidthPx)}`;
+    timelineWidthPx === null
+      ? `width:unknown:typography:${typographyMeasurementScopeKey}`
+      : `width:${Math.round(timelineWidthPx)}:typography:${typographyMeasurementScopeKey}`;
 
   const rowVirtualizer = useVirtualizer({
     count: virtualizedRowCount,
@@ -239,6 +248,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       const row = rows[index];
       if (!row) return 96;
       return estimateMessagesTimelineRowHeight(row, {
+        chatTextSize,
         expandedWorkGroups,
         timelineWidthPx,
         turnDiffSummaryByAssistantMessageId,
@@ -260,6 +270,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     rowVirtualizer.measure();
   }, [rowVirtualizer, timelineWidthPx]);
   useEffect(() => {
+    scheduleVirtualizerMeasure();
+  }, [scheduleVirtualizerMeasure, typographyMeasurementScopeKey]);
+  useEffect(() => {
     if (typeof document === "undefined" || document.fonts === undefined) {
       return;
     }
@@ -280,7 +293,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       fontSet.removeEventListener("loadingdone", handleFontSettle);
       fontSet.removeEventListener("loadingerror", handleFontSettle);
     };
-  }, [scheduleVirtualizerMeasure]);
+  }, [scheduleVirtualizerMeasure, typographyMeasurementScopeKey]);
   useEffect(() => {
     rowVirtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
       const viewportHeight = instance.scrollRect?.height ?? 0;
@@ -313,6 +326,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       return;
     }
     onVirtualizerSnapshot({
+      measurementScopeKey: typographyMeasurementScopeKey,
       totalSize: rowVirtualizer.getTotalSize(),
       measurements: rowVirtualizer.measurementsCache
         .slice(0, virtualizedRowCount)
@@ -333,7 +347,13 @@ export const MessagesTimeline = memo(function MessagesTimeline({
           ];
         }),
     });
-  }, [onVirtualizerSnapshot, rowVirtualizer, rows, virtualizedRowCount]);
+  }, [
+    onVirtualizerSnapshot,
+    rowVirtualizer,
+    rows,
+    typographyMeasurementScopeKey,
+    virtualizedRowCount,
+  ]);
 
   const virtualRows = rowVirtualizer.getVirtualItems();
   const nonVirtualizedRows = rows.slice(virtualizedRowCount);
@@ -708,6 +728,19 @@ const UserMessageBody = memo(function UserMessageBody(props: {
   text: string;
   terminalContexts: ParsedTerminalContextEntry[];
 }) {
+  const chatTextSize = useSettings((settings) => settings.chatTextSize);
+  const textDirection = resolveTextDirection(props.text);
+  const bodyClassName = cn(
+    "chat-message-inline-body whitespace-pre-wrap font-mono text-foreground",
+    resolveChatReadabilityClassName({
+      direction: textDirection,
+      // Terminal-context bubbles stay monospaced even when chat copy uses a
+      // proportional font override.
+      fontFamily: "auto",
+      textSize: chatTextSize,
+    }),
+  );
+
   if (props.terminalContexts.length > 0) {
     const hasEmbeddedInlineLabels = textContainsInlineTerminalContextLabels(
       props.text,
@@ -752,7 +785,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
         }
 
         return (
-          <div className="wrap-break-word whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
+          <div dir={textDirection} className={bodyClassName}>
             {inlineNodes}
           </div>
         );
@@ -780,7 +813,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     }
 
     return (
-      <div className="wrap-break-word whitespace-pre-wrap font-mono text-sm leading-relaxed text-foreground">
+      <div dir={textDirection} className={bodyClassName}>
         {inlineNodes}
       </div>
     );

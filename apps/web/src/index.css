@@ -66,6 +66,17 @@
   --desktop-window-safe-inset: 0px;
   --desktop-window-corner-radius: 0px;
   --radius: 0.625rem;
+  --font-sans-ui:
+    "DM Sans", "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari",
+    "Noto Sans Thai", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans-chat-dm-sans:
+    "DM Sans", "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari",
+    "Noto Sans Thai", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans-chat-noto:
+    "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-sans-chat-multiscript:
+    "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari", "Noto Sans Thai",
+    -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   --background: var(--color-white);
   --foreground: var(--color-neutral-800);
   --card: var(--color-white);
@@ -123,13 +134,7 @@
 }
 
 body {
-  font-family:
-    "DM Sans",
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    system-ui,
-    sans-serif;
+  font-family: var(--font-sans-ui);
   margin: 0;
   padding: 0;
   min-height: 100vh;
@@ -251,7 +256,53 @@ label:has(> select#reasoning-effort) select {
   height: 100%;
 }
 
-/* Chat markdown rendering */
+/* Chat readability */
+.chat-readability-surface {
+  text-align: start;
+  unicode-bidi: isolate;
+}
+
+.chat-readability-direction-rtl {
+  direction: rtl;
+}
+
+.chat-readability-direction-ltr {
+  direction: ltr;
+}
+
+.chat-readability-font-dm-sans {
+  font-family: var(--font-sans-chat-dm-sans);
+}
+
+.chat-readability-font-noto-sans {
+  font-family: var(--font-sans-chat-noto);
+}
+
+.chat-readability-font-noto-sans-multiscript {
+  font-family: var(--font-sans-chat-multiscript);
+}
+
+.chat-readability-text-small {
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.chat-readability-text-default {
+  font-size: 0.875rem;
+  line-height: 1.625;
+}
+
+.chat-readability-text-large {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}
+
+.chat-message-inline-body {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .chat-markdown {
   min-width: 0;
   overflow-wrap: anywhere;
@@ -276,12 +327,12 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown ul {
-  padding-left: 1.25rem;
+  padding-inline-start: 1.25rem;
   list-style-type: disc;
 }
 
 .chat-markdown ol {
-  padding-left: 1.25rem;
+  padding-inline-start: 1.25rem;
   list-style-type: decimal;
 }
 
@@ -316,8 +367,8 @@ label:has(> select#reasoning-effort) select {
 }
 
 .chat-markdown blockquote {
-  border-left: 2px solid var(--border);
-  padding-left: 0.8rem;
+  border-inline-start: 2px solid var(--border);
+  padding-inline-start: 0.8rem;
   color: var(--muted-foreground);
 }
 
@@ -327,7 +378,9 @@ label:has(> select#reasoning-effort) select {
   background: var(--muted);
   padding: 0.1rem 0.35rem;
   color: var(--foreground);
-  font-size: 0.75rem;
+  font-size: 0.9em;
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 .chat-markdown pre {
@@ -344,12 +397,14 @@ label:has(> select#reasoning-effort) select {
   background: transparent;
   padding: 0;
   line-height: 1.5;
-  font-size: 0.875rem;
+  font-size: 0.95em;
 }
 
 .chat-markdown .chat-markdown-codeblock {
   position: relative;
   margin: 0.65rem 0;
+  direction: ltr;
+  unicode-bidi: isolate;
 }
 
 .chat-markdown .chat-markdown-codeblock pre {
@@ -359,7 +414,7 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown .chat-markdown-copy-button {
   position: absolute;
   top: 0.5rem;
-  right: 0.5rem;
+  inset-inline-end: 0.5rem;
   z-index: 1;
   display: inline-flex;
   align-items: center;
@@ -402,7 +457,7 @@ label:has(> select#reasoning-effort) select {
 .chat-markdown td {
   border: 1px solid var(--border);
   padding: 0.35rem 0.45rem;
-  text-align: left;
+  text-align: start;
 }
 
 /* Diffs theme bridge (match diff surfaces to app palette) */
