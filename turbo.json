@@ -23,7 +23,11 @@
     "T3CODE_OTLP_EXPORT_INTERVAL_MS",
     "T3CODE_OTLP_SERVICE_NAME"
   ],
-  "globalPassThroughEnv": ["KODOCODE_DEV_RUNNER_PID", "KODOCODE_DEV_SHUTDOWN_SIGNAL"],
+  "globalPassThroughEnv": [
+    "KODOCODE_DEV_RUNNER_PID",
+    "KODOCODE_DEV_SHUTDOWN_SIGNAL",
+    "PATHEXT"
+  ],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
