@@ -21,6 +21,10 @@ export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"])
 export type TimestampFormat = typeof TimestampFormat.Type;
 export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
 
+export const ProjectPickerMode = Schema.Literals(["fullscreen", "sidebar"]);
+export type ProjectPickerMode = typeof ProjectPickerMode.Type;
+export const DEFAULT_PROJECT_PICKER_MODE: ProjectPickerMode = "fullscreen";
+
 export const SidebarProjectSortOrder = Schema.Literals(["updated_at", "created_at", "manual"]);
 export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
 export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
@@ -33,6 +37,9 @@ export const ClientSettingsSchema = Schema.Struct({
   confirmThreadArchive: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
   confirmThreadDelete: Schema.Boolean.pipe(Schema.withDecodingDefault(() => true)),
   diffWordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(() => false)),
+  projectPickerMode: ProjectPickerMode.pipe(
+    Schema.withDecodingDefault(() => DEFAULT_PROJECT_PICKER_MODE),
+  ),
   promptEnhancePreset: PromptEnhancePreset.pipe(
     Schema.withDecodingDefault(() => "balanced" as const satisfies typeof PromptEnhancePreset.Type),
   ),

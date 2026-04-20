@@ -50,6 +50,9 @@ export function useSettingsRestore(onRestored?: () => void) {
   const changedSettingLabels = useMemo(
     () => [
       ...(theme !== "system" ? ["Theme"] : []),
+      ...(settings.projectPickerMode !== DEFAULT_UNIFIED_SETTINGS.projectPickerMode
+        ? ["Project picker"]
+        : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
@@ -95,6 +98,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.diffWordWrap,
       settings.enableAssistantStreaming,
       settings.planModelSelection,
+      settings.projectPickerMode,
       settings.promptEnhancePreset,
       settings.reviewModelSelection,
       settings.timestampFormat,

@@ -60,7 +60,6 @@ import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { cn, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
 import {
-  canNavigateUp,
   ensureBrowseDirectoryPath,
   findProjectByPath,
   getBrowseParentPath,
@@ -135,6 +134,8 @@ import {
   sortThreadsForSidebar,
   useThreadJumpHintVisibility,
 } from "./Sidebar.logic";
+import { ProjectFolderBrowser } from "./ProjectFolderBrowser";
+import { ProjectFolderPickerDialog } from "./ProjectFolderPickerDialog";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
@@ -744,6 +745,7 @@ export default function Sidebar() {
   const [browseCurrentDirectory, setBrowseCurrentDirectory] = useState<string | null>(null);
   const [browseError, setBrowseError] = useState<string | null>(null);
   const [isBrowsingFilesystem, setIsBrowsingFilesystem] = useState(false);
+  const [projectPickerDialogOpen, setProjectPickerDialogOpen] = useState(false);
   const addProjectInputRef = useRef<HTMLInputElement | null>(null);
   const [renamingProjectId, setRenamingProjectId] = useState<ProjectId | null>(null);
   const [renamingProjectTitle, setRenamingProjectTitle] = useState("");
@@ -773,7 +775,9 @@ export default function Sidebar() {
   const shouldShowSidebarWordmark = true;
   const shouldShowSidebarLogo = true;
   const platform = navigator.platform;
-  const shouldShowProjectPathEntry = addingProject;
+  const usesFullscreenProjectPicker = isElectron && appSettings.projectPickerMode === "fullscreen";
+  const shouldShowProjectPathEntry = addingProject && !usesFullscreenProjectPicker;
+  const isProjectPickerOpen = addingProject || projectPickerDialogOpen;
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
       items: projects,
@@ -873,6 +877,8 @@ export default function Sidebar() {
       setIsAddingProject(true);
       const finishAddingProject = () => {
         setIsAddingProject(false);
+        // Keep the inline and fullscreen pickers on the same reset path so changing the
+        // appearance setting never leaves stale browse state waiting in the other shell.
         setNewCwd("");
         setAddProjectError(null);
         setBrowsePanelOpen(false);
@@ -882,6 +888,7 @@ export default function Sidebar() {
         setBrowseError(null);
         setIsBrowsingFilesystem(false);
         setAddingProject(false);
+        setProjectPickerDialogOpen(false);
       };
 
       const existing = findProjectByPath(projects, cwd);
@@ -975,6 +982,20 @@ export default function Sidebar() {
     void browseFilesystem(initialPath);
   }, [browseFilesystem, newCwd]);
 
+  const closeProjectPicker = useCallback(() => {
+    setAddingProject(false);
+    setProjectPickerDialogOpen(false);
+    setIsAddingProject(false);
+    setIsBrowsingFilesystem(false);
+    setNewCwd("");
+    setAddProjectError(null);
+    setBrowsePanelOpen(false);
+    setBrowsePath("");
+    setBrowseEntries([]);
+    setBrowseCurrentDirectory(null);
+    setBrowseError(null);
+  }, []);
+
   const handleBrowseUp = useCallback(() => {
     if (!browseCurrentDirectory) {
       return;
@@ -994,17 +1015,16 @@ export default function Sidebar() {
   );
 
   const handleStartAddProject = () => {
-    if (addingProject) {
-      setAddingProject(false);
-      setAddProjectError(null);
-      setBrowsePanelOpen(false);
-      setBrowseError(null);
-      setBrowseEntries([]);
-      setBrowseCurrentDirectory(null);
-      setBrowsePath("");
+    if (isProjectPickerOpen) {
+      closeProjectPicker();
       return;
     }
     setAddProjectError(null);
+    if (usesFullscreenProjectPicker) {
+      setProjectPickerDialogOpen(true);
+      openBrowsePanel();
+      return;
+    }
     setAddingProject(true);
     if (isElectron) {
       openBrowsePanel();
@@ -2309,10 +2329,8 @@ export default function Sidebar() {
                       render={
                         <button
                           type="button"
-                          aria-label={
-                            shouldShowProjectPathEntry ? "Cancel add project" : "Add project"
-                          }
-                          aria-pressed={shouldShowProjectPathEntry}
+                          aria-label={isProjectPickerOpen ? "Cancel add project" : "Add project"}
+                          aria-pressed={isProjectPickerOpen}
                           className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
                           onClick={handleStartAddProject}
                         />
@@ -2320,12 +2338,12 @@ export default function Sidebar() {
                     >
                       <PlusIcon
                         className={`size-3.5 transition-transform duration-150 ${
-                          shouldShowProjectPathEntry ? "rotate-45" : "rotate-0"
+                          isProjectPickerOpen ? "rotate-45" : "rotate-0"
                         }`}
                       />
                     </TooltipTrigger>
                     <TooltipPopup side="right">
-                      {shouldShowProjectPathEntry ? "Cancel add project" : "Add project"}
+                      {isProjectPickerOpen ? "Cancel add project" : "Add project"}
                     </TooltipPopup>
                   </Tooltip>
                 </div>
@@ -2349,9 +2367,7 @@ export default function Sidebar() {
                       onKeyDown={(event) => {
                         if (event.key === "Enter") handleAddProject();
                         if (event.key === "Escape") {
-                          setAddingProject(false);
-                          setAddProjectError(null);
-                          setBrowsePanelOpen(false);
+                          closeProjectPicker();
                         }
                       }}
                       autoFocus
@@ -2383,88 +2399,27 @@ export default function Sidebar() {
                     </button>
                   </div>
                   {browsePanelOpen && (
-                    <div className="mt-1.5 rounded-md border border-border/80 bg-background/50 p-1.5">
-                      <div className="flex gap-1">
-                        <button
-                          type="button"
-                          className="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] text-foreground/80 transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                          onClick={handleBrowseUp}
-                          disabled={
-                            !browseCurrentDirectory ||
-                            !canNavigateUp(ensureBrowseDirectoryPath(browseCurrentDirectory)) ||
-                            isBrowsingFilesystem
-                          }
-                        >
-                          Up
-                        </button>
-                        <input
-                          className={`min-w-0 flex-1 rounded-md border bg-secondary px-2 py-1 font-mono text-[11px] text-foreground placeholder:text-muted-foreground/40 focus:outline-none ${
-                            browseError
-                              ? "border-red-500/70 focus:border-red-500"
-                              : "border-border focus:border-ring"
-                          }`}
-                          placeholder="~/code/"
-                          value={browsePath}
-                          onChange={(event) => {
-                            setBrowsePath(event.target.value);
-                            setBrowseError(null);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              void browseFilesystem(browsePath);
-                            }
-                          }}
-                        />
-                        <button
-                          type="button"
-                          className="shrink-0 rounded-md border border-border px-2 py-1 text-[11px] text-foreground/80 transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                          onClick={() => void browseFilesystem(browsePath)}
-                          disabled={browsePath.trim().length === 0 || isBrowsingFilesystem}
-                        >
-                          {isBrowsingFilesystem ? "Loading..." : "Go"}
-                        </button>
-                      </div>
-                      {browseCurrentDirectory && (
-                        <button
-                          type="button"
-                          className="mt-1.5 w-full rounded-md bg-secondary px-2 py-1.5 text-left text-[11px] text-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
-                          onClick={() => void addProjectFromPath(browseCurrentDirectory)}
-                          disabled={isAddingProject}
-                          title={browseCurrentDirectory}
-                        >
-                          Add this folder: {browseCurrentDirectory}
-                        </button>
-                      )}
-                      <div className="mt-1.5 max-h-40 overflow-y-auto rounded-md border border-border/60 bg-secondary/40">
-                        {browseEntries.length === 0 ? (
-                          <p className="px-2 py-2 text-[11px] text-muted-foreground/70">
-                            {isBrowsingFilesystem
-                              ? "Loading folders..."
-                              : "No matching folders in this location."}
-                          </p>
-                        ) : (
-                          browseEntries.map((entry) => (
-                            <button
-                              key={entry.fullPath}
-                              type="button"
-                              className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[11px] text-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
-                              onClick={() => {
-                                void handleBrowseEntryOpen(entry);
-                              }}
-                              title={entry.fullPath}
-                            >
-                              <FolderIcon className="size-3.5 shrink-0" />
-                              <span className="truncate">{entry.name}</span>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                      {browseError && (
-                        <p className="mt-1 px-0.5 text-[11px] leading-tight text-red-400">
-                          {browseError}
-                        </p>
-                      )}
-                    </div>
+                    <ProjectFolderBrowser
+                      variant="sidebar"
+                      browsePath={browsePath}
+                      browseEntries={browseEntries}
+                      browseCurrentDirectory={browseCurrentDirectory}
+                      browseError={browseError}
+                      isBrowsingFilesystem={isBrowsingFilesystem}
+                      isAddingProject={isAddingProject}
+                      onBrowsePathChange={(nextPath) => {
+                        setBrowsePath(nextPath);
+                        setBrowseError(null);
+                      }}
+                      onBrowse={() => void browseFilesystem(browsePath)}
+                      onBrowseUp={handleBrowseUp}
+                      onBrowseEntryOpen={handleBrowseEntryOpen}
+                      onAddCurrentDirectory={() => {
+                        if (browseCurrentDirectory) {
+                          void addProjectFromPath(browseCurrentDirectory);
+                        }
+                      }}
+                    />
                   )}
                   {addProjectError && (
                     <p className="mt-1 px-0.5 text-[11px] leading-tight text-red-400">
@@ -2509,7 +2464,7 @@ export default function Sidebar() {
                 </SidebarMenu>
               )}
 
-              {projects.length === 0 && !shouldShowProjectPathEntry && (
+              {projects.length === 0 && !isProjectPickerOpen && (
                 <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
                   No projects yet
                 </div>
@@ -2533,6 +2488,43 @@ export default function Sidebar() {
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarFooter>
+
+          <ProjectFolderPickerDialog
+            open={projectPickerDialogOpen}
+            newCwd={newCwd}
+            addProjectError={addProjectError}
+            canAddProject={canAddProject}
+            isAddingProject={isAddingProject}
+            browsePath={browsePath}
+            browseEntries={browseEntries}
+            browseCurrentDirectory={browseCurrentDirectory}
+            browseError={browseError}
+            isBrowsingFilesystem={isBrowsingFilesystem}
+            onOpenChange={(open) => {
+              if (open) {
+                setProjectPickerDialogOpen(true);
+                return;
+              }
+              closeProjectPicker();
+            }}
+            onNewCwdChange={(nextPath) => {
+              setNewCwd(nextPath);
+              setAddProjectError(null);
+            }}
+            onAddProject={handleAddProject}
+            onBrowsePathChange={(nextPath) => {
+              setBrowsePath(nextPath);
+              setBrowseError(null);
+            }}
+            onBrowse={() => void browseFilesystem(browsePath)}
+            onBrowseUp={handleBrowseUp}
+            onBrowseEntryOpen={handleBrowseEntryOpen}
+            onAddCurrentDirectory={() => {
+              if (browseCurrentDirectory) {
+                void addProjectFromPath(browseCurrentDirectory);
+              }
+            }}
+          />
         </>
       )}
     </>

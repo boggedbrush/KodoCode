@@ -16,6 +16,7 @@ import {
   ClientSettingsSchema,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
+  ProjectPickerMode,
   SidebarProjectSortOrder,
   SidebarThreadSortOrder,
   TimestampFormat,
@@ -200,6 +201,10 @@ export function buildLegacyClientSettingsMigrationPatch(
 
   if (Predicate.isBoolean(legacySettings.diffWordWrap)) {
     patch.diffWordWrap = legacySettings.diffWordWrap;
+  }
+
+  if (Schema.is(ProjectPickerMode)(legacySettings.projectPickerMode)) {
+    patch.projectPickerMode = legacySettings.projectPickerMode;
   }
 
   if (Schema.is(SidebarProjectSortOrder)(legacySettings.sidebarProjectSortOrder)) {
