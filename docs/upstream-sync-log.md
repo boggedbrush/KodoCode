@@ -16,7 +16,7 @@
 - `37965da0` `fix(server): handle OpenCode text response format in commit message generation (#2202)` — `SKIP`: current sync branch does not carry the upstream OpenCode text-generation layer shape this fix targets, so importing it would reintroduce divergent provider code.
 - `8dbcf92a` `fix(server): prevent probeClaudeCapabilities from wasting API requests (#2192)` — `ADAPT`: kept Kodo's subscription-only Claude probe but switched it to the no-prompt initialization pattern so it no longer burns Anthropic requests.
 - `66c326b8` `Redesign model picker with favorites and search (#2153)` — `SKIP`: broad model-picker UX rewrite conflicts with Kodo-specific composer and settings behavior.
-- `3b98fe35` ``effect-codex-app-server` (#1942)` — `MANUAL REVIEW`: very large Codex runtime/package refactor across server, provider layers, and generated schema surfaces.
+- `3b98fe35` ``effect-codex-app-server` (#1942)`—`MANUAL REVIEW`: very large Codex runtime/package refactor across server, provider layers, and generated schema surfaces.
 - `306ec4bb` `Refactor OpenCode lifecycle and structured output handling (#2218)` — `MANUAL REVIEW`: wide provider/runtime rewrite spanning server and web integration, too large for this bounded sync.
 - `6d1505c9` `fix: Change right panel sheet to be below title bar / action bar (#2224)` — `SELECTIVE FRONTEND`: localized layout correction on an existing surface, but deferred pending visual review against Kodo's desktop/title-bar divergence.
 - `de05b0c9` `fix(web): restore manual sort drag and keep per-group expand state (#2221)` — `MANUAL REVIEW`: touches sidebar grouping and project/worktree state behavior that Kodo intentionally owns.
