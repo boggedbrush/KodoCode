@@ -46,6 +46,12 @@ import { useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
 import { usesCustomDesktopTitlebar } from "../lib/utils";
+import {
+  countAvailableHarnesses,
+  getCompanionGuideFile,
+  getGuideFileForProvider,
+  INIT_COMMAND_TEMPLATE,
+} from "../initCommand";
 import { DesktopWindowControls } from "./DesktopTitleBar";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
@@ -1812,6 +1818,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
           label: "/usage",
           description: "Toggle active provider usage panel",
         },
+        {
+          id: "slash:init",
+          type: "slash-command",
+          command: "init",
+          label: "/init",
+          description: `Create ${getGuideFileForProvider(selectedProvider)} for this harness`,
+        },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
       if (!query) {
@@ -1848,6 +1861,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     composerTrigger,
     filterPresetCommandItems,
     searchableModelOptions,
+    selectedProvider,
     workspaceEntries,
   ]);
   const composerMenuOpen = Boolean(composerTrigger);
@@ -2433,15 +2447,137 @@ export default function ChatView({ threadId }: ChatViewProps) {
       threadId,
     ],
   );
+  const doesWorkspaceEntryExist = useCallback(async (cwd: string, relativePath: string) => {
+    const api = readNativeApi();
+    if (!api) {
+      return false;
+    }
+    const result = await api.projects.searchEntries({
+      cwd,
+      query: relativePath,
+      limit: 20,
+    });
+    return result.entries.some((entry) => entry.path === relativePath);
+  }, []);
+  const handleInitSlashCommand = useCallback(async () => {
+    const api = readNativeApi();
+    if (!api) {
+      return;
+    }
+    if (!activeWorkspaceRoot) {
+      toastManager.add({
+        type: "error",
+        title: "Could not initialize harness guide",
+        description: "Open a project or worktree first so Kodo knows where to create the file.",
+      });
+      return;
+    }
+
+    const primaryFile = getGuideFileForProvider(selectedProvider);
+    const companionFile = getCompanionGuideFile(primaryFile);
+    const multiHarnessAvailable = countAvailableHarnesses(providerStatuses) > 1;
+
+    try {
+      let [primaryExists, companionExists] = await Promise.all([
+        doesWorkspaceEntryExist(activeWorkspaceRoot, primaryFile),
+        doesWorkspaceEntryExist(activeWorkspaceRoot, companionFile),
+      ]);
+
+      if (!primaryExists && multiHarnessAvailable && companionExists) {
+        const shouldSymlinkPrimary = await api.dialogs.confirm(
+          [
+            `${companionFile} already exists in this workspace.`,
+            `Create ${primaryFile} as a symlink to ${companionFile} instead of creating a second guide file?`,
+          ].join("\n"),
+        );
+        if (shouldSymlinkPrimary) {
+          await api.projects.createSymlink({
+            cwd: activeWorkspaceRoot,
+            targetRelativePath: companionFile,
+            linkRelativePath: primaryFile,
+          });
+          toastManager.add({
+            type: "success",
+            title: `Created ${primaryFile} symlink`,
+            description: `Linked ${primaryFile} to the existing ${companionFile}.`,
+          });
+          return;
+        }
+      }
+
+      let createdPrimary = false;
+      if (!primaryExists) {
+        await api.projects.writeFile({
+          cwd: activeWorkspaceRoot,
+          relativePath: primaryFile,
+          contents: INIT_COMMAND_TEMPLATE,
+        });
+        primaryExists = true;
+        createdPrimary = true;
+      }
+
+      if (multiHarnessAvailable && primaryExists && !companionExists) {
+        const shouldCreateCompanionSymlink = await api.dialogs.confirm(
+          [
+            `Create ${companionFile} as a symlink to ${primaryFile}?`,
+            "This keeps both harness guide filenames in sync with a single shared file.",
+          ].join("\n"),
+        );
+        if (shouldCreateCompanionSymlink) {
+          await api.projects.createSymlink({
+            cwd: activeWorkspaceRoot,
+            targetRelativePath: primaryFile,
+            linkRelativePath: companionFile,
+          });
+          toastManager.add({
+            type: "success",
+            title: createdPrimary ? `Created ${primaryFile}` : `Created ${companionFile} symlink`,
+            description: createdPrimary
+              ? `Also linked ${companionFile} to the same guide.`
+              : `Linked ${companionFile} to the existing ${primaryFile}.`,
+          });
+          return;
+        }
+      }
+
+      if (createdPrimary) {
+        toastManager.add({
+          type: "success",
+          title: `Created ${primaryFile}`,
+          description: "Update the placeholder sections with repository-specific guidance.",
+        });
+        return;
+      }
+
+      toastManager.add({
+        type: "info",
+        title: `${primaryFile} already exists`,
+        description:
+          multiHarnessAvailable && companionExists
+            ? `${companionFile} is already present too.`
+            : undefined,
+      });
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not initialize harness guide",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    }
+  }, [activeWorkspaceRoot, doesWorkspaceEntryExist, providerStatuses, selectedProvider]);
   const handleStandaloneSlashCommand = useCallback(
-    (command: ComposerStandaloneSlashCommand) => {
+    async (command: ComposerStandaloneSlashCommand) => {
       if (command === "usage") {
         setProviderUsagePanelOpen((open) => !open);
         return;
       }
-      void handleInteractionModeChange(command);
+      if (command === "init") {
+        await handleInitSlashCommand();
+        return;
+      }
+      handleInteractionModeChange(command);
     },
-    [handleInteractionModeChange],
+    [handleInitSlashCommand, handleInteractionModeChange],
   );
   const applyPresetSelectionToComposer = useCallback(
     (provider: ProviderKind, presetId: string | null) => {
@@ -3552,7 +3688,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ? parseStandaloneComposerSlashCommand(promptRef.current.trim())
         : null;
     if (standaloneSlashCommand) {
-      handleStandaloneSlashCommand(standaloneSlashCommand);
+      await handleStandaloneSlashCommand(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(activeThread.id);
       setComposerHighlightedItemId(null);
@@ -4775,7 +4911,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           return;
         }
-        handleStandaloneSlashCommand(item.command);
+        void handleStandaloneSlashCommand(item.command);
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });

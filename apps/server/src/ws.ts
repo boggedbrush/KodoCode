@@ -12,6 +12,7 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
+  ProjectCreateSymlinkError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
@@ -673,6 +674,22 @@ const makeWsRpcLayer = () =>
                   ? "Workspace file path must stay within the project root."
                   : "Failed to write workspace file";
                 return new ProjectWriteFileError({
+                  message,
+                  cause,
+                });
+              }),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsCreateSymlink]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsCreateSymlink,
+            workspaceFileSystem.createSymlink(input).pipe(
+              Effect.mapError((cause) => {
+                const message = Schema.is(WorkspacePathOutsideRootError)(cause)
+                  ? "Workspace symlink path must stay within the project root."
+                  : "Failed to create workspace symlink";
+                return new ProjectCreateSymlinkError({
                   message,
                   cause,
                 });

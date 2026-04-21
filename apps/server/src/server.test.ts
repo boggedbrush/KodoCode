@@ -1927,6 +1927,59 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("routes websocket rpc projects.createSymlink", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-link-" });
+
+      yield* fs.writeFileString(path.join(workspaceDir, "AGENTS.md"), "# Repo\n");
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsCreateSymlink]({
+            cwd: workspaceDir,
+            targetRelativePath: "AGENTS.md",
+            linkRelativePath: "CLAUDE.md",
+          }),
+        ),
+      );
+
+      assert.equal(response.relativePath, "CLAUDE.md");
+      const linked = yield* fs.readFileString(path.join(workspaceDir, "CLAUDE.md"));
+      assert.equal(linked, "# Repo\n");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("routes websocket rpc projects.createSymlink errors", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-ws-project-link-" });
+
+      yield* buildAppUnderTest();
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[WS_METHODS.projectsCreateSymlink]({
+            cwd: workspaceDir,
+            targetRelativePath: "AGENTS.md",
+            linkRelativePath: "../CLAUDE.md",
+          }),
+        ).pipe(Effect.result),
+      );
+
+      assertTrue(result._tag === "Failure");
+      assertTrue(result.failure._tag === "ProjectCreateSymlinkError");
+      assert.equal(
+        result.failure.message,
+        "Workspace symlink path must stay within the project root.",
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc shell.openInEditor", () =>
     Effect.gen(function* () {
       let openedInput: { cwd: string; editor: EditorId } | null = null;

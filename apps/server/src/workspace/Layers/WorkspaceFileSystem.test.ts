@@ -1,3 +1,5 @@
+import fsPromises from "node:fs/promises";
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { it, describe, expect } from "@effect/vitest";
 import { Effect, FileSystem, Layer, Path } from "effect";
@@ -110,8 +112,8 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
       Effect.gen(function* () {
         const workspaceFileSystem = yield* WorkspaceFileSystem;
         const cwd = yield* makeTempDir;
-        const path = yield* Path.Path;
         const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
 
         const error = yield* workspaceFileSystem
           .writeFile({
@@ -130,6 +132,57 @@ it.layer(TestLayer)("WorkspaceFileSystemLive", (it) => {
           .stat(escapedPath)
           .pipe(Effect.catch(() => Effect.succeed(null)));
         expect(escapedStat).toBeNull();
+      }),
+    );
+  });
+
+  describe("createSymlink", () => {
+    it.effect("creates symlinks relative to the workspace root", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+
+        yield* workspaceFileSystem.writeFile({
+          cwd,
+          relativePath: "AGENTS.md",
+          contents: "# Repository Guidelines\n",
+        });
+        const result = yield* workspaceFileSystem.createSymlink({
+          cwd,
+          targetRelativePath: "AGENTS.md",
+          linkRelativePath: "CLAUDE.md",
+        });
+
+        const linkPath = path.join(cwd, "CLAUDE.md");
+        const target = yield* Effect.promise(() => fsPromises.readlink(linkPath)).pipe(
+          Effect.orDie,
+        );
+        const linkedContents = yield* fileSystem.readFileString(linkPath).pipe(Effect.orDie);
+
+        expect(result).toEqual({ relativePath: "CLAUDE.md" });
+        expect(target).toBe("AGENTS.md");
+        expect(linkedContents).toBe("# Repository Guidelines\n");
+      }),
+    );
+
+    it.effect("rejects symlinks outside the workspace root", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+
+        const error = yield* workspaceFileSystem
+          .createSymlink({
+            cwd,
+            targetRelativePath: "AGENTS.md",
+            linkRelativePath: "../CLAUDE.md",
+          })
+          .pipe(Effect.flip);
+
+        expect(error.message).toContain(
+          "Workspace file path must be relative to the project root: ../CLAUDE.md",
+        );
       }),
     );
   });
