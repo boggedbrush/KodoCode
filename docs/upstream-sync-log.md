@@ -1,5 +1,50 @@
 # Upstream Sync Log
 
+## 2026-04-21
+
+- Fork branch: `sync/upstream-2026-04-17`
+- Fork base: `boggedbrush/KodoCode@69bd860490998607449e1f3932e70addeec91701`
+- Upstream range reviewed: `pingdotgg/t3code@f6978db60553716a9974b9e85f855bae8124905d..3a1daa87ac103da0c176426e82eb576d87046bdf`
+- Upstream release window: `v0.0.21-nightly.20260421.88`
+- Fork PR: https://github.com/boggedbrush/KodoCode/pull/7
+
+### Classification
+
+- `40b3a800` `fix(server): trim OpenCode provider model names (#2252)` — `SKIP`: current sync branch does not carry the upstream OpenCode provider layer this fix targets.
+- `055897f0` `fix: enforce opencode >= 1.14.19 and reveal window on Wayland (#2262)` — `SKIP`: mixed upstream-only OpenCode provider work plus desktop window-reveal behavior that diverges from Kodo's desktop runtime.
+- `3a1daa87` `Add close buttons to toasts (#2023)` — `MANUAL REVIEW`: broad cross-surface web change touching Sidebar, command palette, settings, chat, and shared toast primitives, so it exceeds this run's selective-frontend budget.
+
+### Applied changes
+
+- None. No upstream commit in this reviewed window met the bounded sync bar for direct backend/runtime/tooling import into Kodo.
+
+### Adapted changes
+
+- None.
+
+### Selective frontend changes ported
+
+- None.
+
+### Manual-review candidates
+
+- `3a1daa87` Toast close buttons and toast-surface reshaping: potentially useful, but too broad and entangled with Kodo-owned web surfaces for this run.
+
+### Skipped changes
+
+- `40b3a800` OpenCode provider model-name trimming: inapplicable without the upstream OpenCode provider layer.
+- `055897f0` OpenCode minimum-version enforcement plus Wayland reveal behavior: upstream provider/runtime divergence and desktop behavior divergence.
+
+### Deferred selective frontend candidates
+
+- None.
+
+### Checks
+
+- `bun fmt` ✅
+- `bun lint` ✅
+- `bun typecheck` ✅
+
 ## 2026-04-20
 
 - Fork branch: `sync/upstream-2026-04-17`
