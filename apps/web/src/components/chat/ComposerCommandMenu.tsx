@@ -6,6 +6,7 @@ import {
   CirclePlusIcon,
   EyeIcon,
   ListTodoIcon,
+  OrbitIcon,
   SlidersHorizontalIcon,
   SquarePenIcon,
   TerminalSquareIcon,
@@ -117,6 +118,7 @@ const SLASH_COMMAND_ICON_BY_COMMAND: Record<ComposerSlashCommand, LucideIcon> = 
   plan: ListTodoIcon,
   code: TerminalSquareIcon,
   review: WrenchIcon,
+  swarm: OrbitIcon,
   usage: EyeIcon,
 };
 

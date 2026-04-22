@@ -284,6 +284,39 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
   );
 });
 
+const swarmManager = new FakeCodexManager();
+const swarmLayer = it.layer(
+  makeCodexAdapterLive({ manager: swarmManager }).pipe(
+    Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
+    Layer.provideMerge(ServerSettingsService.layerTest({ swarmMaxLoops: 2 })),
+    Layer.provideMerge(providerSessionDirectoryTestLayer),
+    Layer.provideMerge(NodeServices.layer),
+  ),
+);
+
+swarmLayer("CodexAdapterLive swarm mode", (it) => {
+  it.effect("passes the configured swarm loop cap to the Codex manager", () =>
+    Effect.gen(function* () {
+      swarmManager.sendTurnImpl.mockClear();
+      const adapter = yield* CodexAdapter;
+
+      yield* adapter.sendTurn({
+        threadId: asThreadId("thread-swarm"),
+        input: "Ship the feature",
+        interactionMode: "swarm",
+        attachments: [],
+      });
+
+      assert.deepStrictEqual(swarmManager.sendTurnImpl.mock.calls[0]?.[0], {
+        threadId: asThreadId("thread-swarm"),
+        input: "Ship the feature",
+        interactionMode: "swarm",
+        swarmMaxLoops: 2,
+      });
+    }),
+  );
+});
+
 const lifecycleManager = new FakeCodexManager();
 const lifecycleLayer = it.layer(
   makeCodexAdapterLive({ manager: lifecycleManager }).pipe(

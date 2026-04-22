@@ -1,5 +1,9 @@
 import { useMemo } from "react";
-import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_SWARM_MAX_LOOPS,
+  DEFAULT_UNIFIED_SETTINGS,
+  type UnifiedSettings,
+} from "@t3tools/contracts/settings";
 import { Equal } from "effect";
 import { resolveUtilityModelSelectionDefault } from "@t3tools/shared/model";
 
@@ -77,6 +81,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.commitMessageStyle !== DEFAULT_UNIFIED_SETTINGS.commitMessageStyle
         ? ["Commit message style"]
         : []),
+      ...(settings.swarmMaxLoops !== DEFAULT_UNIFIED_SETTINGS.swarmMaxLoops
+        ? ["Swarm loops"]
+        : []),
       ...(settings.promptEnhancePreset !== DEFAULT_UNIFIED_SETTINGS.promptEnhancePreset
         ? ["Enhance style"]
         : []),
@@ -105,6 +112,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.planModelSelection,
       settings.promptEnhancePreset,
       settings.reviewModelSelection,
+      settings.swarmMaxLoops,
       settings.timestampFormat,
       theme,
     ],
@@ -202,6 +210,45 @@ function GeneralBehaviorSection({
               </SelectItem>
               <SelectItem hideIndicator value="worktree">
                 New worktree
+              </SelectItem>
+            </SelectPopup>
+          </Select>
+        }
+      />
+
+      <SettingsRow
+        title="Swarm loops"
+        description="Cap swarm mode to one or two internal refinement loops. Higher values cost more."
+        resetAction={
+          settings.swarmMaxLoops !== DEFAULT_SWARM_MAX_LOOPS ? (
+            <SettingResetButton
+              label="swarm loops"
+              onClick={() =>
+                updateSettings({
+                  swarmMaxLoops: DEFAULT_SWARM_MAX_LOOPS,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Select
+            value={String(settings.swarmMaxLoops)}
+            onValueChange={(value) => {
+              if (value === "1" || value === "2") {
+                updateSettings({ swarmMaxLoops: Number(value) as 1 | 2 });
+              }
+            }}
+          >
+            <SelectTrigger className="w-full sm:w-44" aria-label="Swarm loop cap">
+              <SelectValue>{settings.swarmMaxLoops === 2 ? "Two loops" : "One loop"}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem hideIndicator value="1">
+                One loop
+              </SelectItem>
+              <SelectItem hideIndicator value="2">
+                Two loops
               </SelectItem>
             </SelectPopup>
           </Select>

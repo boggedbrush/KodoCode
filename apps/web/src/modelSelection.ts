@@ -260,6 +260,8 @@ export function getModeModelSelectionKey(
       ? "planModelSelection"
       : mode === "review"
         ? "reviewModelSelection"
+        : mode === "swarm"
+          ? "codeModelSelection"
         : "codeModelSelection";
 }
 

@@ -261,6 +261,10 @@ describe("parseStandaloneComposerSlashCommand", () => {
     expect(parseStandaloneComposerSlashCommand("/code")).toBe("code");
   });
 
+  it("parses standalone /swarm command", () => {
+    expect(parseStandaloneComposerSlashCommand(" /swarm ")).toBe("swarm");
+  });
+
   it("parses standalone /usage command", () => {
     expect(parseStandaloneComposerSlashCommand("/usage")).toBe("usage");
   });

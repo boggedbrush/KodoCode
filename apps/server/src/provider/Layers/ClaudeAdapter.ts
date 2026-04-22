@@ -68,6 +68,11 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { getClaudeModelCapabilities } from "./ClaudeProvider.ts";
 import {
+  buildClaudeSwarmAgents,
+  buildClaudeSwarmUserPromptPrefix,
+  normalizeSwarmMaxLoops,
+} from "../swarm.ts";
+import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
   ProviderAdapterSessionClosedError,
@@ -510,8 +515,32 @@ const CLAUDE_SETTING_SOURCES = [
   "project",
   "local",
 ] as const satisfies ReadonlyArray<SettingSource>;
+type ClaudeSwarmAgentsOption = Readonly<
+  Record<
+    string,
+    {
+      readonly description: string;
+      readonly prompt: string;
+      readonly tools?: ReadonlyArray<string>;
+      readonly model?: "sonnet" | "opus" | "haiku" | "inherit";
+    }
+  >
+>;
+const CLAUDE_SWARM_AGENTS = buildClaudeSwarmAgents();
 
-function buildPromptText(input: ProviderSendTurnInput): string {
+function buildPromptText(
+  input: ProviderSendTurnInput,
+  options?: {
+    readonly swarmMaxLoops?: 1 | 2;
+  },
+): string {
+  const rawText = input.input?.trim() ?? "";
+  const interactionText =
+    input.interactionMode === "swarm"
+      ? `${buildClaudeSwarmUserPromptPrefix(options?.swarmMaxLoops ?? 1)}\n${
+          rawText.length > 0 ? rawText : "(no text provided; inspect the attachments and local context)"
+        }`
+      : rawText;
   const rawEffort =
     input.modelSelection?.provider === "claudeAgent" ? input.modelSelection.options?.effort : null;
   const claudeModel =
@@ -523,7 +552,7 @@ function buildPromptText(input: ProviderSendTurnInput): string {
   const trimmedEffort = trimOrNull(rawEffort);
   const promptEffort =
     trimmedEffort && caps.promptInjectedEffortLevels.includes(trimmedEffort) ? trimmedEffort : null;
-  return applyClaudePromptEffortPrefix(input.input?.trim() ?? "", promptEffort);
+  return applyClaudePromptEffortPrefix(interactionText, promptEffort);
 }
 
 function buildUserMessage(input: {
@@ -559,9 +588,12 @@ const buildUserMessageEffect = Effect.fn("buildUserMessageEffect")(function* (
   dependencies: {
     readonly fileSystem: FileSystem.FileSystem;
     readonly attachmentsDir: string;
+    readonly swarmMaxLoops?: 1 | 2;
   },
 ) {
-  const text = buildPromptText(input);
+  const text = buildPromptText(input, {
+    swarmMaxLoops: dependencies.swarmMaxLoops,
+  });
   const sdkContent: Array<Record<string, unknown>> = [];
 
   if (text.length > 0) {
@@ -2710,7 +2742,9 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(fastMode ? { fastMode: true } : {}),
       };
 
-      const queryOptions: ClaudeQueryOptions = {
+      const queryOptions: ClaudeQueryOptions & {
+        readonly agents?: ClaudeSwarmAgentsOption;
+      } = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
@@ -2727,6 +2761,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         canUseTool,
         env: process.env,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
+        agents: CLAUDE_SWARM_AGENTS,
       };
 
       const queryRuntime = yield* Effect.try({
@@ -2864,6 +2899,21 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     const resolvedModelSelection = modelSelection
       ? resolveModelSelectionDefault(modelSelection)
       : undefined;
+    const swarmMaxLoops =
+      input.interactionMode === "swarm"
+        ? yield* serverSettingsService.getSettings.pipe(
+            Effect.map((settings) => normalizeSwarmMaxLoops(settings.swarmMaxLoops)),
+            Effect.mapError(
+              (error) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  detail: error.message,
+                  cause: error,
+                }),
+            ),
+          )
+        : undefined;
 
     if (context.turnState) {
       // Auto-close a stale synthetic turn (from background agent responses
@@ -2899,7 +2949,11 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         try: () => context.query.setPermissionMode("plan"),
         catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
       });
-    } else if (input.interactionMode === "default" || input.interactionMode === "code") {
+    } else if (
+      input.interactionMode === "default" ||
+      input.interactionMode === "code" ||
+      input.interactionMode === "swarm"
+    ) {
       yield* Effect.tryPromise({
         try: () =>
           context.query.setPermissionMode(context.basePermissionMode ?? "bypassPermissions"),
@@ -2942,6 +2996,7 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     const message = yield* buildUserMessageEffect(input, {
       fileSystem,
       attachmentsDir: serverConfig.attachmentsDir,
+      ...(swarmMaxLoops !== undefined ? { swarmMaxLoops } : {}),
     });
 
     yield* Queue.offer(context.promptQueue, {

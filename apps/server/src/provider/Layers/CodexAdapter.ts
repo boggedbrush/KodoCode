@@ -42,6 +42,7 @@ import {
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { normalizeSwarmMaxLoops } from "../swarm.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "codex" as const;
@@ -1483,6 +1484,21 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       (attachment) => resolveAttachment(input, attachment),
       { concurrency: 1 },
     );
+    const swarmMaxLoops =
+      input.interactionMode === "swarm"
+        ? yield* serverSettingsService.getSettings.pipe(
+            Effect.map((settings) => normalizeSwarmMaxLoops(settings.swarmMaxLoops)),
+            Effect.mapError(
+              (error) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  detail: error.message,
+                  cause: error,
+                }),
+            ),
+          )
+        : undefined;
 
     return yield* Effect.tryPromise({
       try: () => {
@@ -1498,6 +1514,7 @@ const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(input.interactionMode !== undefined
             ? { interactionMode: input.interactionMode }
             : {}),
+          ...(swarmMaxLoops !== undefined ? { swarmMaxLoops } : {}),
           ...(codexAttachments.length > 0 ? { attachments: codexAttachments } : {}),
         };
         return manager.sendTurn(managerInput);
