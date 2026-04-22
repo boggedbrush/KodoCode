@@ -1,5 +1,49 @@
 # Upstream Sync Log
 
+## 2026-04-22
+
+- Fork branch: `sync/upstream-2026-04-17`
+- Fork base: `boggedbrush/KodoCode@24da89e0c4ef14ef32fe7c852af9475c9b401d53`
+- Upstream range reviewed: `pingdotgg/t3code@3a1daa87ac103da0c176426e82eb576d87046bdf..b8305afa29309e52045987caab91db9b7e481ac0`
+- Upstream release window: `v0.0.21-nightly.20260421.88..v0.0.21-nightly.20260422.92`
+- Fork PR: https://github.com/boggedbrush/KodoCode/pull/7
+
+### Classification
+
+- `b7c89cf4` `Refresh Codex protocol bindings to \`be75785504ff152fa6333e380a2d50642f42fba0\` (#2276)`—`ADAPT`: Kodo does not vendor the upstream generated binding package, so this run ported only the compatible Codex account-plan labeling changes and deferred the protocol/codegen refresh itself.
+- `b8305afa` `fix: increase Claude auth probe timeout to 10s (#2272)` — `APPLY`
+
+### Applied changes
+
+- `b8305afa` Increased the shared Claude auth probe timeout from 4s to 10s so first-run `claude auth status` checks stop flapping on slower disks and Windows environments.
+
+### Adapted changes
+
+- `b7c89cf4` Extended Kodo's Codex account parsing to recognize `prolite`, relabeled `pro` as `ChatGPT Pro 20x Subscription`, and surfaced `prolite` as `ChatGPT Pro 5x Subscription` without pulling in upstream protocol/codegen files that do not exist in this repo.
+
+### Selective frontend changes ported
+
+- None.
+
+### Manual-review candidates
+
+- None.
+
+### Skipped changes
+
+- None.
+
+### Deferred selective frontend candidates
+
+- None.
+
+### Checks
+
+- `bun install` ✅
+- `bun fmt` ✅
+- `bun lint` ✅ (with two pre-existing warnings in [`apps/server/src/os-jank.ts`](/mnt/c/Users/Admin/.codex/worktrees/0b86/KodoCode/apps/server/src/os-jank.ts) and [`apps/server/src/persistence/Layers/ProjectionThreads.ts`](/mnt/c/Users/Admin/.codex/worktrees/0b86/KodoCode/apps/server/src/persistence/Layers/ProjectionThreads.ts))
+- `bun typecheck` ✅
+
 ## 2026-04-21
 
 - Fork branch: `sync/upstream-2026-04-17`

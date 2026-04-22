@@ -12,6 +12,7 @@ import { decodeJsonResult } from "@t3tools/shared/schemaJson";
 import { query as claudeQuery, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import {
+  AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
   DEFAULT_TIMEOUT_MS,
   detailFromResult,
@@ -508,7 +509,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   // ── Auth check + subscription detection ────────────────────────────
 
   const authProbe = yield* runClaudeCommand(["auth", "status"]).pipe(
-    Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
+    Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS),
     Effect.result,
   );
 

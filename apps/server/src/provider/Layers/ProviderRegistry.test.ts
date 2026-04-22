@@ -203,10 +203,42 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           assert.strictEqual(status.status, "ready");
           assert.strictEqual(status.auth.status, "authenticated");
           assert.strictEqual(status.auth.type, "pro");
-          assert.strictEqual(status.auth.label, "ChatGPT Pro Subscription");
+          assert.strictEqual(status.auth.label, "ChatGPT Pro 20x Subscription");
           assert.deepStrictEqual(
             status.models.some((model) => model.slug === "gpt-5.3-codex-spark"),
             true,
+          );
+        }).pipe(
+          Effect.provide(
+            mockSpawnerLayer((args) => {
+              const joined = args.join(" ");
+              if (joined === "--version") return { stdout: "codex 1.0.0\n", stderr: "", code: 0 };
+              if (joined === "login status") return { stdout: "Logged in\n", stderr: "", code: 0 };
+              throw new Error(`Unexpected args: ${joined}`);
+            }),
+          ),
+        ),
+      );
+
+      it.effect("labels chatgpt prolite accounts and keeps spark disabled", () =>
+        Effect.gen(function* () {
+          yield* withTempCodexHome();
+          const status = yield* checkCodexProviderStatus(() =>
+            Effect.succeed({
+              type: "chatgpt" as const,
+              planType: "prolite" as const,
+              sparkEnabled: false,
+            }),
+          );
+
+          assert.strictEqual(status.provider, "codex");
+          assert.strictEqual(status.status, "ready");
+          assert.strictEqual(status.auth.status, "authenticated");
+          assert.strictEqual(status.auth.type, "prolite");
+          assert.strictEqual(status.auth.label, "ChatGPT Pro 5x Subscription");
+          assert.deepStrictEqual(
+            status.models.some((model) => model.slug === "gpt-5.3-codex-spark"),
+            false,
           );
         }).pipe(
           Effect.provide(

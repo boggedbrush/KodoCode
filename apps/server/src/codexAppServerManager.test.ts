@@ -315,6 +315,20 @@ describe("readCodexAccountSnapshot", () => {
     });
   });
 
+  it("keeps spark disabled for chatgpt prolite accounts", () => {
+    expect(
+      readCodexAccountSnapshot({
+        type: "chatgpt",
+        email: "prolite@example.com",
+        planType: "prolite",
+      }),
+    ).toEqual({
+      type: "chatgpt",
+      planType: "prolite",
+      sparkEnabled: false,
+    });
+  });
+
   it("disables spark for api key accounts", () => {
     expect(
       readCodexAccountSnapshot({
