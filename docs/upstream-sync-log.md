@@ -1,5 +1,55 @@
 # Upstream Sync Log
 
+## 2026-04-23
+
+- Fork branch: `sync/upstream-2026-04-17`
+- Fork base: `boggedbrush/KodoCode@6f5f4f67b4d167825c15bf28d5c9855101c9886f`
+- Upstream range reviewed: `pingdotgg/t3code@b8305afa29309e52045987caab91db9b7e481ac0..b0b7b38da1dc4b19833d13f84eb907b1e2adfb63`
+- Upstream release window: `v0.0.21-nightly.20260422.92..v0.0.21-nightly.20260423.101`
+- Fork PR: https://github.com/boggedbrush/KodoCode/pull/7
+
+### Classification
+
+- `e25db3a5` `Fix provider cache atomic write temp path collisions (#2291)` — `ADAPT`: Kodo does not carry the upstream provider status cache file or runtime-state module, so this run ported the shared atomic-write hardening only into the colliding config persistence paths Kodo still owns.
+- `aa2d385a` `fix(server): restore CODEX_HOME tilde expansion for Codex launches (#2255)` — `ADAPT`: Kodo had already expanded `CODEX_HOME` in several Codex launch paths, so this run patched the remaining equivalent config-read and login-status paths rather than cherry-picking the upstream files directly.
+- `fd3b96b4` `Add IntelliJ project icon to the list of possible favicon paths (#1651)` — `APPLY`
+- `b0b7b38d` `fix(server): detect localized Windows command errors (#2152)` — `APPLY`
+
+### Applied changes
+
+- `fd3b96b4` Added `.idea/icon.svg` to the project favicon resolver so IntelliJ-based repos can surface a project icon without extra HTML metadata.
+- `b0b7b38d` Expanded Windows command-not-found detection in `processRunner` to recognize localized `cmd.exe` error output instead of only the English message.
+
+### Adapted changes
+
+- `e25db3a5` Added [`apps/server/src/atomicWrite.ts`](/mnt/c/Users/Admin/.codex/worktrees/431b/KodoCode/apps/server/src/atomicWrite.ts) and rewired [`apps/server/src/keybindings.ts`](/mnt/c/Users/Admin/.codex/worktrees/431b/KodoCode/apps/server/src/keybindings.ts) and [`apps/server/src/serverSettings.ts`](/mnt/c/Users/Admin/.codex/worktrees/431b/KodoCode/apps/server/src/serverSettings.ts) to use temp directories plus UUID-backed temp files, avoiding timestamp collision races during concurrent writes.
+- `aa2d385a` Updated [`apps/server/src/provider/Layers/CodexProvider.ts`](/mnt/c/Users/Admin/.codex/worktrees/431b/KodoCode/apps/server/src/provider/Layers/CodexProvider.ts) so `~/...` Codex home paths are expanded before reading `config.toml`.
+- `aa2d385a` follow-up adaptation: updated [`apps/server/src/provider/usage/modules/codexUsageModule.ts`](/mnt/c/Users/Admin/.codex/worktrees/431b/KodoCode/apps/server/src/provider/usage/modules/codexUsageModule.ts) so `codex login status` inherits expanded `CODEX_HOME` values too.
+
+### Selective frontend changes ported
+
+- None.
+
+### Manual-review candidates
+
+- None.
+
+### Skipped changes
+
+- None.
+
+### Deferred selective frontend candidates
+
+- None.
+
+### Checks
+
+- `bun install` ✅
+- `bun fmt` ✅
+- `bun lint` ✅ (with the same two pre-existing warnings in [`apps/server/src/os-jank.ts`](/mnt/c/Users/Admin/.codex/worktrees/431b/KodoCode/apps/server/src/os-jank.ts) and [`apps/server/src/persistence/Layers/ProjectionThreads.ts`](/mnt/c/Users/Admin/.codex/worktrees/431b/KodoCode/apps/server/src/persistence/Layers/ProjectionThreads.ts))
+- `bun typecheck` ✅
+- `cd apps/server && bun run test src/processRunner.test.ts src/project/Layers/ProjectFaviconResolver.test.ts` ✅
+
 ## 2026-04-22
 
 - Fork branch: `sync/upstream-2026-04-17`

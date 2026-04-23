@@ -45,6 +45,7 @@ import {
   Stream,
 } from "effect";
 import * as Semaphore from "effect/Semaphore";
+import { writeFileStringAtomically } from "./atomicWrite.ts";
 import { ServerConfig } from "./config";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 
@@ -675,15 +676,18 @@ const makeKeybindings = Effect.gen(function* () {
     return { keybindings, issues };
   });
 
-  const writeConfigAtomically = (rules: readonly KeybindingRule[]) => {
-    const tempPath = `${keybindingsConfigPath}.${process.pid}.${Date.now()}.tmp`;
-
-    return Schema.encodeEffect(KeybindingsConfigPrettyJson)(rules).pipe(
+  const writeConfigAtomically = (rules: readonly KeybindingRule[]) =>
+    Schema.encodeEffect(KeybindingsConfigPrettyJson)(rules).pipe(
       Effect.map((encoded) => `${encoded}\n`),
-      Effect.tap(() => fs.makeDirectory(path.dirname(keybindingsConfigPath), { recursive: true })),
-      Effect.tap((encoded) => fs.writeFileString(tempPath, encoded)),
-      Effect.flatMap(() => fs.rename(tempPath, keybindingsConfigPath)),
-      Effect.ensuring(fs.remove(tempPath, { force: true }).pipe(Effect.ignore({ log: true }))),
+      Effect.flatMap((encoded) =>
+        writeFileStringAtomically({
+          filePath: keybindingsConfigPath,
+          contents: encoded,
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Path.Path, path),
+        ),
+      ),
       Effect.mapError(
         (cause) =>
           new KeybindingsConfigError({
@@ -693,7 +697,6 @@ const makeKeybindings = Effect.gen(function* () {
           }),
       ),
     );
-  };
 
   const loadConfigStateFromDisk = loadRuntimeCustomKeybindingsConfig().pipe(
     Effect.map(({ keybindings, issues }) => ({

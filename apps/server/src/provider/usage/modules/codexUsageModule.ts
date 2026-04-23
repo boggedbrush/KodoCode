@@ -5,6 +5,7 @@ import { Effect, Result } from "effect";
 import { type CodexAccountSnapshot, codexAuthSubLabel } from "../../codexAccount";
 import { parseAuthStatusFromOutput } from "../../Layers/CodexProvider";
 import { isCommandMissingCause } from "../../providerSnapshot";
+import { expandHomePath } from "../../../pathExpansion";
 import { ServerSettingsService } from "../../../serverSettings";
 import {
   fetchWithFallback,
@@ -136,7 +137,9 @@ export const makeCodexUsageModule = Effect.gen(function* () {
           command: providerSettings.binaryPath,
           args: ["login", "status"],
           timeoutMs: 4_000,
-          ...(providerSettings.homePath ? { env: { CODEX_HOME: providerSettings.homePath } } : {}),
+          ...(providerSettings.homePath
+            ? { env: { CODEX_HOME: expandHomePath(providerSettings.homePath) } }
+            : {}),
         }),
       ),
       Effect.map((result) => {

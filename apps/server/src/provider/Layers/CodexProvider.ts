@@ -269,6 +269,7 @@ export const readCodexConfigModelProvider = Effect.fn("readCodexConfigModelProvi
         process.env.CODEX_HOME ||
         path.join(OS.homedir(), ".codex"),
     ),
+    Effect.map(expandHomePath),
   );
   const configPath = path.join(codexHome, "config.toml");
 
