@@ -6,7 +6,7 @@
 - Fork base: `boggedbrush/KodoCode@40cd204092a3de25d5592de74cf99c689d8fa6d7`
 - Upstream range reviewed: `pingdotgg/t3code@b0b7b38da1dc4b19833d13f84eb907b1e2adfb63..ada410bccff144ce4cfed0e2c6e18974b045f968`
 - Upstream release window: `v0.0.21-nightly.20260423.101..v0.0.21/main@2026-04-23`
-- Fork PR: https://github.com/boggedbrush/KodoCode/pull/8
+- Fork PR: https://github.com/boggedbrush/KodoCode/pull/13
 
 ### Classification
 
