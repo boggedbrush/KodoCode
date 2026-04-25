@@ -1,5 +1,43 @@
 # Upstream Sync Log
 
+## 2026-04-25
+
+- Fork branch: `sync/upstream-2026-04-25`
+- Fork base: `boggedbrush/KodoCode@f46ba8d06b6a8fe3f4add376bc7ed46137168292`
+- Upstream range reviewed: `pingdotgg/t3code@ada410bccff144ce4cfed0e2c6e18974b045f968..ada410bccff144ce4cfed0e2c6e18974b045f968`
+- Upstream release window: no new upstream `main` commits after the 2026-04-24 reviewed endpoint.
+- Fork PR: https://github.com/boggedbrush/KodoCode/pull/14
+
+### Classification
+
+- No new upstream commits to classify. The latest fetched upstream `main` remains at `ada410bccff144ce4cfed0e2c6e18974b045f968`, which was already reviewed in the 2026-04-24 sync entry.
+
+### Applied changes
+
+- None.
+
+### Adapted changes
+
+- None.
+
+### Selective frontend changes ported
+
+- None.
+
+### Manual-review candidates
+
+- Carry forward the 2026-04-24 manual-review candidates: provider model-selection option arrays, dynamic tool-call request-permission schema, and Claude session cwd resume drift.
+
+### Skipped changes
+
+- None newly skipped in this run.
+
+### Checks
+
+- `bun fmt` passed.
+- `bun lint` passed with two existing warnings.
+- `bun typecheck` passed.
+
 ## 2026-04-24
 
 - Fork branch: `sync/upstream-2026-04-24`
