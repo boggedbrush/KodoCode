@@ -1,5 +1,43 @@
 # Upstream Sync Log
 
+## 2026-04-27
+
+- Fork branch: `sync/upstream-2026-04-27`
+- Fork base: `boggedbrush/KodoCode@f46ba8d06b6a8fe3f4add376bc7ed46137168292`
+- Upstream range reviewed: `pingdotgg/t3code@ada410bccff144ce4cfed0e2c6e18974b045f968..5cf83ffe8f9d5eabd1c17721bd1f9597c97d98fe`
+- Upstream release window: `v0.0.22-nightly.20260427.135`
+- Fork PR: https://github.com/boggedbrush/KodoCode/pull/15
+
+### Classification
+
+- `5cf83ffe` `fix(release): use configured node for smoke manifest merge (#2364)` - `SKIP`: release-smoke tooling fix for an upstream Windows updater-manifest merge block that is not present in Kodo's current `scripts/release-smoke.ts`. Cherry-pick conflicts because the fixed invocation has no local equivalent to patch, and importing the surrounding upstream release-smoke coverage would be broader than this bounded sync.
+
+### Applied Changes
+
+- None.
+
+### Adapted Changes
+
+- None.
+
+### Selective Frontend Changes Ported
+
+- None.
+
+### Manual-Review Candidates
+
+- Carry forward the 2026-04-24 manual-review candidates: provider model-selection option arrays, dynamic tool-call request-permission schema, and Claude session cwd resume drift.
+
+### Skipped Changes
+
+- `5cf83ffe` release-smoke configured-Node fix: not applicable without the upstream Windows updater-manifest merge block.
+
+### Checks
+
+- `bun fmt` passed.
+- `bun lint` passed with two existing warnings in `apps/server/src/os-jank.ts` and `apps/server/src/persistence/Layers/ProjectionThreads.ts`.
+- `bun typecheck` passed.
+
 ## 2026-04-25
 
 - Fork branch: `sync/upstream-2026-04-25`
