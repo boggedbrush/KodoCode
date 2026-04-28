@@ -1,5 +1,47 @@
 # Upstream Sync Log
 
+## 2026-04-28
+
+- Fork branch: `sync/upstream-2026-04-28`
+- Fork base: `boggedbrush/KodoCode@f46ba8d06b6a8fe3f4add376bc7ed46137168292`
+- Upstream range reviewed: `pingdotgg/t3code@5cf83ffe8f9d5eabd1c17721bd1f9597c97d98fe..main`
+- Upstream release window: no newer release tag was available through the local git remote; GitHub compare reported one new upstream `main` commit after `v0.0.22-nightly.20260427.135`.
+- Fork PR: https://github.com/boggedbrush/KodoCode/pull/15
+
+### Classification
+
+- upstream `main` +1 commit touching `apps/web/src/rpc/protocol.ts`, `apps/web/src/rpc/wsTransport.ts`, and `apps/web/src/rpc/wsTransport.test.ts` - `SKIP`: frontend RPC transport lifecycle hardening for upstream's newer `WsTransport` session/reconnect split. Kodo's active sync branch still routes the web RPC runtime through `WsRpcAtomClient` and `createWsRpcProtocolLayer()` directly, with no local `wsTransport.ts` equivalent to patch. Importing the upstream transport split would be broader than this bounded sync and would touch visible runtime/reconnect behavior.
+
+### Applied Changes
+
+- None.
+
+### Adapted Changes
+
+- None.
+
+### Selective Frontend Changes Ported
+
+- None.
+
+### Manual-Review Candidates
+
+- Carry forward the 2026-04-24 manual-review candidates: provider model-selection option arrays, dynamic tool-call request-permission schema, and Claude session cwd resume drift.
+
+### Skipped Changes
+
+- Upstream frontend RPC transport lifecycle hardening: not safely applicable without the upstream `WsTransport` architecture. Protected Kodo workflow, model selector `auto` behavior, and KodoCode identity were left untouched.
+
+### Checks
+
+- `bun fmt` not run: the only `bun.exe` on PATH is the WinGet link at `C:\Users\Admin\AppData\Local\Microsoft\WinGet\Links\bun.exe`, and this sandbox cannot execute it (`No application is associated with the specified file for this operation`).
+- `bun lint` not run: same local Bun launcher failure.
+- `bun typecheck` not run: same local Bun launcher failure.
+
+### Browser Review
+
+- Not required: no frontend-presentational changes were applied.
+
 ## 2026-04-27
 
 - Fork branch: `sync/upstream-2026-04-27`
