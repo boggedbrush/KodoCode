@@ -518,7 +518,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         account: {
           type: "unknown",
           planType: null,
-          sparkEnabled: false,
+          sparkEnabled: true,
         },
         child,
         output,
@@ -548,7 +548,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       try {
         const accountReadResponse = await this.sendRequest(context, "account/read", {});
         console.log("codex account/read response", accountReadResponse);
-        context.account = readCodexAccountSnapshot(accountReadResponse);
+        context.account = readCodexAccountSnapshot(accountReadResponse, modelListResponse);
         console.log("codex subscription status", {
           type: context.account.type,
           planType: context.account.planType,

@@ -125,6 +125,40 @@ describe("estimateTimelineMessageHeight", () => {
     expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 768 })).toBe(117.5);
   });
 
+  it("increases message estimates when chat text size is larger", () => {
+    const assistantMessage = {
+      role: "assistant" as const,
+      text: "a".repeat(180),
+    };
+    const userMessage = {
+      role: "user" as const,
+      text: "a".repeat(120),
+    };
+
+    expect(
+      estimateTimelineMessageHeight(assistantMessage, {
+        timelineWidthPx: 420,
+        chatTextSize: "large",
+      }),
+    ).toBeGreaterThan(
+      estimateTimelineMessageHeight(assistantMessage, {
+        timelineWidthPx: 420,
+        chatTextSize: "default",
+      }),
+    );
+    expect(
+      estimateTimelineMessageHeight(userMessage, {
+        timelineWidthPx: 420,
+        chatTextSize: "large",
+      }),
+    ).toBeGreaterThan(
+      estimateTimelineMessageHeight(userMessage, {
+        timelineWidthPx: 420,
+        chatTextSize: "default",
+      }),
+    );
+  });
+
   it("does not clamp user wrapping too aggressively on very narrow layouts", () => {
     const message = {
       role: "user" as const,

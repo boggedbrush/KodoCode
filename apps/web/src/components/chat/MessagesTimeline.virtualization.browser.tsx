@@ -1,6 +1,7 @@
 import "../../index.css";
 
 import { MessageId, type TurnId } from "@t3tools/contracts";
+import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import { page } from "vitest/browser";
 import { useCallback, useState, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +20,7 @@ const DEFAULT_VIEWPORT = {
   height: 1_100,
 };
 const MARKDOWN_CWD = "/repo/project";
+const CLIENT_SETTINGS_STORAGE_KEY = "t3code:client-settings:v1";
 
 interface RowMeasurement {
   actualHeightPx: number;
@@ -36,6 +38,7 @@ interface VirtualizationScenario {
 }
 
 interface VirtualizerSnapshot {
+  measurementScopeKey: string;
   totalSize: number;
   measurements: ReadonlyArray<{
     id: string;
@@ -407,6 +410,16 @@ function buildStaticScenarios(): VirtualizationScenario[] {
       ].join(" "),
       maxEstimateDeltaPx: 28,
     }),
+    createAssistantMessageScenario({
+      name: "assistant mixed-direction row with inline code",
+      rowId: "target-assistant-mixed-direction",
+      text: [
+        "Validate the bidi layout for `src/main.tsx` before shipping this branch.",
+        "مرحبا من واجهة الدردشة مع نص عربي وانجليزي مختلط.",
+        "שלום שוב כדי نتפוס עטיפה מימין לשמאל.",
+      ].join(" "),
+      maxEstimateDeltaPx: 40,
+    }),
     createChangedFilesScenario({
       name: "assistant changed-files row with a compacted single-chain directory",
       rowId: "target-assistant-changed-files-single-chain",
@@ -484,6 +497,33 @@ async function waitForDocumentFonts(): Promise<void> {
   }
   await document.fonts.ready;
   await waitForLayout();
+}
+
+async function setClientSettings(patch: Partial<typeof DEFAULT_CLIENT_SETTINGS>): Promise<void> {
+  localStorage.setItem(
+    CLIENT_SETTINGS_STORAGE_KEY,
+    JSON.stringify({
+      ...DEFAULT_CLIENT_SETTINGS,
+      ...patch,
+    }),
+  );
+  window.dispatchEvent(
+    new CustomEvent("t3code:local_storage_change", {
+      detail: { key: CLIENT_SETTINGS_STORAGE_KEY },
+    }),
+  );
+  await waitForDocumentFonts();
+  await waitForLayout();
+}
+
+function requireVirtualizerSnapshot(
+  snapshot: VirtualizerSnapshot | null,
+  message: string,
+): VirtualizerSnapshot {
+  if (!snapshot) {
+    throw new Error(message);
+  }
+  return snapshot;
 }
 
 async function waitForElement<T extends Element>(
@@ -641,11 +681,13 @@ async function measureRenderedRowActualHeight(input: {
 describe("MessagesTimeline virtualization harness", () => {
   beforeEach(async () => {
     document.body.innerHTML = "";
+    localStorage.clear();
     await setViewport(DEFAULT_VIEWPORT);
   });
 
   afterEach(() => {
     document.body.innerHTML = "";
+    localStorage.clear();
   });
 
   it.each(buildStaticScenarios())("keeps the $name estimate within tolerance", async (scenario) => {
@@ -902,6 +944,7 @@ describe("MessagesTimeline virtualization harness", () => {
       ]),
       onVirtualizerSnapshot: (snapshot) => {
         latestSnapshot = {
+          measurementScopeKey: snapshot.measurementScopeKey,
           totalSize: snapshot.totalSize,
           measurements: snapshot.measurements,
         };
@@ -996,6 +1039,7 @@ describe("MessagesTimeline virtualization harness", () => {
       messages: [...beforeMessages, targetMessage, ...afterMessages],
       onVirtualizerSnapshot: (snapshot) => {
         latestSnapshot = {
+          measurementScopeKey: snapshot.measurementScopeKey,
           totalSize: snapshot.totalSize,
           measurements: snapshot.measurements,
         };
@@ -1056,6 +1100,119 @@ describe("MessagesTimeline virtualization harness", () => {
           expect(Math.abs((measurement?.size ?? 0) - initiallyRenderedHeight)).toBeLessThanOrEqual(
             8,
           );
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("re-measures virtualized rows after chat text size changes", async () => {
+    const scenario = createAssistantMessageScenario({
+      name: "assistant text-size remeasure",
+      rowId: "target-assistant-text-size-remeasure",
+      text: [
+        "This message should wrap differently once the shared chat text size changes.",
+        "It needs enough content to create a visible virtualizer delta after the setting update.",
+        "We want the live timeline cache to invalidate instead of holding on to stale heights.",
+      ].join(" "),
+      maxEstimateDeltaPx: 40,
+    });
+
+    const mounted = await mountMessagesTimeline({
+      props: scenario.props,
+      viewport: { width: 420, height: 760 },
+    });
+
+    try {
+      const beforeChange = await measureTimelineRow({
+        host: mounted.host,
+        props: scenario.props,
+        targetRowId: scenario.targetRowId,
+      });
+
+      await setClientSettings({ chatTextSize: "large" });
+
+      await vi.waitFor(
+        async () => {
+          const afterChange = await measureTimelineRow({
+            host: mounted.host,
+            props: scenario.props,
+            targetRowId: scenario.targetRowId,
+          });
+          expect(afterChange.actualHeightPx).toBeGreaterThan(beforeChange.actualHeightPx + 8);
+          expect(
+            Math.abs(afterChange.actualHeightPx - afterChange.virtualizerSizePx),
+          ).toBeLessThanOrEqual(8);
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("re-measures virtualized rows after chat font family changes", async () => {
+    await setClientSettings({ chatFontFamily: "dm-sans" });
+
+    const scenario = createAssistantMessageScenario({
+      name: "assistant font-family remeasure",
+      rowId: "target-assistant-font-family-remeasure",
+      text: [
+        "Typography changes should invalidate the virtualizer cache for already measured rows.",
+        "This paragraph is narrow on purpose so a font-family switch can move line breaks enough to matter.",
+        "The browser view should settle on the new measured height instead of keeping the old cached size.",
+      ].join(" "),
+      maxEstimateDeltaPx: 40,
+    });
+
+    let latestSnapshot: VirtualizerSnapshot | null = null;
+
+    const mounted = await mountMessagesTimeline({
+      props: {
+        ...scenario.props,
+        onVirtualizerSnapshot: (snapshot) => {
+          latestSnapshot = {
+            measurementScopeKey: snapshot.measurementScopeKey,
+            totalSize: snapshot.totalSize,
+            measurements: snapshot.measurements,
+          };
+        },
+      },
+      viewport: { width: 320, height: 760 },
+    });
+
+    try {
+      await measureTimelineRow({
+        host: mounted.host,
+        props: scenario.props,
+        targetRowId: scenario.targetRowId,
+      });
+      const beforeScopeKey = requireVirtualizerSnapshot(
+        latestSnapshot,
+        "Expected an initial virtualizer snapshot before changing chat fonts.",
+      ).measurementScopeKey;
+      expect(beforeScopeKey).toBe("dm-sans:default");
+
+      await setClientSettings({ chatFontFamily: "noto-sans-multiscript" });
+
+      await vi.waitFor(
+        async () => {
+          const afterChange = await measureTimelineRow({
+            host: mounted.host,
+            props: scenario.props,
+            targetRowId: scenario.targetRowId,
+          });
+          const afterSnapshot = requireVirtualizerSnapshot(
+            latestSnapshot,
+            "Expected a virtualizer snapshot after changing chat fonts.",
+          );
+          expect(afterSnapshot.measurementScopeKey).toBe("noto-sans-multiscript:default");
+          expect(afterSnapshot.measurementScopeKey).not.toBe(beforeScopeKey);
+          expect(
+            Math.abs(afterChange.actualHeightPx - afterChange.virtualizerSizePx),
+          ).toBeLessThanOrEqual(8);
         },
         { timeout: 8_000, interval: 16 },
       );

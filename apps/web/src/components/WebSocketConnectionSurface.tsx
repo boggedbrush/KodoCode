@@ -13,11 +13,13 @@ import {
   useWsConnectionStatus,
   WS_RECONNECT_MAX_ATTEMPTS,
 } from "../rpc/wsConnectionState";
+import { AppStartupScreen } from "./AppStartupScreen";
 import { Button } from "./ui/button";
 import { toastManager } from "./ui/toast";
 import { getWsRpcClient } from "~/wsRpcClient";
 
 const FORCED_WS_RECONNECT_DEBOUNCE_MS = 5_000;
+const PRODUCTION_STARTUP_SCREEN_TIMEOUT_MS = 30_000;
 type WsAutoReconnectTrigger = "focus" | "online";
 
 const connectionTimeFormatter = new Intl.DateTimeFormat(undefined, {
@@ -193,6 +195,25 @@ function buildConnectionDetails(status: WsConnectionStatus, uiState: WsConnectio
   }
 
   return details.join("\n");
+}
+
+export function shouldShowProductionStartupLoader({
+  hasConnected,
+  startupTimedOut,
+  uiState,
+}: {
+  readonly hasConnected: boolean;
+  readonly startupTimedOut: boolean;
+  readonly uiState: WsConnectionUiState;
+}): boolean {
+  // Planned local-model support means some users may intentionally stay offline
+  // after install, so known offline state should remain explicit immediately.
+  return (
+    !import.meta.env.DEV &&
+    !startupTimedOut &&
+    uiState !== "offline" &&
+    (!hasConnected || uiState === "connecting")
+  );
 }
 
 function WebSocketBlockingState({
@@ -532,15 +553,36 @@ export function SlowRpcAckToastCoordinator() {
 export function WebSocketConnectionSurface({ children }: { readonly children: ReactNode }) {
   const serverConfig = useServerConfig();
   const status = useWsConnectionStatus();
+  const [startupTimedOut, setStartupTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (import.meta.env.DEV || serverConfig !== null || startupTimedOut) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setStartupTimedOut(true);
+    }, PRODUCTION_STARTUP_SCREEN_TIMEOUT_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [serverConfig, startupTimedOut]);
 
   if (serverConfig === null) {
     const uiState = getWsConnectionUiState(status);
-    return (
-      <WebSocketBlockingState
-        status={status}
-        uiState={uiState === "connected" ? "connecting" : uiState}
-      />
-    );
+    const blockingUiState = uiState === "connected" ? "connecting" : uiState;
+    if (
+      shouldShowProductionStartupLoader({
+        hasConnected: status.hasConnected,
+        startupTimedOut,
+        uiState: blockingUiState,
+      })
+    ) {
+      return <AppStartupScreen />;
+    }
+
+    return <WebSocketBlockingState status={status} uiState={blockingUiState} />;
   }
 
   return children;

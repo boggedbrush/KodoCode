@@ -5048,12 +5048,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       {/* Error banner */}
       <ProviderStatusBanner status={activeProviderStatus} />
-      <ProviderUsageNotice
-        provider={selectedProvider}
-        usage={activeProviderUsage}
-        visible={providerUsagePanelOpen}
-        onDismiss={() => setProviderUsagePanelOpen(false)}
-      />
       <ThreadErrorBanner
         error={activeThread.error}
         onDismiss={() => setThreadError(activeThread.id, null)}
@@ -5137,9 +5131,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
               className="mx-auto w-full min-w-0 max-w-208"
               data-chat-composer-form="true"
             >
+              <div className="pointer-events-none relative z-0 mb-[-8px] flex justify-center px-4">
+                <ProviderUsageNotice
+                  provider={selectedProvider}
+                  usage={activeProviderUsage}
+                  visible={providerUsagePanelOpen}
+                  onDismiss={() => setProviderUsagePanelOpen(false)}
+                  className="pointer-events-auto max-w-[32rem]"
+                />
+              </div>
               <div
                 className={cn(
-                  "group rounded-[22px] p-px transition-colors duration-200",
+                  "group relative z-10 rounded-[22px] p-px transition-colors duration-200",
                   composerProviderState.composerFrameClassName,
                 )}
                 style={

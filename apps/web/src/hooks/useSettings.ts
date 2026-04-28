@@ -64,9 +64,7 @@ function splitPatch(patch: SettingsUpdatePatch): {
  * only re-render when the slice they care about changes.
  */
 
-export function useSettings<T extends UnifiedSettings = UnifiedSettings>(
-  selector?: (s: UnifiedSettings) => T,
-): T {
+export function useSettings<T = UnifiedSettings>(selector?: (s: UnifiedSettings) => T): T {
   const serverSettings = useServerSettings();
   const [clientSettings] = useLocalStorage(
     CLIENT_SETTINGS_STORAGE_KEY,

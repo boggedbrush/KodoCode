@@ -42,6 +42,38 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function normalizeClaudePlanName(value: string | null | undefined): string | null {
+  const raw = value?.trim();
+  if (!raw) {
+    return null;
+  }
+
+  const normalized = raw.toLowerCase().replace(/[\s_-]+/g, "");
+  switch (normalized) {
+    case "pro":
+    case "claudepro":
+    case "defaultclaudeai":
+      return "pro";
+    case "max":
+    case "max5":
+    case "max20":
+    case "maxplan":
+    case "claudemax":
+      return "max";
+    case "team":
+    case "claudeteam":
+      return "team";
+    case "enterprise":
+    case "claudeenterprise":
+      return "enterprise";
+    case "free":
+    case "claudefree":
+      return "free";
+    default:
+      return raw;
+  }
+}
+
 function toUsageState(status: "ready" | "warning" | "error"): ProviderUsageState {
   switch (status) {
     case "ready":
@@ -58,20 +90,23 @@ function parseAuthStatusJson(stdout: string): {
   readonly planName: string | null;
   readonly loginMethod: string | null;
   readonly email: string | null;
+  readonly org: string | null;
 } {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
   } catch {
-    return { planName: null, loginMethod: null, email: null };
+    return { planName: null, loginMethod: null, email: null, org: null };
   }
 
-  const planName =
-    findStringByKeys(parsed, ["plan", "planType", "subscriptionType", "subscription", "tier"]) ??
-    null;
+  const planName = normalizeClaudePlanName(
+    findStringByKeys(parsed, ["plan", "planType", "subscriptionType", "subscription", "tier"]),
+  );
   const loginMethod = findStringByKeys(parsed, ["authMethod", "auth_method"]) ?? null;
   const email = findStringByKeys(parsed, ["email"]) ?? null;
-  return { planName, loginMethod, email };
+  const org =
+    findStringByKeys(parsed, ["orgName", "organization", "organizationName", "org"]) ?? null;
+  return { planName, loginMethod, email, org };
 }
 
 function parseClaudeOAuthCredentials(stdout: string): {
@@ -89,10 +124,11 @@ function parseClaudeOAuthCredentials(stdout: string): {
   const oauth = asRecord(root?.claudeAiOauth) ?? root;
   return {
     accessToken: asString(oauth?.accessToken) ?? null,
-    planName:
+    planName: normalizeClaudePlanName(
       asString(oauth?.subscriptionType) ??
-      findStringByKeys(parsed, ["subscriptionType", "subscription_type"]) ??
-      null,
+        asString(oauth?.rateLimitTier) ??
+        findStringByKeys(parsed, ["subscriptionType", "subscription_type", "rateLimitTier"]),
+    ),
   };
 }
 
@@ -266,7 +302,7 @@ export const makeClaudeUsageModule = Effect.gen(function* () {
               planName: parsedJson.planName,
               loginMethod: parsedJson.loginMethod,
               email: parsedJson.email,
-              org: null,
+              org: parsedJson.org,
             },
             windows: [],
             raw: result.stdout || result.stderr || null,
@@ -316,15 +352,24 @@ export const makeClaudeUsageModule = Effect.gen(function* () {
       }
 
       if (event.type === "account.updated") {
-        const planName = findStringByKeys(event.payload.account, [
-          "subscriptionType",
-          "planType",
-          "plan",
-          "tier",
-        ]);
+        const planName = normalizeClaudePlanName(
+          findStringByKeys(event.payload.account, [
+            "subscriptionType",
+            "planType",
+            "plan",
+            "tier",
+            "rateLimitTier",
+          ]),
+        );
         const loginMethod = findStringByKeys(event.payload.account, ["authMethod", "auth_method"]);
         const email = findStringByKeys(event.payload.account, ["email"]);
-        if (!planName && !loginMethod && !email) {
+        const org = findStringByKeys(event.payload.account, [
+          "orgName",
+          "organization",
+          "organizationName",
+          "org",
+        ]);
+        if (!planName && !loginMethod && !email && !org) {
           return undefined;
         }
 
@@ -337,6 +382,7 @@ export const makeClaudeUsageModule = Effect.gen(function* () {
             ...(planName ? { planName } : {}),
             ...(loginMethod ? { loginMethod } : {}),
             ...(email ? { email } : {}),
+            ...(org ? { org } : {}),
           },
         };
       }

@@ -6,6 +6,21 @@ import { createHashHistory, createBrowserHistory } from "@tanstack/react-router"
 import "@fontsource/dm-sans/400.css";
 import "@fontsource/dm-sans/500.css";
 import "@fontsource/dm-sans/700.css";
+import "@fontsource/noto-sans/400.css";
+import "@fontsource/noto-sans/500.css";
+import "@fontsource/noto-sans/700.css";
+import "@fontsource/noto-sans-arabic/400.css";
+import "@fontsource/noto-sans-arabic/500.css";
+import "@fontsource/noto-sans-arabic/700.css";
+import "@fontsource/noto-sans-devanagari/400.css";
+import "@fontsource/noto-sans-devanagari/500.css";
+import "@fontsource/noto-sans-devanagari/700.css";
+import "@fontsource/noto-sans-hebrew/400.css";
+import "@fontsource/noto-sans-hebrew/500.css";
+import "@fontsource/noto-sans-hebrew/700.css";
+import "@fontsource/noto-sans-thai/400.css";
+import "@fontsource/noto-sans-thai/500.css";
+import "@fontsource/noto-sans-thai/700.css";
 import "@xterm/xterm/css/xterm.css";
 import "./index.css";
 

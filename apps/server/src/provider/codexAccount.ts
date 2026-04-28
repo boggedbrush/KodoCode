@@ -33,7 +33,17 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-export function readCodexAccountSnapshot(response: unknown): CodexAccountSnapshot {
+function responseIncludesModelSlug(response: unknown, slug: string): boolean {
+  const record = asObject(response);
+  const models = Array.isArray(record?.models) ? record.models : [];
+
+  return models.some((model) => asString(asObject(model)?.id) === slug);
+}
+
+export function readCodexAccountSnapshot(
+  response: unknown,
+  modelListResponse?: unknown,
+): CodexAccountSnapshot {
   const record = asObject(response);
   const account = asObject(record?.account) ?? record;
   const accountType = asString(account?.type);
@@ -51,7 +61,9 @@ export function readCodexAccountSnapshot(response: unknown): CodexAccountSnapsho
     return {
       type: "chatgpt",
       planType,
-      sparkEnabled: CODEX_SPARK_ENABLED_PLAN_TYPES.has(planType),
+      sparkEnabled:
+        CODEX_SPARK_ENABLED_PLAN_TYPES.has(planType) ||
+        responseIncludesModelSlug(modelListResponse, CODEX_SPARK_MODEL),
     };
   }
 

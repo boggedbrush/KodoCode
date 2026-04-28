@@ -4,6 +4,7 @@ export { SettingsModelsPanel } from "./SettingsModelsPanel";
 export { SettingsGitPanel } from "./SettingsGitPanel";
 export { SettingsEnhancePanel } from "./SettingsEnhancePanel";
 export { SettingsProvidersPanel } from "./SettingsProvidersPanel";
+export { SettingsUsagePanel } from "./SettingsUsagePanel";
 export { SettingsAdvancedPanel } from "./SettingsAdvancedPanel";
 export { SettingsAboutPanel } from "./SettingsAboutPanel";
 export { ArchivedThreadsPanel } from "./SettingsArchivedPanel";
