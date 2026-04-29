@@ -17,6 +17,7 @@ vi.mock("../editorPreferences", () => ({
 }));
 
 vi.mock("../nativeApi", () => ({
+  ensureNativeApi: readNativeApiMock,
   readNativeApi: readNativeApiMock,
 }));
 

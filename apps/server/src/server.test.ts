@@ -203,16 +203,6 @@ const splitHeaderTokens = (value: string | null) =>
     .filter((token) => token.length > 0)
     .toSorted();
 
-const workspaceAndProjectServicesLayer = Layer.mergeAll(
-  WorkspacePathsLive,
-  WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive)),
-  WorkspaceFileSystemLive.pipe(
-    Layer.provide(WorkspacePathsLive),
-    Layer.provide(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
-  ),
-  ProjectFaviconResolverLive,
-);
-
 const browserOtlpTracingLayer = Layer.mergeAll(
   FetchHttpClient.layer,
   OtlpSerialization.layerJson,
@@ -556,6 +546,13 @@ const buildAppUnderTest = (options?: {
       createBranch: (input) => Effect.succeed({ branch: input.branch }),
       checkoutBranch: (input) => Effect.succeed({ branch: input.branch }),
       initRepo: () => Effect.void,
+      isInsideWorkTree: () => Effect.succeed(false),
+      listWorkspaceFiles: () =>
+        Effect.succeed({
+          paths: [],
+          truncated: false,
+        }),
+      filterIgnoredPaths: (_cwd, relativePaths) => Effect.succeed(relativePaths),
       ...options?.layers?.gitCore,
     } as GitCoreShape);
     const projectSetupScriptRunnerLayer = Layer.succeed(ProjectSetupScriptRunner, {
@@ -624,6 +621,19 @@ const buildAppUnderTest = (options?: {
       enqueueCommand: (effect) => effect,
       ...options?.layers?.serverRuntimeStartup,
     } satisfies ServerRuntimeStartupShape);
+    const workspaceEntriesLayer = WorkspaceEntriesLive.pipe(
+      Layer.provide(WorkspacePathsLive),
+      Layer.provideMerge(gitCoreLayer),
+    );
+    const workspaceAndProjectServicesLayer = Layer.mergeAll(
+      WorkspacePathsLive,
+      workspaceEntriesLayer,
+      WorkspaceFileSystemLive.pipe(
+        Layer.provide(WorkspacePathsLive),
+        Layer.provide(workspaceEntriesLayer),
+      ),
+      ProjectFaviconResolverLive,
+    );
 
     const appLayerBase = Layer.fresh(
       HttpRouter.serve(makeRoutesLayer(), {

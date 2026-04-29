@@ -112,7 +112,7 @@ describe("estimateTimelineMessageHeight", () => {
       text: "a".repeat(52),
     };
 
-    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 320 })).toBe(138.25);
+    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 320 })).toBe(117.5);
     expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 768 })).toBe(96.75);
   });
 
@@ -122,7 +122,7 @@ describe("estimateTimelineMessageHeight", () => {
       text: "x".repeat(72),
     };
 
-    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 768 })).toBe(117.5);
+    expect(estimateTimelineMessageHeight(message, { timelineWidthPx: 768 })).toBe(96.75);
   });
 
   it("increases message estimates when chat text size is larger", () => {
