@@ -20,7 +20,7 @@ const USER_BUBBLE_HORIZONTAL_PADDING_PX = 32;
 const ASSISTANT_MESSAGE_HORIZONTAL_PADDING_PX = 8;
 // Browser parity tests load the app font before measuring chat rows, so keep
 // the markdown model calibrated to the actual UI font and renderer.
-const USER_MARKDOWN_AVG_CHAR_WIDTH_PX = 8;
+const USER_MARKDOWN_AVG_CHAR_WIDTH_PX = 8.4;
 const USER_MONO_AVG_CHAR_WIDTH_PX = 8;
 const ASSISTANT_AVG_CHAR_WIDTH_PX = 7.2;
 const MIN_USER_CHARS_PER_LINE = 4;

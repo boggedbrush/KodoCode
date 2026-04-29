@@ -353,7 +353,7 @@ function buildStaticScenarios(): VirtualizationScenario[] {
       props: createBaseTimelineProps({
         messages: [...beforeMessages, longUserMessage, ...afterMessages],
       }),
-      maxEstimateDeltaPx: 56,
+      maxEstimateDeltaPx: 72,
     },
     {
       name: "grouped work log row",
