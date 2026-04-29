@@ -133,6 +133,14 @@ import {
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPopup,
+  DialogTitle,
+} from "./ui/dialog";
 import { Separator } from "./ui/separator";
 import { cn, randomUUID } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -255,6 +263,14 @@ const LazyThreadTerminalDrawer = lazy(() => import("./ThreadTerminalDrawer"));
 const LazyComposerPromptEditor = lazy(() =>
   import("./ComposerPromptEditor").then((module) => ({ default: module.ComposerPromptEditor })),
 );
+
+interface InitGuideConfirmState {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  resolve: (confirmed: boolean) => void;
+}
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -781,6 +797,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
+  const [initGuideConfirmState, setInitGuideConfirmState] = useState<InitGuideConfirmState | null>(
+    null,
+  );
+  const initGuideConfirmStateRef = useRef<InitGuideConfirmState | null>(null);
   const [reviewSetupDraft, setReviewSetupDraft] = useState<ReviewRequestDraft>(() => ({
     targetKind: "uncommitted",
     targetRef: "",
@@ -2459,6 +2479,40 @@ export default function ChatView({ threadId }: ChatViewProps) {
     });
     return result.entries.some((entry) => entry.path === relativePath);
   }, []);
+  const settleInitGuideConfirm = useCallback((confirmed: boolean) => {
+    const pending = initGuideConfirmStateRef.current;
+    if (!pending) {
+      return;
+    }
+    initGuideConfirmStateRef.current = null;
+    setInitGuideConfirmState(null);
+    pending.resolve(confirmed);
+  }, []);
+  const confirmInitGuideSymlink = useCallback(
+    (input: { title: string; description: string; confirmLabel?: string; cancelLabel?: string }) =>
+      new Promise<boolean>((resolve) => {
+        if (initGuideConfirmStateRef.current) {
+          initGuideConfirmStateRef.current.resolve(false);
+        }
+        const nextState: InitGuideConfirmState = {
+          title: input.title,
+          description: input.description,
+          confirmLabel: input.confirmLabel ?? "Create symlink",
+          cancelLabel: input.cancelLabel ?? "Create separate file",
+          resolve,
+        };
+        initGuideConfirmStateRef.current = nextState;
+        setInitGuideConfirmState(nextState);
+      }),
+    [],
+  );
+  useEffect(
+    () => () => {
+      initGuideConfirmStateRef.current?.resolve(false);
+      initGuideConfirmStateRef.current = null;
+    },
+    [],
+  );
   const handleInitSlashCommand = useCallback(async () => {
     const api = readNativeApi();
     if (!api) {
@@ -2484,12 +2538,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
       ]);
 
       if (!primaryExists && multiHarnessAvailable && companionExists) {
-        const shouldSymlinkPrimary = await api.dialogs.confirm(
-          [
-            `${companionFile} already exists in this workspace.`,
-            `Create ${primaryFile} as a symlink to ${companionFile} instead of creating a second guide file?`,
-          ].join("\n"),
-        );
+        const shouldSymlinkPrimary = await confirmInitGuideSymlink({
+          title: `${companionFile} already exists`,
+          description: `Create ${primaryFile} as a symlink to ${companionFile} instead of creating a second guide file?`,
+        });
         if (shouldSymlinkPrimary) {
           await api.projects.createSymlink({
             cwd: activeWorkspaceRoot,
@@ -2517,12 +2569,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
 
       if (multiHarnessAvailable && primaryExists && !companionExists) {
-        const shouldCreateCompanionSymlink = await api.dialogs.confirm(
-          [
-            `Create ${companionFile} as a symlink to ${primaryFile}?`,
-            "This keeps both harness guide filenames in sync with a single shared file.",
-          ].join("\n"),
-        );
+        const shouldCreateCompanionSymlink = await confirmInitGuideSymlink({
+          title: `Create ${companionFile} as a symlink?`,
+          description: `This keeps ${primaryFile} and ${companionFile} in sync with a single shared file.`,
+          cancelLabel: "Skip",
+        });
         if (shouldCreateCompanionSymlink) {
           await api.projects.createSymlink({
             cwd: activeWorkspaceRoot,
@@ -2564,7 +2615,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         description: error instanceof Error ? error.message : "An error occurred.",
       });
     }
-  }, [activeWorkspaceRoot, doesWorkspaceEntryExist, providerStatuses, selectedProvider]);
+  }, [
+    activeWorkspaceRoot,
+    confirmInitGuideSymlink,
+    doesWorkspaceEntryExist,
+    providerStatuses,
+    selectedProvider,
+  ]);
   const handleStandaloneSlashCommand = useCallback(
     async (command: ComposerStandaloneSlashCommand) => {
       if (command === "usage") {
@@ -5685,6 +5742,29 @@ export default function ChatView({ threadId }: ChatViewProps) {
               onPrepared={handlePreparedPullRequestThread}
             />
           ) : null}
+          <Dialog
+            open={Boolean(initGuideConfirmState)}
+            onOpenChange={(open) => {
+              if (!open) {
+                settleInitGuideConfirm(false);
+              }
+            }}
+          >
+            <DialogPopup className="max-w-md" showCloseButton={false}>
+              <DialogHeader>
+                <DialogTitle>{initGuideConfirmState?.title ?? "Create guide symlink?"}</DialogTitle>
+                <DialogDescription>{initGuideConfirmState?.description}</DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => settleInitGuideConfirm(false)}>
+                  {initGuideConfirmState?.cancelLabel ?? "Cancel"}
+                </Button>
+                <Button onClick={() => settleInitGuideConfirm(true)}>
+                  {initGuideConfirmState?.confirmLabel ?? "Create symlink"}
+                </Button>
+              </DialogFooter>
+            </DialogPopup>
+          </Dialog>
           {isReviewSetupDialogOpen ? (
             <ReviewSetupDialog
               open
