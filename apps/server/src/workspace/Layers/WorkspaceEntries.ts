@@ -362,7 +362,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
           if (dirent.isDirectory() && IGNORED_DIRECTORY_NAMES.has(dirent.name)) {
             continue;
           }
-          if (!dirent.isDirectory() && !dirent.isFile()) {
+          if (!dirent.isDirectory() && !dirent.isFile() && !dirent.isSymbolicLink()) {
             continue;
           }
 
