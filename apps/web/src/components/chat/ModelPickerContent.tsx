@@ -39,6 +39,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   providers?: ReadonlyArray<ServerProvider>;
   keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<ModelEsque>>;
+  allowAutoModel?: boolean;
   showAsAuto?: boolean;
   terminalOpen?: boolean;
   onRequestClose?: () => void;
@@ -127,13 +128,18 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         return [];
       }
 
-      return [autoModelByProvider[providerKind as ProviderKind], ...models].map((model) =>
+      const providerModels =
+        props.allowAutoModel === false
+          ? models
+          : [autoModelByProvider[providerKind as ProviderKind], ...models];
+
+      return providerModels.map((model) =>
         Object.assign({}, model, {
           provider: providerKind as ProviderKind,
         }),
       ) satisfies Array<ModelPickerItem>;
     });
-  }, [autoModelByProvider, props.modelOptionsByProvider, readyProviderSet]);
+  }, [autoModelByProvider, props.allowAutoModel, props.modelOptionsByProvider, readyProviderSet]);
 
   const filteredModels = useMemo(() => {
     let result = flatModels;
@@ -242,6 +248,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const handleModelSelect = useCallback(
     (modelSlug: string, provider: ProviderKind) => {
       if (modelSlug === COMPOSER_AUTO_MODEL_VALUE) {
+        if (props.allowAutoModel === false) {
+          return;
+        }
         props.onProviderModelChange(provider, COMPOSER_AUTO_MODEL_VALUE);
         return;
       }

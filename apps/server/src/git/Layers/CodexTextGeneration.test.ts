@@ -284,7 +284,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGenerationLive", (it) => {
           subject: "Add important change",
           body: "",
         }),
-        requireModel: "gpt-5.4",
+        requireModel: "gpt-5.4-mini",
       },
       Effect.gen(function* () {
         const textGeneration = yield* TextGeneration;

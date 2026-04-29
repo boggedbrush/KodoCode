@@ -56,9 +56,9 @@ export function fixPath(
   }
 }
 
-export const expandHomePath = Effect.fn(function* (input: string) {
-  return expandHomePathValue(input);
-});
+export const expandHomePath = Effect.fn((input: string) =>
+  Effect.succeed(expandHomePathValue(input)),
+);
 
 export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {
   const { join, resolve } = yield* Path.Path;

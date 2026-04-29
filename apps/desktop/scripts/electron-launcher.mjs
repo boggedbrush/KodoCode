@@ -10,6 +10,7 @@ import {
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createRequire } from "node:module";
@@ -18,8 +19,8 @@ import { fileURLToPath } from "node:url";
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const APP_DISPLAY_NAME = isDevelopment ? "Kodo Code (Dev)" : "Kodo Code (Alpha)";
-const APP_BUNDLE_ID = isDevelopment ? "com.kodo.code.dev" : "com.kodo.code";
-const LAUNCHER_VERSION = 2;
+const APP_BUNDLE_ID = isDevelopment ? "app.kodocode.dev" : "app.kodocode";
+const LAUNCHER_VERSION = 4;
 const ELECTRON_INSTALL_CANDIDATES = ["node", "bun"];
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -46,8 +47,33 @@ function setPlistString(plistPath, key, value) {
   throw new Error(`Failed to update plist key "${key}" at ${plistPath}: ${details}`.trim());
 }
 
+function ensureMainBundleInfoPlist(appBundlePath) {
+  const contentsDir = join(appBundlePath, "Contents");
+  const infoPlistPath = join(contentsDir, "Info.plist");
+  if (existsSync(infoPlistPath)) {
+    return infoPlistPath;
+  }
+
+  mkdirSync(contentsDir, { recursive: true });
+  writeFileSync(
+    infoPlistPath,
+    `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>Electron</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+</dict>
+</plist>
+`,
+  );
+  return infoPlistPath;
+}
+
 function patchMainBundleInfoPlist(appBundlePath, iconPath) {
-  const infoPlistPath = join(appBundlePath, "Contents", "Info.plist");
+  const infoPlistPath = ensureMainBundleInfoPlist(appBundlePath);
   setPlistString(infoPlistPath, "CFBundleDisplayName", APP_DISPLAY_NAME);
   setPlistString(infoPlistPath, "CFBundleName", APP_DISPLAY_NAME);
   setPlistString(infoPlistPath, "CFBundleIdentifier", APP_BUNDLE_ID);
@@ -89,6 +115,45 @@ function patchHelperBundleInfoPlists(appBundlePath) {
     setPlistString(helperPlistPath, "CFBundleDisplayName", helperName);
     setPlistString(helperPlistPath, "CFBundleName", helperName);
     setPlistString(helperPlistPath, "CFBundleIdentifier", helperBundleId);
+  }
+}
+
+function repairFrameworkVersionSymlinks(appBundlePath) {
+  const frameworksDir = join(appBundlePath, "Contents", "Frameworks");
+  if (!existsSync(frameworksDir)) {
+    return;
+  }
+
+  for (const entry of readdirSync(frameworksDir, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.endsWith(".framework")) {
+      continue;
+    }
+
+    const frameworkPath = join(frameworksDir, entry.name);
+    const frameworkExecutable = entry.name.replace(/\.framework$/, "");
+    const versionsDir = join(frameworkPath, "Versions");
+    const versionAPath = join(versionsDir, "A");
+    const currentPath = join(versionsDir, "Current");
+    if (!existsSync(versionAPath)) {
+      continue;
+    }
+
+    if (!existsSync(currentPath)) {
+      rmSync(currentPath, { force: true });
+      symlinkSync("A", currentPath);
+    }
+
+    const executablePath = join(frameworkPath, frameworkExecutable);
+    if (existsSync(join(versionAPath, frameworkExecutable))) {
+      rmSync(executablePath, { force: true });
+      symlinkSync(`Versions/Current/${frameworkExecutable}`, executablePath);
+    }
+
+    const resourcesPath = join(frameworkPath, "Resources");
+    if (existsSync(join(versionAPath, "Resources"))) {
+      rmSync(resourcesPath, { force: true });
+      symlinkSync("Versions/Current/Resources", resourcesPath);
+    }
   }
 }
 
@@ -198,6 +263,7 @@ function buildMacLauncher(electronBinaryPath) {
   const runtimeDir = join(desktopDir, ".electron-runtime");
   const targetAppBundlePath = join(runtimeDir, `${APP_DISPLAY_NAME}.app`);
   const targetBinaryPath = join(targetAppBundlePath, "Contents", "MacOS", "Electron");
+  const targetInfoPlistPath = join(targetAppBundlePath, "Contents", "Info.plist");
   const iconPath = resolveMacLauncherIconPath();
   const metadataPath = join(runtimeDir, "metadata.json");
 
@@ -205,10 +271,10 @@ function buildMacLauncher(electronBinaryPath) {
 
   const expectedMetadata = {
     launcherVersion: LAUNCHER_VERSION,
+    appDisplayName: APP_DISPLAY_NAME,
+    appBundleId: APP_BUNDLE_ID,
     sourceAppBundlePath,
     sourceAppMtimeMs: statSync(sourceAppBundlePath).mtimeMs,
-    appBundleId: APP_BUNDLE_ID,
-    appDisplayName: APP_DISPLAY_NAME,
     iconPath,
     iconMtimeMs: statSync(iconPath).mtimeMs,
   };
@@ -216,6 +282,7 @@ function buildMacLauncher(electronBinaryPath) {
   const currentMetadata = readJson(metadataPath);
   if (
     existsSync(targetBinaryPath) &&
+    existsSync(targetInfoPlistPath) &&
     currentMetadata &&
     JSON.stringify(currentMetadata) === JSON.stringify(expectedMetadata)
   ) {
@@ -223,7 +290,8 @@ function buildMacLauncher(electronBinaryPath) {
   }
 
   rmSync(targetAppBundlePath, { recursive: true, force: true });
-  cpSync(sourceAppBundlePath, targetAppBundlePath, { recursive: true });
+  cpSync(sourceAppBundlePath, targetAppBundlePath, { recursive: true, verbatimSymlinks: true });
+  repairFrameworkVersionSymlinks(targetAppBundlePath);
   patchMainBundleInfoPlist(targetAppBundlePath, iconPath);
   patchHelperBundleInfoPlists(targetAppBundlePath);
   writeFileSync(metadataPath, `${JSON.stringify(expectedMetadata, null, 2)}\n`);

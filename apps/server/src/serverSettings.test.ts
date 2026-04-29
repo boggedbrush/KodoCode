@@ -456,10 +456,44 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       assert.equal(next.modelSelectionPresets.codex[DEFAULT_MODEL_SELECTION_PRESET_ID], undefined);
       assert.equal(next.modelSelectionPresets.codex["starter-codex-free"]?.name, "Free");
       assert.deepEqual(
+        next.modelSelectionPresets.codex["starter-codex-free"]?.reviewModelSelection,
+        {
+          provider: "codex",
+          model: "gpt-5.4-mini",
+          options: {
+            reasoningEffort: "high",
+          },
+        },
+      );
+      assert.deepEqual(next.modelSelectionPresets.codex["starter-codex-go"]?.planModelSelection, {
+        provider: "codex",
+        model: "gpt-5.4-mini",
+        options: {
+          reasoningEffort: "high",
+        },
+      });
+      assert.deepEqual(next.modelSelectionPresets.codex["starter-codex-plus"]?.planModelSelection, {
+        provider: "codex",
+        model: "gpt-5.5",
+        options: {
+          reasoningEffort: "medium",
+        },
+      });
+      assert.deepEqual(
+        next.modelSelectionPresets.codex["starter-codex-plus"]?.reviewModelSelection,
+        {
+          provider: "codex",
+          model: "gpt-5.5",
+          options: {
+            reasoningEffort: "low",
+          },
+        },
+      );
+      assert.deepEqual(
         next.modelSelectionPresets.codex["starter-codex-pro-5x"]?.askModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.4",
+          model: "gpt-5.5",
           options: {
             reasoningEffort: "low",
           },
@@ -469,9 +503,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.codex["starter-codex-pro-5x"]?.codeModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.3-codex",
+          model: "gpt-5.5",
           options: {
-            reasoningEffort: "high",
+            reasoningEffort: "medium",
           },
         },
       );
@@ -479,9 +513,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.codex["starter-codex-pro-20x"]?.askModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.4",
+          model: "gpt-5.5",
           options: {
-            reasoningEffort: "medium",
+            reasoningEffort: "low",
           },
         },
       );
@@ -489,9 +523,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.codex["starter-codex-pro-20x"]?.reviewModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.3-codex",
+          model: "gpt-5.5",
           options: {
-            reasoningEffort: "xhigh",
+            reasoningEffort: "high",
           },
         },
       );
@@ -515,21 +549,21 @@ it.layer(NodeServices.layer)("server settings", (it) => {
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   );
 
-  it.effect("preserves legacy starter preset entries while still seeding missing built-ins", () =>
+  it.effect("updates legacy starter preset entries while still seeding missing built-ins", () =>
     Effect.gen(function* () {
       const serverSettings = yield* ServerSettingsService;
       const next = yield* serverSettings.getSettings;
 
       assert.equal(next.modelSelectionPresets.codex["starter-codex-pro-100"]?.name, "pro 100");
       assert.equal(next.modelSelectionPresets.codex["starter-codex-pro-200"]?.name, "pro 200");
-      assert.equal(next.modelSelectionPresets.codex["starter-codex-free"]?.name, "free");
-      assert.equal(next.modelSelectionPresets.codex["starter-codex-go"]?.name, "go");
-      assert.equal(next.modelSelectionPresets.codex["starter-codex-plus"]?.name, "plus");
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-free"]?.name, "Free");
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-go"]?.name, "Go");
+      assert.equal(next.modelSelectionPresets.codex["starter-codex-plus"]?.name, "Plus");
       assert.deepEqual(
         next.modelSelectionPresets.codex["starter-codex-pro-5x"]?.askModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.4",
+          model: "gpt-5.5",
           options: {
             reasoningEffort: "low",
           },
@@ -539,9 +573,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.codex["starter-codex-pro-5x"]?.codeModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.3-codex",
+          model: "gpt-5.5",
           options: {
-            reasoningEffort: "high",
+            reasoningEffort: "medium",
           },
         },
       );
@@ -549,9 +583,9 @@ it.layer(NodeServices.layer)("server settings", (it) => {
         next.modelSelectionPresets.codex["starter-codex-pro-20x"]?.askModelSelection,
         {
           provider: "codex",
-          model: "gpt-5.4",
+          model: "gpt-5.5",
           options: {
-            reasoningEffort: "medium",
+            reasoningEffort: "low",
           },
         },
       );

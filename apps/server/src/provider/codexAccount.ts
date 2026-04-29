@@ -1,4 +1,4 @@
-import type { ServerProviderModel } from "@t3tools/contracts";
+import { DEFAULT_MODEL_BY_PROVIDER, type ServerProviderModel } from "@t3tools/contracts";
 
 export type CodexPlanType =
   | "free"
@@ -18,7 +18,7 @@ export interface CodexAccountSnapshot {
   readonly sparkEnabled: boolean;
 }
 
-export const CODEX_DEFAULT_MODEL = "gpt-5.3-codex";
+export const CODEX_DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
 export const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
 const CODEX_SPARK_ENABLED_PLAN_TYPES = new Set<CodexPlanType>(["pro"]);
 

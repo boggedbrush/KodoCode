@@ -116,6 +116,8 @@ const PRESET_SELECTION_SETTINGS_KEYS = [
   "reviewModelSelection",
 ] as const;
 type PresetSelectionSettingsKey = (typeof PRESET_SELECTION_SETTINGS_KEYS)[number];
+const CODEX_EFFICIENT_MODEL = "gpt-5.4-mini";
+const CODEX_RECOMMENDED_MODEL = "gpt-5.5";
 
 function makeCodexPreset(
   id: string,
@@ -216,34 +218,34 @@ const BUILT_IN_MODEL_SELECTION_PRESETS: {
 } = {
   codex: [
     makeCodexPreset("starter-codex-free", "Free", {
-      ask: { model: "gpt-5.4-mini", effort: "low" },
-      plan: { model: "gpt-5.4-mini", effort: "medium" },
-      code: { model: "gpt-5.4-mini", effort: "low" },
-      review: { model: "gpt-5.4", effort: "low" },
+      ask: { model: CODEX_EFFICIENT_MODEL, effort: "low" },
+      plan: { model: CODEX_EFFICIENT_MODEL, effort: "medium" },
+      code: { model: CODEX_EFFICIENT_MODEL, effort: "medium" },
+      review: { model: CODEX_EFFICIENT_MODEL, effort: "high" },
     }),
     makeCodexPreset("starter-codex-go", "Go", {
-      ask: { model: "gpt-5.4-mini", effort: "low" },
-      plan: { model: "gpt-5.4-mini", effort: "medium" },
-      code: { model: "gpt-5.4-mini", effort: "medium" },
-      review: { model: "gpt-5.3-codex", effort: "medium" },
+      ask: { model: CODEX_EFFICIENT_MODEL, effort: "low" },
+      plan: { model: CODEX_EFFICIENT_MODEL, effort: "high" },
+      code: { model: CODEX_EFFICIENT_MODEL, effort: "medium" },
+      review: { model: CODEX_EFFICIENT_MODEL, effort: "high" },
     }),
     makeCodexPreset("starter-codex-plus", "Plus", {
-      ask: { model: "gpt-5.4-mini", effort: "low" },
-      plan: { model: "gpt-5.4", effort: "medium" },
-      code: { model: "gpt-5.4-mini", effort: "medium" },
-      review: { model: "gpt-5.3-codex", effort: "medium" },
+      ask: { model: CODEX_EFFICIENT_MODEL, effort: "low" },
+      plan: { model: CODEX_RECOMMENDED_MODEL, effort: "medium" },
+      code: { model: CODEX_EFFICIENT_MODEL, effort: "medium" },
+      review: { model: CODEX_RECOMMENDED_MODEL, effort: "low" },
     }),
     makeCodexPreset("starter-codex-pro-5x", "Pro (5X)", {
-      ask: { model: "gpt-5.4", effort: "low" },
-      plan: { model: "gpt-5.4", effort: "high" },
-      code: { model: "gpt-5.3-codex", effort: "high" },
-      review: { model: "gpt-5.3-codex", effort: "high" },
+      ask: { model: CODEX_RECOMMENDED_MODEL, effort: "low" },
+      plan: { model: CODEX_RECOMMENDED_MODEL, effort: "medium" },
+      code: { model: CODEX_RECOMMENDED_MODEL, effort: "medium" },
+      review: { model: CODEX_RECOMMENDED_MODEL, effort: "high" },
     }),
     makeCodexPreset("starter-codex-pro-20x", "Pro (20X)", {
-      ask: { model: "gpt-5.4", effort: "medium" },
-      plan: { model: "gpt-5.4", effort: "high" },
-      code: { model: "gpt-5.3-codex", effort: "high" },
-      review: { model: "gpt-5.3-codex", effort: "xhigh" },
+      ask: { model: CODEX_RECOMMENDED_MODEL, effort: "low" },
+      plan: { model: CODEX_RECOMMENDED_MODEL, effort: "medium" },
+      code: { model: CODEX_RECOMMENDED_MODEL, effort: "medium" },
+      review: { model: CODEX_RECOMMENDED_MODEL, effort: "high" },
     }),
   ],
   claudeAgent: [
@@ -360,7 +362,11 @@ function seedBuiltInPresets(settings: ServerSettings): ServerSettings {
 
   for (const provider of PROVIDER_ORDER) {
     for (const preset of BUILT_IN_MODEL_SELECTION_PRESETS[provider]) {
-      if (nextPresets[provider][preset.id]) {
+      if (provider !== "codex" && nextPresets[provider][preset.id]) {
+        continue;
+      }
+
+      if (Equal.equals(nextPresets[provider][preset.id], preset)) {
         continue;
       }
 

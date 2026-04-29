@@ -109,12 +109,12 @@ const BUILT_IN_PRESET_MODE_SELECTIONS: Readonly<
       codeModelSelection: {
         provider: "codex",
         model: "gpt-5.4-mini",
-        options: { reasoningEffort: "low" },
+        options: { reasoningEffort: "medium" },
       },
       reviewModelSelection: {
         provider: "codex",
-        model: "gpt-5.4",
-        options: { reasoningEffort: "low" },
+        model: "gpt-5.4-mini",
+        options: { reasoningEffort: "high" },
       },
     },
     "starter-codex-go": {
@@ -126,7 +126,7 @@ const BUILT_IN_PRESET_MODE_SELECTIONS: Readonly<
       planModelSelection: {
         provider: "codex",
         model: "gpt-5.4-mini",
-        options: { reasoningEffort: "medium" },
+        options: { reasoningEffort: "high" },
       },
       codeModelSelection: {
         provider: "codex",
@@ -135,8 +135,8 @@ const BUILT_IN_PRESET_MODE_SELECTIONS: Readonly<
       },
       reviewModelSelection: {
         provider: "codex",
-        model: "gpt-5.3-codex",
-        options: { reasoningEffort: "medium" },
+        model: "gpt-5.4-mini",
+        options: { reasoningEffort: "high" },
       },
     },
     "starter-codex-plus": {
@@ -147,7 +147,7 @@ const BUILT_IN_PRESET_MODE_SELECTIONS: Readonly<
       },
       planModelSelection: {
         provider: "codex",
-        model: "gpt-5.4",
+        model: "gpt-5.5",
         options: { reasoningEffort: "medium" },
       },
       codeModelSelection: {
@@ -157,52 +157,52 @@ const BUILT_IN_PRESET_MODE_SELECTIONS: Readonly<
       },
       reviewModelSelection: {
         provider: "codex",
-        model: "gpt-5.3-codex",
-        options: { reasoningEffort: "medium" },
+        model: "gpt-5.5",
+        options: { reasoningEffort: "low" },
       },
     },
     "starter-codex-pro-5x": {
       askModelSelection: {
         provider: "codex",
-        model: "gpt-5.4",
+        model: "gpt-5.5",
         options: { reasoningEffort: "low" },
       },
       planModelSelection: {
         provider: "codex",
-        model: "gpt-5.4",
-        options: { reasoningEffort: "high" },
+        model: "gpt-5.5",
+        options: { reasoningEffort: "medium" },
       },
       codeModelSelection: {
         provider: "codex",
-        model: "gpt-5.3-codex",
-        options: { reasoningEffort: "high" },
+        model: "gpt-5.5",
+        options: { reasoningEffort: "medium" },
       },
       reviewModelSelection: {
         provider: "codex",
-        model: "gpt-5.3-codex",
+        model: "gpt-5.5",
         options: { reasoningEffort: "high" },
       },
     },
     "starter-codex-pro-20x": {
       askModelSelection: {
         provider: "codex",
-        model: "gpt-5.4",
-        options: { reasoningEffort: "medium" },
+        model: "gpt-5.5",
+        options: { reasoningEffort: "low" },
       },
       planModelSelection: {
         provider: "codex",
-        model: "gpt-5.4",
-        options: { reasoningEffort: "high" },
+        model: "gpt-5.5",
+        options: { reasoningEffort: "medium" },
       },
       codeModelSelection: {
         provider: "codex",
-        model: "gpt-5.3-codex",
-        options: { reasoningEffort: "high" },
+        model: "gpt-5.5",
+        options: { reasoningEffort: "medium" },
       },
       reviewModelSelection: {
         provider: "codex",
-        model: "gpt-5.3-codex",
-        options: { reasoningEffort: "xhigh" },
+        model: "gpt-5.5",
+        options: { reasoningEffort: "high" },
       },
     },
   },

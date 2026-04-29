@@ -469,7 +469,7 @@ const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   mockUpdateServerPort: string | undefined,
 ) {
   const buildConfig: Record<string, unknown> = {
-    appId: "com.kodo.code",
+    appId: "app.kodocode",
     productName,
     artifactName: "Kodo-Code-${version}-${arch}.${ext}",
     asarUnpack: ["apps/server/dist/**", "node_modules/**"],
