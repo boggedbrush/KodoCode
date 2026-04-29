@@ -64,6 +64,7 @@ import {
   findProjectByPath,
   getBrowseParentPath,
   inferProjectTitleFromPath,
+  isExplicitRelativeProjectPath,
   normalizeProjectPathForDispatch,
 } from "../lib/projectPaths";
 import { useStore } from "../store";
@@ -798,6 +799,14 @@ export default function Sidebar() {
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
     [projects],
   );
+  const activeBrowseCwd = useMemo(() => {
+    const activeProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
+    return (
+      activeThread?.worktreePath ??
+      activeDraftThread?.worktreePath ??
+      (activeProjectId ? (projectCwdById.get(activeProjectId) ?? null) : null)
+    );
+  }, [activeDraftThread, activeThread, projectCwdById]);
   const routeTerminalOpen = routeThreadId
     ? selectThreadTerminalState(terminalStateByThreadId, routeThreadId).terminalOpen
     : false;
@@ -950,7 +959,12 @@ export default function Sidebar() {
       setIsBrowsingFilesystem(true);
       setBrowseError(null);
       try {
-        const result = await api.filesystem.browse({ partialPath });
+        const result = await api.filesystem.browse({
+          partialPath,
+          ...(isExplicitRelativeProjectPath(partialPath) && activeBrowseCwd
+            ? { cwd: activeBrowseCwd }
+            : {}),
+        });
         const browsingDirectory = /[\\/]$/.test(partialPath) || partialPath === "~";
         const resolvedDirectory = browsingDirectory
           ? normalizeProjectPathForDispatch(result.parentPath)
@@ -969,7 +983,7 @@ export default function Sidebar() {
         setIsBrowsingFilesystem(false);
       }
     },
-    [isBrowsingFilesystem],
+    [activeBrowseCwd, isBrowsingFilesystem],
   );
 
   const openBrowsePanel = useCallback(() => {

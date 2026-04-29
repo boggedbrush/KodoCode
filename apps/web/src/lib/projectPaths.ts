@@ -12,7 +12,7 @@ function isWindowsAbsolutePath(value: string): boolean {
   return isUncPath(value) || isWindowsDrivePath(value);
 }
 
-function isExplicitRelativePath(value: string): boolean {
+export function isExplicitRelativeProjectPath(value: string): boolean {
   return (
     value === "." ||
     value === ".." ||
@@ -139,7 +139,7 @@ export function normalizeProjectPathForDispatch(value: string): string {
 
 export function resolveProjectPathForDispatch(value: string, cwd?: string | null): string {
   const trimmedValue = value.trim();
-  if (!isExplicitRelativePath(trimmedValue) || !cwd) {
+  if (!isExplicitRelativeProjectPath(trimmedValue) || !cwd) {
     return normalizeProjectPathForDispatch(trimmedValue);
   }
 

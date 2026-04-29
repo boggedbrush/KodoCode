@@ -7,6 +7,7 @@ import {
   findProjectByPath,
   getBrowseParentPath,
   inferProjectTitleFromPath,
+  isExplicitRelativeProjectPath,
   isFilesystemBrowseQuery,
   normalizeProjectPathForDispatch,
   resolveProjectPathForDispatch,
@@ -21,6 +22,13 @@ describe("projectPaths", () => {
   it("resolves explicit relative paths against an absolute cwd", () => {
     expect(resolveProjectPathForDispatch("./child", "/tmp/project")).toBe("/tmp/project/child");
     expect(resolveProjectPathForDispatch("../sibling", "/tmp/project")).toBe("/tmp/sibling");
+  });
+
+  it("detects explicit relative project paths", () => {
+    expect(isExplicitRelativeProjectPath("./child")).toBe(true);
+    expect(isExplicitRelativeProjectPath("../sibling")).toBe(true);
+    expect(isExplicitRelativeProjectPath("child")).toBe(false);
+    expect(isExplicitRelativeProjectPath("/tmp/project")).toBe(false);
   });
 
   it("detects browse-like queries", () => {
