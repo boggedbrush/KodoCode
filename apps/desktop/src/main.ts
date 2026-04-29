@@ -76,7 +76,7 @@ const LEGACY_DESKTOP_SCHEME = "t3";
 const ROOT_DIR = Path.resolve(__dirname, "../../..");
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const APP_DISPLAY_NAME = isDevelopment ? "Kodo Code (Dev)" : "Kodo Code (Alpha)";
-const APP_USER_MODEL_ID = "com.kodo.code";
+const APP_USER_MODEL_ID = "app.kodocode";
 const LINUX_DESKTOP_ENTRY_NAME = isDevelopment ? "kodo-code-dev.desktop" : "kodo-code.desktop";
 const LINUX_WM_CLASS = isDevelopment ? "kodo-code-dev" : "kodo-code";
 const USER_DATA_DIR_NAME = isDevelopment ? "kodo-code-dev" : "kodo-code";
@@ -803,32 +803,7 @@ function resolveIconPath(ext: "ico" | "icns" | "png"): string | null {
   return resolveResourcePath(`icon.${ext}`);
 }
 
-function resolveMacDockIcon(): Electron.NativeImage | null {
-  const iconPath = resolveIconPath("icns");
-  if (!iconPath) {
-    return null;
-  }
-
-  const icon = nativeImage.createFromPath(iconPath);
-  return icon.isEmpty() ? null : icon;
-}
-
-function resolveVectorIconPath(): string | null {
-  const candidate = isDevelopment
-    ? Path.join(ROOT_DIR, "assets/dev/blueprint.svg")
-    : Path.join(ROOT_DIR, "assets/prod/logo.svg");
-  return FS.existsSync(candidate) ? candidate : null;
-}
-
 function resolveNativeAppIcon(ext: "ico" | "icns" | "png"): Electron.NativeImage | null {
-  const vectorIconPath = resolveVectorIconPath();
-  if (vectorIconPath) {
-    const vectorIcon = nativeImage.createFromPath(vectorIconPath);
-    if (!vectorIcon.isEmpty()) {
-      return vectorIcon;
-    }
-  }
-
   const rasterIconPath = resolveIconPath(ext);
   if (!rasterIconPath) {
     return null;
@@ -885,12 +860,8 @@ function configureAppIdentity(): void {
     (app as LinuxDesktopNamedApp).setDesktopName?.(LINUX_DESKTOP_ENTRY_NAME);
   }
 
-  if (process.platform === "darwin" && app.dock) {
-    const icon = resolveMacDockIcon();
-    if (icon) {
-      app.dock.setIcon(icon);
-    }
-  }
+  // macOS uses CFBundleIconFile from the app bundle. Calling app.dock.setIcon()
+  // renders the raw image payload and bypasses the bundle icon presentation.
 }
 
 function clearUpdatePollTimer(): void {

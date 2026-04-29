@@ -121,6 +121,7 @@ async function mountPicker(props: {
   providers?: ReadonlyArray<ServerProvider>;
   keybindings?: ResolvedKeybindingsConfig;
   triggerVariant?: "ghost" | "outline";
+  allowAutoModel?: boolean;
   showAsAuto?: boolean;
 }) {
   const host = document.createElement("div");
@@ -141,6 +142,7 @@ async function mountPicker(props: {
       providers={providers}
       modelOptionsByProvider={modelOptionsByProvider}
       {...(props.keybindings ? { keybindings: props.keybindings } : {})}
+      {...(props.allowAutoModel !== undefined ? { allowAutoModel: props.allowAutoModel } : {})}
       {...(props.showAsAuto !== undefined ? { showAsAuto: props.showAsAuto } : {})}
       triggerVariant={props.triggerVariant}
       onProviderModelChange={onProviderModelChange}
@@ -282,6 +284,27 @@ describe("ProviderModelPicker", () => {
         "claudeAgent",
         COMPOSER_AUTO_MODEL_VALUE,
       );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("hides Auto when disabled for persisted settings pickers", async () => {
+    const mounted = await mountPicker({
+      provider: "claudeAgent",
+      model: "claude-opus-4-6",
+      lockedProvider: "claudeAgent",
+      allowAutoModel: false,
+    });
+
+    try {
+      await page.getByRole("button").click();
+      await vi.waitFor(() => {
+        expect(document.querySelector(".model-picker-list")).not.toBeNull();
+      });
+
+      expect(getVisibleModelNames().some((name) => name.includes("Auto"))).toBe(false);
+      expect(getVisibleModelNames().some((name) => name.includes("Claude Opus 4.6"))).toBe(true);
     } finally {
       await mounted.cleanup();
     }

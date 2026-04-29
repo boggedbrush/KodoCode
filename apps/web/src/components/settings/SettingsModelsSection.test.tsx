@@ -26,6 +26,12 @@ vi.mock("../../rpc/serverState", () => ({
       checkedAt: "2026-01-01T00:00:00.000Z",
       models: [
         {
+          slug: "gpt-5.5",
+          name: "GPT-5.5",
+          isCustom: false,
+          capabilities: null,
+        },
+        {
           slug: "gpt-5.4",
           name: "GPT-5.4",
           isCustom: false,
