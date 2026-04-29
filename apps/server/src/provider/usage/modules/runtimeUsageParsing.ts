@@ -134,6 +134,8 @@ export function parseRateLimitWindow(input: {
     "limit",
     "max",
     "total",
+    "totalLimit",
+    "total_limit",
     "requestLimit",
     "request_limit",
     "tokenLimit",
@@ -145,13 +147,22 @@ export function parseRateLimitWindow(input: {
     "reset_at",
     "resets_at",
     "resetsAt",
+    "resetsAtSeconds",
+    "resets_at_seconds",
     "windowEndsAt",
     "window_ends_at",
   ]);
   const resetAt =
     normalizeDateString(resetAtValue) ??
     normalizeDateString(
-      findNumberByKeys(payload, ["resetAt", "reset_at", "resets_at", "resetsAt"]),
+      findNumberByKeys(payload, [
+        "resetAt",
+        "reset_at",
+        "resets_at",
+        "resetsAt",
+        "resetsAtSeconds",
+        "resets_at_seconds",
+      ]),
     );
 
   const rawPercentUsed = findNumberByKeys(payload, [
@@ -159,6 +170,7 @@ export function parseRateLimitWindow(input: {
     "used_percent",
     "used_percentage",
     "percentUsed",
+    "percent_used",
     "utilization",
   ]);
   const derivedPercentUsed =
@@ -260,19 +272,29 @@ export function parseRateLimitWindows(input: {
     }
   | undefined {
   const payloadRecord = asRecord(input.payload);
-  const rateLimitPayload = payloadRecord?.rate_limit ?? payloadRecord?.rateLimit ?? input.payload;
+  const rateLimitPayload =
+    payloadRecord?.rateLimits ??
+    payloadRecord?.rate_limit ??
+    payloadRecord?.rateLimit ??
+    input.payload;
 
   const sessionRecord = pickNestedRecord(rateLimitPayload, [
+    "primary",
     "primary_window",
     "primaryWindow",
     "five_hour",
     "fiveHour",
+    "current_session",
+    "currentSession",
   ]);
   const weeklyRecord = pickNestedRecord(rateLimitPayload, [
+    "secondary",
     "secondary_window",
     "secondaryWindow",
     "seven_day",
     "sevenDay",
+    "current_week",
+    "currentWeek",
   ]);
 
   const parsedSession = sessionRecord

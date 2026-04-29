@@ -25,6 +25,13 @@ function getUsageStatusLabel(status: "ready" | "limited" | "exhausted" | "unknow
   }
 }
 
+function getProviderUsageStatusLabel(usage: ServerProviderUsage): string {
+  if (usage.windows.length === 0 && usage.status === "ready") {
+    return "Account connected";
+  }
+  return getUsageStatusLabel(usage.status);
+}
+
 function normalizeUsageText(value: string): string {
   return value.trim().replaceAll(/\s+/g, " ").toLowerCase();
 }
@@ -136,6 +143,10 @@ function buildUsageBarRows(input: {
   readonly usage: ServerProviderUsage;
   readonly metadata: ProviderUsageMetadata;
 }): ReadonlyArray<UsageBarRow> {
+  if (input.usage.windows.length === 0) {
+    return [];
+  }
+
   const usageWindows = input.usage.windows;
   const { sessionWindow, weeklyWindow } = selectPrimaryUsageWindows({
     windows: usageWindows,
@@ -148,7 +159,7 @@ function buildUsageBarRows(input: {
       weeklyResetAt: weeklyWindow?.resetAt ?? null,
     });
 
-  return [
+  const rows: Array<UsageBarRow> = [
     {
       key: "session",
       label: input.metadata.sessionLabel,
@@ -172,6 +183,8 @@ function buildUsageBarRows(input: {
       window: weeklyWindow,
     },
   ];
+
+  return rows.filter((row) => row.window !== null);
 }
 
 export function SettingsProviderUsageSection({
@@ -194,7 +207,7 @@ export function SettingsProviderUsageSection({
   return (
     <div className="rounded-md border border-border/60 bg-muted/20 px-2.5 py-2 text-[11px] text-muted-foreground">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="font-medium text-foreground/90">{getUsageStatusLabel(usage.status)}</span>
+        <span className="font-medium text-foreground/90">{getProviderUsageStatusLabel(usage)}</span>
         {usage.stale ? (
           <span className="rounded bg-warning/20 px-1.5 py-0.5 text-warning">Stale</span>
         ) : null}
@@ -207,51 +220,57 @@ export function SettingsProviderUsageSection({
           {usageSummary && usageDetail ? ` - ${usageDetail}` : null}
         </p>
       ) : null}
-      <div className="mt-1 grid gap-1 md:grid-cols-2">
-        {usageBarRows.map((row) => {
-          const percentUsed = clampUsagePercentUsed(row.window?.percentUsed ?? null);
-          const percentRemaining = toRemainingUsagePercent(percentUsed);
-          const hasRemaining = percentRemaining !== null && hasRenderableUsagePercent(row.window);
-          const unavailableLabel = getUsageWindowUnavailableLabel(row.window);
-          const primaryStatusLabel = row.window?.resetAt
-            ? formatUsageResetLabel(row.window.resetAt)
-            : unavailableLabel;
-          return (
-            <div
-              key={row.key}
-              className="rounded-md border border-border/70 bg-background/15 px-2 py-1.5"
-            >
-              <p className="text-[11px] font-medium text-muted-foreground/90">
-                {getUsageLimitTitle({ key: row.key, label: row.label })}
-              </p>
-              <div className="mt-0.5 flex items-baseline gap-1">
-                {hasRemaining ? (
-                  <>
-                    <span className="text-2xl font-semibold leading-none text-foreground tabular-nums">
-                      {`${Math.round(percentRemaining)}%`}
+      {usageBarRows.length > 0 ? (
+        <div className="mt-1 grid gap-1 md:grid-cols-2">
+          {usageBarRows.map((row) => {
+            const percentUsed = clampUsagePercentUsed(row.window?.percentUsed ?? null);
+            const percentRemaining = toRemainingUsagePercent(percentUsed);
+            const hasRemaining = percentRemaining !== null && hasRenderableUsagePercent(row.window);
+            const unavailableLabel = getUsageWindowUnavailableLabel(row.window);
+            const primaryStatusLabel = row.window?.resetAt
+              ? formatUsageResetLabel(row.window.resetAt)
+              : unavailableLabel;
+            return (
+              <div
+                key={row.key}
+                className="rounded-md border border-border/70 bg-background/15 px-2 py-1.5"
+              >
+                <p className="text-[11px] font-medium text-muted-foreground/90">
+                  {getUsageLimitTitle({ key: row.key, label: row.label })}
+                </p>
+                <div className="mt-0.5 flex items-baseline gap-1">
+                  {hasRemaining ? (
+                    <>
+                      <span className="text-2xl font-semibold leading-none text-foreground tabular-nums">
+                        {`${Math.round(percentRemaining)}%`}
+                      </span>
+                      <span className="text-sm leading-none text-foreground/90">remaining</span>
+                    </>
+                  ) : (
+                    <span className="text-sm leading-none text-muted-foreground">
+                      {primaryStatusLabel}
                     </span>
-                    <span className="text-sm leading-none text-foreground/90">remaining</span>
-                  </>
-                ) : (
-                  <span className="text-sm leading-none text-muted-foreground">
-                    {primaryStatusLabel}
-                  </span>
-                )}
-              </div>
-              <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-foreground/20">
-                <div
-                  className={cn(
-                    "h-full rounded-full transition-[width] duration-300",
-                    usageBarToneClass(percentRemaining),
                   )}
-                  style={{ width: hasRemaining ? `${percentRemaining}%` : "0%" }}
-                />
+                </div>
+                <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-foreground/20">
+                  <div
+                    className={cn(
+                      "h-full rounded-full transition-[width] duration-300",
+                      usageBarToneClass(percentRemaining),
+                    )}
+                    style={{ width: hasRemaining ? `${percentRemaining}%` : "0%" }}
+                  />
+                </div>
+                <p className="mt-1.5 text-[11px] text-muted-foreground/90">{primaryStatusLabel}</p>
               </div>
-              <p className="mt-1.5 text-[11px] text-muted-foreground/90">{primaryStatusLabel}</p>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="mt-2 rounded-md border border-border/60 bg-background/15 px-2 py-1.5 text-muted-foreground">
+          No usage limit data reported for this provider.
+        </p>
+      )}
       <div className="mt-1.5 flex flex-wrap items-center gap-x-2">
         {metadata.usageUrl ? (
           <a

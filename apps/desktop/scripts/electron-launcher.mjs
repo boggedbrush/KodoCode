@@ -18,8 +18,8 @@ import { fileURLToPath } from "node:url";
 
 const isDevelopment = Boolean(process.env.VITE_DEV_SERVER_URL);
 const APP_DISPLAY_NAME = isDevelopment ? "Kodo Code (Dev)" : "Kodo Code (Alpha)";
-const APP_BUNDLE_ID = "com.kodo.code";
-const LAUNCHER_VERSION = 1;
+const APP_BUNDLE_ID = isDevelopment ? "com.kodo.code.dev" : "com.kodo.code";
+const LAUNCHER_VERSION = 2;
 const ELECTRON_INSTALL_CANDIDATES = ["node", "bun"];
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -98,6 +98,18 @@ function readJson(path) {
   } catch {
     return null;
   }
+}
+
+function resolveMacLauncherIconPath() {
+  const iconPath = isDevelopment
+    ? resolve(desktopDir, "../../assets/dev/blueprint-macos.icns")
+    : join(desktopDir, "resources", "icon.icns");
+
+  if (!existsSync(iconPath)) {
+    throw new Error(`Missing macOS launcher icon: ${iconPath}`);
+  }
+
+  return iconPath;
 }
 
 function getElectronPlatformPath() {
@@ -186,7 +198,7 @@ function buildMacLauncher(electronBinaryPath) {
   const runtimeDir = join(desktopDir, ".electron-runtime");
   const targetAppBundlePath = join(runtimeDir, `${APP_DISPLAY_NAME}.app`);
   const targetBinaryPath = join(targetAppBundlePath, "Contents", "MacOS", "Electron");
-  const iconPath = join(desktopDir, "resources", "icon.icns");
+  const iconPath = resolveMacLauncherIconPath();
   const metadataPath = join(runtimeDir, "metadata.json");
 
   mkdirSync(runtimeDir, { recursive: true });
@@ -195,6 +207,9 @@ function buildMacLauncher(electronBinaryPath) {
     launcherVersion: LAUNCHER_VERSION,
     sourceAppBundlePath,
     sourceAppMtimeMs: statSync(sourceAppBundlePath).mtimeMs,
+    appBundleId: APP_BUNDLE_ID,
+    appDisplayName: APP_DISPLAY_NAME,
+    iconPath,
     iconMtimeMs: statSync(iconPath).mtimeMs,
   };
 
