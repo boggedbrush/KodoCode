@@ -285,7 +285,7 @@ This snippet mirrors the current settings schema and built-in model defaults in 
 - Mode overrides are stored as `askModelSelection`, `planModelSelection`, `codeModelSelection`, and `reviewModelSelection`.
 - Default provider models are `gpt-5.4` for Codex and `claude-sonnet-4-6` for Claude.
 - Git text generation and prompt enhancement currently default to `gpt-5.4-mini`.
-- Other built-in models currently exposed include `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `claude-opus-4-6`, and `claude-haiku-4-5`.
+- Other built-in models currently exposed include `gpt-5.3-codex`, `gpt-5.3-codex-spark`, `claude-opus-4-7`, `claude-opus-4-6`, and `claude-haiku-4-5`.
 
 <br>
 

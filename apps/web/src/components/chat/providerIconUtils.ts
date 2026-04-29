@@ -10,7 +10,7 @@ export const PROVIDER_ICON_BY_PROVIDER: Record<ProviderKind | "cursor", Icon> = 
 
 export const PROVIDER_TINT_CLASS_BY_PROVIDER: Record<ProviderKind | "cursor", string> = {
   codex: "text-neutral-900 dark:text-white",
-  claudeAgent: "text-orange-500 dark:text-orange-300",
+  claudeAgent: "text-[#CC7C5E]",
   cursor: "text-violet-500 dark:text-violet-400",
 };
 
