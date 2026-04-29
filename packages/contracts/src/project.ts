@@ -53,3 +53,27 @@ export class ProjectWriteFileError extends Schema.TaggedErrorClass<ProjectWriteF
     cause: Schema.optional(Schema.Defect),
   },
 ) {}
+
+export const ProjectCreateSymlinkInput = Schema.Struct({
+  cwd: TrimmedNonEmptyString,
+  targetRelativePath: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH),
+  ),
+  linkRelativePath: TrimmedNonEmptyString.check(
+    Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH),
+  ),
+});
+export type ProjectCreateSymlinkInput = typeof ProjectCreateSymlinkInput.Type;
+
+export const ProjectCreateSymlinkResult = Schema.Struct({
+  relativePath: TrimmedNonEmptyString,
+});
+export type ProjectCreateSymlinkResult = typeof ProjectCreateSymlinkResult.Type;
+
+export class ProjectCreateSymlinkError extends Schema.TaggedErrorClass<ProjectCreateSymlinkError>()(
+  "ProjectCreateSymlinkError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}

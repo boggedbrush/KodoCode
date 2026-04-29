@@ -46,6 +46,14 @@ import { useGitStatus } from "~/lib/gitStatusState";
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
 import { usesCustomDesktopTitlebar } from "../lib/utils";
+import {
+  buildInitCommandPrompt,
+  getCompanionGuideFile,
+  getGuideFileForProvider,
+  type HarnessGuideFile,
+  INIT_COMMAND_TEMPLATE,
+  isClaudeHarnessEnabled,
+} from "../initCommand";
 import { DesktopWindowControls } from "./DesktopTitleBar";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import {
@@ -127,6 +135,14 @@ import {
   XIcon,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogPopup,
+  DialogTitle,
+} from "./ui/dialog";
 import { Separator } from "./ui/separator";
 import { cn, randomUUID } from "~/lib/utils";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
@@ -249,6 +265,14 @@ const LazyThreadTerminalDrawer = lazy(() => import("./ThreadTerminalDrawer"));
 const LazyComposerPromptEditor = lazy(() =>
   import("./ComposerPromptEditor").then((module) => ({ default: module.ComposerPromptEditor })),
 );
+
+interface InitGuideConfirmState {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  resolve: (confirmed: boolean) => void;
+}
 
 const ATTACHMENT_PREVIEW_HANDOFF_TTL_MS = 5000;
 const IMAGE_SIZE_LIMIT_LABEL = `${Math.round(PROVIDER_SEND_TURN_MAX_IMAGE_BYTES / (1024 * 1024))}MB`;
@@ -776,6 +800,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
+  const [initGuideConfirmState, setInitGuideConfirmState] = useState<InitGuideConfirmState | null>(
+    null,
+  );
+  const initGuideConfirmStateRef = useRef<InitGuideConfirmState | null>(null);
   const [reviewSetupDraft, setReviewSetupDraft] = useState<ReviewRequestDraft>(() => ({
     targetKind: "uncommitted",
     targetRef: "",
@@ -1813,6 +1841,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
           label: "/usage",
           description: "Toggle active provider usage panel",
         },
+        {
+          id: "slash:init",
+          type: "slash-command",
+          command: "init",
+          label: "/init",
+          description: `Create ${getGuideFileForProvider(selectedProvider)} for this harness`,
+        },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
       const query = composerTrigger.query.trim().toLowerCase();
       if (!query) {
@@ -1849,6 +1884,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     composerTrigger,
     filterPresetCommandItems,
     searchableModelOptions,
+    selectedProvider,
     workspaceEntries,
   ]);
   const composerMenuOpen = Boolean(composerTrigger);
@@ -2434,15 +2470,362 @@ export default function ChatView({ threadId }: ChatViewProps) {
       threadId,
     ],
   );
+  const doesWorkspaceEntryExist = useCallback(async (cwd: string, relativePath: string) => {
+    const api = readNativeApi();
+    if (!api) {
+      return false;
+    }
+    const result = await api.projects.searchEntries({
+      cwd,
+      query: relativePath,
+      limit: 20,
+    });
+    return result.entries.some((entry) => entry.path === relativePath);
+  }, []);
+  const settleInitGuideConfirm = useCallback((confirmed: boolean) => {
+    const pending = initGuideConfirmStateRef.current;
+    if (!pending) {
+      return;
+    }
+    initGuideConfirmStateRef.current = null;
+    setInitGuideConfirmState(null);
+    pending.resolve(confirmed);
+  }, []);
+  const confirmInitGuideSymlink = useCallback(
+    (input: { title: string; description: string; confirmLabel?: string; cancelLabel?: string }) =>
+      new Promise<boolean>((resolve) => {
+        if (initGuideConfirmStateRef.current) {
+          initGuideConfirmStateRef.current.resolve(false);
+        }
+        const nextState: InitGuideConfirmState = {
+          title: input.title,
+          description: input.description,
+          confirmLabel: input.confirmLabel ?? "Create symlink",
+          cancelLabel: input.cancelLabel ?? "Create separate file",
+          resolve,
+        };
+        initGuideConfirmStateRef.current = nextState;
+        setInitGuideConfirmState(nextState);
+      }),
+    [],
+  );
+  useEffect(
+    () => () => {
+      initGuideConfirmStateRef.current?.resolve(false);
+      initGuideConfirmStateRef.current = null;
+    },
+    [],
+  );
+  const submitInitGuidePrompt = useCallback(
+    async (file: HarnessGuideFile) => {
+      const api = readNativeApi();
+      if (
+        !api ||
+        !activeThread ||
+        !activeProject ||
+        isSendBusy ||
+        isConnecting ||
+        sendInFlightRef.current
+      ) {
+        return false;
+      }
+
+      const threadIdForSend = activeThread.id;
+      const initEnvMode: DraftThreadEnvMode = activeThread.worktreePath
+        ? "worktree"
+        : isLocalDraftThread
+          ? (draftThread?.envMode ?? "local")
+          : "local";
+      const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
+      const baseBranchForWorktree =
+        isFirstMessage && initEnvMode === "worktree" && !activeThread.worktreePath
+          ? activeThread.branch
+          : null;
+      const shouldCreateWorktree =
+        isFirstMessage && initEnvMode === "worktree" && !activeThread.worktreePath;
+      if (shouldCreateWorktree && !activeThread.branch) {
+        setStoreThreadError(
+          threadIdForSend,
+          "Select a base branch before sending in New worktree mode.",
+        );
+        return false;
+      }
+
+      sendInFlightRef.current = true;
+      beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
+
+      const promptText = buildInitCommandPrompt(file);
+      const outgoingMessageText = formatOutgoingPrompt({
+        provider: selectedProvider,
+        model: selectedModel,
+        models: selectedProviderModels,
+        effort: selectedPromptEffort,
+        text: promptText,
+      });
+      const messageIdForSend = newMessageId();
+      const messageCreatedAt = new Date().toISOString();
+      const title = truncate(`Initialize ${file}`);
+      const normalizedSelectedModelSelection =
+        normalizeModelSelectionForDispatch(selectedModelSelection);
+      const threadCreateModelSelection: ModelSelection = {
+        provider: selectedProvider,
+        model: normalizeModelForDispatch(
+          selectedModel ||
+            activeProject.defaultModelSelection?.model ||
+            DEFAULT_MODEL_BY_PROVIDER.codex,
+        ),
+        ...(selectedModelSelection.options ? { options: selectedModelSelection.options } : {}),
+      };
+
+      setOptimisticUserMessages((existing) => [
+        ...existing,
+        {
+          id: messageIdForSend,
+          role: "user",
+          text: outgoingMessageText,
+          createdAt: messageCreatedAt,
+          streaming: false,
+        },
+      ]);
+      shouldAutoScrollRef.current = true;
+      setThreadError(threadIdForSend, null);
+
+      let turnStartSucceeded = false;
+      try {
+        if (isFirstMessage && isServerThread) {
+          await api.orchestration.dispatchCommand({
+            type: "thread.meta.update",
+            commandId: newCommandId(),
+            threadId: threadIdForSend,
+            title,
+          });
+        }
+
+        const bootstrap =
+          isLocalDraftThread || baseBranchForWorktree
+            ? {
+                ...(isLocalDraftThread
+                  ? {
+                      createThread: {
+                        projectId: activeProject.id,
+                        title,
+                        modelSelection: threadCreateModelSelection,
+                        runtimeMode,
+                        interactionMode: "code" as const,
+                        branch: activeThread.branch,
+                        worktreePath: activeThread.worktreePath,
+                        createdAt: activeThread.createdAt,
+                      },
+                    }
+                  : {}),
+                ...(baseBranchForWorktree
+                  ? {
+                      prepareWorktree: {
+                        projectCwd: activeProject.cwd,
+                        baseBranch: baseBranchForWorktree,
+                        branch: buildTemporaryWorktreeBranchName(),
+                      },
+                      runSetupScript: true,
+                    }
+                  : {}),
+              }
+            : undefined;
+        beginLocalDispatch({ preparingWorktree: false });
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.start",
+          commandId: newCommandId(),
+          threadId: threadIdForSend,
+          message: {
+            messageId: messageIdForSend,
+            role: "user",
+            text: outgoingMessageText,
+            attachments: [],
+          },
+          modelSelection: normalizedSelectedModelSelection,
+          titleSeed: title,
+          runtimeMode,
+          interactionMode: "code",
+          ...(bootstrap ? { bootstrap } : {}),
+          createdAt: messageCreatedAt,
+        });
+        turnStartSucceeded = true;
+        return true;
+      } catch (err) {
+        if (!turnStartSucceeded) {
+          setOptimisticUserMessages((existing) =>
+            existing.filter((message) => message.id !== messageIdForSend),
+          );
+        }
+        setThreadError(
+          threadIdForSend,
+          err instanceof Error ? err.message : "Failed to send /init prompt.",
+        );
+        return false;
+      } finally {
+        sendInFlightRef.current = false;
+        if (!turnStartSucceeded) {
+          resetLocalDispatch();
+        }
+      }
+    },
+    [
+      activeProject,
+      activeThread,
+      beginLocalDispatch,
+      draftThread?.envMode,
+      isConnecting,
+      isLocalDraftThread,
+      isSendBusy,
+      isServerThread,
+      resetLocalDispatch,
+      runtimeMode,
+      selectedModel,
+      selectedModelSelection,
+      selectedPromptEffort,
+      selectedProvider,
+      selectedProviderModels,
+      setStoreThreadError,
+      setThreadError,
+    ],
+  );
+  const handleInitSlashCommand = useCallback(async () => {
+    const api = readNativeApi();
+    if (!api) {
+      return;
+    }
+    if (!activeWorkspaceRoot) {
+      toastManager.add({
+        type: "error",
+        title: "Could not initialize harness guide",
+        description: "Open a project or worktree first so Kodo knows where to create the file.",
+      });
+      return;
+    }
+
+    const primaryFile = getGuideFileForProvider(selectedProvider);
+    const companionFile = getCompanionGuideFile(primaryFile);
+    const shouldOfferGuideSymlink = isClaudeHarnessEnabled(providerStatuses);
+    const submitGuidePrompt = async () => {
+      const submitted = await submitInitGuidePrompt(primaryFile);
+      if (!submitted) {
+        toastManager.add({
+          type: "warning",
+          title: `Created ${primaryFile}`,
+          description:
+            "Kodo could not start the guide editing turn. Try /init again after this turn.",
+        });
+      }
+    };
+
+    try {
+      let [primaryExists, companionExists] = await Promise.all([
+        doesWorkspaceEntryExist(activeWorkspaceRoot, primaryFile),
+        doesWorkspaceEntryExist(activeWorkspaceRoot, companionFile),
+      ]);
+
+      if (!primaryExists && shouldOfferGuideSymlink && companionExists) {
+        const shouldSymlinkPrimary = await confirmInitGuideSymlink({
+          title: `${companionFile} already exists`,
+          description: `Create ${primaryFile} as a symlink to ${companionFile} instead of creating a second guide file?`,
+        });
+        if (shouldSymlinkPrimary) {
+          await api.projects.createSymlink({
+            cwd: activeWorkspaceRoot,
+            targetRelativePath: companionFile,
+            linkRelativePath: primaryFile,
+          });
+          toastManager.add({
+            type: "success",
+            title: `Created ${primaryFile} symlink`,
+            description: `Linked ${primaryFile} to the existing ${companionFile}.`,
+          });
+          await submitGuidePrompt();
+          return;
+        }
+      }
+
+      let createdPrimary = false;
+      if (!primaryExists) {
+        await api.projects.writeFile({
+          cwd: activeWorkspaceRoot,
+          relativePath: primaryFile,
+          contents: INIT_COMMAND_TEMPLATE,
+        });
+        primaryExists = true;
+        createdPrimary = true;
+      }
+
+      if (shouldOfferGuideSymlink && primaryExists && !companionExists) {
+        const shouldCreateCompanionSymlink = await confirmInitGuideSymlink({
+          title: `Create ${companionFile} as a symlink?`,
+          description: `This keeps ${primaryFile} and ${companionFile} in sync with a single shared file.`,
+          cancelLabel: "Skip",
+        });
+        if (shouldCreateCompanionSymlink) {
+          await api.projects.createSymlink({
+            cwd: activeWorkspaceRoot,
+            targetRelativePath: primaryFile,
+            linkRelativePath: companionFile,
+          });
+          toastManager.add({
+            type: "success",
+            title: createdPrimary ? `Created ${primaryFile}` : `Created ${companionFile} symlink`,
+            description: createdPrimary
+              ? `Also linked ${companionFile} to the same guide.`
+              : `Linked ${companionFile} to the existing ${primaryFile}.`,
+          });
+          await submitGuidePrompt();
+          return;
+        }
+      }
+
+      if (createdPrimary) {
+        toastManager.add({
+          type: "success",
+          title: `Created ${primaryFile}`,
+          description: "Update the placeholder sections with repository-specific guidance.",
+        });
+        await submitGuidePrompt();
+        return;
+      }
+
+      toastManager.add({
+        type: "info",
+        title: `${primaryFile} already exists`,
+        description:
+          shouldOfferGuideSymlink && companionExists
+            ? `${companionFile} is already present too.`
+            : undefined,
+      });
+      await submitGuidePrompt();
+    } catch (error) {
+      toastManager.add({
+        type: "error",
+        title: "Could not initialize harness guide",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      });
+    }
+  }, [
+    activeWorkspaceRoot,
+    confirmInitGuideSymlink,
+    doesWorkspaceEntryExist,
+    providerStatuses,
+    selectedProvider,
+    submitInitGuidePrompt,
+  ]);
   const handleStandaloneSlashCommand = useCallback(
-    (command: ComposerStandaloneSlashCommand) => {
+    async (command: ComposerStandaloneSlashCommand) => {
       if (command === "usage") {
         setProviderUsagePanelOpen((open) => !open);
         return;
       }
-      void handleInteractionModeChange(command);
+      if (command === "init") {
+        await handleInitSlashCommand();
+        return;
+      }
+      handleInteractionModeChange(command);
     },
-    [handleInteractionModeChange],
+    [handleInitSlashCommand, handleInteractionModeChange],
   );
   const applyPresetSelectionToComposer = useCallback(
     (provider: ProviderKind, presetId: string | null) => {
@@ -3566,7 +3949,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ? parseStandaloneComposerSlashCommand(promptRef.current.trim())
         : null;
     if (standaloneSlashCommand) {
-      handleStandaloneSlashCommand(standaloneSlashCommand);
+      await handleStandaloneSlashCommand(standaloneSlashCommand);
       promptRef.current = "";
       clearComposerDraftContent(activeThread.id);
       setComposerHighlightedItemId(null);
@@ -4789,7 +5172,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }
           return;
         }
-        handleStandaloneSlashCommand(item.command);
+        void handleStandaloneSlashCommand(item.command);
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
@@ -5570,6 +5953,33 @@ export default function ChatView({ threadId }: ChatViewProps) {
               onPrepared={handlePreparedPullRequestThread}
             />
           ) : null}
+          <Dialog
+            open={Boolean(initGuideConfirmState)}
+            onOpenChange={(open) => {
+              if (!open) {
+                settleInitGuideConfirm(false);
+              }
+            }}
+          >
+            <DialogPopup
+              className="max-w-md"
+              showCloseButton={false}
+              viewportClassName="grid-rows-[1fr_auto_1fr]"
+            >
+              <DialogHeader>
+                <DialogTitle>{initGuideConfirmState?.title ?? "Create guide symlink?"}</DialogTitle>
+                <DialogDescription>{initGuideConfirmState?.description}</DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => settleInitGuideConfirm(false)}>
+                  {initGuideConfirmState?.cancelLabel ?? "Cancel"}
+                </Button>
+                <Button onClick={() => settleInitGuideConfirm(true)}>
+                  {initGuideConfirmState?.confirmLabel ?? "Create symlink"}
+                </Button>
+              </DialogFooter>
+            </DialogPopup>
+          </Dialog>
           {isReviewSetupDialogOpen ? (
             <ReviewSetupDialog
               open

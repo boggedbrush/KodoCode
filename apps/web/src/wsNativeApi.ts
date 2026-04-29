@@ -54,6 +54,7 @@ export function createWsNativeApi(): NativeApi {
     projects: {
       searchEntries: rpcClient.projects.searchEntries,
       writeFile: rpcClient.projects.writeFile,
+      createSymlink: rpcClient.projects.createSymlink,
     },
     filesystem: {
       browse: rpcClient.filesystem.browse,

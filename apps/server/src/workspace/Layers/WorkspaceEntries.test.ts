@@ -230,6 +230,21 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
       }),
     );
 
+    it.effect("indexes symlinks in non-git workspaces", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-non-git-symlink-" });
+        const path = yield* Path.Path;
+        yield* writeTextFile(cwd, "AGENTS.md", "# Repository Guidelines\n");
+        yield* Effect.promise(() => fsPromises.symlink("AGENTS.md", path.join(cwd, "CLAUDE.md")));
+
+        const result = yield* searchWorkspaceEntries({ cwd, query: "CLAUDE.md", limit: 10 });
+
+        expect(result.entries).toEqual(
+          expect.arrayContaining([expect.objectContaining({ kind: "file", path: "CLAUDE.md" })]),
+        );
+      }),
+    );
+
     it.effect("deduplicates concurrent index builds for the same cwd", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTempDir({ prefix: "t3code-workspace-concurrent-build-" });

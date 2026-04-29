@@ -58,6 +58,7 @@ const {
     projects: {
       searchEntries: vi.fn(),
       writeFile: vi.fn(),
+      createSymlink: vi.fn(),
     },
     filesystem: {
       browse: vi.fn(),

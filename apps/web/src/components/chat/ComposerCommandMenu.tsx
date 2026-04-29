@@ -118,6 +118,7 @@ const SLASH_COMMAND_ICON_BY_COMMAND: Record<ComposerSlashCommand, LucideIcon> = 
   code: TerminalSquareIcon,
   review: WrenchIcon,
   usage: EyeIcon,
+  init: CirclePlusIcon,
 };
 
 const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {

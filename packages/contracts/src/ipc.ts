@@ -19,6 +19,8 @@ import type {
   GitCreateBranchResult,
 } from "./git";
 import type {
+  ProjectCreateSymlinkInput,
+  ProjectCreateSymlinkResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
@@ -159,6 +161,7 @@ export interface NativeApi {
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;
     writeFile: (input: ProjectWriteFileInput) => Promise<ProjectWriteFileResult>;
+    createSymlink: (input: ProjectCreateSymlinkInput) => Promise<ProjectCreateSymlinkResult>;
   };
   filesystem: {
     browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
