@@ -39,6 +39,21 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
     checkedAt: "2026-01-01T00:00:00.000Z",
     models: [
       {
+        slug: "gpt-5.5",
+        name: "GPT-5.5",
+        isCustom: false,
+        capabilities: {
+          reasoningEffortLevels: [
+            { value: "xhigh", label: "Extra High" },
+            { value: "high", label: "High", isDefault: true },
+          ],
+          supportsFastMode: true,
+          supportsThinkingToggle: false,
+          contextWindowOptions: [],
+          promptInjectedEffortLevels: [],
+        },
+      },
+      {
         slug: "gpt-5.4",
         name: "GPT-5.4",
         isCustom: false,
