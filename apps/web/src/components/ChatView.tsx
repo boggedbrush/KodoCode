@@ -47,10 +47,12 @@ import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { isElectron } from "../env";
 import { usesCustomDesktopTitlebar } from "../lib/utils";
 import {
-  countAvailableHarnesses,
+  buildInitCommandPrompt,
   getCompanionGuideFile,
   getGuideFileForProvider,
+  type HarnessGuideFile,
   INIT_COMMAND_TEMPLATE,
+  isClaudeHarnessEnabled,
 } from "../initCommand";
 import { DesktopWindowControls } from "./DesktopTitleBar";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
@@ -2513,6 +2515,178 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [],
   );
+  const submitInitGuidePrompt = useCallback(
+    async (file: HarnessGuideFile) => {
+      const api = readNativeApi();
+      if (
+        !api ||
+        !activeThread ||
+        !activeProject ||
+        isSendBusy ||
+        isConnecting ||
+        sendInFlightRef.current
+      ) {
+        return false;
+      }
+
+      const threadIdForSend = activeThread.id;
+      const initEnvMode: DraftThreadEnvMode = activeThread.worktreePath
+        ? "worktree"
+        : isLocalDraftThread
+          ? (draftThread?.envMode ?? "local")
+          : "local";
+      const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
+      const baseBranchForWorktree =
+        isFirstMessage && initEnvMode === "worktree" && !activeThread.worktreePath
+          ? activeThread.branch
+          : null;
+      const shouldCreateWorktree =
+        isFirstMessage && initEnvMode === "worktree" && !activeThread.worktreePath;
+      if (shouldCreateWorktree && !activeThread.branch) {
+        setStoreThreadError(
+          threadIdForSend,
+          "Select a base branch before sending in New worktree mode.",
+        );
+        return false;
+      }
+
+      sendInFlightRef.current = true;
+      beginLocalDispatch({ preparingWorktree: Boolean(baseBranchForWorktree) });
+
+      const promptText = buildInitCommandPrompt(file);
+      const outgoingMessageText = formatOutgoingPrompt({
+        provider: selectedProvider,
+        model: selectedModel,
+        models: selectedProviderModels,
+        effort: selectedPromptEffort,
+        text: promptText,
+      });
+      const messageIdForSend = newMessageId();
+      const messageCreatedAt = new Date().toISOString();
+      const title = truncate(`Initialize ${file}`);
+      const normalizedSelectedModelSelection =
+        normalizeModelSelectionForDispatch(selectedModelSelection);
+      const threadCreateModelSelection: ModelSelection = {
+        provider: selectedProvider,
+        model: normalizeModelForDispatch(
+          selectedModel ||
+            activeProject.defaultModelSelection?.model ||
+            DEFAULT_MODEL_BY_PROVIDER.codex,
+        ),
+        ...(selectedModelSelection.options ? { options: selectedModelSelection.options } : {}),
+      };
+
+      setOptimisticUserMessages((existing) => [
+        ...existing,
+        {
+          id: messageIdForSend,
+          role: "user",
+          text: outgoingMessageText,
+          createdAt: messageCreatedAt,
+          streaming: false,
+        },
+      ]);
+      shouldAutoScrollRef.current = true;
+      setThreadError(threadIdForSend, null);
+
+      let turnStartSucceeded = false;
+      try {
+        if (isFirstMessage && isServerThread) {
+          await api.orchestration.dispatchCommand({
+            type: "thread.meta.update",
+            commandId: newCommandId(),
+            threadId: threadIdForSend,
+            title,
+          });
+        }
+
+        const bootstrap =
+          isLocalDraftThread || baseBranchForWorktree
+            ? {
+                ...(isLocalDraftThread
+                  ? {
+                      createThread: {
+                        projectId: activeProject.id,
+                        title,
+                        modelSelection: threadCreateModelSelection,
+                        runtimeMode,
+                        interactionMode: "code" as const,
+                        branch: activeThread.branch,
+                        worktreePath: activeThread.worktreePath,
+                        createdAt: activeThread.createdAt,
+                      },
+                    }
+                  : {}),
+                ...(baseBranchForWorktree
+                  ? {
+                      prepareWorktree: {
+                        projectCwd: activeProject.cwd,
+                        baseBranch: baseBranchForWorktree,
+                        branch: buildTemporaryWorktreeBranchName(),
+                      },
+                      runSetupScript: true,
+                    }
+                  : {}),
+              }
+            : undefined;
+        beginLocalDispatch({ preparingWorktree: false });
+        await api.orchestration.dispatchCommand({
+          type: "thread.turn.start",
+          commandId: newCommandId(),
+          threadId: threadIdForSend,
+          message: {
+            messageId: messageIdForSend,
+            role: "user",
+            text: outgoingMessageText,
+            attachments: [],
+          },
+          modelSelection: normalizedSelectedModelSelection,
+          titleSeed: title,
+          runtimeMode,
+          interactionMode: "code",
+          ...(bootstrap ? { bootstrap } : {}),
+          createdAt: messageCreatedAt,
+        });
+        turnStartSucceeded = true;
+        return true;
+      } catch (err) {
+        if (!turnStartSucceeded) {
+          setOptimisticUserMessages((existing) =>
+            existing.filter((message) => message.id !== messageIdForSend),
+          );
+        }
+        setThreadError(
+          threadIdForSend,
+          err instanceof Error ? err.message : "Failed to send /init prompt.",
+        );
+        return false;
+      } finally {
+        sendInFlightRef.current = false;
+        if (!turnStartSucceeded) {
+          resetLocalDispatch();
+        }
+      }
+    },
+    [
+      activeProject,
+      activeThread,
+      beginLocalDispatch,
+      draftThread?.envMode,
+      isConnecting,
+      isLocalDraftThread,
+      isSendBusy,
+      isServerThread,
+      resetLocalDispatch,
+      runtimeMode,
+      selectedModel,
+      selectedModelSelection,
+      selectedPromptEffort,
+      selectedProvider,
+      selectedProviderModels,
+      setStoreThreadError,
+      setThreadError,
+    ],
+  );
   const handleInitSlashCommand = useCallback(async () => {
     const api = readNativeApi();
     if (!api) {
@@ -2529,7 +2703,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
     const primaryFile = getGuideFileForProvider(selectedProvider);
     const companionFile = getCompanionGuideFile(primaryFile);
-    const multiHarnessAvailable = countAvailableHarnesses(providerStatuses) > 1;
+    const shouldOfferGuideSymlink = isClaudeHarnessEnabled(providerStatuses);
+    const submitGuidePrompt = async () => {
+      const submitted = await submitInitGuidePrompt(primaryFile);
+      if (!submitted) {
+        toastManager.add({
+          type: "warning",
+          title: `Created ${primaryFile}`,
+          description:
+            "Kodo could not start the guide editing turn. Try /init again after this turn.",
+        });
+      }
+    };
 
     try {
       let [primaryExists, companionExists] = await Promise.all([
@@ -2537,7 +2722,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         doesWorkspaceEntryExist(activeWorkspaceRoot, companionFile),
       ]);
 
-      if (!primaryExists && multiHarnessAvailable && companionExists) {
+      if (!primaryExists && shouldOfferGuideSymlink && companionExists) {
         const shouldSymlinkPrimary = await confirmInitGuideSymlink({
           title: `${companionFile} already exists`,
           description: `Create ${primaryFile} as a symlink to ${companionFile} instead of creating a second guide file?`,
@@ -2553,6 +2738,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             title: `Created ${primaryFile} symlink`,
             description: `Linked ${primaryFile} to the existing ${companionFile}.`,
           });
+          await submitGuidePrompt();
           return;
         }
       }
@@ -2568,7 +2754,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         createdPrimary = true;
       }
 
-      if (multiHarnessAvailable && primaryExists && !companionExists) {
+      if (shouldOfferGuideSymlink && primaryExists && !companionExists) {
         const shouldCreateCompanionSymlink = await confirmInitGuideSymlink({
           title: `Create ${companionFile} as a symlink?`,
           description: `This keeps ${primaryFile} and ${companionFile} in sync with a single shared file.`,
@@ -2587,6 +2773,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
               ? `Also linked ${companionFile} to the same guide.`
               : `Linked ${companionFile} to the existing ${primaryFile}.`,
           });
+          await submitGuidePrompt();
           return;
         }
       }
@@ -2597,6 +2784,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           title: `Created ${primaryFile}`,
           description: "Update the placeholder sections with repository-specific guidance.",
         });
+        await submitGuidePrompt();
         return;
       }
 
@@ -2604,10 +2792,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
         type: "info",
         title: `${primaryFile} already exists`,
         description:
-          multiHarnessAvailable && companionExists
+          shouldOfferGuideSymlink && companionExists
             ? `${companionFile} is already present too.`
             : undefined,
       });
+      await submitGuidePrompt();
     } catch (error) {
       toastManager.add({
         type: "error",
@@ -2621,6 +2810,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     doesWorkspaceEntryExist,
     providerStatuses,
     selectedProvider,
+    submitInitGuidePrompt,
   ]);
   const handleStandaloneSlashCommand = useCallback(
     async (command: ComposerStandaloneSlashCommand) => {
@@ -5750,7 +5940,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
               }
             }}
           >
-            <DialogPopup className="max-w-md" showCloseButton={false}>
+            <DialogPopup
+              className="max-w-md"
+              showCloseButton={false}
+              viewportClassName="grid-rows-[1fr_auto_1fr]"
+            >
               <DialogHeader>
                 <DialogTitle>{initGuideConfirmState?.title ?? "Create guide symlink?"}</DialogTitle>
                 <DialogDescription>{initGuideConfirmState?.description}</DialogDescription>

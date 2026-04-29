@@ -2,10 +2,12 @@ import type { ServerProvider } from "@t3tools/contracts";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildInitCommandPrompt,
   countAvailableHarnesses,
   getCompanionGuideFile,
   getGuideFileForProvider,
   INIT_COMMAND_TEMPLATE,
+  isClaudeHarnessEnabled,
 } from "./initCommand";
 
 function makeProvider(
@@ -44,9 +46,34 @@ describe("initCommand", () => {
     ).toBe(1);
   });
 
+  it("detects only enabled and installed Claude harnesses", () => {
+    expect(
+      isClaudeHarnessEnabled([
+        makeProvider({ provider: "codex", enabled: true, installed: true }),
+        makeProvider({ provider: "claudeAgent", enabled: true, installed: true }),
+      ]),
+    ).toBe(true);
+    expect(
+      isClaudeHarnessEnabled([
+        makeProvider({ provider: "codex", enabled: true, installed: true }),
+        makeProvider({ provider: "claudeAgent", enabled: false, installed: true }),
+      ]),
+    ).toBe(false);
+  });
+
   it("ships a starter template with the expected sections", () => {
     expect(INIT_COMMAND_TEMPLATE).toContain("# Repository Guidelines");
     expect(INIT_COMMAND_TEMPLATE).toContain("## Build, Test, and Development Commands");
-    expect(INIT_COMMAND_TEMPLATE).toContain("## Operational Notes");
+    expect(INIT_COMMAND_TEMPLATE).toContain(
+      "## Optional: Security, Configuration, or Architecture Notes",
+    );
+  });
+
+  it("builds the model prompt for the selected guide file", () => {
+    const prompt = buildInitCommandPrompt("CLAUDE.md");
+
+    expect(prompt).toContain("Generate a file named CLAUDE.md");
+    expect(prompt).toContain("Edit CLAUDE.md in place");
+    expect(prompt).toContain("Repository Guidelines");
   });
 });
