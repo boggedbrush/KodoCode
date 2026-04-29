@@ -255,7 +255,7 @@ const BUILT_IN_MODEL_SELECTION_PRESETS: {
     }),
     makeClaudePreset("starter-claude-pro", "Pro", {
       ask: { model: "claude-haiku-4-5", thinking: false },
-      plan: { model: "claude-sonnet-4-6", effort: "low" },
+      plan: { model: "claude-haiku-4-5", thinking: true },
       code: { model: "claude-sonnet-4-6", effort: "low" },
       review: { model: "claude-sonnet-4-6", effort: "medium" },
     }),
@@ -269,7 +269,7 @@ const BUILT_IN_MODEL_SELECTION_PRESETS: {
       ask: { model: "claude-sonnet-4-6", effort: "low" },
       plan: { model: "claude-sonnet-4-6", effort: "high" },
       code: { model: "claude-sonnet-4-6", effort: "medium" },
-      review: { model: "claude-opus-4-6", effort: "high" },
+      review: { model: "claude-opus-4-7", effort: "high" },
     }),
   ],
 };

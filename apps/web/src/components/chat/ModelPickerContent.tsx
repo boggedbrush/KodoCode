@@ -39,6 +39,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   providers?: ReadonlyArray<ServerProvider>;
   keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<ModelEsque>>;
+  includeAutoModel?: boolean;
   showAsAuto?: boolean;
   terminalOpen?: boolean;
   onRequestClose?: () => void;
@@ -127,13 +128,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         return [];
       }
 
-      return [autoModelByProvider[providerKind as ProviderKind], ...models].map((model) =>
-        Object.assign({}, model, {
-          provider: providerKind as ProviderKind,
-        }),
+      const provider = providerKind as ProviderKind;
+      const providerModels =
+        props.includeAutoModel === false ? models : [autoModelByProvider[provider], ...models];
+
+      return providerModels.map((model) =>
+        Object.assign({}, model, { provider }),
       ) satisfies Array<ModelPickerItem>;
     });
-  }, [autoModelByProvider, props.modelOptionsByProvider, readyProviderSet]);
+  }, [autoModelByProvider, props.includeAutoModel, props.modelOptionsByProvider, readyProviderSet]);
 
   const filteredModels = useMemo(() => {
     let result = flatModels;
@@ -409,9 +412,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           isLocked ? "flex-col" : "flex-row",
         )}
       >
-        {isLocked && LockedProviderIcon && props.lockedProvider ? (
+        {isLocked && props.lockedProvider ? (
           <div className="flex items-center gap-2 border-b px-4 py-3">
-            <LockedProviderIcon className="size-5 shrink-0" />
+            {LockedProviderIcon ? <LockedProviderIcon className="size-5 shrink-0" /> : null}
             <span className="text-sm font-medium">
               {PROVIDER_DISPLAY_NAMES[props.lockedProvider]}
             </span>

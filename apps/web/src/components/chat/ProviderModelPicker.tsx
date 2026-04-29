@@ -33,6 +33,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   activeProviderIconClassName?: string;
   compact?: boolean;
   disabled?: boolean;
+  includeAutoModel?: boolean;
   showAsAuto?: boolean;
   terminalOpen?: boolean;
   open?: boolean;
@@ -159,6 +160,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           {...(props.providers ? { providers: props.providers } : {})}
           {...(props.keybindings ? { keybindings: props.keybindings } : {})}
           modelOptionsByProvider={props.modelOptionsByProvider}
+          {...(props.includeAutoModel !== undefined
+            ? { includeAutoModel: props.includeAutoModel }
+            : {})}
           {...(props.showAsAuto !== undefined ? { showAsAuto: props.showAsAuto } : {})}
           terminalOpen={props.terminalOpen ?? false}
           onRequestClose={() => setIsMenuOpen(false)}

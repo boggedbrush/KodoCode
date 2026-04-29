@@ -22,7 +22,6 @@ import {
 import { ensureNativeApi } from "../../nativeApi";
 import { useServerProviders } from "../../rpc/serverState";
 import type { SettingsUpdatePatch } from "../../hooks/useSettings";
-import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
 import { ClaudeAI, OpenAI } from "../Icons";
 import { Select, SelectItem, SelectPopup, SelectTrigger } from "../ui/select";
@@ -237,8 +236,8 @@ const BUILT_IN_PRESET_MODE_SELECTIONS: Readonly<
       },
       planModelSelection: {
         provider: "claudeAgent",
-        model: "claude-sonnet-4-6",
-        options: { effort: "low" },
+        model: "claude-haiku-4-5",
+        options: { thinking: true },
       },
       codeModelSelection: {
         provider: "claudeAgent",
@@ -291,7 +290,7 @@ const BUILT_IN_PRESET_MODE_SELECTIONS: Readonly<
       },
       reviewModelSelection: {
         provider: "claudeAgent",
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-7",
         options: { effort: "high" },
       },
     },
@@ -325,10 +324,8 @@ function ProviderPresetLabel({ provider }: { provider: ProviderKind }) {
     <span className="flex items-center gap-2">
       <ProviderIcon
         aria-hidden="true"
-        className={cn(
-          "size-4 shrink-0",
-          provider === "claudeAgent" ? "text-[#d97757]" : "text-muted-foreground/85",
-        )}
+        className="size-4 shrink-0 text-muted-foreground/85 data-[claude=true]:text-[#CC7C5E]"
+        data-claude={provider === "claudeAgent"}
       />
       <span>{PROVIDER_DISPLAY_NAMES[provider]}</span>
     </span>

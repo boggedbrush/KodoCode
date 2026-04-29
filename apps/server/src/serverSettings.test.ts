@@ -501,10 +501,20 @@ it.layer(NodeServices.layer)("server settings", (it) => {
       );
       assert.equal(next.modelSelectionPresets.claudeAgent["starter-claude-free"]?.name, "Free");
       assert.deepEqual(
+        next.modelSelectionPresets.claudeAgent["starter-claude-pro"]?.planModelSelection,
+        {
+          provider: "claudeAgent",
+          model: "claude-haiku-4-5",
+          options: {
+            thinking: true,
+          },
+        },
+      );
+      assert.deepEqual(
         next.modelSelectionPresets.claudeAgent["starter-claude-max-20x"]?.reviewModelSelection,
         {
           provider: "claudeAgent",
-          model: "claude-opus-4-6",
+          model: "claude-opus-4-7",
           options: {
             effort: "high",
           },
