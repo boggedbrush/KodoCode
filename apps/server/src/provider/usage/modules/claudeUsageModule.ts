@@ -174,6 +174,58 @@ function parsePercentUsed(line: string): number | null {
   return match[2]?.toLowerCase() === "used" ? value : 100 - value;
 }
 
+function parseMonthNumber(value: string): number | null {
+  const parsed = Date.parse(`${value} 1 2000 00:00 UTC`);
+  if (Number.isNaN(parsed)) {
+    return null;
+  }
+  return new Date(parsed).getUTCMonth();
+}
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string): number | null {
+  try {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    }).formatToParts(date);
+    const part = (type: Intl.DateTimeFormatPartTypes) =>
+      Number(parts.find((entry) => entry.type === type)?.value);
+    const asUtc = Date.UTC(
+      part("year"),
+      part("month") - 1,
+      part("day"),
+      part("hour"),
+      part("minute"),
+      part("second"),
+    );
+    return Number.isFinite(asUtc) ? asUtc - date.getTime() : null;
+  } catch {
+    return null;
+  }
+}
+
+function dateFromTimeZoneParts(input: {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  timeZone: string;
+}): Date | null {
+  const localAsUtc = Date.UTC(input.year, input.month, input.day, input.hour, input.minute);
+  const offset = getTimeZoneOffsetMs(new Date(localAsUtc), input.timeZone);
+  if (offset === null) {
+    return null;
+  }
+  return new Date(localAsUtc - offset);
+}
+
 function parseClaudeCliResetAt(line: string, now: Date = new Date()): string | null {
   const normalized = normalizeCliLine(line);
   if (!/^Resets?\b/i.test(normalized)) {
@@ -188,17 +240,19 @@ function parseClaudeCliResetAt(line: string, now: Date = new Date()): string | n
     return new Date(now.getTime() + amount * multiplier).toISOString();
   }
 
+  const timeZone = /\(([^)]+)\)\s*$/.exec(normalized)?.[1]?.trim() ?? null;
   const absoluteText = normalized
     .replace(/^Resets?\s+/i, "")
     .replace(/\s*\([^)]*\)\s*$/g, "")
     .replace(/\bat\b/gi, "")
     .trim();
-  const absolute = Date.parse(absoluteText);
+  const absolute = timeZone === null ? Date.parse(absoluteText) : Number.NaN;
   if (!Number.isNaN(absolute)) {
     return new Date(absolute).toISOString();
   }
 
-  const withYear = Date.parse(`${absoluteText} ${now.getFullYear()}`);
+  const withYear =
+    timeZone === null ? Date.parse(`${absoluteText} ${now.getFullYear()}`) : Number.NaN;
   if (!Number.isNaN(withYear)) {
     const parsed = new Date(withYear);
     if (parsed.getTime() < now.getTime() - 86_400_000) {
@@ -211,9 +265,39 @@ function parseClaudeCliResetAt(line: string, now: Date = new Date()): string | n
     absoluteText,
   );
   if (monthTime) {
-    const parsed = new Date(
-      `${monthTime[1]} ${monthTime[2]} ${now.getFullYear()} ${monthTime[3]}:${monthTime[4] ?? "00"} ${monthTime[5] ?? ""}`,
-    );
+    const monthName = monthTime[1];
+    const dayText = monthTime[2];
+    const hourText = monthTime[3];
+    if (monthName === undefined || dayText === undefined || hourText === undefined) {
+      return null;
+    }
+    const month = parseMonthNumber(monthName);
+    if (month === null) {
+      return null;
+    }
+    const day = Number(dayText);
+    const minute = Number(monthTime[4] ?? "0");
+    let hour = Number(hourText);
+    const meridiem = monthTime[5]?.toLowerCase();
+    if (meridiem === "pm" && hour < 12) {
+      hour += 12;
+    } else if (meridiem === "am" && hour === 12) {
+      hour = 0;
+    }
+    const parsed =
+      timeZone === null
+        ? new Date(now.getFullYear(), month, day, hour, minute)
+        : dateFromTimeZoneParts({
+            year: now.getFullYear(),
+            month,
+            day,
+            hour,
+            minute,
+            timeZone,
+          });
+    if (parsed === null) {
+      return null;
+    }
     if (!Number.isNaN(parsed.getTime())) {
       if (parsed.getTime() < now.getTime() - 86_400_000) {
         parsed.setFullYear(parsed.getFullYear() + 1);
