@@ -27,6 +27,7 @@ import {
   parseCodexCliVersion,
 } from "./provider/codexCliVersion";
 import {
+  CODEX_DEFAULT_MODEL,
   readCodexAccountSnapshot,
   resolveCodexModelForAccount,
   type CodexAccountSnapshot,
@@ -384,7 +385,7 @@ function buildCodexCollaborationMode(input: {
   }
   const codexMode =
     input.interactionMode === "plan" || input.interactionMode === "review" ? "plan" : "default";
-  const model = normalizeCodexModelSlug(input.model) ?? "gpt-5.3-codex";
+  const model = normalizeCodexModelSlug(input.model) ?? CODEX_DEFAULT_MODEL;
   return {
     mode: codexMode,
     settings: {

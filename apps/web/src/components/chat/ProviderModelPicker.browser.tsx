@@ -121,7 +121,7 @@ async function mountPicker(props: {
   providers?: ReadonlyArray<ServerProvider>;
   keybindings?: ResolvedKeybindingsConfig;
   triggerVariant?: "ghost" | "outline";
-  includeAutoModel?: boolean;
+  allowAutoModel?: boolean;
   showAsAuto?: boolean;
 }) {
   const host = document.createElement("div");
@@ -142,9 +142,7 @@ async function mountPicker(props: {
       providers={providers}
       modelOptionsByProvider={modelOptionsByProvider}
       {...(props.keybindings ? { keybindings: props.keybindings } : {})}
-      {...(props.includeAutoModel !== undefined
-        ? { includeAutoModel: props.includeAutoModel }
-        : {})}
+      {...(props.allowAutoModel !== undefined ? { allowAutoModel: props.allowAutoModel } : {})}
       {...(props.showAsAuto !== undefined ? { showAsAuto: props.showAsAuto } : {})}
       triggerVariant={props.triggerVariant}
       onProviderModelChange={onProviderModelChange}
@@ -291,23 +289,22 @@ describe("ProviderModelPicker", () => {
     }
   });
 
-  it("hides Auto when auto model selection is disabled", async () => {
+  it("hides Auto when disabled for persisted settings pickers", async () => {
     const mounted = await mountPicker({
       provider: "claudeAgent",
       model: "claude-opus-4-6",
       lockedProvider: "claudeAgent",
-      includeAutoModel: false,
+      allowAutoModel: false,
     });
 
     try {
       await page.getByRole("button").click();
-
       await vi.waitFor(() => {
-        expect(getVisibleModelNames().some((name) => name.includes("Auto"))).toBe(false);
-        expect(getVisibleModelNames().some((name) => name.includes("Claude Sonnet 4.6"))).toBe(
-          true,
-        );
+        expect(document.querySelector(".model-picker-list")).not.toBeNull();
       });
+
+      expect(getVisibleModelNames().some((name) => name.includes("Auto"))).toBe(false);
+      expect(getVisibleModelNames().some((name) => name.includes("Claude Opus 4.6"))).toBe(true);
     } finally {
       await mounted.cleanup();
     }

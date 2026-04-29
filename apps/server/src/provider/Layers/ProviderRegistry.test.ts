@@ -176,6 +176,16 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           assert.strictEqual(status.status, "ready");
           assert.strictEqual(status.installed, true);
           assert.strictEqual(status.auth.status, "authenticated");
+          assert.strictEqual(
+            status.models.some((model) => model.slug === "gpt-5.5" && model.name === "GPT-5.5"),
+            true,
+          );
+          const gpt55 = status.models.find((model) => model.slug === "gpt-5.5");
+          assert.ok(gpt55?.capabilities);
+          assert.strictEqual(
+            gpt55.capabilities.reasoningEffortLevels.find((level) => level.isDefault)?.value,
+            "low",
+          );
         }).pipe(
           Effect.provide(
             mockSpawnerLayer((args) => {

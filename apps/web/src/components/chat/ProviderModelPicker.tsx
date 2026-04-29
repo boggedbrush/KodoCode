@@ -31,9 +31,9 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   keybindings?: ResolvedKeybindingsConfig;
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<ModelEsque>>;
   activeProviderIconClassName?: string;
+  allowAutoModel?: boolean;
   compact?: boolean;
   disabled?: boolean;
-  includeAutoModel?: boolean;
   showAsAuto?: boolean;
   terminalOpen?: boolean;
   open?: boolean;
@@ -160,9 +160,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           {...(props.providers ? { providers: props.providers } : {})}
           {...(props.keybindings ? { keybindings: props.keybindings } : {})}
           modelOptionsByProvider={props.modelOptionsByProvider}
-          {...(props.includeAutoModel !== undefined
-            ? { includeAutoModel: props.includeAutoModel }
-            : {})}
+          {...(props.allowAutoModel !== undefined ? { allowAutoModel: props.allowAutoModel } : {})}
           {...(props.showAsAuto !== undefined ? { showAsAuto: props.showAsAuto } : {})}
           terminalOpen={props.terminalOpen ?? false}
           onRequestClose={() => setIsMenuOpen(false)}

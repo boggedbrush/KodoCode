@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ApprovalRequestId, ThreadId } from "@t3tools/contracts";
+import { ApprovalRequestId, DEFAULT_MODEL_BY_PROVIDER, ThreadId } from "@t3tools/contracts";
 
 import {
   buildCodexInitializeParams,
@@ -249,6 +249,10 @@ describe("normalizeCodexModelSlug", () => {
     expect(normalizeCodexModelSlug("gpt-5.3")).toBe("gpt-5.3-codex");
   });
 
+  it("maps 5.5 aliases to gpt-5.5", () => {
+    expect(normalizeCodexModelSlug("5.5")).toBe("gpt-5.5");
+  });
+
   it("prefers codex id when model differs", () => {
     expect(normalizeCodexModelSlug("gpt-5.3", "gpt-5.3-codex")).toBe("gpt-5.3-codex");
   });
@@ -381,7 +385,7 @@ describe("resolveCodexModelForAccount", () => {
         planType: "plus",
         sparkEnabled: false,
       }),
-    ).toBe("gpt-5.3-codex");
+    ).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
   });
 
   it("keeps spark for supported plans", () => {
@@ -401,7 +405,7 @@ describe("resolveCodexModelForAccount", () => {
         planType: null,
         sparkEnabled: false,
       }),
-    ).toBe("gpt-5.3-codex");
+    ).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
   });
 });
 
