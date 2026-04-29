@@ -54,6 +54,11 @@ const CHAT_TEXT_SIZE_LABELS = {
   large: "Large",
 } as const satisfies Record<ChatTextSize, string>;
 
+const PROJECT_PICKER_MODE_LABELS = {
+  fullscreen: "Fullscreen",
+  sidebar: "Sidebar",
+} as const;
+
 export function SettingsAppearancePanel() {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
@@ -169,6 +174,45 @@ export function SettingsAppearancePanel() {
                 </SelectItem>
                 <SelectItem hideIndicator value="large">
                   {CHAT_TEXT_SIZE_LABELS.large}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Project picker"
+          description="Choose whether adding a project opens the fullscreen picker or the inline sidebar browser."
+          resetAction={
+            settings.projectPickerMode !== DEFAULT_UNIFIED_SETTINGS.projectPickerMode ? (
+              <SettingResetButton
+                label="project picker"
+                onClick={() =>
+                  updateSettings({
+                    projectPickerMode: DEFAULT_UNIFIED_SETTINGS.projectPickerMode,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.projectPickerMode}
+              onValueChange={(value) => {
+                if (value === "fullscreen" || value === "sidebar") {
+                  updateSettings({ projectPickerMode: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Project picker preference">
+                <SelectValue>{PROJECT_PICKER_MODE_LABELS[settings.projectPickerMode]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="fullscreen">
+                  {PROJECT_PICKER_MODE_LABELS.fullscreen}
+                </SelectItem>
+                <SelectItem hideIndicator value="sidebar">
+                  {PROJECT_PICKER_MODE_LABELS.sidebar}
                 </SelectItem>
               </SelectPopup>
             </Select>

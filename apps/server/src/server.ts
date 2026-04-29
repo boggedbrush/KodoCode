@@ -76,7 +76,7 @@ import { ServerAuthLive } from "./auth/Layers/ServerAuth";
 
 const PtyAdapterLive = Layer.unwrap(
   Effect.gen(function* () {
-    if (typeof Bun !== "undefined") {
+    if (typeof Bun !== "undefined" && process.platform !== "win32") {
       const BunPTY = yield* Effect.promise(() => import("./terminal/Layers/BunPTY"));
       return BunPTY.layer;
     } else {
@@ -215,13 +215,20 @@ const GitLayerLive = Layer.empty.pipe(
 
 const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
 
+const WorkspaceEntriesLayerLive = WorkspaceEntriesLive.pipe(
+  Layer.provide(WorkspacePathsLive),
+  Layer.provideMerge(GitCoreLive),
+);
+
+const WorkspaceFileSystemLayerLive = WorkspaceFileSystemLive.pipe(
+  Layer.provide(WorkspacePathsLive),
+  Layer.provide(WorkspaceEntriesLayerLive),
+);
+
 const WorkspaceLayerLive = Layer.mergeAll(
   WorkspacePathsLive,
-  WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive)),
-  WorkspaceFileSystemLive.pipe(
-    Layer.provide(WorkspacePathsLive),
-    Layer.provide(WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive))),
-  ),
+  WorkspaceEntriesLayerLive,
+  WorkspaceFileSystemLayerLive,
 );
 
 const AuthLayerLive = ServerAuthLive.pipe(

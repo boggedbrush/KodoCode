@@ -11,6 +11,7 @@ import { normalizeModelSlug } from "@t3tools/shared/model";
 import { isWindowsCommandNotFound } from "../processRunner";
 
 export const DEFAULT_TIMEOUT_MS = 4_000;
+export const AUTH_PROBE_TIMEOUT_MS = 10_000;
 
 export interface CommandResult {
   readonly stdout: string;

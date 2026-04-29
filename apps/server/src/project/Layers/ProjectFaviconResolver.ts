@@ -28,6 +28,7 @@ const FAVICON_CANDIDATES = [
   "assets/logo.svg",
   "assets/logo.png",
   "assets/prod/logo.svg",
+  ".idea/icon.svg",
 ] as const;
 
 // Files that may contain a <link rel="icon"> or icon metadata declaration.

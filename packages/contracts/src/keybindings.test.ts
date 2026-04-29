@@ -59,6 +59,18 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsedReviewMode.command, "composer.mode.review");
 
+    const parsedModelPickerToggle = yield* decode(KeybindingRule, {
+      key: "mod+shift+m",
+      command: "modelPicker.toggle",
+    });
+    assert.strictEqual(parsedModelPickerToggle.command, "modelPicker.toggle");
+
+    const parsedModelPickerJump = yield* decode(KeybindingRule, {
+      key: "mod+1",
+      command: "modelPicker.jump.1",
+    });
+    assert.strictEqual(parsedModelPickerJump.command, "modelPicker.jump.1");
+
     const parsedThreadPrevious = yield* decode(KeybindingRule, {
       key: "mod+shift+[",
       command: "thread.previous",
@@ -155,8 +167,23 @@ it.effect("parses resolved keybindings arrays", () =>
           modKey: true,
         },
       },
+      {
+        command: "modelPicker.jump.3",
+        shortcut: {
+          key: "3",
+          metaKey: false,
+          ctrlKey: false,
+          shiftKey: false,
+          altKey: false,
+          modKey: true,
+        },
+        whenAst: {
+          type: "identifier",
+          name: "modelPickerOpen",
+        },
+      },
     ]);
-    assert.lengthOf(parsed, 2);
+    assert.lengthOf(parsed, 3);
   }),
 );
 

@@ -45,6 +45,7 @@ import { CSS } from "@dnd-kit/utilities";
 import {
   DEFAULT_MODEL_BY_PROVIDER,
   type DesktopUpdateState,
+  type FilesystemBrowseEntry,
   ProjectId,
   ThreadId,
   type GitStatusResult,
@@ -57,7 +58,15 @@ import {
 import { isElectron } from "../env";
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
 import { isTerminalFocused } from "../lib/terminalFocus";
-import { cn, isLinuxPlatform, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
+import { cn, isMacPlatform, newCommandId, newProjectId } from "../lib/utils";
+import {
+  ensureBrowseDirectoryPath,
+  findProjectByPath,
+  getBrowseParentPath,
+  inferProjectTitleFromPath,
+  isExplicitRelativeProjectPath,
+  normalizeProjectPathForDispatch,
+} from "../lib/projectPaths";
 import { useStore } from "../store";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
@@ -108,7 +117,6 @@ import {
   useSidebar,
 } from "./ui/sidebar";
 import { useThreadSelectionStore } from "../threadSelectionStore";
-import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
   getProjectThreadsForSidebar,
   getVisibleSidebarThreadIds,
@@ -127,6 +135,8 @@ import {
   sortThreadsForSidebar,
   useThreadJumpHintVisibility,
 } from "./Sidebar.logic";
+import { ProjectFolderBrowser } from "./ProjectFolderBrowser";
+import { ProjectFolderPickerDialog } from "./ProjectFolderPickerDialog";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
@@ -728,9 +738,15 @@ export default function Sidebar() {
   const keybindings = useServerKeybindings();
   const [addingProject, setAddingProject] = useState(false);
   const [newCwd, setNewCwd] = useState("");
-  const [isPickingFolder, setIsPickingFolder] = useState(false);
   const [isAddingProject, setIsAddingProject] = useState(false);
   const [addProjectError, setAddProjectError] = useState<string | null>(null);
+  const [browsePanelOpen, setBrowsePanelOpen] = useState(false);
+  const [browsePath, setBrowsePath] = useState("");
+  const [browseEntries, setBrowseEntries] = useState<ReadonlyArray<FilesystemBrowseEntry>>([]);
+  const [browseCurrentDirectory, setBrowseCurrentDirectory] = useState<string | null>(null);
+  const [browseError, setBrowseError] = useState<string | null>(null);
+  const [isBrowsingFilesystem, setIsBrowsingFilesystem] = useState(false);
+  const [projectPickerDialogOpen, setProjectPickerDialogOpen] = useState(false);
   const addProjectInputRef = useRef<HTMLInputElement | null>(null);
   const [renamingProjectId, setRenamingProjectId] = useState<ProjectId | null>(null);
   const [renamingProjectTitle, setRenamingProjectTitle] = useState("");
@@ -756,13 +772,13 @@ export default function Sidebar() {
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const removeFromSelection = useThreadSelectionStore((s) => s.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
-  const isLinuxDesktop = isElectron && isLinuxPlatform(navigator.platform);
   const isMacDesktop = isElectron && isMacPlatform(navigator.platform);
   const shouldShowSidebarWordmark = true;
   const shouldShowSidebarLogo = true;
   const platform = navigator.platform;
-  const shouldBrowseForProjectImmediately = isElectron && !isLinuxDesktop;
-  const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
+  const usesFullscreenProjectPicker = isElectron && appSettings.projectPickerMode === "fullscreen";
+  const shouldShowProjectPathEntry = addingProject && !usesFullscreenProjectPicker;
+  const isProjectPickerOpen = addingProject || projectPickerDialogOpen;
   const orderedProjects = useMemo(() => {
     return orderItemsByPreferredIds({
       items: projects,
@@ -783,6 +799,14 @@ export default function Sidebar() {
     () => new Map(projects.map((project) => [project.id, project.cwd] as const)),
     [projects],
   );
+  const activeBrowseCwd = useMemo(() => {
+    const activeProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
+    return (
+      activeThread?.worktreePath ??
+      activeDraftThread?.worktreePath ??
+      (activeProjectId ? (projectCwdById.get(activeProjectId) ?? null) : null)
+    );
+  }, [activeDraftThread, activeThread, projectCwdById]);
   const routeTerminalOpen = routeThreadId
     ? selectThreadTerminalState(terminalStateByThreadId, routeThreadId).terminalOpen
     : false;
@@ -854,7 +878,7 @@ export default function Sidebar() {
 
   const addProjectFromPath = useCallback(
     async (rawCwd: string) => {
-      const cwd = rawCwd.trim();
+      const cwd = normalizeProjectPathForDispatch(rawCwd);
       if (!cwd || isAddingProject) return;
       const api = readNativeApi();
       if (!api) return;
@@ -862,12 +886,21 @@ export default function Sidebar() {
       setIsAddingProject(true);
       const finishAddingProject = () => {
         setIsAddingProject(false);
+        // Keep the inline and fullscreen pickers on the same reset path so changing the
+        // appearance setting never leaves stale browse state waiting in the other shell.
         setNewCwd("");
         setAddProjectError(null);
+        setBrowsePanelOpen(false);
+        setBrowsePath("");
+        setBrowseEntries([]);
+        setBrowseCurrentDirectory(null);
+        setBrowseError(null);
+        setIsBrowsingFilesystem(false);
         setAddingProject(false);
+        setProjectPickerDialogOpen(false);
       };
 
-      const existing = projects.find((project) => project.cwd === cwd);
+      const existing = findProjectByPath(projects, cwd);
       if (existing) {
         focusMostRecentThreadForProject(existing.id);
         finishAddingProject();
@@ -876,7 +909,7 @@ export default function Sidebar() {
 
       const projectId = newProjectId();
       const createdAt = new Date().toISOString();
-      const title = cwd.split(/[/\\]/).findLast(isNonEmptyString) ?? cwd;
+      const title = inferProjectTitleFromPath(cwd);
       try {
         await api.orchestration.dispatchCommand({
           type: "project.create",
@@ -897,15 +930,7 @@ export default function Sidebar() {
         const description =
           error instanceof Error ? error.message : "An error occurred while adding the project.";
         setIsAddingProject(false);
-        if (shouldBrowseForProjectImmediately) {
-          toastManager.add({
-            type: "error",
-            title: "Failed to add project",
-            description,
-          });
-        } else {
-          setAddProjectError(description);
-        }
+        setAddProjectError(description);
         return;
       }
       finishAddingProject();
@@ -915,7 +940,6 @@ export default function Sidebar() {
       handleNewThread,
       isAddingProject,
       projects,
-      shouldBrowseForProjectImmediately,
       appSettings.defaultThreadEnvMode,
     ],
   );
@@ -926,31 +950,99 @@ export default function Sidebar() {
 
   const canAddProject = newCwd.trim().length > 0 && !isAddingProject;
 
-  const handlePickFolder = async () => {
-    const api = readNativeApi();
-    if (!api || isPickingFolder) return;
-    setIsPickingFolder(true);
-    let pickedPath: string | null = null;
-    try {
-      pickedPath = await api.dialogs.pickFolder();
-    } catch {
-      // Ignore picker failures and leave the current thread selection unchanged.
-    }
-    if (pickedPath) {
-      await addProjectFromPath(pickedPath);
-    } else if (!shouldBrowseForProjectImmediately) {
-      addProjectInputRef.current?.focus();
-    }
-    setIsPickingFolder(false);
-  };
+  const browseFilesystem = useCallback(
+    async (requestedPath: string) => {
+      const api = readNativeApi();
+      const partialPath = requestedPath.trim();
+      if (!api || !partialPath || isBrowsingFilesystem) return;
 
-  const handleStartAddProject = () => {
+      setIsBrowsingFilesystem(true);
+      setBrowseError(null);
+      try {
+        const result = await api.filesystem.browse({
+          partialPath,
+          ...(isExplicitRelativeProjectPath(partialPath) && activeBrowseCwd
+            ? { cwd: activeBrowseCwd }
+            : {}),
+        });
+        const browsingDirectory = /[\\/]$/.test(partialPath) || partialPath === "~";
+        const resolvedDirectory = browsingDirectory
+          ? normalizeProjectPathForDispatch(result.parentPath)
+          : null;
+        setBrowsePath(partialPath);
+        setBrowseEntries(result.entries);
+        setBrowseCurrentDirectory(resolvedDirectory);
+        if (resolvedDirectory) {
+          setNewCwd(resolvedDirectory);
+        }
+      } catch (error) {
+        setBrowseEntries([]);
+        setBrowseCurrentDirectory(null);
+        setBrowseError(error instanceof Error ? error.message : "Unable to browse folders.");
+      } finally {
+        setIsBrowsingFilesystem(false);
+      }
+    },
+    [activeBrowseCwd, isBrowsingFilesystem],
+  );
+
+  const openBrowsePanel = useCallback(() => {
+    const initialPath =
+      newCwd.trim().length > 0
+        ? ensureBrowseDirectoryPath(normalizeProjectPathForDispatch(newCwd))
+        : "~/";
+    setBrowsePanelOpen(true);
+    setBrowsePath(initialPath);
+    void browseFilesystem(initialPath);
+  }, [browseFilesystem, newCwd]);
+
+  const closeProjectPicker = useCallback(() => {
+    setAddingProject(false);
+    setProjectPickerDialogOpen(false);
+    setIsAddingProject(false);
+    setIsBrowsingFilesystem(false);
+    setNewCwd("");
     setAddProjectError(null);
-    if (shouldBrowseForProjectImmediately) {
-      void handlePickFolder();
+    setBrowsePanelOpen(false);
+    setBrowsePath("");
+    setBrowseEntries([]);
+    setBrowseCurrentDirectory(null);
+    setBrowseError(null);
+  }, []);
+
+  const handleBrowseUp = useCallback(() => {
+    if (!browseCurrentDirectory) {
       return;
     }
-    setAddingProject((prev) => !prev);
+    const parentPath = getBrowseParentPath(ensureBrowseDirectoryPath(browseCurrentDirectory));
+    if (!parentPath) {
+      return;
+    }
+    void browseFilesystem(parentPath);
+  }, [browseCurrentDirectory, browseFilesystem]);
+
+  const handleBrowseEntryOpen = useCallback(
+    (entry: FilesystemBrowseEntry) => {
+      void browseFilesystem(ensureBrowseDirectoryPath(entry.fullPath));
+    },
+    [browseFilesystem],
+  );
+
+  const handleStartAddProject = () => {
+    if (isProjectPickerOpen) {
+      closeProjectPicker();
+      return;
+    }
+    setAddProjectError(null);
+    if (usesFullscreenProjectPicker) {
+      setProjectPickerDialogOpen(true);
+      openBrowsePanel();
+      return;
+    }
+    setAddingProject(true);
+    if (isElectron) {
+      openBrowsePanel();
+    }
   };
 
   const cancelRename = useCallback(() => {
@@ -2251,10 +2343,8 @@ export default function Sidebar() {
                       render={
                         <button
                           type="button"
-                          aria-label={
-                            shouldShowProjectPathEntry ? "Cancel add project" : "Add project"
-                          }
-                          aria-pressed={shouldShowProjectPathEntry}
+                          aria-label={isProjectPickerOpen ? "Cancel add project" : "Add project"}
+                          aria-pressed={isProjectPickerOpen}
                           className="inline-flex size-5 cursor-pointer items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
                           onClick={handleStartAddProject}
                         />
@@ -2262,29 +2352,18 @@ export default function Sidebar() {
                     >
                       <PlusIcon
                         className={`size-3.5 transition-transform duration-150 ${
-                          shouldShowProjectPathEntry ? "rotate-45" : "rotate-0"
+                          isProjectPickerOpen ? "rotate-45" : "rotate-0"
                         }`}
                       />
                     </TooltipTrigger>
                     <TooltipPopup side="right">
-                      {shouldShowProjectPathEntry ? "Cancel add project" : "Add project"}
+                      {isProjectPickerOpen ? "Cancel add project" : "Add project"}
                     </TooltipPopup>
                   </Tooltip>
                 </div>
               </div>
               {shouldShowProjectPathEntry && (
                 <div className="mb-2 px-1">
-                  {isElectron && (
-                    <button
-                      type="button"
-                      className="mb-1.5 flex w-full items-center justify-center gap-2 rounded-md border border-border bg-secondary py-1.5 text-xs text-foreground/80 transition-colors duration-150 hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-60"
-                      onClick={() => void handlePickFolder()}
-                      disabled={isPickingFolder || isAddingProject}
-                    >
-                      <FolderIcon className="size-3.5" />
-                      {isPickingFolder ? "Picking folder..." : "Browse for folder"}
-                    </button>
-                  )}
                   <div className="flex gap-1.5">
                     <input
                       ref={addProjectInputRef}
@@ -2302,8 +2381,7 @@ export default function Sidebar() {
                       onKeyDown={(event) => {
                         if (event.key === "Enter") handleAddProject();
                         if (event.key === "Escape") {
-                          setAddingProject(false);
-                          setAddProjectError(null);
+                          closeProjectPicker();
                         }
                       }}
                       autoFocus
@@ -2317,6 +2395,46 @@ export default function Sidebar() {
                       {isAddingProject ? "Adding..." : "Add"}
                     </button>
                   </div>
+                  <div className="mt-1.5 flex gap-1.5">
+                    <button
+                      type="button"
+                      className="flex flex-1 items-center justify-center gap-2 rounded-md border border-border bg-secondary py-1.5 text-xs text-foreground/80 transition-colors duration-150 hover:bg-accent hover:text-foreground"
+                      onClick={() => {
+                        if (browsePanelOpen) {
+                          setBrowsePanelOpen(false);
+                          setBrowseError(null);
+                          return;
+                        }
+                        openBrowsePanel();
+                      }}
+                    >
+                      <FolderIcon className="size-3.5" />
+                      {browsePanelOpen ? "Hide folder browser" : "Browse folders"}
+                    </button>
+                  </div>
+                  {browsePanelOpen && (
+                    <ProjectFolderBrowser
+                      variant="sidebar"
+                      browsePath={browsePath}
+                      browseEntries={browseEntries}
+                      browseCurrentDirectory={browseCurrentDirectory}
+                      browseError={browseError}
+                      isBrowsingFilesystem={isBrowsingFilesystem}
+                      isAddingProject={isAddingProject}
+                      onBrowsePathChange={(nextPath) => {
+                        setBrowsePath(nextPath);
+                        setBrowseError(null);
+                      }}
+                      onBrowse={() => void browseFilesystem(browsePath)}
+                      onBrowseUp={handleBrowseUp}
+                      onBrowseEntryOpen={handleBrowseEntryOpen}
+                      onAddCurrentDirectory={() => {
+                        if (browseCurrentDirectory) {
+                          void addProjectFromPath(browseCurrentDirectory);
+                        }
+                      }}
+                    />
+                  )}
                   {addProjectError && (
                     <p className="mt-1 px-0.5 text-[11px] leading-tight text-red-400">
                       {addProjectError}
@@ -2360,7 +2478,7 @@ export default function Sidebar() {
                 </SidebarMenu>
               )}
 
-              {projects.length === 0 && !shouldShowProjectPathEntry && (
+              {projects.length === 0 && !isProjectPickerOpen && (
                 <div className="px-2 pt-4 text-center text-xs text-muted-foreground/60">
                   No projects yet
                 </div>
@@ -2384,6 +2502,43 @@ export default function Sidebar() {
               </SidebarMenuItem>
             </SidebarMenu>
           </SidebarFooter>
+
+          <ProjectFolderPickerDialog
+            open={projectPickerDialogOpen}
+            newCwd={newCwd}
+            addProjectError={addProjectError}
+            canAddProject={canAddProject}
+            isAddingProject={isAddingProject}
+            browsePath={browsePath}
+            browseEntries={browseEntries}
+            browseCurrentDirectory={browseCurrentDirectory}
+            browseError={browseError}
+            isBrowsingFilesystem={isBrowsingFilesystem}
+            onOpenChange={(open) => {
+              if (open) {
+                setProjectPickerDialogOpen(true);
+                return;
+              }
+              closeProjectPicker();
+            }}
+            onNewCwdChange={(nextPath) => {
+              setNewCwd(nextPath);
+              setAddProjectError(null);
+            }}
+            onAddProject={handleAddProject}
+            onBrowsePathChange={(nextPath) => {
+              setBrowsePath(nextPath);
+              setBrowseError(null);
+            }}
+            onBrowse={() => void browseFilesystem(browsePath)}
+            onBrowseUp={handleBrowseUp}
+            onBrowseEntryOpen={handleBrowseEntryOpen}
+            onAddCurrentDirectory={() => {
+              if (browseCurrentDirectory) {
+                void addProjectFromPath(browseCurrentDirectory);
+              }
+            }}
+          />
         </>
       )}
     </>

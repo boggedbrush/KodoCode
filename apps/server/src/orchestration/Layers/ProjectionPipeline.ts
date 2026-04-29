@@ -89,6 +89,17 @@ function extractActivityRequestId(payload: unknown): ApprovalRequestId | null {
   return typeof requestId === "string" ? ApprovalRequestId.makeUnsafe(requestId) : null;
 }
 
+function isStalePendingApprovalFailureDetail(detail: string | null): boolean {
+  if (detail === null) {
+    return false;
+  }
+  return (
+    detail.includes("stale pending approval request") ||
+    detail.includes("unknown pending approval request") ||
+    detail.includes("unknown pending permission request")
+  );
+}
+
 function retainProjectionMessagesAfterRevert(
   messages: ReadonlyArray<ProjectionThreadMessage>,
   turns: ReadonlyArray<ProjectionTurn>,
@@ -1119,6 +1130,42 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
                 : event.payload.activity.createdAt,
               resolvedAt: event.payload.activity.createdAt,
             });
+            return;
+          }
+          if (event.payload.activity.kind === "provider.approval.respond.failed") {
+            const payload =
+              typeof event.payload.activity.payload === "object" &&
+              event.payload.activity.payload !== null
+                ? (event.payload.activity.payload as Record<string, unknown>)
+                : null;
+            const detail =
+              typeof payload?.detail === "string" ? payload.detail.toLowerCase() : null;
+            if (isStalePendingApprovalFailureDetail(detail)) {
+              if (Option.isNone(existingRow)) {
+                return;
+              }
+              if (existingRow.value.status === "resolved") {
+                return;
+              }
+              yield* projectionPendingApprovalRepository.upsert({
+                requestId,
+                threadId: existingRow.value.threadId,
+                turnId: existingRow.value.turnId,
+                status: "resolved",
+                decision: null,
+                createdAt: existingRow.value.createdAt,
+                resolvedAt: event.payload.activity.createdAt,
+              });
+              return;
+            }
+            return;
+          }
+          // Only approval-requested activities should create pending-approval
+          // rows.  Other activity kinds that happen to carry a requestId
+          // (e.g. user-input.requested / user-input.resolved) must not
+          // pollute this projection — they have their own accounting via
+          // derivePendingUserInputCountFromActivities.
+          if (event.payload.activity.kind !== "approval.requested") {
             return;
           }
           if (Option.isSome(existingRow) && existingRow.value.status === "resolved") {

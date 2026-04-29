@@ -1,5 +1,6 @@
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { Effect, Option } from "effect";
+import { spawn as spawnPty } from "node-pty";
 
 import type { CodexAccountSnapshot } from "../codexAccount";
 import {
@@ -19,6 +20,7 @@ export interface PtyApi {
     readonly args: ReadonlyArray<string>;
     readonly cwd?: string;
     readonly timeoutMs: number;
+    readonly sendAfterMs?: ReadonlyArray<{ readonly delayMs: number; readonly send: string }>;
     readonly sendOnSubstring?: ReadonlyArray<{ readonly match: string; readonly send: string }>;
     readonly stopOnSubstring?: ReadonlyArray<string>;
   }) => Effect.Effect<
@@ -109,6 +111,107 @@ export const makeSubprocessApi = Effect.gen(function* () {
   };
 
   return api;
+});
+
+export const makePtyApi = Effect.succeed<PtyApi>({
+  runInteractive: (input) =>
+    Effect.tryPromise(
+      () =>
+        new Promise<{
+          readonly stdout: string;
+          readonly stderr: string;
+          readonly exitCode: number;
+        }>((resolve, reject) => {
+          let stdout = "";
+          let stderr = "";
+          let settled = false;
+          const pendingSends = (input.sendOnSubstring ?? []).map((send) =>
+            Object.assign({}, send, { sent: false }),
+          );
+          const timers: Array<ReturnType<typeof setTimeout>> = [];
+
+          const child = spawnPty(input.command, [...input.args], {
+            cols: 140,
+            rows: 50,
+            name: "xterm-256color",
+            cwd: input.cwd ?? process.cwd(),
+            env: process.env,
+          });
+
+          const settle = (result: {
+            readonly stdout: string;
+            readonly stderr: string;
+            readonly exitCode: number;
+          }) => {
+            if (settled) {
+              return;
+            }
+            settled = true;
+            for (const timer of timers) {
+              clearTimeout(timer);
+            }
+            try {
+              child.kill();
+            } catch {
+              // Already exited.
+            }
+            resolve(result);
+          };
+
+          timers.push(
+            setTimeout(() => {
+              if (settled) {
+                return;
+              }
+              settled = true;
+              try {
+                child.kill();
+              } catch {
+                // Already exited.
+              }
+              reject(
+                new Error(
+                  `PTY command timed out after ${input.timeoutMs}ms: ${input.command} ${input.args.join(" ")}`,
+                ),
+              );
+            }, input.timeoutMs),
+          );
+
+          for (const send of input.sendAfterMs ?? []) {
+            timers.push(
+              setTimeout(() => {
+                if (!settled) {
+                  child.write(send.send);
+                }
+              }, send.delayMs),
+            );
+          }
+
+          child.onData((chunk) => {
+            stdout += chunk;
+            for (const send of pendingSends) {
+              if (!send.sent && stdout.includes(send.match)) {
+                send.sent = true;
+                child.write(send.send);
+              }
+            }
+
+            if ((input.stopOnSubstring ?? []).some((marker) => stdout.includes(marker))) {
+              settle({ stdout, stderr, exitCode: 0 });
+            }
+          });
+
+          child.onExit((event) => {
+            settle({ stdout, stderr, exitCode: event.exitCode });
+          });
+
+          child.onData((chunk) => {
+            if (chunk.includes("Error:") || chunk.includes("error:")) {
+              stderr += chunk;
+            }
+          });
+        }),
+    ).pipe(Effect.mapError(toError)),
 });
 
 export const makeCodexAccountProbeApi = Effect.succeed<CodexAccountProbeApi>({

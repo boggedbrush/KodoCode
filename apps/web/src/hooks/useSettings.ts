@@ -16,6 +16,7 @@ import {
   ClientSettingsSchema,
   DEFAULT_CLIENT_SETTINGS,
   DEFAULT_UNIFIED_SETTINGS,
+  ProjectPickerMode,
   SidebarProjectSortOrder,
   SidebarThreadSortOrder,
   TimestampFormat,
@@ -198,6 +199,31 @@ export function buildLegacyClientSettingsMigrationPatch(
 
   if (Predicate.isBoolean(legacySettings.diffWordWrap)) {
     patch.diffWordWrap = legacySettings.diffWordWrap;
+  }
+
+  if (Array.isArray(legacySettings.favorites)) {
+    const favorites = legacySettings.favorites.flatMap((favorite) => {
+      if (!Predicate.isObject(favorite)) {
+        return [];
+      }
+      const provider = favorite.provider;
+      const model = favorite.model;
+      if (
+        (provider === "codex" || provider === "claudeAgent") &&
+        typeof model === "string" &&
+        model.trim().length > 0
+      ) {
+        return [{ provider, model: model.trim() }] as const;
+      }
+      return [];
+    });
+    if (favorites.length > 0) {
+      patch.favorites = favorites;
+    }
+  }
+
+  if (Schema.is(ProjectPickerMode)(legacySettings.projectPickerMode)) {
+    patch.projectPickerMode = legacySettings.projectPickerMode;
   }
 
   if (Schema.is(SidebarProjectSortOrder)(legacySettings.sidebarProjectSortOrder)) {

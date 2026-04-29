@@ -59,6 +59,19 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
       }),
     );
 
+    it.effect("resolves IntelliJ project icons", () =>
+      Effect.gen(function* () {
+        const resolver = yield* ProjectFaviconResolver;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, ".idea/icon.svg", "<svg>idea</svg>");
+
+        const resolved = yield* resolver.resolvePath(cwd);
+
+        expect(resolved).not.toBeNull();
+        expect(resolved).toContain(".idea/icon.svg");
+      }),
+    );
+
     it.effect("resolves icon hrefs from project source files", () =>
       Effect.gen(function* () {
         const resolver = yield* ProjectFaviconResolver;

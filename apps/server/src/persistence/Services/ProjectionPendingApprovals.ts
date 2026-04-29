@@ -45,6 +45,12 @@ export const DeleteProjectionPendingApprovalInput = Schema.Struct({
 });
 export type DeleteProjectionPendingApprovalInput = typeof DeleteProjectionPendingApprovalInput.Type;
 
+export const RefreshProjectionPendingApprovalCountInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type RefreshProjectionPendingApprovalCountInput =
+  typeof RefreshProjectionPendingApprovalCountInput.Type;
+
 /**
  * ProjectionPendingApprovalRepositoryShape - Service API for pending approvals.
  */
@@ -79,6 +85,13 @@ export interface ProjectionPendingApprovalRepositoryShape {
    */
   readonly deleteByRequestId: (
     input: DeleteProjectionPendingApprovalInput,
+  ) => Effect.Effect<void, ProjectionRepositoryError>;
+
+  /**
+   * Recompute the denormalized pending approval count for a thread.
+   */
+  readonly refreshThreadPendingCount: (
+    input: RefreshProjectionPendingApprovalCountInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>;
 }
 

@@ -27,6 +27,7 @@ import {
   type ExecuteGitProgress,
   type GitCommitOptions,
   type GitCoreShape,
+  type GitStatusDetails,
   type ExecuteGitInput,
   type ExecuteGitResult,
 } from "../Services/GitCore.ts";
@@ -60,14 +61,30 @@ const STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY = 2_048;
 const STATUS_UPSTREAM_REFRESH_SSH_CONNECT_TIMEOUT_SECONDS = 1;
 const DEFAULT_BASE_BRANCH_CANDIDATES = ["main", "master"] as const;
 const GIT_LIST_BRANCHES_DEFAULT_LIMIT = 100;
+const NON_REPOSITORY_STATUS_DETAILS = Object.freeze<GitStatusDetails>({
+  isRepo: false,
+  hasOriginRemote: false,
+  isDefaultBranch: false,
+  branch: null,
+  upstreamRef: null,
+  hasWorkingTreeChanges: false,
+  workingTree: { files: [], insertions: 0, deletions: 0 },
+  hasUpstream: false,
+  aheadCount: 0,
+  behindCount: 0,
+});
 
 type TraceTailState = {
   processedChars: number;
   remainder: string;
 };
 
-class StatusUpstreamRefreshCacheKey extends Data.Class<{
+class StatusRemoteRefreshCacheKey extends Data.Class<{
   gitCommonDir: string;
+  // The cache must stay branch-specific. Reusing one remote-level refresh
+  // entry across sibling worktrees can make a fetch for `origin/main` appear
+  // to satisfy `origin/feature/...`, even though only one tracking ref was
+  // updated.
   upstreamRef: string;
   remoteName: string;
   upstreamBranch: string;
@@ -372,6 +389,16 @@ function createGitCommandError(
 
 function quoteGitCommand(args: ReadonlyArray<string>): string {
   return `git ${args.join(" ")}`;
+}
+
+function isMissingGitCwdError(error: GitCommandError): boolean {
+  const normalized = `${error.detail}\n${error.message}`.toLowerCase();
+  return (
+    normalized.includes("no such file or directory") ||
+    normalized.includes("notfound: filesystem.access") ||
+    normalized.includes("enoent") ||
+    normalized.includes("not a directory")
+  );
 }
 
 function toGitCommandError(
@@ -926,15 +953,19 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     );
   });
 
-  const fetchUpstreamRefForStatus = (
+  const fetchRemoteForStatus = (
     gitCommonDir: string,
     upstream: { upstreamRef: string; remoteName: string; upstreamBranch: string },
   ): Effect.Effect<void, GitCommandError> => {
+    // Status refreshes need to update the exact tracking ref for the current
+    // branch. A bare `git fetch <remote>` can skip that ref in single-branch
+    // clones or repos with custom remote.<name>.fetch rules, which leaves
+    // ahead/behind counts stale even though we just "refreshed".
     const refspec = `+refs/heads/${upstream.upstreamBranch}:refs/remotes/${upstream.upstreamRef}`;
     const fetchCwd =
       path.basename(gitCommonDir) === ".git" ? path.dirname(gitCommonDir) : gitCommonDir;
     return executeGit(
-      "GitCore.fetchUpstreamRefForStatus",
+      "GitCore.fetchRemoteForStatus",
       fetchCwd,
       ["--git-dir", gitCommonDir, "fetch", "--quiet", "--no-tags", upstream.remoteName, refspec],
       {
@@ -953,10 +984,10 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     return path.isAbsolute(gitCommonDir) ? gitCommonDir : path.resolve(cwd, gitCommonDir);
   });
 
-  const refreshStatusUpstreamCacheEntry = Effect.fn("refreshStatusUpstreamCacheEntry")(function* (
-    cacheKey: StatusUpstreamRefreshCacheKey,
+  const refreshStatusRemoteCacheEntry = Effect.fn("refreshStatusRemoteCacheEntry")(function* (
+    cacheKey: StatusRemoteRefreshCacheKey,
   ) {
-    yield* fetchUpstreamRefForStatus(cacheKey.gitCommonDir, {
+    yield* fetchRemoteForStatus(cacheKey.gitCommonDir, {
       upstreamRef: cacheKey.upstreamRef,
       remoteName: cacheKey.remoteName,
       upstreamBranch: cacheKey.upstreamBranch,
@@ -964,9 +995,9 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     return true as const;
   });
 
-  const statusUpstreamRefreshCache = yield* Cache.makeWith({
+  const statusRemoteRefreshCache = yield* Cache.makeWith({
     capacity: STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY,
-    lookup: refreshStatusUpstreamCacheEntry,
+    lookup: refreshStatusRemoteCacheEntry,
     // Keep successful refreshes warm and briefly back off failed refreshes to avoid retry storms.
     timeToLive: (exit) =>
       Exit.isSuccess(exit)
@@ -987,9 +1018,13 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
     }
     const gitCommonDir = yield* resolveGitCommonDir(cwd);
     yield* Cache.get(
-      statusUpstreamRefreshCache,
-      new StatusUpstreamRefreshCacheKey({
+      statusRemoteRefreshCache,
+      new StatusRemoteRefreshCacheKey({
         gitCommonDir,
+        // Keep the cache scoped to the exact upstream ref. Sibling worktrees on
+        // the same remote can track different branches, and sharing one remote-
+        // keyed entry would let a refresh for `origin/main` incorrectly satisfy
+        // a later `origin/feature/...` status request.
         upstreamRef: upstream.upstreamRef,
         remoteName: upstream.remoteName,
         upstreamBranch: upstream.upstreamBranch,
@@ -1228,7 +1263,11 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       {
         allowNonZeroExit: true,
       },
-    );
+    ).pipe(Effect.catchIf(isMissingGitCwdError, () => Effect.succeed(null)));
+
+    if (statusResult === null) {
+      return NON_REPOSITORY_STATUS_DETAILS;
+    }
 
     if (statusResult.code !== 0) {
       const stderr = statusResult.stderr.trim();
@@ -1360,7 +1399,10 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
   );
 
   const statusDetails: GitCoreShape["statusDetails"] = Effect.fn("statusDetails")(function* (cwd) {
-    yield* refreshStatusUpstreamIfStale(cwd).pipe(Effect.ignoreCause({ log: true }));
+    yield* refreshStatusUpstreamIfStale(cwd).pipe(
+      Effect.catchIf(isMissingGitCwdError, () => Effect.void),
+      Effect.ignoreCause({ log: true }),
+    );
     return yield* readStatusDetailsLocal(cwd);
   });
 
@@ -1757,6 +1799,16 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
         timeoutMs: 10_000,
         allowNonZeroExit: true,
       },
+    ).pipe(
+      Effect.catchIf(isMissingGitCwdError, () =>
+        Effect.succeed({
+          code: 128,
+          stdout: "",
+          stderr: "fatal: not a git repository",
+          stdoutTruncated: false,
+          stderrTruncated: false,
+        }),
+      ),
     );
 
     if (localBranchResult.code !== 0) {

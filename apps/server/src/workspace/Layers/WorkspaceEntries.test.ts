@@ -73,6 +73,38 @@ it.layer(TestLayer)("WorkspaceEntriesLive", (it) => {
     vi.restoreAllMocks();
   });
 
+  describe("browse", () => {
+    it.effect("lists matching child directories for a browsed path prefix", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-browse-prefix-" });
+        yield* writeTextFile(cwd, "project-a/README.md");
+        yield* writeTextFile(cwd, "project-b/README.md");
+        yield* writeTextFile(cwd, "notes.txt");
+
+        const workspaceEntries = yield* WorkspaceEntries;
+        const result = yield* workspaceEntries.browse({
+          partialPath: `${cwd}/pro`,
+        });
+
+        expect(result.entries).toEqual([
+          { name: "project-a", fullPath: `${cwd}/project-a` },
+          { name: "project-b", fullPath: `${cwd}/project-b` },
+        ]);
+      }),
+    );
+
+    it.effect("supports browsing from the home-directory shorthand", () =>
+      Effect.gen(function* () {
+        const workspaceEntries = yield* WorkspaceEntries;
+        const result = yield* workspaceEntries.browse({
+          partialPath: "~/",
+        });
+
+        expect(result.parentPath.length).toBeGreaterThan(0);
+      }),
+    );
+  });
+
   describe("search", () => {
     it.effect("returns files and directories relative to cwd", () =>
       Effect.gen(function* () {

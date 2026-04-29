@@ -1,6 +1,6 @@
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-import { Effect, Layer, Schema, Struct } from "effect";
+import { Effect, Layer, Option, Schema, Struct } from "effect";
 
 import { toPersistenceSqlError } from "../Errors.ts";
 import {
@@ -12,13 +12,43 @@ import {
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
 import { ModelSelection } from "@t3tools/contracts";
+import { normalizePersistedProviderInteractionMode } from "../interactionMode.ts";
 
-const ProjectionThreadDbRow = ProjectionThread.mapFields(
-  Struct.assign({
-    modelSelection: Schema.fromJsonString(ModelSelection),
-  }),
-);
+const ProjectionThreadDbRow = Schema.Struct({
+  threadId: ProjectionThread.fields.threadId,
+  projectId: ProjectionThread.fields.projectId,
+  title: ProjectionThread.fields.title,
+  modelSelection: Schema.fromJsonString(ModelSelection),
+  runtimeMode: ProjectionThread.fields.runtimeMode,
+  interactionMode: Schema.String,
+  branch: ProjectionThread.fields.branch,
+  worktreePath: ProjectionThread.fields.worktreePath,
+  latestTurnId: ProjectionThread.fields.latestTurnId,
+  createdAt: ProjectionThread.fields.createdAt,
+  updatedAt: ProjectionThread.fields.updatedAt,
+  archivedAt: ProjectionThread.fields.archivedAt,
+  deletedAt: ProjectionThread.fields.deletedAt,
+});
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
+type ProjectionThreadRecord = typeof ProjectionThread.Type;
+
+function normalizeProjectionThreadRow(row: ProjectionThreadDbRow): ProjectionThreadRecord {
+  return {
+    threadId: row.threadId,
+    projectId: row.projectId,
+    title: row.title,
+    modelSelection: row.modelSelection,
+    runtimeMode: row.runtimeMode,
+    interactionMode: normalizePersistedProviderInteractionMode(row.interactionMode),
+    branch: row.branch,
+    worktreePath: row.worktreePath,
+    latestTurnId: row.latestTurnId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    archivedAt: row.archivedAt,
+    deletedAt: row.deletedAt,
+  };
+}
 
 const makeProjectionThreadRepository = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -139,11 +169,13 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
 
   const getById: ProjectionThreadRepositoryShape["getById"] = (input) =>
     getProjectionThreadRow(input).pipe(
+      Effect.map(Option.map((row) => normalizeProjectionThreadRow(row))),
       Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.getById:query")),
     );
 
   const listByProjectId: ProjectionThreadRepositoryShape["listByProjectId"] = (input) =>
     listProjectionThreadRows(input).pipe(
+      Effect.map((rows) => rows.map((row) => normalizeProjectionThreadRow(row))),
       Effect.mapError(toPersistenceSqlError("ProjectionThreadRepository.listByProjectId:query")),
     );
 

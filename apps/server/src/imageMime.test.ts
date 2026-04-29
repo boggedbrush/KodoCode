@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { inferImageExtension, parseBase64DataUrl } from "./imageMime.ts";
+import { getContentTypeFromFilePath } from "./mime.ts";
 
 describe("imageMime", () => {
   it("parses base64 data URL with mime type", () => {
@@ -34,5 +35,15 @@ describe("imageMime", () => {
 
   it("does not read inherited keys from mime extension map", () => {
     expect(inferImageExtension({ mimeType: "constructor" })).toBe(".bin");
+  });
+
+  it("returns a content type for common static assets", () => {
+    expect(getContentTypeFromFilePath("/tmp/index.html")).toBe("text/html; charset=utf-8");
+    expect(getContentTypeFromFilePath("/tmp/app.js")).toBe("text/javascript; charset=utf-8");
+    expect(getContentTypeFromFilePath("/tmp/logo.svg")).toBe("image/svg+xml");
+  });
+
+  it("falls back to octet-stream for unknown extensions", () => {
+    expect(getContentTypeFromFilePath("/tmp/archive.custom")).toBe("application/octet-stream");
   });
 });

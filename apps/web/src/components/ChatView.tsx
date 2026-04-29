@@ -765,6 +765,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [providerUsagePanelOpen, setProviderUsagePanelOpen] = useState(false);
   const [isComposerFooterCompact, setIsComposerFooterCompact] = useState(false);
   const [isComposerPrimaryActionsCompact, setIsComposerPrimaryActionsCompact] = useState(false);
+  const [composerModelPickerOpen, setComposerModelPickerOpen] = useState(false);
   // Tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null);
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
@@ -3267,11 +3268,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [activeThreadId, focusComposer, terminalState.terminalOpen]);
 
   useEffect(() => {
+    setComposerModelPickerOpen(false);
+  }, [activeThreadId, lockedProvider, selectedProvider]);
+
+  useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (!activeThreadId || event.defaultPrevented) return;
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
         terminalOpen: Boolean(terminalState.terminalOpen),
+        modelPickerOpen: composerModelPickerOpen,
       };
 
       const command = resolveShortcutCommand(event, keybindings, {
@@ -3321,6 +3327,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
 
+      if (command === "modelPicker.toggle") {
+        event.preventDefault();
+        event.stopPropagation();
+        setComposerModelPickerOpen((current) => !current);
+        return;
+      }
+
       if (
         command === "composer.mode.ask" ||
         command === "composer.mode.plan" ||
@@ -3349,10 +3362,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       event.stopPropagation();
       void runProjectScript(script);
     };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
   }, [
     activeProject,
+    composerModelPickerOpen,
     terminalState.terminalOpen,
     terminalState.activeTerminalId,
     activeThreadId,
@@ -5344,8 +5358,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           model={selectedModelForPickerWithCustomFallback}
                           lockedProvider={lockedProvider}
                           providers={providerStatuses}
+                          keybindings={keybindings}
                           modelOptionsByProvider={modelOptionsByProvider}
                           showAsAuto={isExplicitAutoModelSelection || isModelFromModeSettings}
+                          terminalOpen={Boolean(terminalState.terminalOpen)}
+                          open={composerModelPickerOpen}
+                          onOpenChange={setComposerModelPickerOpen}
                           {...(composerProviderState.modelPickerIconClassName
                             ? {
                                 activeProviderIconClassName:

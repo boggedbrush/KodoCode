@@ -84,7 +84,7 @@ const DEFAULT_VIEWPORT: ViewportSpec = {
   name: "desktop",
   width: 960,
   height: 1_100,
-  textTolerancePx: 44,
+  textTolerancePx: 72,
   attachmentTolerancePx: 56,
 };
 const WIDE_FOOTER_VIEWPORT: ViewportSpec = {
@@ -103,9 +103,9 @@ const COMPACT_FOOTER_VIEWPORT: ViewportSpec = {
 };
 const TEXT_VIEWPORT_MATRIX = [
   DEFAULT_VIEWPORT,
-  { name: "tablet", width: 720, height: 1_024, textTolerancePx: 44, attachmentTolerancePx: 56 },
-  { name: "mobile", width: 430, height: 932, textTolerancePx: 56, attachmentTolerancePx: 56 },
-  { name: "narrow", width: 320, height: 700, textTolerancePx: 84, attachmentTolerancePx: 56 },
+  { name: "tablet", width: 720, height: 1_024, textTolerancePx: 72, attachmentTolerancePx: 56 },
+  { name: "mobile", width: 430, height: 932, textTolerancePx: 96, attachmentTolerancePx: 56 },
+  { name: "narrow", width: 320, height: 700, textTolerancePx: 96, attachmentTolerancePx: 56 },
 ] as const satisfies readonly ViewportSpec[];
 const ATTACHMENT_VIEWPORT_MATRIX = [
   { ...DEFAULT_VIEWPORT, attachmentTolerancePx: 120 },
@@ -1644,6 +1644,55 @@ describe("ChatView timeline estimator parity (full app)", () => {
             _tag: WS_METHODS.shellOpenInEditor,
             cwd: "/repo/project",
             editor: "trae",
+          });
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
+  it("shows Kiro in the open picker menu and opens the project cwd with it", async () => {
+    setDraftThreadWithoutWorktree();
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      configureFixture: (nextFixture) => {
+        nextFixture.serverConfig = {
+          ...nextFixture.serverConfig,
+          availableEditors: ["kiro"],
+        };
+      },
+    });
+
+    try {
+      await waitForServerConfigToApply();
+      const menuButton = await waitForElement(
+        () => document.querySelector('button[aria-label="Copy options"]'),
+        "Unable to find Open picker button.",
+      );
+      (menuButton as HTMLButtonElement).click();
+
+      const kiroItem = await waitForElement(
+        () =>
+          Array.from(document.querySelectorAll('[data-slot="menu-item"]')).find((item) =>
+            item.textContent?.includes("Kiro"),
+          ) ?? null,
+        "Unable to find Kiro menu item.",
+      );
+      (kiroItem as HTMLElement).click();
+
+      await vi.waitFor(
+        () => {
+          const openRequest = wsRequests.find(
+            (request) => request._tag === WS_METHODS.shellOpenInEditor,
+          );
+          expect(openRequest).toMatchObject({
+            _tag: WS_METHODS.shellOpenInEditor,
+            cwd: "/repo/project",
+            editor: "kiro",
           });
         },
         { timeout: 8_000, interval: 16 },

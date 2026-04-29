@@ -41,6 +41,24 @@ function writeTextFile(
   });
 }
 
+function removePath(
+  targetPath: string,
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    yield* fileSystem.remove(targetPath, { recursive: true, force: true });
+  });
+}
+
+function makeDirectory(
+  dirPath: string,
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    yield* fileSystem.makeDirectory(dirPath, { recursive: true });
+  });
+}
+
 /** Run a raw git command for test setup (not under test). */
 function git(
   cwd: string,
@@ -298,6 +316,21 @@ it.layer(TestLayer)("git integration", (it) => {
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();
         const result = yield* (yield* GitCore).listBranches({ cwd: tmp });
+        expect(result.isRepo).toBe(false);
+        expect(result.hasOriginRemote).toBe(false);
+        expect(result.branches).toEqual([]);
+      }),
+    );
+
+    it.effect("returns isRepo: false for deleted directories", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const deletedDir = path.join(tmp, "deleted-repo");
+        yield* makeDirectory(deletedDir);
+        yield* removePath(deletedDir);
+
+        const result = yield* (yield* GitCore).listBranches({ cwd: deletedDir });
+
         expect(result.isRepo).toBe(false);
         expect(result.hasOriginRemote).toBe(false);
         expect(result.branches).toEqual([]);
@@ -798,7 +831,7 @@ it.layer(TestLayer)("git integration", (it) => {
       }),
     );
 
-    it.effect("shares upstream refreshes across worktrees that use the same git common dir", () =>
+    it.effect("refreshes each tracked upstream ref even when siblings share one remote", () =>
       Effect.gen(function* () {
         const ok = (stdout = "") =>
           Effect.succeed({
@@ -817,7 +850,9 @@ it.layer(TestLayer)("git integration", (it) => {
             input.args[2] === "--symbolic-full-name" &&
             input.args[3] === "@{upstream}"
           ) {
-            return ok("origin/main\n");
+            return ok(
+              input.cwd === "/repo/worktrees/pr-123" ? "origin/feature/pr-123\n" : "origin/main\n",
+            );
           }
           if (input.args[0] === "remote") {
             return ok("origin\n");
@@ -828,10 +863,34 @@ it.layer(TestLayer)("git integration", (it) => {
           if (input.args[0] === "--git-dir" && input.args[2] === "fetch") {
             fetchCount += 1;
             expect(input.cwd).toBe("/repo");
+            expect([
+              [
+                "--git-dir",
+                "/repo/.git",
+                "fetch",
+                "--quiet",
+                "--no-tags",
+                "origin",
+                "+refs/heads/main:refs/remotes/origin/main",
+              ],
+              [
+                "--git-dir",
+                "/repo/.git",
+                "fetch",
+                "--quiet",
+                "--no-tags",
+                "origin",
+                "+refs/heads/feature/pr-123:refs/remotes/origin/feature/pr-123",
+              ],
+            ]).toContainEqual(input.args);
             return ok();
           }
           if (input.operation === "GitCore.statusDetails.status") {
-            return ok("# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -0\n");
+            return ok(
+              input.cwd === "/repo/worktrees/pr-123"
+                ? "# branch.head feature/pr-123\n# branch.upstream origin/feature/pr-123\n# branch.ab +0 -0\n"
+                : "# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -0\n",
+            );
           }
           if (
             input.operation === "GitCore.statusDetails.unstagedNumstat" ||
@@ -854,11 +913,11 @@ it.layer(TestLayer)("git integration", (it) => {
 
         yield* core.statusDetails("/repo/worktrees/main");
         yield* core.statusDetails("/repo/worktrees/pr-123");
-        expect(fetchCount).toBe(1);
+        expect(fetchCount).toBe(2);
       }),
     );
 
-    it.effect("briefly backs off failed upstream refreshes across sibling worktrees", () =>
+    it.effect("briefly backs off failed refreshes per tracked upstream ref on one remote", () =>
       Effect.gen(function* () {
         const ok = (stdout = "") =>
           Effect.succeed({
@@ -877,7 +936,9 @@ it.layer(TestLayer)("git integration", (it) => {
             input.args[2] === "--symbolic-full-name" &&
             input.args[3] === "@{upstream}"
           ) {
-            return ok("origin/main\n");
+            return ok(
+              input.cwd === "/repo/worktrees/pr-123" ? "origin/feature/pr-123\n" : "origin/main\n",
+            );
           }
           if (input.args[0] === "remote") {
             return ok("origin\n");
@@ -897,7 +958,11 @@ it.layer(TestLayer)("git integration", (it) => {
             );
           }
           if (input.operation === "GitCore.statusDetails.status") {
-            return ok("# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -0\n");
+            return ok(
+              input.cwd === "/repo/worktrees/pr-123"
+                ? "# branch.head feature/pr-123\n# branch.upstream origin/feature/pr-123\n# branch.ab +0 -0\n"
+                : "# branch.head main\n# branch.upstream origin/main\n# branch.ab +0 -0\n",
+            );
           }
           if (
             input.operation === "GitCore.statusDetails.unstagedNumstat" ||
@@ -920,7 +985,7 @@ it.layer(TestLayer)("git integration", (it) => {
 
         yield* core.statusDetails("/repo/worktrees/main");
         yield* core.statusDetails("/repo/worktrees/pr-123");
-        expect(fetchCount).toBe(1);
+        expect(fetchCount).toBe(2);
       }),
     );
 
@@ -1628,6 +1693,37 @@ it.layer(TestLayer)("git integration", (it) => {
         yield* writeTextFile(path.join(tmp, "README.md"), "updated\n");
         const dirty = yield* core.statusDetails(tmp);
         expect(dirty.hasWorkingTreeChanges).toBe(true);
+      }),
+    );
+
+    it.effect("returns a non-repo status for deleted directories", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        const deletedDir = path.join(tmp, "deleted-repo");
+        yield* makeDirectory(deletedDir);
+        yield* removePath(deletedDir);
+        const core = yield* GitCore;
+
+        const status = yield* core.statusDetails(deletedDir);
+        const localStatus = yield* core.statusDetailsLocal(deletedDir);
+
+        expect(status).toEqual({
+          isRepo: false,
+          hasOriginRemote: false,
+          isDefaultBranch: false,
+          branch: null,
+          upstreamRef: null,
+          hasWorkingTreeChanges: false,
+          workingTree: {
+            files: [],
+            insertions: 0,
+            deletions: 0,
+          },
+          hasUpstream: false,
+          aheadCount: 0,
+          behindCount: 0,
+        });
+        expect(localStatus).toEqual(status);
       }),
     );
 

@@ -1504,6 +1504,329 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       }),
   );
 
+  it.effect("clears stale pending approvals from projected shell summaries", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.makeUnsafe("evt-stale-approval-1"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.makeUnsafe("project-stale-approval"),
+        occurredAt: "2026-02-26T12:30:00.000Z",
+        commandId: CommandId.makeUnsafe("cmd-stale-approval-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-stale-approval-1"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.makeUnsafe("project-stale-approval"),
+          title: "Project Stale Approval",
+          workspaceRoot: "/tmp/project-stale-approval",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-02-26T12:30:00.000Z",
+          updatedAt: "2026-02-26T12:30:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.makeUnsafe("evt-stale-approval-2"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-stale-approval"),
+        occurredAt: "2026-02-26T12:30:01.000Z",
+        commandId: CommandId.makeUnsafe("cmd-stale-approval-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-stale-approval-2"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-stale-approval"),
+          projectId: ProjectId.makeUnsafe("project-stale-approval"),
+          title: "Thread Stale Approval",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-02-26T12:30:01.000Z",
+          updatedAt: "2026-02-26T12:30:01.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.makeUnsafe("evt-stale-approval-3"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-stale-approval"),
+        occurredAt: "2026-02-26T12:30:02.000Z",
+        commandId: CommandId.makeUnsafe("cmd-stale-approval-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-stale-approval-3"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-stale-approval"),
+          activity: {
+            id: EventId.makeUnsafe("activity-stale-approval-requested"),
+            tone: "approval",
+            kind: "approval.requested",
+            summary: "Command approval requested",
+            payload: {
+              requestId: "approval-request-stale-1",
+              requestKind: "command",
+            },
+            turnId: null,
+            createdAt: "2026-02-26T12:30:02.000Z",
+          },
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.makeUnsafe("evt-stale-approval-4"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-stale-approval"),
+        occurredAt: "2026-02-26T12:30:03.000Z",
+        commandId: CommandId.makeUnsafe("cmd-stale-approval-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-stale-approval-4"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-stale-approval"),
+          activity: {
+            id: EventId.makeUnsafe("activity-stale-approval-failed"),
+            tone: "error",
+            kind: "provider.approval.respond.failed",
+            summary: "Provider approval response failed",
+            payload: {
+              requestId: "approval-request-stale-1",
+              detail: "Unknown pending permission request: approval-request-stale-1",
+            },
+            turnId: null,
+            createdAt: "2026-02-26T12:30:03.000Z",
+          },
+        },
+      });
+
+      const approvalRows = yield* sql<{
+        readonly requestId: string;
+        readonly status: string;
+        readonly resolvedAt: string | null;
+      }>`
+        SELECT
+          request_id AS "requestId",
+          status,
+          resolved_at AS "resolvedAt"
+        FROM projection_pending_approvals
+        WHERE request_id = 'approval-request-stale-1'
+      `;
+      assert.deepEqual(approvalRows, [
+        {
+          requestId: "approval-request-stale-1",
+          status: "resolved",
+          resolvedAt: "2026-02-26T12:30:03.000Z",
+        },
+      ]);
+
+      const threadRows = yield* sql<{
+        readonly pendingApprovalCount: number;
+      }>`
+        SELECT pending_approval_count AS "pendingApprovalCount"
+        FROM projection_threads
+        WHERE thread_id = 'thread-stale-approval'
+      `;
+      assert.deepEqual(threadRows, [{ pendingApprovalCount: 0 }]);
+    }),
+  );
+
+  it.effect("ignores non-stale provider approval response failures", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.makeUnsafe("evt-nonstale-approval-1"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.makeUnsafe("project-nonstale-approval"),
+        occurredAt: "2026-02-26T12:45:00.000Z",
+        commandId: CommandId.makeUnsafe("cmd-nonstale-approval-1"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-nonstale-approval-1"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.makeUnsafe("project-nonstale-approval"),
+          title: "Project Non-Stale Approval",
+          workspaceRoot: "/tmp/project-nonstale-approval",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-02-26T12:45:00.000Z",
+          updatedAt: "2026-02-26T12:45:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.makeUnsafe("evt-nonstale-approval-2"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-nonstale-approval"),
+        occurredAt: "2026-02-26T12:45:01.000Z",
+        commandId: CommandId.makeUnsafe("cmd-nonstale-approval-2"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-nonstale-approval-2"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-nonstale-approval"),
+          projectId: ProjectId.makeUnsafe("project-nonstale-approval"),
+          title: "Thread Non-Stale Approval",
+          modelSelection: {
+            provider: "codex",
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-02-26T12:45:01.000Z",
+          updatedAt: "2026-02-26T12:45:01.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.makeUnsafe("evt-nonstale-approval-3"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-nonstale-approval"),
+        occurredAt: "2026-02-26T12:45:02.000Z",
+        commandId: CommandId.makeUnsafe("cmd-nonstale-approval-3"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-nonstale-approval-3"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-nonstale-approval"),
+          activity: {
+            id: EventId.makeUnsafe("activity-nonstale-approval-requested"),
+            tone: "approval",
+            kind: "approval.requested",
+            summary: "Command approval requested",
+            payload: {
+              requestId: "approval-request-nonstale-existing",
+              requestKind: "command",
+            },
+            turnId: null,
+            createdAt: "2026-02-26T12:45:02.000Z",
+          },
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.makeUnsafe("evt-nonstale-approval-4"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-nonstale-approval"),
+        occurredAt: "2026-02-26T12:45:03.000Z",
+        commandId: CommandId.makeUnsafe("cmd-nonstale-approval-4"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-nonstale-approval-4"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-nonstale-approval"),
+          activity: {
+            id: EventId.makeUnsafe("activity-nonstale-approval-failed-existing"),
+            tone: "error",
+            kind: "provider.approval.respond.failed",
+            summary: "Provider approval response failed",
+            payload: {
+              requestId: "approval-request-nonstale-existing",
+              detail: "Provider timed out while responding to approval request",
+            },
+            turnId: TurnId.makeUnsafe("turn-nonstale-failure"),
+            createdAt: "2026-02-26T12:45:03.000Z",
+          },
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.makeUnsafe("evt-nonstale-approval-5"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.makeUnsafe("thread-nonstale-approval"),
+        occurredAt: "2026-02-26T12:45:04.000Z",
+        commandId: CommandId.makeUnsafe("cmd-nonstale-approval-5"),
+        causationEventId: null,
+        correlationId: CorrelationId.makeUnsafe("cmd-nonstale-approval-5"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.makeUnsafe("thread-nonstale-approval"),
+          activity: {
+            id: EventId.makeUnsafe("activity-nonstale-approval-failed-missing"),
+            tone: "error",
+            kind: "provider.approval.respond.failed",
+            summary: "Provider approval response failed",
+            payload: {
+              requestId: "approval-request-nonstale-missing",
+              detail: "Provider timed out while responding to approval request",
+            },
+            turnId: null,
+            createdAt: "2026-02-26T12:45:04.000Z",
+          },
+        },
+      });
+
+      const approvalRows = yield* sql<{
+        readonly requestId: string;
+        readonly status: string;
+        readonly turnId: string | null;
+        readonly createdAt: string;
+        readonly resolvedAt: string | null;
+      }>`
+        SELECT
+          request_id AS "requestId",
+          status,
+          turn_id AS "turnId",
+          created_at AS "createdAt",
+          resolved_at AS "resolvedAt"
+        FROM projection_pending_approvals
+        WHERE request_id IN (
+          'approval-request-nonstale-existing',
+          'approval-request-nonstale-missing'
+        )
+        ORDER BY request_id
+      `;
+      assert.deepEqual(approvalRows, [
+        {
+          requestId: "approval-request-nonstale-existing",
+          status: "pending",
+          turnId: null,
+          createdAt: "2026-02-26T12:45:02.000Z",
+          resolvedAt: null,
+        },
+      ]);
+
+      const threadRows = yield* sql<{
+        readonly pendingApprovalCount: number;
+      }>`
+        SELECT pending_approval_count AS "pendingApprovalCount"
+        FROM projection_threads
+        WHERE thread_id = 'thread-nonstale-approval'
+      `;
+      assert.deepEqual(threadRows, [{ pendingApprovalCount: 1 }]);
+    }),
+  );
+
   it.effect("does not fallback-retain messages whose turnId is removed by revert", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;

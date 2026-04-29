@@ -90,9 +90,9 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
         assert.equal(env.T3CODE_HOME, resolve("/tmp/custom-t3"));
         assert.equal(env.T3CODE_PORT, "4222");
         assert.equal(env.VITE_WS_URL, "ws://localhost:4222");
-        assert.equal(env.T3CODE_NO_BROWSER, "1");
-        assert.equal(env.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD, "0");
-        assert.equal(env.T3CODE_LOG_WS_EVENTS, "1");
+        assert.equal(env.T3CODE_NO_BROWSER, "true");
+        assert.equal(env.T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD, "false");
+        assert.equal(env.T3CODE_LOG_WS_EVENTS, "true");
         assert.equal(env.T3CODE_HOST, "0.0.0.0");
         assert.equal(env.VITE_DEV_SERVER_URL, "http://localhost:7331/");
       }),
@@ -139,7 +139,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           devUrl: undefined,
         });
 
-        assert.equal(env.T3CODE_LOG_WS_EVENTS, "0");
+        assert.equal(env.T3CODE_LOG_WS_EVENTS, "false");
       }),
     );
 
@@ -172,7 +172,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             T3CODE_PORT: "3773",
             T3CODE_AUTH_TOKEN: "stale-token",
             T3CODE_MODE: "web",
-            T3CODE_NO_BROWSER: "0",
+            T3CODE_NO_BROWSER: "false",
             T3CODE_HOST: "0.0.0.0",
             VITE_WS_URL: "ws://localhost:3773",
           },

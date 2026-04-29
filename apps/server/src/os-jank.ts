@@ -1,40 +1,63 @@
 import * as OS from "node:os";
 import { Effect, Path } from "effect";
-import { readPathFromLoginShell, resolveLoginShell } from "@t3tools/shared/shell";
+import {
+  listLoginShellCandidates,
+  mergePathEntries,
+  readPathFromLaunchctl,
+  readPathFromLoginShell,
+} from "@t3tools/shared/shell";
+import { expandHomePath as expandHomePathValue } from "./pathExpansion";
+
+function logPathHydrationWarning(message: string, error?: unknown): void {
+  console.warn(`[server] ${message}`, error instanceof Error ? error.message : (error ?? ""));
+}
 
 export function fixPath(
   options: {
     env?: NodeJS.ProcessEnv;
     platform?: NodeJS.Platform;
     readPath?: typeof readPathFromLoginShell;
+    readLaunchctlPath?: typeof readPathFromLaunchctl;
+    userShell?: string;
+    logWarning?: (message: string, error?: unknown) => void;
   } = {},
 ): void {
   const platform = options.platform ?? process.platform;
   if (platform !== "darwin" && platform !== "linux") return;
 
   const env = options.env ?? process.env;
+  const logWarning = options.logWarning ?? logPathHydrationWarning;
+  const readPath = options.readPath ?? readPathFromLoginShell;
 
   try {
-    const shell = resolveLoginShell(platform, env.SHELL);
-    if (!shell) return;
-    const result = (options.readPath ?? readPathFromLoginShell)(shell);
-    if (result) {
-      env.PATH = result;
+    let shellPath: string | undefined;
+    for (const shell of listLoginShellCandidates(platform, env.SHELL, options.userShell)) {
+      try {
+        shellPath = readPath(shell);
+      } catch (error) {
+        logWarning(`Failed to read PATH from login shell ${shell}.`, error);
+      }
+
+      if (shellPath) {
+        break;
+      }
     }
-  } catch {
-    // Silently ignore — keep default PATH
+
+    const launchctlPath =
+      platform === "darwin" && !shellPath
+        ? (options.readLaunchctlPath ?? readPathFromLaunchctl)()
+        : undefined;
+    const mergedPath = mergePathEntries(shellPath ?? launchctlPath, env.PATH, platform);
+    if (mergedPath) {
+      env.PATH = mergedPath;
+    }
+  } catch (error) {
+    logWarning("Failed to hydrate PATH from the user environment.", error);
   }
 }
 
 export const expandHomePath = Effect.fn(function* (input: string) {
-  const { join } = yield* Path.Path;
-  if (input === "~") {
-    return OS.homedir();
-  }
-  if (input.startsWith("~/") || input.startsWith("~\\")) {
-    return join(OS.homedir(), input.slice(2));
-  }
-  return input;
+  return expandHomePathValue(input);
 });
 
 export const resolveBaseDir = Effect.fn(function* (raw: string | undefined) {

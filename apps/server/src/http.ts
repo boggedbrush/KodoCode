@@ -1,4 +1,3 @@
-import Mime from "@effect/platform-node/Mime";
 import { Data, Effect, FileSystem, Layer, Option, Path } from "effect";
 import { cast } from "effect/Function";
 import {
@@ -20,6 +19,7 @@ import {
 import { resolveAttachmentPathById } from "./attachmentStore";
 import { ServerConfig } from "./config";
 import { ServerEnvironment } from "./environment/Services/ServerEnvironment";
+import { getContentTypeFromFilePath } from "./mime.ts";
 import { decodeOtlpTraceRecords } from "./observability/TraceRecord.ts";
 import { BrowserTraceCollector } from "./observability/Services/BrowserTraceCollector.ts";
 import { ProjectFaviconResolver } from "./project/Services/ProjectFaviconResolver";
@@ -270,7 +270,7 @@ export const staticAndDevRouteLayer = HttpRouter.add(
       });
     }
 
-    const contentType = Mime.getType(filePath) ?? "application/octet-stream";
+    const contentType = getContentTypeFromFilePath(filePath);
     const data = yield* fileSystem
       .readFile(filePath)
       .pipe(Effect.catch(() => Effect.succeed(null)));

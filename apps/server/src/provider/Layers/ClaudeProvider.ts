@@ -9,9 +9,10 @@ import type {
 import { Cache, Duration, Effect, Equal, Layer, Option, Result, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
-import { query as claudeQuery } from "@anthropic-ai/claude-agent-sdk";
+import { query as claudeQuery, type SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 
 import {
+  AUTH_PROBE_TIMEOUT_MS,
   buildServerProvider,
   DEFAULT_TIMEOUT_MS,
   detailFromResult,
@@ -276,18 +277,6 @@ function extractClaudeAuthMethodFromOutput(result: CommandResult): string | unde
   return Option.getOrUndefined(findAuthMethod(parsed.success));
 }
 
-// ── Dynamic model capability adjustment ─────────────────────────────
-
-/** Subscription types where the 1M context window is included in the plan. */
-const PREMIUM_SUBSCRIPTION_TYPES = new Set([
-  "max",
-  "maxplan",
-  "max5",
-  "max20",
-  "enterprise",
-  "team",
-]);
-
 function toTitleCaseWords(value: string): string {
   return value
     .split(/[\s_-]+/g)
@@ -348,52 +337,27 @@ function claudeAuthMetadata(input: {
   return undefined;
 }
 
-/**
- * Adjust the built-in model list based on the user's detected subscription.
- *
- * - Premium tiers (Max, Enterprise, Team): 1M context becomes the default.
- * - Other tiers (Pro, free, unknown): 200k context stays the default;
- *   1M remains available as a manual option so users can still enable it.
- */
-export function adjustModelsForSubscription(
-  baseModels: ReadonlyArray<ServerProviderModel>,
-  subscriptionType: string | undefined,
-): ReadonlyArray<ServerProviderModel> {
-  const normalized = subscriptionType?.toLowerCase().replace(/[\s_-]+/g, "");
-  if (!normalized || !PREMIUM_SUBSCRIPTION_TYPES.has(normalized)) {
-    return baseModels;
-  }
-
-  // Flip 1M to be the default for premium users
-  return baseModels.map((model) => {
-    const caps = model.capabilities;
-    if (!caps || caps.contextWindowOptions.length === 0) return model;
-
-    return {
-      ...model,
-      capabilities: {
-        ...caps,
-        contextWindowOptions: caps.contextWindowOptions.map((opt) =>
-          opt.value === "1m"
-            ? { value: opt.value, label: opt.label, isDefault: true as const }
-            : { value: opt.value, label: opt.label },
-        ),
-      },
-    };
-  });
-}
-
 // ── SDK capability probe ────────────────────────────────────────────
 
 const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
 
+function waitForAbortSignal(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
 /**
  * Probe account information by spawning a lightweight Claude Agent SDK
  * session and reading the initialization result.
  *
- * The prompt is never sent to the Anthropic API — we abort immediately
- * after the local initialization phase completes. This gives us the
- * user's subscription type without incurring any token cost.
+ * We pass a never-yielding AsyncIterable as the prompt so that no user
+ * message is ever written to the subprocess stdin. This means the Claude
+ * Code subprocess completes its local initialization IPC (returning
+ * account info and slash commands) but never starts an API request to
+ * Anthropic. We read the init data and then abort the subprocess.
  *
  * This is used as a fallback when `claude auth status` does not include
  * subscription type information.
@@ -402,13 +366,17 @@ const probeClaudeCapabilities = (binaryPath: string) => {
   const abort = new AbortController();
   return Effect.tryPromise(async () => {
     const q = claudeQuery({
-      prompt: ".",
+      // Never yield — we only need initialization data, not a conversation.
+      // This prevents any prompt from reaching the Anthropic API.
+      // oxlint-disable-next-line require-yield
+      prompt: (async function* (): AsyncGenerator<SDKUserMessage> {
+        await waitForAbortSignal(abort.signal);
+      })(),
       options: {
         persistSession: false,
         pathToClaudeCodeExecutable: binaryPath,
         abortController: abort,
-        maxTurns: 0,
-        settingSources: [],
+        settingSources: ["user", "project", "local"],
         allowedTools: [],
         stderr: () => {},
       },
@@ -541,7 +509,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
   // ── Auth check + subscription detection ────────────────────────────
 
   const authProbe = yield* runClaudeCommand(["auth", "status"]).pipe(
-    Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
+    Effect.timeoutOption(AUTH_PROBE_TIMEOUT_MS),
     Effect.result,
   );
 
@@ -563,8 +531,6 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     subscriptionType = yield* resolveSubscriptionType(claudeSettings.binaryPath);
   }
 
-  const resolvedModels = adjustModelsForSubscription(models, subscriptionType);
-
   // ── Handle auth results (same logic as before, adjusted models) ──
 
   if (Result.isFailure(authProbe)) {
@@ -573,7 +539,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       provider: PROVIDER,
       enabled: claudeSettings.enabled,
       checkedAt,
-      models: resolvedModels,
+      models,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -592,7 +558,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       provider: PROVIDER,
       enabled: claudeSettings.enabled,
       checkedAt,
-      models: resolvedModels,
+      models,
       probe: {
         installed: true,
         version: parsedVersion,
@@ -609,7 +575,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     provider: PROVIDER,
     enabled: claudeSettings.enabled,
     checkedAt,
-    models: resolvedModels,
+    models,
     probe: {
       installed: true,
       version: parsedVersion,

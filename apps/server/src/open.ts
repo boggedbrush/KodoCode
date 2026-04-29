@@ -11,7 +11,7 @@ import { accessSync, constants, statSync } from "node:fs";
 import { extname, join } from "node:path";
 
 import { EDITORS, OpenError, type EditorId } from "@t3tools/contracts";
-import { ServiceMap, Effect, Layer } from "effect";
+import { ServiceMap, Effect, Layer, Schema } from "effect";
 
 // ==============================
 // Definitions
@@ -73,6 +73,14 @@ function resolveCommandEditorArgs(
       return [...(line ? ["--line", line] : []), ...(column ? ["--column", column] : []), path];
     }
   }
+}
+
+function resolveEditorArgs(
+  editor: (typeof EDITORS)[number],
+  target: string,
+): ReadonlyArray<string> {
+  const baseArgs = "baseArgs" in editor ? editor.baseArgs : [];
+  return [...baseArgs, ...resolveCommandEditorArgs(editor, target)];
 }
 
 function resolveAvailableCommand(
@@ -273,7 +281,7 @@ export const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
       resolveAvailableCommand(editorDef.commands, { platform, env }) ?? editorDef.commands[0];
     return {
       command,
-      args: resolveCommandEditorArgs(editorDef, input.cwd),
+      args: resolveEditorArgs(editorDef, input.cwd),
     };
   }
 
@@ -293,11 +301,16 @@ export const launchDetached = (launch: EditorLaunch) =>
     yield* Effect.callback<void, OpenError>((resume) => {
       let child;
       try {
-        child = spawn(launch.command, [...launch.args], {
-          detached: true,
-          stdio: "ignore",
-          shell: process.platform === "win32",
-        });
+        const isWin32 = process.platform === "win32";
+        child = spawn(
+          launch.command,
+          isWin32 ? launch.args.map((a) => `"${a}"`) : [...launch.args],
+          {
+            detached: true,
+            stdio: "ignore",
+            shell: isWin32,
+          },
+        );
       } catch (error) {
         return resume(
           Effect.fail(new OpenError({ message: "failed to spawn detached process", cause: error })),
@@ -316,20 +329,21 @@ export const launchDetached = (launch: EditorLaunch) =>
     });
   });
 
-const make = Effect.gen(function* () {
-  const open = yield* Effect.tryPromise({
-    try: () => import("open"),
-    catch: (cause) => new OpenError({ message: "failed to load browser opener", cause }),
-  });
-
-  return {
-    openBrowser: (target) =>
-      Effect.tryPromise({
-        try: () => open.default(target),
-        catch: (cause) => new OpenError({ message: "Browser auto-open failed", cause }),
-      }),
-    openInEditor: (input) => Effect.flatMap(resolveEditorLaunch(input), launchDetached),
-  } satisfies OpenShape;
-});
+const make = Effect.succeed({
+  openBrowser: (target) =>
+    Effect.tryPromise({
+      try: async () => {
+        const open = await import("open").catch((cause) => {
+          throw new OpenError({ message: "failed to load browser opener", cause });
+        });
+        return open.default(target);
+      },
+      catch: (cause) =>
+        Schema.is(OpenError)(cause)
+          ? cause
+          : new OpenError({ message: "Browser auto-open failed", cause }),
+    }),
+  openInEditor: (input) => Effect.flatMap(resolveEditorLaunch(input), launchDetached),
+} satisfies OpenShape);
 
 export const OpenLive = Layer.effect(Open, make);

@@ -17,6 +17,7 @@ import {
   type SDKResultMessage,
   type SettingSource,
   type SDKUserMessage,
+  ModelUsage,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
   ApprovalRequestId,
@@ -274,24 +275,14 @@ function asRuntimeItemId(value: string): RuntimeItemId {
   return RuntimeItemId.makeUnsafe(value);
 }
 
-function maxClaudeContextWindowFromModelUsage(modelUsage: unknown): number | undefined {
-  if (!modelUsage || typeof modelUsage !== "object") {
-    return undefined;
-  }
+function maxClaudeContextWindowFromModelUsage(
+  modelUsage: Record<string, ModelUsage> | undefined,
+): number | undefined {
+  if (!modelUsage) return undefined;
 
   let maxContextWindow: number | undefined;
-  for (const value of Object.values(modelUsage as Record<string, unknown>)) {
-    if (!value || typeof value !== "object") {
-      continue;
-    }
-    const contextWindow = (value as { contextWindow?: unknown }).contextWindow;
-    if (
-      typeof contextWindow !== "number" ||
-      !Number.isFinite(contextWindow) ||
-      contextWindow <= 0
-    ) {
-      continue;
-    }
+  for (const value of Object.values(modelUsage)) {
+    const contextWindow = value.contextWindow;
     maxContextWindow = Math.max(maxContextWindow ?? 0, contextWindow);
   }
 
@@ -299,53 +290,58 @@ function maxClaudeContextWindowFromModelUsage(modelUsage: unknown): number | und
 }
 
 function normalizeClaudeTokenUsage(
-  usage: unknown,
+  value: unknown,
   contextWindow?: number,
 ): ThreadTokenUsageSnapshot | undefined {
-  if (!usage || typeof usage !== "object") {
+  if (!value || typeof value !== "object") {
     return undefined;
   }
 
-  const record = usage as Record<string, unknown>;
-  const directUsedTokens =
-    typeof record.total_tokens === "number" && Number.isFinite(record.total_tokens)
-      ? record.total_tokens
-      : undefined;
+  const usage = value as Record<string, unknown>;
   const inputTokens =
-    (typeof record.input_tokens === "number" && Number.isFinite(record.input_tokens)
-      ? record.input_tokens
+    (typeof usage.input_tokens === "number" && Number.isFinite(usage.input_tokens)
+      ? usage.input_tokens
       : 0) +
-    (typeof record.cache_creation_input_tokens === "number" &&
-    Number.isFinite(record.cache_creation_input_tokens)
-      ? record.cache_creation_input_tokens
+    (typeof usage.cache_creation_input_tokens === "number" &&
+    Number.isFinite(usage.cache_creation_input_tokens)
+      ? usage.cache_creation_input_tokens
       : 0) +
-    (typeof record.cache_read_input_tokens === "number" &&
-    Number.isFinite(record.cache_read_input_tokens)
-      ? record.cache_read_input_tokens
+    (typeof usage.cache_read_input_tokens === "number" &&
+    Number.isFinite(usage.cache_read_input_tokens)
+      ? usage.cache_read_input_tokens
       : 0);
   const outputTokens =
-    typeof record.output_tokens === "number" && Number.isFinite(record.output_tokens)
-      ? record.output_tokens
+    typeof usage.output_tokens === "number" && Number.isFinite(usage.output_tokens)
+      ? usage.output_tokens
       : 0;
-  const derivedUsedTokens = inputTokens + outputTokens;
-  const usedTokens = directUsedTokens ?? (derivedUsedTokens > 0 ? derivedUsedTokens : undefined);
-  if (usedTokens === undefined || usedTokens <= 0) {
+  const derivedTotalProcessedTokens = inputTokens + outputTokens;
+  const totalProcessedTokens =
+    (typeof usage.total_tokens === "number" && Number.isFinite(usage.total_tokens)
+      ? usage.total_tokens
+      : undefined) ?? (derivedTotalProcessedTokens > 0 ? derivedTotalProcessedTokens : undefined);
+  if (totalProcessedTokens === undefined || totalProcessedTokens <= 0) {
     return undefined;
   }
+
+  const maxTokens =
+    typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
+      ? contextWindow
+      : undefined;
+  const usedTokens =
+    maxTokens !== undefined ? Math.min(totalProcessedTokens, maxTokens) : totalProcessedTokens;
 
   return {
     usedTokens,
     lastUsedTokens: usedTokens,
+    ...(totalProcessedTokens > usedTokens ? { totalProcessedTokens } : {}),
     ...(inputTokens > 0 ? { inputTokens } : {}),
     ...(outputTokens > 0 ? { outputTokens } : {}),
-    ...(typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
-      ? { maxTokens: contextWindow }
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
+    ...(typeof usage.tool_uses === "number" && Number.isFinite(usage.tool_uses)
+      ? { toolUses: usage.tool_uses }
       : {}),
-    ...(typeof record.tool_uses === "number" && Number.isFinite(record.tool_uses)
-      ? { toolUses: record.tool_uses }
-      : {}),
-    ...(typeof record.duration_ms === "number" && Number.isFinite(record.duration_ms)
-      ? { durationMs: record.duration_ms }
+    ...(typeof usage.duration_ms === "number" && Number.isFinite(usage.duration_ms)
+      ? { durationMs: usage.duration_ms }
       : {}),
   };
 }
@@ -1330,8 +1326,6 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     errorMessage?: string,
     result?: SDKResultMessage,
   ) {
-    const resultUsage =
-      result?.usage && typeof result.usage === "object" ? { ...result.usage } : undefined;
     const resultContextWindow = maxClaudeContextWindowFromModelUsage(result?.modelUsage);
     if (resultContextWindow !== undefined) {
       context.lastKnownContextWindow = resultContextWindow;
@@ -1343,9 +1337,11 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     // Instead, use the last known context-window-accurate usage from task_progress
     // events and treat the accumulated total as totalProcessedTokens.
     const accumulatedSnapshot = normalizeClaudeTokenUsage(
-      resultUsage,
+      result?.usage,
       resultContextWindow ?? context.lastKnownContextWindow,
     );
+    const accumulatedTotalProcessedTokens =
+      accumulatedSnapshot?.totalProcessedTokens ?? accumulatedSnapshot?.usedTokens;
     const lastGoodUsage = context.lastKnownTokenUsage;
     const maxTokens = resultContextWindow ?? context.lastKnownContextWindow;
     const usageSnapshot: ThreadTokenUsageSnapshot | undefined = lastGoodUsage
@@ -1354,8 +1350,10 @@ const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ...(typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0
             ? { maxTokens }
             : {}),
-          ...(accumulatedSnapshot && accumulatedSnapshot.usedTokens > lastGoodUsage.usedTokens
-            ? { totalProcessedTokens: accumulatedSnapshot.usedTokens }
+          ...(typeof accumulatedTotalProcessedTokens === "number" &&
+          Number.isFinite(accumulatedTotalProcessedTokens) &&
+          accumulatedTotalProcessedTokens > lastGoodUsage.usedTokens
+            ? { totalProcessedTokens: accumulatedTotalProcessedTokens }
             : {}),
         }
       : accumulatedSnapshot;
