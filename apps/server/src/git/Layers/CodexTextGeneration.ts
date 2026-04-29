@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import { Effect, FileSystem, Layer, Option, Path, Schema, Scope, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
-import { CodexModelSelection } from "@t3tools/contracts";
+import {
+  CodexModelSelection,
+  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+} from "@t3tools/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -163,9 +166,15 @@ const makeCodexTextGeneration = Effect.gen(function* () {
 
     const runCodexCommand = Effect.fn("runCodexJson.runCodexCommand")(function* () {
       // Resolve frontend sentinel models like `auto` before invoking Codex CLI.
-      const resolvedModelSelection = resolveModelSelectionDefault(
-        modelSelection,
-      ) as CodexModelSelection;
+      // Utility text generation should use the cheaper utility default, not the
+      // interactive composer default.
+      const resolvedModelSelection =
+        modelSelection.model.trim().toLowerCase() === "auto"
+          ? ({
+              ...modelSelection,
+              model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
+            } satisfies CodexModelSelection)
+          : (resolveModelSelectionDefault(modelSelection) as CodexModelSelection);
       const normalizedOptions = normalizeCodexModelOptionsWithCapabilities(
         getCodexModelCapabilities(resolvedModelSelection.model),
         resolvedModelSelection.options,
