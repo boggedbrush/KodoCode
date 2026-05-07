@@ -54,6 +54,7 @@ import { Link, useLocation, useNavigate, useParams } from "@tanstack/react-route
 import {
   type SidebarProjectSortOrder,
   type SidebarThreadSortOrder,
+  type UnifiedSettings,
 } from "@t3tools/contracts/settings";
 import { isElectron } from "../env";
 import { APP_BASE_NAME, APP_STAGE_LABEL, APP_VERSION } from "../branding";
@@ -161,6 +162,15 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   easing: "ease-out",
 } as const;
 const sidebarWordmarkLogo = import.meta.env.DEV ? devLogo : prodLogo;
+
+const selectSidebarSettings = (settings: UnifiedSettings) => ({
+  confirmThreadArchive: settings.confirmThreadArchive,
+  confirmThreadDelete: settings.confirmThreadDelete,
+  defaultThreadEnvMode: settings.defaultThreadEnvMode,
+  projectPickerMode: settings.projectPickerMode,
+  sidebarProjectSortOrder: settings.sidebarProjectSortOrder,
+  sidebarThreadSortOrder: settings.sidebarThreadSortOrder,
+});
 
 function SidebarCollapseGlyph() {
   return (
@@ -702,6 +712,113 @@ function SortableProjectItem({
 }
 
 export default function Sidebar() {
+  const pathname = useLocation({ select: (loc) => loc.pathname });
+  if (pathname.startsWith("/settings")) {
+    return <SettingsModeSidebar pathname={pathname} />;
+  }
+  return <ThreadSidebarContent />;
+}
+
+function SettingsModeSidebar({ pathname }: { pathname: string }) {
+  const { toggleSidebar, open: sidebarOpen } = useSidebar();
+  const keybindings = useServerKeybindings();
+  const platform = navigator.platform;
+  const isMacDesktop = isElectron && isMacPlatform(platform);
+  const sidebarToggleShortcutLabel = shortcutLabelForCommand(keybindings, "sidebar.toggle", {
+    platform,
+    context: {
+      terminalFocus: false,
+      terminalOpen: false,
+    },
+  });
+
+  const wordmark = (
+    <div className="flex items-center gap-2">
+      <SidebarTrigger className="shrink-0 md:hidden" />
+      <div className="flex min-w-0 items-center">
+        <button
+          type="button"
+          aria-label={
+            sidebarToggleShortcutLabel
+              ? `Collapse sidebar (${sidebarToggleShortcutLabel})`
+              : "Collapse sidebar"
+          }
+          title={
+            sidebarToggleShortcutLabel
+              ? `Collapse sidebar (${sidebarToggleShortcutLabel})`
+              : "Collapse sidebar"
+          }
+          data-testid="sidebar-inline-logo-toggle"
+          className={cn(
+            "group/logo relative inline-flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground/70 outline-hidden ring-ring transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 [-webkit-app-region:no-drag]",
+          )}
+          onClick={toggleSidebar}
+        >
+          <span className="relative flex size-6 shrink-0 items-center justify-center">
+            <img
+              src={sidebarWordmarkLogo}
+              alt=""
+              aria-hidden="true"
+              className="size-6 transition-opacity duration-150 group-hover/logo:opacity-0 group-focus-visible/logo:opacity-0"
+            />
+            <span className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-150 group-hover/logo:opacity-100 group-focus-visible/logo:opacity-100">
+              <SidebarCollapseGlyph />
+            </span>
+          </span>
+        </button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Link
+                aria-label="Go to threads"
+                className={cn(
+                  "flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 rounded-md outline-hidden ring-ring transition-[opacity,color] ease-linear hover:text-foreground focus-visible:ring-2",
+                  "ml-2",
+                  sidebarOpen
+                    ? "opacity-100 duration-200"
+                    : "opacity-0 pointer-events-none duration-75",
+                )}
+                to="/"
+              />
+            }
+          >
+            <span className="truncate text-xs font-semibold tracking-tight text-foreground">
+              {APP_BASE_NAME}
+            </span>
+            <span className="rounded-full bg-muted/50 px-1.5 py-0.5 text-[8px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60">
+              {APP_STAGE_LABEL}
+            </span>
+          </TooltipTrigger>
+          <TooltipPopup side="bottom" sideOffset={2}>
+            Version {APP_VERSION}
+          </TooltipPopup>
+        </Tooltip>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      {isElectron ? (
+        <SidebarHeader
+          className={cn(
+            "drag-region h-[52px] flex-row items-center gap-2 px-4 py-0",
+            isMacDesktop && "pl-[90px]",
+          )}
+        >
+          {wordmark}
+        </SidebarHeader>
+      ) : (
+        <SidebarHeader className="gap-3 px-3 py-2 sm:gap-2.5 sm:px-4 sm:py-3">
+          {wordmark}
+        </SidebarHeader>
+      )}
+      <SettingsSidebarNav pathname={pathname} />
+    </>
+  );
+}
+
+function ThreadSidebarContent() {
   const { toggleSidebar, open: sidebarOpen } = useSidebar();
   const projects = useStore((store) => store.projects);
   const sidebarThreadsById = useStore((store) => store.sidebarThreadsById);
@@ -727,7 +844,7 @@ export default function Sidebar() {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
   const isOnSettings = pathname.startsWith("/settings");
-  const appSettings = useSettings();
+  const appSettings = useSettings(selectSidebarSettings);
   const { updateSettings } = useUpdateSettings();
   const { activeDraftThread, activeThread, handleNewThread } = useHandleNewThread();
   const { archiveThread, deleteThread } = useThreadActions();

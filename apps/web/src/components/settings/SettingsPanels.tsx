@@ -1,4 +1,5 @@
-export { GeneralSettingsPanel, useSettingsRestore } from "./SettingsGeneralPanel";
+export { useSettingsRestore } from "./SettingsRestore";
+export { GeneralSettingsPanel } from "./SettingsGeneralPanel";
 export { SettingsAppearancePanel } from "./SettingsAppearancePanel";
 export { SettingsModelsPanel } from "./SettingsModelsPanel";
 export { SettingsGitPanel } from "./SettingsGitPanel";

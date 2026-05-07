@@ -3,6 +3,7 @@ import {
   type ServerLifecycleWelcomePayload,
   type ThreadId,
 } from "@t3tools/contracts";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import {
   Outlet,
   createRootRouteWithContext,
@@ -56,6 +57,7 @@ import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
 import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
 import { deriveReplayRetryDecision } from "../orchestrationRecovery";
+import { scheduleStartupWarmup } from "../startupWarmup";
 import { getWsRpcClient } from "~/wsRpcClient";
 import { useServerKeybindings } from "~/rpc/serverState";
 
@@ -83,6 +85,7 @@ function RootRouteView() {
       <ToastProvider>
         <AnchoredToastProvider>
           <ServerStateBootstrap />
+          <StartupWarmupBootstrap />
           <ProviderUsageStateBootstrap />
           <UtilityModelDefaultBootstrap />
           <GlobalAppShortcuts />
@@ -213,6 +216,11 @@ function coalesceOrchestrationUiEvents(
 const REPLAY_RECOVERY_RETRY_DELAY_MS = 100;
 const MAX_NO_PROGRESS_REPLAY_RETRIES = 3;
 
+const selectTextGenerationModelSelection = (settings: UnifiedSettings) =>
+  settings.textGenerationModelSelection;
+const selectPromptEnhanceModelSelection = (settings: UnifiedSettings) =>
+  settings.promptEnhanceModelSelection;
+
 function ServerStateBootstrap() {
   useEffect(() => startServerStateSync(getWsRpcClient().server), []);
 
@@ -225,40 +233,55 @@ function ProviderUsageStateBootstrap() {
   return null;
 }
 
+function StartupWarmupBootstrap() {
+  const serverConfig = useServerConfig();
+
+  useEffect(() => {
+    if (serverConfig === null) {
+      return;
+    }
+
+    scheduleStartupWarmup();
+  }, [serverConfig]);
+
+  return null;
+}
+
 function UtilityModelDefaultBootstrap() {
-  const settings = useSettings();
+  const currentTextGenerationModelSelection = useSettings(selectTextGenerationModelSelection);
+  const currentPromptEnhanceModelSelection = useSettings(selectPromptEnhanceModelSelection);
   const { updateSettings } = useUpdateSettings();
   const providers = useServerProviders();
 
   useEffect(() => {
     const textGenerationModelSelection = resolveUtilityModelSelectionDefault(
-      settings.textGenerationModelSelection,
+      currentTextGenerationModelSelection,
       providers,
     );
     const promptEnhanceModelSelection = resolveUtilityModelSelectionDefault(
-      settings.promptEnhanceModelSelection,
+      currentPromptEnhanceModelSelection,
       providers,
     );
 
     if (
-      Equal.equals(textGenerationModelSelection, settings.textGenerationModelSelection) &&
-      Equal.equals(promptEnhanceModelSelection, settings.promptEnhanceModelSelection)
+      Equal.equals(textGenerationModelSelection, currentTextGenerationModelSelection) &&
+      Equal.equals(promptEnhanceModelSelection, currentPromptEnhanceModelSelection)
     ) {
       return;
     }
 
     updateSettings({
-      ...(Equal.equals(textGenerationModelSelection, settings.textGenerationModelSelection)
+      ...(Equal.equals(textGenerationModelSelection, currentTextGenerationModelSelection)
         ? {}
         : { textGenerationModelSelection }),
-      ...(Equal.equals(promptEnhanceModelSelection, settings.promptEnhanceModelSelection)
+      ...(Equal.equals(promptEnhanceModelSelection, currentPromptEnhanceModelSelection)
         ? {}
         : { promptEnhanceModelSelection }),
     });
   }, [
+    currentPromptEnhanceModelSelection,
+    currentTextGenerationModelSelection,
     providers,
-    settings.promptEnhanceModelSelection,
-    settings.textGenerationModelSelection,
     updateSettings,
   ]);
 
@@ -615,8 +638,12 @@ function EventRouter() {
       }
     };
 
+    let bootstrapSnapshotPromise: Promise<void> | null = null;
     const bootstrapFromSnapshot = async (): Promise<void> => {
-      await runSnapshotRecovery("bootstrap");
+      bootstrapSnapshotPromise ??= runSnapshotRecovery("bootstrap").finally(() => {
+        bootstrapSnapshotPromise = null;
+      });
+      await bootstrapSnapshotPromise;
     };
     bootstrapFromSnapshotRef.current = bootstrapFromSnapshot;
 
@@ -676,6 +703,14 @@ function EventRouter() {
     syncServerReadModel,
     syncThreads,
   ]);
+
+  useEffect(() => {
+    if (serverConfig === null) {
+      return;
+    }
+
+    void bootstrapFromSnapshotRef.current();
+  }, [serverConfig]);
 
   useServerWelcomeSubscription(handleWelcome);
   useServerConfigUpdatedSubscription(handleServerConfigUpdated);

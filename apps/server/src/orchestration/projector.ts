@@ -42,7 +42,26 @@ function updateThread(
   threadId: ThreadId,
   patch: ThreadPatch,
 ): OrchestrationThread[] {
-  return threads.map((thread) => (thread.id === threadId ? { ...thread, ...patch } : thread));
+  const index = threads.findIndex((thread) => thread.id === threadId);
+  if (index < 0) {
+    return threads as OrchestrationThread[];
+  }
+
+  const current = threads[index]!;
+  let changed = false;
+  for (const [key, value] of Object.entries(patch)) {
+    if (current[key as keyof ThreadPatch] !== value) {
+      changed = true;
+      break;
+    }
+  }
+  if (!changed) {
+    return threads as OrchestrationThread[];
+  }
+
+  const nextThreads = [...threads];
+  nextThreads[index] = { ...current, ...patch };
+  return nextThreads;
 }
 
 function decodeForEvent<A>(

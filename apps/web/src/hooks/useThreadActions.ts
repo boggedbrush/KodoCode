@@ -1,6 +1,7 @@
 import { ThreadId } from "@t3tools/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { useCallback } from "react";
 
 import { getFallbackThreadIdAfterDelete } from "../components/Sidebar.logic";
@@ -15,8 +16,13 @@ import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "
 import { toastManager } from "../components/ui/toast";
 import { useSettings } from "./useSettings";
 
+const selectThreadActionSettings = (settings: UnifiedSettings) => ({
+  confirmThreadDelete: settings.confirmThreadDelete,
+  sidebarThreadSortOrder: settings.sidebarThreadSortOrder,
+});
+
 export function useThreadActions() {
-  const appSettings = useSettings();
+  const appSettings = useSettings(selectThreadActionSettings);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearDraftThread);
   const clearProjectDraftThreadById = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadById,

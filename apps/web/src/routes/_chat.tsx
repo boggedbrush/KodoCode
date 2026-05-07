@@ -1,5 +1,6 @@
 import { Outlet, createFileRoute } from "@tanstack/react-router";
 import { useEffect } from "react";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
 
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -9,6 +10,8 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
 import { useSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "~/rpc/serverState";
+
+const selectDefaultThreadEnvMode = (settings: UnifiedSettings) => settings.defaultThreadEnvMode;
 
 function ChatRouteGlobalShortcuts() {
   const clearSelection = useThreadSelectionStore((state) => state.clearSelection);
@@ -21,7 +24,7 @@ function ChatRouteGlobalShortcuts() {
       ? selectThreadTerminalState(state.terminalStateByThreadId, routeThreadId).terminalOpen
       : false,
   );
-  const appSettings = useSettings();
+  const defaultThreadEnvMode = useSettings(selectDefaultThreadEnvMode);
 
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
@@ -48,7 +51,7 @@ function ChatRouteGlobalShortcuts() {
         event.stopPropagation();
         void handleNewThread(projectId, {
           envMode: resolveSidebarNewThreadEnvMode({
-            defaultEnvMode: appSettings.defaultThreadEnvMode,
+            defaultEnvMode: defaultThreadEnvMode,
           }),
         });
         return;
@@ -80,7 +83,7 @@ function ChatRouteGlobalShortcuts() {
     defaultProjectId,
     selectedThreadIdsSize,
     terminalOpen,
-    appSettings.defaultThreadEnvMode,
+    defaultThreadEnvMode,
   ]);
 
   return null;

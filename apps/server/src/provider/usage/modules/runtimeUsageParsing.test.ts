@@ -79,6 +79,56 @@ describe("parseRateLimitWindows", () => {
       },
     ]);
   });
+
+  it("treats Claude OAuth utilization as a percent value", () => {
+    const parsed = parseRateLimitWindows({
+      payload: {
+        five_hour: {
+          utilization: 1,
+          resets_at: "2026-04-29T04:18:00.000Z",
+        },
+        seven_day: {
+          utilization: 10,
+          resets_at: "2026-05-03T04:18:00.000Z",
+        },
+      },
+      sessionLabel: "Session",
+      weeklyLabel: "Weekly",
+      keyPrefix: "claude-oauth",
+    });
+
+    expect(parsed?.state).toBe("ready");
+    expect(parsed?.windows).toEqual([
+      {
+        key: "claude-oauth-session",
+        label: "Session",
+        percentUsed: 1,
+        resetAt: "2026-04-29T04:18:00.000Z",
+      },
+      {
+        key: "claude-oauth-weekly",
+        label: "Weekly",
+        percentUsed: 10,
+        resetAt: "2026-05-03T04:18:00.000Z",
+      },
+    ]);
+  });
+
+  it("still scales explicit ratio fields to percent values", () => {
+    const parsed = parseRateLimitWindows({
+      payload: {
+        primary: {
+          used_ratio: 0.42,
+          resetsAt: "2026-04-29T04:18:00.000Z",
+        },
+      },
+      sessionLabel: "Session",
+      weeklyLabel: "Weekly",
+      keyPrefix: "provider",
+    });
+
+    expect(parsed?.windows[0]?.percentUsed).toBe(42);
+  });
 });
 
 describe("parseClaudeCliUsageOutput", () => {

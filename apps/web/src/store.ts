@@ -16,8 +16,7 @@ import { create } from "zustand";
 import {
   findLatestProposedPlan,
   hasActionableProposedPlan,
-  derivePendingApprovals,
-  derivePendingUserInputs,
+  derivePendingRequestFlags,
 } from "./session-logic";
 import { resolveBackendHttpOrigin } from "./lib/utils";
 import { sanitizeThreadErrorMessage } from "./rpc/transportError";
@@ -53,14 +52,18 @@ function updateThread(
   threadId: ThreadId,
   updater: (t: Thread) => Thread,
 ): Thread[] {
-  let changed = false;
-  const next = threads.map((t) => {
-    if (t.id !== threadId) return t;
-    const updated = updater(t);
-    if (updated !== t) changed = true;
-    return updated;
-  });
-  return changed ? next : threads;
+  const index = threads.findIndex((thread) => thread.id === threadId);
+  if (index < 0) {
+    return threads;
+  }
+  const current = threads[index]!;
+  const updated = updater(current);
+  if (updated === current) {
+    return threads;
+  }
+  const nextThreads = [...threads];
+  nextThreads[index] = updated;
+  return nextThreads;
 }
 
 function updateProject(
@@ -68,18 +71,18 @@ function updateProject(
   projectId: Project["id"],
   updater: (project: Project) => Project,
 ): Project[] {
-  let changed = false;
-  const next = projects.map((project) => {
-    if (project.id !== projectId) {
-      return project;
-    }
-    const updated = updater(project);
-    if (updated !== project) {
-      changed = true;
-    }
-    return updated;
-  });
-  return changed ? next : projects;
+  const index = projects.findIndex((project) => project.id === projectId);
+  if (index < 0) {
+    return projects;
+  }
+  const current = projects[index]!;
+  const updated = updater(current);
+  if (updated === current) {
+    return projects;
+  }
+  const nextProjects = [...projects];
+  nextProjects[index] = updated;
+  return nextProjects;
 }
 
 function normalizeModelSelection<T extends { provider: "codex" | "claudeAgent"; model: string }>(
@@ -212,6 +215,7 @@ function getLatestUserMessageAt(
 }
 
 function buildSidebarThreadSummary(thread: Thread): SidebarThreadSummary {
+  const pendingRequestFlags = derivePendingRequestFlags(thread.activities);
   return {
     id: thread.id,
     projectId: thread.projectId,
@@ -225,8 +229,8 @@ function buildSidebarThreadSummary(thread: Thread): SidebarThreadSummary {
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     latestUserMessageAt: getLatestUserMessageAt(thread.messages),
-    hasPendingApprovals: derivePendingApprovals(thread.activities).length > 0,
-    hasPendingUserInput: derivePendingUserInputs(thread.activities).length > 0,
+    hasPendingApprovals: pendingRequestFlags.hasPendingApprovals,
+    hasPendingUserInput: pendingRequestFlags.hasPendingUserInput,
     hasActionableProposedPlan: hasActionableProposedPlan(
       findLatestProposedPlan(thread.proposedPlans, thread.latestTurn?.turnId ?? null),
     ),
@@ -301,8 +305,12 @@ function removeThreadIdByProjectId(
 function buildThreadIdsByProjectId(threads: ReadonlyArray<Thread>): Record<string, ThreadId[]> {
   const threadIdsByProjectId: Record<string, ThreadId[]> = {};
   for (const thread of threads) {
-    const existingThreadIds = threadIdsByProjectId[thread.projectId] ?? EMPTY_THREAD_IDS;
-    threadIdsByProjectId[thread.projectId] = [...existingThreadIds, thread.id];
+    let threadIds = threadIdsByProjectId[thread.projectId];
+    if (!threadIds) {
+      threadIds = [];
+      threadIdsByProjectId[thread.projectId] = threadIds;
+    }
+    threadIds.push(thread.id);
   }
   return threadIdsByProjectId;
 }
@@ -310,9 +318,11 @@ function buildThreadIdsByProjectId(threads: ReadonlyArray<Thread>): Record<strin
 function buildSidebarThreadsById(
   threads: ReadonlyArray<Thread>,
 ): Record<string, SidebarThreadSummary> {
-  return Object.fromEntries(
-    threads.map((thread) => [thread.id, buildSidebarThreadSummary(thread)]),
-  );
+  const sidebarThreadsById: Record<string, SidebarThreadSummary> = {};
+  for (const thread of threads) {
+    sidebarThreadsById[thread.id] = buildSidebarThreadSummary(thread);
+  }
+  return sidebarThreadsById;
 }
 
 function checkpointStatusToLatestTurnState(status: "ready" | "missing" | "error") {

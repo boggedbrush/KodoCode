@@ -107,6 +107,9 @@ jobs:
       - name: Browser test
         run: bun run --cwd apps/web test:browser
 
+      - name: Release smoke
+        run: bun run release:smoke
+
   build:
     name: Build ${{ matrix.label }}
     needs: preflight

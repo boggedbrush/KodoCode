@@ -8,4 +8,8 @@ script = ""
 [[actions]]
 name = "Run Desktop"
 icon = "run"
-command = "bun dev:desktop"
+command = '''
+clear
+bun install
+bun dev:desktop
+'''

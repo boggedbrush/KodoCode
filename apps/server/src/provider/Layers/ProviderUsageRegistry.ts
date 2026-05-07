@@ -131,7 +131,12 @@ export const ProviderUsageRegistryLive = Layer.effect(
       },
     ).pipe(Effect.map(sortUsages));
 
-    const usagesRef = yield* Ref.make<ReadonlyArray<ServerProviderUsage>>(yield* refreshAll);
+    const initialUsages = sortUsages(
+      modules.map((module) =>
+        unknownUsage(module.metadata, `${module.metadata.displayName} usage check is running.`),
+      ),
+    );
+    const usagesRef = yield* Ref.make<ReadonlyArray<ServerProviderUsage>>(initialUsages);
 
     const publishIfChanged = Effect.fn("publishIfChanged")(function* (
       previous: ReadonlyArray<ServerProviderUsage>,
@@ -195,6 +200,8 @@ export const ProviderUsageRegistryLive = Layer.effect(
     yield* Stream.runForEach(providerService.streamEvents, applyRuntimeEvent).pipe(
       Effect.forkScoped,
     );
+
+    yield* syncUsages().pipe(Effect.ignoreCause({ log: true }), Effect.forkScoped);
 
     yield* startUsagePollingController({
       frequency: "5m",

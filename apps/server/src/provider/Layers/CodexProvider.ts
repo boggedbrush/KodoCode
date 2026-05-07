@@ -248,6 +248,38 @@ export const hasCustomModelProvider = readCodexConfigModelProvider().pipe(
 
 const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
 
+function makeOptimisticCodexProviderSnapshot(codexSettings: CodexSettings): ServerProvider {
+  const checkedAt = new Date().toISOString();
+  const models = providerModelsFromSettings(
+    BUILT_IN_MODELS,
+    PROVIDER,
+    codexSettings.customModels,
+    DEFAULT_CODEX_MODEL_CAPABILITIES,
+  );
+
+  return buildServerProvider({
+    provider: PROVIDER,
+    enabled: codexSettings.enabled,
+    checkedAt,
+    models,
+    probe: codexSettings.enabled
+      ? {
+          installed: true,
+          version: null,
+          status: "ready",
+          auth: { status: "unknown" },
+          message: "Codex status check is running in the background.",
+        }
+      : {
+          installed: false,
+          version: null,
+          status: "warning",
+          auth: { status: "unknown" },
+          message: "Codex is disabled in Kodo Code settings.",
+        },
+  });
+}
+
 const probeCodexCapabilities = (input: {
   readonly binaryPath: string;
   readonly homePath?: string;
@@ -520,6 +552,7 @@ export const CodexProviderLive = Layer.effect(
       ),
       haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
       checkProvider,
+      initialSnapshot: makeOptimisticCodexProviderSnapshot,
     });
   }),
 );

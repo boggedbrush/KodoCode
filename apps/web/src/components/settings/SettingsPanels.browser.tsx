@@ -13,7 +13,8 @@ import { render } from "vitest-browser-react";
 import { __resetNativeApiForTests } from "../../nativeApi";
 import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
 import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/serverState";
-import { SettingsAboutPanel, SettingsGitPanel } from "./SettingsPanels";
+import { SettingsAboutPanel } from "./SettingsAboutPanel";
+import { SettingsGitPanel } from "./SettingsGitPanel";
 
 function createBaseServerConfig(): ServerConfig {
   return {

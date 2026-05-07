@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { SettingsModelsPanel } from "../components/settings/SettingsPanels";
+import { SettingsModelsPanel } from "../components/settings/SettingsModelsPanel";
 
 export const Route = createFileRoute("/settings/models")({
   component: SettingsModelsPanel,

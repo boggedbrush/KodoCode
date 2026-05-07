@@ -166,9 +166,7 @@ function readJson(path) {
 }
 
 function resolveMacLauncherIconPath() {
-  const iconPath = isDevelopment
-    ? resolve(desktopDir, "../../assets/dev/blueprint-macos.icns")
-    : join(desktopDir, "resources", "icon.icns");
+  const iconPath = join(desktopDir, "resources", "icon.icns");
 
   if (!existsSync(iconPath)) {
     throw new Error(`Missing macOS launcher icon: ${iconPath}`);

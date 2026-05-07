@@ -3,7 +3,7 @@ import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "rea
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { type SlowRpcAckRequest, useSlowRpcAckRequests } from "../rpc/requestLatencyState";
-import { useServerConfig } from "../rpc/serverState";
+import { getServerConfig, useServerConfig } from "../rpc/serverState";
 import {
   getWsConnectionStatus,
   getWsConnectionUiState,
@@ -19,6 +19,7 @@ import { toastManager } from "./ui/toast";
 import { getWsRpcClient } from "~/wsRpcClient";
 
 const FORCED_WS_RECONNECT_DEBOUNCE_MS = 5_000;
+const INITIAL_STARTUP_EXHAUSTED_RECONNECT_DELAY_MS = 2_000;
 const PRODUCTION_STARTUP_SCREEN_TIMEOUT_MS = 30_000;
 type WsAutoReconnectTrigger = "focus" | "online";
 
@@ -121,6 +122,18 @@ export function shouldRestartStalledReconnect(
     status.reconnectPhase === "waiting" &&
     status.nextRetryAt === expectedNextRetryAt &&
     status.online
+  );
+}
+
+export function shouldRetryExhaustedInitialStartup(
+  status: WsConnectionStatus,
+  hasServerConfig: boolean,
+): boolean {
+  return (
+    !hasServerConfig &&
+    !status.hasConnected &&
+    status.online &&
+    status.reconnectPhase === "exhausted"
   );
 }
 
@@ -294,6 +307,7 @@ function WebSocketBlockingState({
 
 export function WebSocketConnectionCoordinator() {
   const status = useWsConnectionStatus();
+  const serverConfig = useServerConfig();
   const [nowMs, setNowMs] = useState(() => Date.now());
   const lastForcedReconnectAtRef = useRef(0);
   const toastIdRef = useRef<ReturnType<typeof toastManager.add> | null>(null);
@@ -399,6 +413,26 @@ export function WebSocketConnectionCoordinator() {
       window.clearTimeout(timeoutId);
     };
   }, [status.nextRetryAt, status.online, status.reconnectAttemptCount, status.reconnectPhase]);
+
+  useEffect(() => {
+    if (!shouldRetryExhaustedInitialStartup(status, serverConfig !== null)) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      if (
+        !shouldRetryExhaustedInitialStartup(getWsConnectionStatus(), getServerConfig() !== null)
+      ) {
+        return;
+      }
+
+      runReconnect(false);
+    }, INITIAL_STARTUP_EXHAUSTED_RECONNECT_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [serverConfig, status]);
 
   useEffect(() => {
     const uiState = getWsConnectionUiState(status);

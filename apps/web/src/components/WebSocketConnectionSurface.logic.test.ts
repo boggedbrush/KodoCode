@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { WsConnectionStatus } from "../rpc/wsConnectionState";
 import {
   shouldAutoReconnect,
+  shouldRetryExhaustedInitialStartup,
   shouldRestartStalledReconnect,
   shouldShowProductionStartupLoader,
 } from "./WebSocketConnectionSurface";
@@ -111,6 +112,28 @@ describe("WebSocketConnectionSurface.logic", () => {
           reconnectPhase: "attempting",
         }),
         "2026-04-03T20:00:01.000Z",
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps retrying exhausted startup connections until the first config snapshot lands", () => {
+    const exhaustedStartup = makeStatus({
+      hasConnected: false,
+      online: true,
+      phase: "disconnected",
+      reconnectAttemptCount: 8,
+      reconnectPhase: "exhausted",
+    });
+
+    expect(shouldRetryExhaustedInitialStartup(exhaustedStartup, false)).toBe(true);
+    expect(shouldRetryExhaustedInitialStartup(exhaustedStartup, true)).toBe(false);
+    expect(
+      shouldRetryExhaustedInitialStartup(
+        {
+          ...exhaustedStartup,
+          hasConnected: true,
+        },
+        false,
       ),
     ).toBe(false);
   });

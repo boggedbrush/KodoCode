@@ -349,6 +349,38 @@ function claudeAuthMetadata(input: {
 
 const CAPABILITIES_PROBE_TIMEOUT_MS = 8_000;
 
+function makeOptimisticClaudeProviderSnapshot(claudeSettings: ClaudeSettings): ServerProvider {
+  const checkedAt = new Date().toISOString();
+  const models = providerModelsFromSettings(
+    BUILT_IN_MODELS,
+    PROVIDER,
+    claudeSettings.customModels,
+    DEFAULT_CLAUDE_MODEL_CAPABILITIES,
+  );
+
+  return buildServerProvider({
+    provider: PROVIDER,
+    enabled: claudeSettings.enabled,
+    checkedAt,
+    models,
+    probe: claudeSettings.enabled
+      ? {
+          installed: true,
+          version: null,
+          status: "ready",
+          auth: { status: "unknown" },
+          message: "Claude status check is running in the background.",
+        }
+      : {
+          installed: false,
+          version: null,
+          status: "warning",
+          auth: { status: "unknown" },
+          message: "Claude is disabled in Kodo Code settings.",
+        },
+  });
+}
+
 function waitForAbortSignal(signal: AbortSignal): Promise<void> {
   if (signal.aborted) {
     return Promise.resolve();
@@ -627,6 +659,7 @@ export const ClaudeProviderLive = Layer.effect(
       ),
       haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
       checkProvider,
+      initialSnapshot: makeOptimisticClaudeProviderSnapshot,
     });
   }),
 );

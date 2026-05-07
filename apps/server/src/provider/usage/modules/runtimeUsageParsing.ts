@@ -88,6 +88,40 @@ export function findNumberByKeys(value: unknown, keys: ReadonlyArray<string>): n
   }) as number | undefined;
 }
 
+function findNumberEntryByKeys(
+  value: unknown,
+  keys: ReadonlyArray<string>,
+): { readonly key: string; readonly value: number } | undefined {
+  const record = asRecord(value);
+  if (!record) {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const nested = findNumberEntryByKeys(item, keys);
+        if (nested !== undefined) {
+          return nested;
+        }
+      }
+    }
+    return undefined;
+  }
+
+  for (const key of keys) {
+    const candidate = asNumber(record[key]);
+    if (candidate !== undefined) {
+      return { key, value: candidate };
+    }
+  }
+
+  for (const nestedValue of Object.values(record)) {
+    const nested = findNumberEntryByKeys(nestedValue, keys);
+    if (nested !== undefined) {
+      return nested;
+    }
+  }
+
+  return undefined;
+}
+
 export function normalizeDateString(value: unknown): string | null {
   const direct = asString(value);
   if (direct) {
@@ -107,6 +141,32 @@ export function normalizeDateString(value: unknown): string | null {
     return null;
   }
   return new Date(millis).toISOString();
+}
+
+const PERCENT_USED_KEYS = [
+  "usedPercent",
+  "used_percent",
+  "used_percentage",
+  "percentUsed",
+  "percent_used",
+  "utilization",
+] as const;
+const RATIO_USED_KEYS = [
+  "usedRatio",
+  "used_ratio",
+  "usageRatio",
+  "usage_ratio",
+  "utilizationRatio",
+  "utilization_ratio",
+  "usedFraction",
+  "used_fraction",
+] as const;
+const USED_PERCENT_VALUE_KEYS = [...PERCENT_USED_KEYS, ...RATIO_USED_KEYS] as const;
+
+function normalizeUsedPercent(entry: { readonly key: string; readonly value: number }): number {
+  const ratioKey = (RATIO_USED_KEYS as ReadonlyArray<string>).includes(entry.key);
+  const percent = ratioKey ? entry.value * 100 : entry.value;
+  return Math.max(0, Math.min(100, percent));
 }
 
 export function parseRateLimitWindow(input: {
@@ -165,24 +225,9 @@ export function parseRateLimitWindow(input: {
       ]),
     );
 
-  const rawPercentUsed = findNumberByKeys(payload, [
-    "usedPercent",
-    "used_percent",
-    "used_percentage",
-    "percentUsed",
-    "percent_used",
-    "utilization",
-  ]);
+  const rawPercentUsed = findNumberEntryByKeys(payload, USED_PERCENT_VALUE_KEYS);
   const derivedPercentUsed =
-    rawPercentUsed === undefined
-      ? null
-      : Math.max(
-          0,
-          Math.min(
-            100,
-            rawPercentUsed > 0 && rawPercentUsed <= 1 ? rawPercentUsed * 100 : rawPercentUsed,
-          ),
-        );
+    rawPercentUsed === undefined ? null : normalizeUsedPercent(rawPercentUsed);
   if (remaining === undefined && limit === undefined && !resetAt) {
     if (derivedPercentUsed === null) {
       return undefined;

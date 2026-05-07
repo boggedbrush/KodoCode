@@ -13,6 +13,7 @@ import {
   deriveActivePlanState,
   PROVIDER_OPTIONS,
   derivePendingApprovals,
+  derivePendingRequestFlags,
   derivePendingUserInputs,
   deriveTimelineEntries,
   deriveWorkLogEntries,
@@ -304,6 +305,56 @@ describe("derivePendingUserInputs", () => {
     ];
 
     expect(derivePendingUserInputs(activities)).toEqual([]);
+  });
+});
+
+describe("derivePendingRequestFlags", () => {
+  it("summarizes pending approval and user-input state in one ordered pass", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "user-input-resolved",
+        createdAt: "2026-02-23T00:00:04.000Z",
+        kind: "user-input.resolved",
+        summary: "User input submitted",
+        tone: "info",
+        payload: { requestId: "req-user-input-closed" },
+      }),
+      makeActivity({
+        id: "approval-open",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "approval.requested",
+        summary: "Command approval requested",
+        tone: "approval",
+        payload: {
+          requestId: "req-approval-open",
+          requestType: "command_execution_approval",
+        },
+      }),
+      makeActivity({
+        id: "user-input-open",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "user-input.requested",
+        summary: "User input requested",
+        tone: "info",
+        payload: {
+          requestId: "req-user-input-closed",
+          questions: [
+            {
+              id: "next_step",
+              header: "Next",
+              question: "Continue?",
+              options: [{ label: "yes", description: "Continue" }],
+              multiSelect: false,
+            },
+          ],
+        },
+      }),
+    ];
+
+    expect(derivePendingRequestFlags(activities)).toEqual({
+      hasPendingApprovals: true,
+      hasPendingUserInput: false,
+    });
   });
 });
 

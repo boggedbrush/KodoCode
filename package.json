@@ -63,9 +63,11 @@
     "vitest": "catalog:"
   },
   "overrides": {
+    "@anthropic-ai/sdk": "0.91.1",
     "@effect/platform-node-shared": "catalog:",
     "defu": "^6.1.5",
     "h3": "^1.15.11",
+    "ip-address": "10.1.1",
     "picomatch": "^2.3.2",
     "smol-toml": "^1.6.1",
     "uuid": "^14.0.0",

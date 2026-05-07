@@ -6,7 +6,8 @@ export const BRAND_ASSET_PATHS = {
   productionWebFavicon16Png: "assets/prod/kodo-black-web-favicon-16x16.png",
   productionWebFavicon32Png: "assets/prod/kodo-black-web-favicon-32x32.png",
   productionWebAppleTouchIconPng: "assets/prod/kodo-black-web-apple-touch-180.png",
-  developmentMacIconIcns: "assets/dev/blueprint-macos.icns",
+  // Keep the macOS Dock/App Switcher icon on the production app mark in dev.
+  developmentMacIconIcns: "assets/prod/kodo-black-macos.icns",
   developmentWindowsIconIco: "assets/dev/blueprint-windows.ico",
   developmentWebFaviconIco: "assets/dev/blueprint-web-favicon.ico",
   developmentWebFavicon16Png: "assets/dev/blueprint-web-favicon-16x16.png",

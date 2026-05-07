@@ -64,6 +64,11 @@ export interface PendingUserInput {
   questions: ReadonlyArray<UserInputQuestion>;
 }
 
+export interface PendingRequestFlags {
+  hasPendingApprovals: boolean;
+  hasPendingUserInput: boolean;
+}
+
 export interface ActivePlanState {
   createdAt: string;
   turnId: TurnId | null;
@@ -184,7 +189,7 @@ export function derivePendingApprovals(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): PendingApproval[] {
   const openByRequestId = new Map<ApprovalRequestId, PendingApproval>();
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = getOrderedActivities(activities);
 
   for (const activity of ordered) {
     const payload =
@@ -290,7 +295,7 @@ export function derivePendingUserInputs(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): PendingUserInput[] {
   const openByRequestId = new Map<ApprovalRequestId, PendingUserInput>();
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = getOrderedActivities(activities);
 
   for (const activity of ordered) {
     const payload =
@@ -335,21 +340,100 @@ export function derivePendingUserInputs(
   );
 }
 
+export function derivePendingRequestFlags(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): PendingRequestFlags {
+  const pendingApprovalRequestIds = new Set<ApprovalRequestId>();
+  const pendingUserInputRequestIds = new Set<ApprovalRequestId>();
+  const ordered = getOrderedActivities(activities);
+
+  for (const activity of ordered) {
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const requestId =
+      payload && typeof payload.requestId === "string"
+        ? ApprovalRequestId.makeUnsafe(payload.requestId)
+        : null;
+    const requestKind =
+      payload &&
+      (payload.requestKind === "command" ||
+        payload.requestKind === "file-read" ||
+        payload.requestKind === "file-change")
+        ? payload.requestKind
+        : payload
+          ? requestKindFromRequestType(payload.requestType)
+          : null;
+    const detail = payload && typeof payload.detail === "string" ? payload.detail : undefined;
+
+    if (activity.kind === "approval.requested" && requestId && requestKind) {
+      pendingApprovalRequestIds.add(requestId);
+      continue;
+    }
+
+    if (activity.kind === "approval.resolved" && requestId) {
+      pendingApprovalRequestIds.delete(requestId);
+      continue;
+    }
+
+    if (
+      activity.kind === "provider.approval.respond.failed" &&
+      requestId &&
+      isStalePendingRequestFailureDetail(detail)
+    ) {
+      pendingApprovalRequestIds.delete(requestId);
+      continue;
+    }
+
+    if (activity.kind === "user-input.requested" && requestId) {
+      if (parseUserInputQuestions(payload)) {
+        pendingUserInputRequestIds.add(requestId);
+      }
+      continue;
+    }
+
+    if (activity.kind === "user-input.resolved" && requestId) {
+      pendingUserInputRequestIds.delete(requestId);
+      continue;
+    }
+
+    if (
+      activity.kind === "provider.user-input.respond.failed" &&
+      requestId &&
+      isStalePendingRequestFailureDetail(detail)
+    ) {
+      pendingUserInputRequestIds.delete(requestId);
+    }
+  }
+
+  return {
+    hasPendingApprovals: pendingApprovalRequestIds.size > 0,
+    hasPendingUserInput: pendingUserInputRequestIds.size > 0,
+  };
+}
+
 export function deriveActivePlanState(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
 ): ActivePlanState | null {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const candidates = ordered.filter((activity) => {
+  let latest: OrchestrationThreadActivity | null = null;
+  for (const activity of activities) {
     if (activity.kind !== "turn.plan.updated") {
-      return false;
+      continue;
     }
     if (!latestTurnId) {
-      return true;
+      if (latest === null || compareActivitiesByOrder(latest, activity) <= 0) {
+        latest = activity;
+      }
+      continue;
     }
-    return activity.turnId === latestTurnId;
-  });
-  const latest = candidates.at(-1);
+    if (activity.turnId === latestTurnId) {
+      if (latest === null || compareActivitiesByOrder(latest, activity) <= 0) {
+        latest = activity;
+      }
+    }
+  }
   if (!latest) {
     return null;
   }
@@ -401,24 +485,29 @@ export function findLatestProposedPlan(
   latestTurnId: TurnId | string | null | undefined,
 ): LatestProposedPlanState | null {
   if (latestTurnId) {
-    const matchingTurnPlan = [...proposedPlans]
-      .filter((proposedPlan) => proposedPlan.turnId === latestTurnId)
-      .toSorted(
-        (left, right) =>
-          left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id),
-      )
-      .at(-1);
+    let matchingTurnPlan: ProposedPlan | null = null;
+    for (const proposedPlan of proposedPlans) {
+      if (proposedPlan.turnId !== latestTurnId) {
+        continue;
+      }
+      if (
+        matchingTurnPlan === null ||
+        compareProposedPlansByUpdateOrder(matchingTurnPlan, proposedPlan) <= 0
+      ) {
+        matchingTurnPlan = proposedPlan;
+      }
+    }
     if (matchingTurnPlan) {
       return toLatestProposedPlanState(matchingTurnPlan);
     }
   }
 
-  const latestPlan = [...proposedPlans]
-    .toSorted(
-      (left, right) =>
-        left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id),
-    )
-    .at(-1);
+  let latestPlan: ProposedPlan | null = null;
+  for (const proposedPlan of proposedPlans) {
+    if (latestPlan === null || compareProposedPlansByUpdateOrder(latestPlan, proposedPlan) <= 0) {
+      latestPlan = proposedPlan;
+    }
+  }
   if (!latestPlan) {
     return null;
   }
@@ -460,15 +549,29 @@ export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
 ): WorkLogEntry[] {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  const entries = ordered
-    .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
-    .filter((activity) => activity.kind !== "tool.started")
-    .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
-    .filter((activity) => activity.kind !== "context-window.updated")
-    .filter((activity) => activity.summary !== "Checkpoint captured")
-    .filter((activity) => !isPlanBoundaryToolActivity(activity))
-    .map(toDerivedWorkLogEntry);
+  const ordered = getOrderedActivities(activities);
+  const entries: DerivedWorkLogEntry[] = [];
+  for (const activity of ordered) {
+    if (latestTurnId && activity.turnId !== latestTurnId) {
+      continue;
+    }
+    if (activity.kind === "tool.started") {
+      continue;
+    }
+    if (activity.kind === "task.started" || activity.kind === "task.completed") {
+      continue;
+    }
+    if (activity.kind === "context-window.updated") {
+      continue;
+    }
+    if (activity.summary === "Checkpoint captured") {
+      continue;
+    }
+    if (isPlanBoundaryToolActivity(activity)) {
+      continue;
+    }
+    entries.push(toDerivedWorkLogEntry(activity));
+  }
   return collapseDerivedWorkLogEntries(entries).map(
     ({ activityKind: _activityKind, collapseKey: _collapseKey, ...entry }) => entry,
   );
@@ -629,6 +732,10 @@ function toLatestProposedPlanState(proposedPlan: ProposedPlan): LatestProposedPl
     implementedAt: proposedPlan.implementedAt,
     implementationThreadId: proposedPlan.implementationThreadId,
   };
+}
+
+function compareProposedPlansByUpdateOrder(left: ProposedPlan, right: ProposedPlan): number {
+  return left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -961,6 +1068,17 @@ function compareActivitiesByOrder(
   return left.id.localeCompare(right.id);
 }
 
+function getOrderedActivities(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyArray<OrchestrationThreadActivity> {
+  for (let index = 1; index < activities.length; index += 1) {
+    if (compareActivitiesByOrder(activities[index - 1]!, activities[index]!) > 0) {
+      return activities.toSorted(compareActivitiesByOrder);
+    }
+  }
+  return activities;
+}
+
 function compareActivityLifecycleRank(kind: string): number {
   if (kind.endsWith(".started") || kind === "tool.started") {
     return 0;
@@ -987,27 +1105,32 @@ export function deriveTimelineEntries(
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
 ): TimelineEntry[] {
-  const messageRows: TimelineEntry[] = messages.map((message) => ({
-    id: message.id,
-    kind: "message",
-    createdAt: message.createdAt,
-    message,
-  }));
-  const proposedPlanRows: TimelineEntry[] = proposedPlans.map((proposedPlan) => ({
-    id: proposedPlan.id,
-    kind: "proposed-plan",
-    createdAt: proposedPlan.createdAt,
-    proposedPlan,
-  }));
-  const workRows: TimelineEntry[] = workEntries.map((entry) => ({
-    id: entry.id,
-    kind: "work",
-    createdAt: entry.createdAt,
-    entry,
-  }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
-  );
+  const entries: TimelineEntry[] = [];
+  for (const message of messages) {
+    entries.push({
+      id: message.id,
+      kind: "message",
+      createdAt: message.createdAt,
+      message,
+    });
+  }
+  for (const proposedPlan of proposedPlans) {
+    entries.push({
+      id: proposedPlan.id,
+      kind: "proposed-plan",
+      createdAt: proposedPlan.createdAt,
+      proposedPlan,
+    });
+  }
+  for (const entry of workEntries) {
+    entries.push({
+      id: entry.id,
+      kind: "work",
+      createdAt: entry.createdAt,
+      entry,
+    });
+  }
+  return entries.toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 export function deriveCompletionDividerBeforeEntryId(
