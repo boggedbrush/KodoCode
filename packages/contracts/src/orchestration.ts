@@ -67,6 +67,7 @@ export const ProviderInteractionMode = Schema.Literals([
   "ask",
   "code",
   "review",
+  "swarm",
 ]);
 export type ProviderInteractionMode = typeof ProviderInteractionMode.Type;
 export const DEFAULT_PROVIDER_INTERACTION_MODE: ProviderInteractionMode = "default";

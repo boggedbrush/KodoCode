@@ -813,6 +813,7 @@ function normalizePersistedDraftThreads(
         interactionMode:
           candidateDraftThread.interactionMode === "plan" ||
           candidateDraftThread.interactionMode === "review" ||
+          candidateDraftThread.interactionMode === "swarm" ||
           candidateDraftThread.interactionMode === "default"
             ? candidateDraftThread.interactionMode
             : DEFAULT_INTERACTION_MODE,
@@ -899,6 +900,7 @@ function normalizePersistedDraftsByThreadId(
     const interactionMode =
       draftCandidate.interactionMode === "plan" ||
       draftCandidate.interactionMode === "review" ||
+      draftCandidate.interactionMode === "swarm" ||
       draftCandidate.interactionMode === "default"
         ? draftCandidate.interactionMode
         : null;
@@ -1861,6 +1863,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           interactionMode === "plan" ||
           interactionMode === "review" ||
           interactionMode === "code" ||
+          interactionMode === "swarm" ||
           interactionMode === "default"
             ? interactionMode
             : null;

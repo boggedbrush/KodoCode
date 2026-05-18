@@ -34,6 +34,7 @@ import {
 } from "./provider/codexAccount";
 import { buildCodexInitializeParams, killCodexChildProcess } from "./provider/codexAppServer";
 import { expandHomePath } from "./pathExpansion";
+import { buildCodexSwarmDeveloperInstructions } from "./provider/swarm";
 
 export { buildCodexInitializeParams } from "./provider/codexAppServer";
 export { readCodexAccountSnapshot, resolveCodexModelForAccount } from "./provider/codexAccount";
@@ -115,6 +116,7 @@ export interface CodexAppServerSendTurnInput {
   readonly serviceTier?: string | null;
   readonly effort?: string;
   readonly interactionMode?: ProviderInteractionMode;
+  readonly swarmMaxLoops?: 1 | 2;
 }
 
 export interface CodexAppServerStartSessionInput {
@@ -367,9 +369,10 @@ export function normalizeCodexModelSlug(
 }
 
 function buildCodexCollaborationMode(input: {
-  readonly interactionMode?: "default" | "plan" | "ask" | "code" | "review";
+  readonly interactionMode?: "default" | "plan" | "ask" | "code" | "review" | "swarm";
   readonly model?: string;
   readonly effort?: string;
+  readonly swarmMaxLoops?: 1 | 2;
 }):
   | {
       mode: "default" | "plan";
@@ -396,7 +399,9 @@ function buildCodexCollaborationMode(input: {
           ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
           : input.interactionMode === "review"
             ? CODEX_REVIEW_MODE_DEVELOPER_INSTRUCTIONS
-            : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
+            : input.interactionMode === "swarm"
+              ? buildCodexSwarmDeveloperInstructions(input.swarmMaxLoops ?? 1)
+              : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
     },
   };
 }
@@ -758,6 +763,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
       ...(normalizedModel !== undefined ? { model: normalizedModel } : {}),
       ...(input.effort !== undefined ? { effort: input.effort } : {}),
+      ...(input.swarmMaxLoops !== undefined ? { swarmMaxLoops: input.swarmMaxLoops } : {}),
     });
     if (collaborationMode) {
       if (!turnStartParams.model) {

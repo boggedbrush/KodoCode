@@ -87,4 +87,29 @@ describe("ComposerPrimaryActions", () => {
 
     expect(markup).toContain(">Add Details<");
   });
+
+  it("renders the standard icon button when swarm mode is selected", () => {
+    const markup = renderToStaticMarkup(
+      <ComposerPrimaryActions
+        compact={false}
+        accentColor={INTERACTION_MODE_ACCENT_COLORS.swarm}
+        pendingActionAccentColor={INTERACTION_MODE_ACCENT_COLORS.swarm}
+        pendingAction={null}
+        isRunning={false}
+        showPlanFollowUpPrompt={false}
+        promptHasText={false}
+        isSendBusy={false}
+        isConnecting={false}
+        isPreparingWorktree={false}
+        hasSendableContent={true}
+        interactionMode={"swarm" as ProviderInteractionMode}
+        onPreviousPendingQuestion={() => {}}
+        onInterrupt={() => {}}
+        onImplementPlanInNewThread={() => {}}
+      />,
+    );
+
+    expect(markup).toContain('viewBox="0 0 14 14"');
+    expect(markup).not.toContain(">Swarm<");
+  });
 });

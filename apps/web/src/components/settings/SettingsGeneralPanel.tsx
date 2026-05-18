@@ -1,4 +1,8 @@
-import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_SWARM_MAX_LOOPS,
+  DEFAULT_UNIFIED_SETTINGS,
+  type UnifiedSettings,
+} from "@t3tools/contracts/settings";
 
 import { useSettings, useUpdateSettings } from "../../hooks/useSettings";
 import {
@@ -11,7 +15,6 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../
 import { Switch } from "../ui/switch";
 
 type SettingsUpdater = (patch: Partial<UnifiedSettings>) => void;
-
 function GeneralBehaviorSection({
   settings,
   updateSettings,
@@ -83,6 +86,45 @@ function GeneralBehaviorSection({
               </SelectItem>
               <SelectItem hideIndicator value="worktree">
                 New worktree
+              </SelectItem>
+            </SelectPopup>
+          </Select>
+        }
+      />
+
+      <SettingsRow
+        title="Swarm loops"
+        description="Cap swarm mode to one or two internal refinement loops. Higher values cost more."
+        resetAction={
+          settings.swarmMaxLoops !== DEFAULT_SWARM_MAX_LOOPS ? (
+            <SettingResetButton
+              label="swarm loops"
+              onClick={() =>
+                updateSettings({
+                  swarmMaxLoops: DEFAULT_SWARM_MAX_LOOPS,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Select
+            value={String(settings.swarmMaxLoops)}
+            onValueChange={(value) => {
+              if (value === "1" || value === "2") {
+                updateSettings({ swarmMaxLoops: Number(value) as 1 | 2 });
+              }
+            }}
+          >
+            <SelectTrigger className="w-full sm:w-44" aria-label="Swarm loop cap">
+              <SelectValue>{settings.swarmMaxLoops === 2 ? "Two loops" : "One loop"}</SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem hideIndicator value="1">
+                One loop
+              </SelectItem>
+              <SelectItem hideIndicator value="2">
+                Two loops
               </SelectItem>
             </SelectPopup>
           </Select>

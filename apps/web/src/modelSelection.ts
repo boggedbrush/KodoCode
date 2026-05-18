@@ -260,7 +260,9 @@ export function getModeModelSelectionKey(
       ? "planModelSelection"
       : mode === "review"
         ? "reviewModelSelection"
-        : "codeModelSelection";
+        : mode === "swarm"
+          ? "codeModelSelection"
+          : "codeModelSelection";
 }
 
 export type WorkflowPresetModeSelectionKey = ReturnType<typeof getModeModelSelectionKey>;
