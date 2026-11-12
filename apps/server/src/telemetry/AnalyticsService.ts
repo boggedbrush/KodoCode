@@ -23,6 +23,11 @@ import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import { getTelemetryIdentity, type TelemetryOwner } from "./Identify.ts";
+import {
+  isTelemetryEndpointConfigured,
+  KODO_BUILD_POSTHOG_HOST,
+  KODO_BUILD_POSTHOG_KEY,
+} from "./kodoTelemetryEndpoint.ts";
 
 interface BufferedAnalyticsEvent {
   readonly uuid: string;
@@ -65,11 +70,10 @@ function retryDelayMs(failures: number, random: number): number {
 }
 
 const TelemetryEnvConfig = Config.all({
-  posthogKey: Config.String("T3CODE_POSTHOG_KEY").pipe(
-    Config.withDefault("phc_XOWci4oZP4VvLiEyrFqkFjP4CZn55mjYYBMREK5Wd6m"),
-  ),
+  // KODO: telemetry-endpoint - telemetry endpoint (no upstream default; off until an operator supplies both)
+  posthogKey: Config.String("T3CODE_POSTHOG_KEY").pipe(Config.withDefault(KODO_BUILD_POSTHOG_KEY)),
   posthogHost: Config.String("T3CODE_POSTHOG_HOST").pipe(
-    Config.withDefault("https://ingest.t3.codes"),
+    Config.withDefault(KODO_BUILD_POSTHOG_HOST),
   ),
   enabled: Config.Boolean("T3CODE_TELEMETRY_ENABLED").pipe(Config.withDefault(true)),
   flushBatchSize: Config.Number("T3CODE_TELEMETRY_FLUSH_BATCH_SIZE").pipe(Config.withDefault(20)),
@@ -122,12 +126,19 @@ export const make = Effect.gen(function* () {
   const telemetryConfig = yield* TelemetryEnvConfig;
   const hostEnvironment = yield* HostProcess.Environment;
   const awaitingShellConsent = hostEnvironment.T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING === "1";
+  const endpointConfigured = isTelemetryEndpointConfigured({
+    key: telemetryConfig.posthogKey,
+    host: telemetryConfig.posthogHost,
+  });
   // A managed policy can switch analytics off over the environment, never on.
   const policyAllows =
     ManagedPolicy.deniedBy(yield* ManagedPolicy.ManagedPolicy, "telemetry") === undefined;
   // A cached PATH does not establish consent from the current login shell.
   const telemetryEnabled = Effect.suspend(() => {
-    if (!telemetryConfig.enabled || !policyAllows) return Effect.succeed(false);
+    // KODO: telemetry-endpoint - telemetry endpoint
+    if (!endpointConfigured || !telemetryConfig.enabled || !policyAllows) {
+      return Effect.succeed(false);
+    }
     if (!awaitingShellConsent) return Effect.succeed(true);
     if (hostEnvironment.T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING === "1")
       return Effect.succeed(false);

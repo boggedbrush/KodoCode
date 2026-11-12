@@ -1,3 +1,4 @@
+import { DESKTOP_DEFAULT_HOME_DIRECTORY_NAME } from "./DesktopStatePaths.ts";
 import * as NodePath from "@effect/platform-node/NodePath";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
@@ -68,8 +69,11 @@ describe("DesktopEnvironment", () => {
       );
       const production = yield* makeEnvironment();
 
-      assert.equal(development.stateDir, "/Users/alice/.t3/dev");
-      assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+      assert.equal(development.stateDir, `/Users/alice/${DESKTOP_DEFAULT_HOME_DIRECTORY_NAME}/dev`);
+      assert.equal(
+        production.stateDir,
+        `/Users/alice/${DESKTOP_DEFAULT_HOME_DIRECTORY_NAME}/userdata`,
+      );
     }),
   );
 });

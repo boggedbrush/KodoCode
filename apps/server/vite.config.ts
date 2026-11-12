@@ -128,6 +128,9 @@ export default mergeConfig(
       define: {
         __T3CODE_BUILD_CHANNEL__: JSON.stringify(cliBuildChannel),
         __T3CODE_TELEMETRY_CHANNEL__: JSON.stringify(telemetryChannel),
+        // KODO: telemetry-endpoint - telemetry endpoint (empty unless the build supplies one)
+        __KODO_BUILD_POSTHOG_KEY__: JSON.stringify(repoEnv.KODO_POSTHOG_KEY?.trim() ?? ""),
+        __KODO_BUILD_POSTHOG_HOST__: JSON.stringify(repoEnv.KODO_POSTHOG_HOST?.trim() ?? ""),
         __T3CODE_BUILD_RELAY_URL__: JSON.stringify(repoEnv.T3CODE_RELAY_URL?.trim() ?? ""),
         __T3CODE_BUILD_CLERK_PUBLISHABLE_KEY__: JSON.stringify(
           repoEnv.T3CODE_CLERK_PUBLISHABLE_KEY?.trim() ?? "",

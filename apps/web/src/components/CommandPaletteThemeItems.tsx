@@ -1,10 +1,9 @@
-import { BUILT_IN_THEMES } from "@t3tools/shared/themePalettes";
 import { MonitorIcon, MoonIcon, PaletteIcon, SunIcon } from "lucide-react";
 
 import { useCustomThemes } from "../hooks/useCustomThemes";
 import { useEnvironmentThemeDefinitions } from "../hooks/useEnvironmentTheme";
 import { useTheme } from "../hooks/useTheme";
-import { getThemeDefinition } from "../themePalette";
+import { getThemeDefinition, WEB_BUILT_IN_THEMES } from "../themePalette";
 import {
   ADDON_ICON_CLASS,
   ITEM_ICON_CLASS,
@@ -43,7 +42,8 @@ function useThemeCards() {
   const seen = new Set<string>();
   return [
     ...STANDARD_THEME_CARDS.map((card) => ({ ...card, id: null })),
-    ...[...BUILT_IN_THEMES, ...customThemes, ...environmentThemes]
+    // KODO: theme-builtin-list - use the web built-in list that includes Kodo
+    ...[...WEB_BUILT_IN_THEMES, ...customThemes, ...environmentThemes]
       .filter((definition) => {
         if (seen.has(definition.id)) return false;
         seen.add(definition.id);

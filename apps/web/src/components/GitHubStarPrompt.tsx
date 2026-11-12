@@ -1,5 +1,6 @@
 import { type EnvironmentId, SourceControlProviderKind } from "@t3tools/contracts";
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
+import { APP_REPOSITORY } from "@t3tools/shared/appBrand";
 import * as Schema from "effect/Schema";
 import { StarIcon } from "lucide-react";
 
@@ -12,7 +13,8 @@ import { toastManager } from "./ui/toast";
 // Separate keys so a count written by another tab can never undo a dismissal.
 const SENT_KEY = "t3code:github-star-prompt:sent";
 const DISMISSED_KEY = "t3code:github-star-prompt:dismissed";
-const REPOSITORY = "pingdotgg/t3code";
+// KODO: brand-star-repository - star the fork, not upstream
+const REPOSITORY = APP_REPOSITORY;
 const PROMPTS_BEFORE_ASKING = 5;
 const IDLE_MS = 30_000;
 // User-driven actions (send, navigate, type, scroll) start with one of these; touch fires pointerdown.

@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
+import { APP_BASE_NAME } from "@t3tools/shared/appBrand";
 import * as NetService from "@t3tools/shared/Net";
 
 import * as DesktopBackendConfiguration from "../backend/DesktopBackendConfiguration.ts";
@@ -149,7 +150,8 @@ describe("DesktopWslBackend", () => {
 
       yield* recordOwnershipFailure();
       const refusal = yield* backend.lastPreflightError;
-      assert.include(Option.getOrThrow(refusal), "Another T3 Code server");
+      // KODO: brand-wsl-ownership-message - the source message is rewritten by the brand codemod
+      assert.include(Option.getOrThrow(refusal), `Another ${APP_BASE_NAME} server`);
       yield* backend.reconcile;
       assert.equal(startCount, 1);
       assert.deepEqual(yield* backend.lastPreflightError, refusal);

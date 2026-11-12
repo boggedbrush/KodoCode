@@ -23,6 +23,8 @@ import {
   type ThemeDefinition,
   type ThemeVariants,
 } from "@t3tools/shared/themePalettes";
+// KODO: theme-kodo-import - Kodo theme import
+import { KODO_THEME, KODO_THEME_ID } from "@t3tools/shared/kodoTheme";
 import {
   CONTEXT_CHIP_ACCENTS,
   contextChipColorVariable,
@@ -32,7 +34,16 @@ import {
 import { appAtomRegistry, subscribeAtomChanges } from "./rpc/atomRegistry";
 import { themeServerEnvironmentThemesAtom } from "./state/server";
 
-export { EMBER_THEME, GROVE_THEME, IRIS_THEME, OCEAN_THEME, T3_CHAT_THEME, THEME_COLOR_ROLES };
+export {
+  EMBER_THEME,
+  GROVE_THEME,
+  IRIS_THEME,
+  KODO_THEME,
+  KODO_THEME_ID,
+  OCEAN_THEME,
+  T3_CHAT_THEME,
+  THEME_COLOR_ROLES,
+};
 export type { ThemeAppearance, ThemeColorRole, ThemeColors, ThemeDefinition, ThemeVariants };
 
 const T3_CHAT_THEME_ID = "t3-chat" as const;
@@ -1184,7 +1195,11 @@ export function updateThemeColorFamily(
   }
 }
 
-const BUILT_IN_THEME_DEFINITIONS: ReadonlyArray<ThemeDefinition> = BUILT_IN_THEMES;
+/** Kodo leads the built-ins; upstream's list stays untouched so mobile keeps its own. */
+// KODO: theme-kodo-builtin - Kodo is a built-in theme, listed first
+export const WEB_BUILT_IN_THEMES: ReadonlyArray<ThemeDefinition> = [KODO_THEME, ...BUILT_IN_THEMES];
+
+const BUILT_IN_THEME_DEFINITIONS: ReadonlyArray<ThemeDefinition> = WEB_BUILT_IN_THEMES;
 
 export function getThemeDefinition(theme: ThemePreference): ThemeDefinition | null {
   const themeId = themeIdFromPreference(theme);

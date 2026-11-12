@@ -1,5 +1,9 @@
 import * as Option from "effect/Option";
 
+/** Kodo Code desktop keeps its data in `~/.kodo-code`; upstream uses `~/.t3`. */
+// KODO: brand-default-home - default home ~/.kodo-code
+export const DESKTOP_DEFAULT_HOME_DIRECTORY_NAME = ".kodo-code";
+
 export type JoinPath = (first: string, ...segments: string[]) => string;
 
 function normalizeConfiguredBaseDir(t3Home: Option.Option<string>): Option.Option<string> {
@@ -16,7 +20,7 @@ export function resolveDesktopBaseDir(input: {
   readonly t3Home: Option.Option<string>;
 }): string {
   return Option.getOrElse(normalizeConfiguredBaseDir(input.t3Home), () =>
-    input.joinPath(input.homeDirectory, ".t3"),
+    input.joinPath(input.homeDirectory, DESKTOP_DEFAULT_HOME_DIRECTORY_NAME),
   );
 }
 

@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 import { converter } from "culori/fn";
-import { BUILT_IN_THEMES } from "@t3tools/shared/themePalettes";
 
 import { CONTEXT_CHIP_ACCENTS, contextChipColorVariable } from "./lib/contextChipAccents";
 
 import {
+  WEB_BUILT_IN_THEMES,
   applyThemePalette,
   contextChipVariables,
   getThemeColorsForMode,
@@ -82,7 +82,10 @@ describe("theme files", () => {
     const palettes = [
       getStandardThemeColors("light"),
       getStandardThemeColors("dark"),
-      ...BUILT_IN_THEMES.flatMap((theme) => [theme.colors, ...Object.values(theme.variants ?? {})]),
+      ...WEB_BUILT_IN_THEMES.flatMap((theme) => [
+        theme.colors,
+        ...Object.values(theme.variants ?? {}),
+      ]),
     ];
     for (const colors of palettes) {
       expect(
@@ -602,7 +605,7 @@ describe("context chip colors", () => {
   const palettes = [
     getStandardThemeColors("light"),
     getStandardThemeColors("dark"),
-    ...BUILT_IN_THEMES.flatMap((theme) =>
+    ...WEB_BUILT_IN_THEMES.flatMap((theme) =>
       getThemeModes(theme).map((mode) => getThemeColorsForMode(theme, mode)!),
     ),
   ];

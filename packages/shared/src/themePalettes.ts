@@ -9,6 +9,7 @@ export const RESERVED_THEME_IDS: ReadonlySet<string> = new Set([
   "system",
   "light",
   "dark",
+  "kodo",
   ...BUILT_IN_THEME_IDS,
   "t3-chat-dark",
   "t3-grove",

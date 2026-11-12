@@ -1,0 +1,167 @@
+/*
+ * Kodo "GNOME" look: the structural half of the built-in Kodo theme. Colours live in the
+ * theme (packages/shared/src/kodoTheme.ts); this file is everything a colour token cannot
+ * express (type, radii, header bar, boxed lists, switches, popovers). Every rule is scoped
+ * to `html[data-theme-id="kodo"]`, so upstream's other themes are untouched.
+ *
+ * Reference: libadwaita 1.6 stylesheet. Hardcoded values below are libadwaita constants
+ * (6px button radius, 12px card and popover radius, 47px header bar), not colours.
+ * The file is unlayered on purpose: it must outrank Tailwind utilities on `components/ui`
+ * primitives, which we may not restyle through `className`.
+ */
+
+html[data-theme-id="kodo"] {
+  /* Adwaita Sans (GNOME 48), Cantarell (GNOME 3-47), then the system UI font, then Inter,
+     which Adwaita Sans is derived from. No font is bundled; GNOME machines have the first two. */
+  --font-sans:
+    "Adwaita Sans", Cantarell, system-ui, "Inter Variable", Inter, "Noto Sans", "Segoe UI",
+    sans-serif;
+  --font-mono: "Adwaita Mono", "Source Code Pro", "DejaVu Sans Mono", ui-monospace, monospace;
+
+  /* Radii: buttons and entries 6px, cards, popovers and boxed lists 12px. */
+  --control-radius: 6px;
+  --radius: 0.5rem;
+
+  /* libadwaita shadow tokens. */
+  --adw-shade: rgb(0 0 6 / 12%);
+  --adw-card-shadow:
+    0 0 0 1px rgb(0 0 6 / 3%), 0 1px 3px 1px rgb(0 0 6 / 7%), 0 2px 6px 2px rgb(0 0 6 / 3%);
+  --adw-popover-shadow: 0 1px 3px 1px rgb(0 0 6 / 7%), 0 2px 14px 3px rgb(0 0 6 / 15%);
+  --adw-popover-border: rgb(0 0 6 / 14%);
+  --adw-switch-off: rgb(0 0 6 / 20%);
+  --adw-control-fill: rgb(0 0 6 / 8%);
+  --adw-control-fill-hover: rgb(0 0 6 / 12%);
+}
+
+html[data-theme-id="kodo"].dark {
+  --adw-shade: rgb(0 0 0 / 36%);
+  --adw-card-shadow: 0 0 0 1px rgb(255 255 255 / 3%), 0 1px 3px 1px rgb(0 0 0 / 20%);
+  --adw-popover-shadow: 0 1px 3px 1px rgb(0 0 0 / 25%), 0 2px 14px 3px rgb(0 0 0 / 45%);
+  --adw-popover-border: rgb(255 255 255 / 10%);
+  --adw-switch-off: rgb(255 255 255 / 20%);
+  --adw-control-fill: rgb(255 255 255 / 10%);
+  --adw-control-fill-hover: rgb(255 255 255 / 15%);
+}
+
+/* Header bar: 47px, flat, with the 1px shade line below it. The desktop overlay
+   (.wco) keeps the height Electron reports. */
+html[data-theme-id="kodo"]:not(.wco) {
+  --workspace-topbar-height: 47px;
+}
+
+html[data-theme-id="kodo"] header[data-chat-header],
+html[data-theme-id="kodo"] [data-slot="sidebar-inset"] > header {
+  background: var(--toolbar-background);
+  box-shadow: 0 1px 0 var(--toolbar-border);
+}
+
+/* Buttons are flat fills: no inset highlight or drop shadow. The focus ring is a separate
+   shadow layer and is kept. */
+html[data-theme-id="kodo"] [data-slot="button"] {
+  --tw-shadow: 0 0 #0000;
+  --tw-inset-shadow: 0 0 #0000;
+  font-weight: 500;
+}
+
+/* Switches: 46x26 pill with a white knob, as in AdwSwitch. */
+html[data-theme-id="kodo"] [data-slot="switch"] {
+  --thumb-size: 24px;
+}
+html[data-theme-id="kodo"] [data-slot="switch"][data-unchecked]:not([data-mixed]) {
+  background-color: var(--adw-switch-off);
+}
+html[data-theme-id="kodo"] [data-slot="switch-thumb"] {
+  background-color: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 6 / 25%);
+}
+
+/* Popovers, menus and dialogs. */
+html[data-theme-id="kodo"]
+  :is(
+    [data-slot="menu-popup"],
+    [data-slot="popover-popup"]:not(.w-full),
+    [data-slot="select-popup"],
+    [data-slot="dialog-popup"],
+    [data-slot="command-dialog-popup"],
+    [data-slot="command-dialog-popup"] .dropdown-glass
+  ) {
+  /* Adwaita popovers and dialogs are opaque, not frosted (the glass-opacity setting still
+     governs the composer). */
+  background-color: var(--popover);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html[data-theme-id="kodo"]
+  :is([data-slot="menu-popup"], [data-slot="popover-popup"], [data-slot="select-popup"]) {
+  border-radius: 12px;
+  border-color: var(--adw-popover-border);
+  box-shadow: var(--adw-popover-shadow);
+}
+html[data-theme-id="kodo"] :is([data-slot="dialog-popup"], [data-slot="command-dialog-popup"]) {
+  border-radius: 18px;
+  box-shadow: var(--adw-popover-shadow);
+}
+
+/* Default controls are a flat translucent fill with no border (AdwEntry, GtkButton, AdwComboRow).
+   The outline button variant is the only one that paints `border-input`; it is matched by that
+   class because ui primitives expose no variant attribute. */
+html[data-theme-id="kodo"]
+  :is(
+    [data-slot="button"].border-input,
+    [data-slot="select-trigger"],
+    [data-slot="input-control"].border-input,
+    [data-slot="textarea-control"].border-input
+  ) {
+  background-color: var(--adw-control-fill);
+  background-clip: border-box;
+  border-color: transparent;
+  box-shadow: none;
+}
+html[data-theme-id="kodo"]
+  :is([data-slot="button"].border-input, [data-slot="select-trigger"]):hover {
+  background-color: var(--adw-control-fill-hover);
+}
+html[data-theme-id="kodo"]
+  :is(
+    [data-slot="button"].border-input,
+    [data-slot="select-trigger"],
+    [data-slot="input-control"].border-input,
+    [data-slot="textarea-control"].border-input
+  )::before {
+  box-shadow: none;
+}
+html[data-theme-id="kodo"]
+  :is([data-slot="input-control"], [data-slot="textarea-control"]).border-input:focus-within {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+/* AdwDialog dims the window with a flat scrim; it does not blur it. */
+html[data-theme-id="kodo"]
+  :is([data-slot="dialog-backdrop"], [data-slot="command-dialog-backdrop"]):not(
+    [data-variant="media"]
+  ) {
+  background-color: rgb(0 0 6 / 25%);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html[data-theme-id="kodo"].dark
+  :is([data-slot="dialog-backdrop"], [data-slot="command-dialog-backdrop"]):not(
+    [data-variant="media"]
+  ) {
+  background-color: rgb(0 0 0 / 50%);
+}
+
+/* GtkTooltip: translucent black, white text, 6px radius. */
+html[data-theme-id="kodo"] [data-slot="tooltip-popup"] {
+  border-radius: 6px;
+  border-color: transparent;
+  background-color: rgb(0 0 0 / 80%);
+  color: #fff;
+  box-shadow: none;
+}
+
+/* Preference group titles are AdwPreferencesGroup `.heading`: bold, body size. */
+html[data-theme-id="kodo"] [data-settings-scroll-target] h2 {
+  font-size: 0.9375rem;
+  font-weight: 700;
+}

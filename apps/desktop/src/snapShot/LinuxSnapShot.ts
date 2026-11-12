@@ -16,16 +16,19 @@ import {
 } from "dbus-next";
 import * as Schema from "effect/Schema";
 import { isKdeCaptureSession, type KdeCapturePaths } from "./KdeSnapShot.ts";
+import { GNOME_EXTENSION_BUS_NAME, GNOME_EXTENSION_OBJECT_PATH } from "./kodoSnapShotNames.ts";
 import { isGnomeCaptureSession, readPortalPng, resizeLinuxCapture } from "./linuxCaptureSession.ts";
 export { readPortalPng } from "./linuxCaptureSession.ts";
 import { isHyprlandCaptureSession, type HyprlandCapturePaths } from "./HyprlandSnapShot.ts";
+import { APP_BASE_NAME } from "@t3tools/shared/appBrand";
 
 const PORTAL = "org.freedesktop.portal.Desktop";
 const PORTAL_PATH = "/org/freedesktop/portal/desktop";
 const SCREENSHOT = "org.freedesktop.portal.Screenshot";
 const REQUEST = "org.freedesktop.portal.Request";
-const EXTENSION = "org.gnome.Shell.Extensions.T3SnapShot";
-const EXTENSION_PATH = "/org/gnome/Shell/Extensions/T3SnapShot";
+// KODO: brand-gnome-bus-name - own GNOME extension bus name
+const EXTENSION = GNOME_EXTENSION_BUS_NAME;
+const EXTENSION_PATH = GNOME_EXTENSION_OBJECT_PATH;
 const DBUS = "org.freedesktop.DBus";
 const DBUS_PATH = "/org/freedesktop/DBus";
 const UInt = Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 0xffff_ffff }));
@@ -304,7 +307,7 @@ class LinuxCaptureConnection {
       this.bus.requestName(`${appId}.SnapShot`, NameFlag.DO_NOT_QUEUE),
     );
     if (result !== RequestNameReply.PRIMARY_OWNER) {
-      throw new Error("Another T3 Code instance is capturing a window. Try again.");
+      throw new Error(`Another ${APP_BASE_NAME} instance is capturing a window. Try again.`);
     }
     const withFeedback = this.feedbackAvailable && options !== undefined;
     const reply = await this.call({

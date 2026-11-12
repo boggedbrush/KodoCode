@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="100%" height="100%" role="img" aria-label="Kōdo Code Emblem Blueprint Clipped">
+  <defs>
+    <style>
+      /* Blueprint Background */
+      .bg {
+        fill: #003366;
+      }
+      /* Main technical lines */
+      .oct {
+        fill: rgba(255, 255, 255, 0.05);
+        stroke: #ffffff;
+        stroke-width: 2;
+        stroke-linejoin: miter;
+      }
+      .oct-inner {
+        fill: none;
+        stroke: rgba(255, 255, 255, 0.5);
+        stroke-width: 1;
+        stroke-linejoin: miter;
+      }
+      /* Technical text */
+      .kanji {
+        font-family: 'Noto Sans CJK JP', 'Noto Sans CJK SC', 'Noto Sans', sans-serif;
+        font-size: 72px;
+        font-weight: 500;
+        fill: #ffffff;
+        text-anchor: middle;
+        filter: drop-shadow(0 0 2px rgba(255,255,255,0.5));
+      }
+    </style>
+    
+    <!-- Grid Definition -->
+    <pattern id="gridPattern" width="20" height="20" patternUnits="userSpaceOnUse">
+      <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255, 255, 255, 0.1)" stroke-width="0.5"/>
+    </pattern>
+
+    <!-- The Clipping Path (The Shape) -->
+    <clipPath id="octagonClip">
+      <polygon points="91.4,45 208.6,45 255,91.4 255,208.6 208.6,255 91.4,255 45,208.6 45,91.4" />
+    </clipPath>
+  </defs>
+
+  <!-- Background Group: This is "cropped" by the clip-path -->
+  <g clip-path="url(#octagonClip)">
+    <rect width="300" height="300" class="bg" />
+    <rect width="300" height="300" fill="url(#gridPattern)" />
+  </g>
+
+  <!-- Octagon Borders (Drawn on top of the background) -->
+  <polygon 
+    class="oct"
+    points="91.4,45 208.6,45 255,91.4 255,208.6 208.6,255 91.4,255 45,208.6 45,91.4"
+  />
+  <polygon 
+    class="oct-inner"
+    points="98,54 202,54 246,98 246,202 202,246 98,246 54,202 54,98"
+  />
+
+  <!-- Kanji -->
+  <text x="150" y="138" class="kanji">香</text>
+  <text x="150" y="218" class="kanji">道</text>
+</svg>

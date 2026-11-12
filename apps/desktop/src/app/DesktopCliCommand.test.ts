@@ -1,3 +1,4 @@
+import { APP_BASE_NAME } from "@t3tools/shared/appBrand";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -129,7 +130,7 @@ it.layer(NodeServices.layer)("DesktopCliCommand", (it) => {
       yield* Effect.all([command.addToPath, command.addToPath], { concurrency: "unbounded" });
       expect((yield* command.addToPath).pathSetup).toEqual({ file: "~/.zshrc", added: true });
       expect(yield* fs.readFileString(zshrc)).toBe(
-        '# mine\n# Added by T3 Code\nexport PATH="$PATH:$HOME/.local/bin"\n',
+        `# mine\n# Added by ${APP_BASE_NAME}\nexport PATH="$PATH:$HOME/.local/bin"\n`,
       );
 
       expect((yield* command.uninstall).installedPath).toBeNull();

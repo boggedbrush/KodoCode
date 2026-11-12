@@ -2,6 +2,9 @@ import { describe, expect, it } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
 import { planProjectRemoval } from "@t3tools/client-runtime/state/projects";
 
+// KODO: brand-text-concatenation - client-runtime copy is not brand-rewritten; built by concatenation so this file's own rewrite skips it.
+const UPSTREAM_NAME = ["T3", "Code"].join(" ");
+
 describe("project removal confirmation", () => {
   const local = {
     id: ProjectId.make("shared-id"),
@@ -43,7 +46,7 @@ describe("project removal confirmation", () => {
     });
     expect(plan.projectThreads).toHaveLength(3);
     expect(plan.confirmationMessage).toBe(
-      'Remove checkout "Repo" and delete its 1 thread?\nPath: /work/repo\nEnvironment: Local\nThose threads and any archived threads are deleted from T3 Code. Provider sessions are kept.\nOther entries in this grouped project are unaffected.\nThis action cannot be undone.',
+      `Remove checkout "Repo" and delete its 1 thread?\nPath: /work/repo\nEnvironment: Local\nThose threads and any archived threads are deleted from ${UPSTREAM_NAME}. Provider sessions are kept.\nOther entries in this grouped project are unaffected.\nThis action cannot be undone.`,
     );
   });
 
@@ -61,7 +64,7 @@ describe("project removal confirmation", () => {
       "Other entries in this grouped project are unaffected.",
     );
     expect(plan.confirmationMessage).toContain(
-      "Any archived threads are deleted from T3 Code. Provider sessions are kept.",
+      `Any archived threads are deleted from ${UPSTREAM_NAME}. Provider sessions are kept.`,
     );
   });
 

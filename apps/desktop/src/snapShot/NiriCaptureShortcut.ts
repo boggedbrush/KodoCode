@@ -5,6 +5,7 @@ import {
   NIRI_CAPTURE_INTERFACE as INTERFACE,
   NIRI_CAPTURE_PATH as PATH,
 } from "./linuxCaptureSession.ts";
+import { APP_BASE_NAME } from "@t3tools/shared/appBrand";
 
 export async function startNiriCaptureShortcut(
   appId: string,
@@ -54,7 +55,7 @@ export async function startNiriCaptureShortcut(
       }),
     ]);
     if (result !== RequestNameReply.PRIMARY_OWNER)
-      throw new Error("Another T3 Code instance already owns the capture shortcut.");
+      throw new Error(`Another ${APP_BASE_NAME} instance already owns the capture shortcut.`);
     return close;
   } catch (error) {
     close();

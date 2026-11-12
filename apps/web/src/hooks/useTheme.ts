@@ -9,6 +9,7 @@ import {
   invalidateCustomThemes,
   canonicalThemePreference,
   isKnownThemePreference,
+  KODO_THEME_ID,
   getThemePreferenceMode,
   getThemePreviewAppearance,
   parseThemeHalves,
@@ -40,8 +41,10 @@ type DesktopThemeBridge = Pick<DesktopBridge, "setTheme">;
 
 const STORAGE_KEY = "t3code:theme";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
+// KODO: theme-default-kodo - default theme is Kodo (see also apps/web/index.html boot script)
+// Kodo is the default theme; it follows the OS appearance until the user picks one.
 const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
-  theme: "system",
+  theme: KODO_THEME_ID,
   resolvedTheme: "light",
   systemDark: false,
   followSystem: true,
@@ -143,8 +146,13 @@ function getSystemDark() {
   );
 }
 
+// KODO: theme-follow-os - Kodo default follows the OS appearance
+function followsSystemByDefault(theme: Theme): boolean {
+  return theme === "system" || theme === KODO_THEME_ID;
+}
+
 function readStoredFollowSystem(theme: Theme): boolean {
-  if (typeof window === "undefined") return theme === "system";
+  if (typeof window === "undefined") return followsSystemByDefault(theme);
 
   try {
     const raw = window.localStorage.getItem(THEME_FOLLOW_SYSTEM_STORAGE_KEY);
@@ -152,7 +160,7 @@ function readStoredFollowSystem(theme: Theme): boolean {
     if (raw === "false") return false;
   } catch {}
 
-  return theme === "system";
+  return followsSystemByDefault(theme);
 }
 
 function isThemePreferenceMode(value: string | null): value is ThemePreferenceMode {

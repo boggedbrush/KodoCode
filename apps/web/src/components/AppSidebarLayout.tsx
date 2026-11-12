@@ -40,6 +40,7 @@ import {
 import { BackgroundThreadAnnouncer } from "./BackgroundThreadAnnouncer";
 import { HistorySwipeNavigation } from "./HistorySwipeNavigation";
 import ThreadSidebar from "./Sidebar";
+import { SidebarBrandToggleButton } from "./sidebar/SidebarBrandToggleButton";
 import { SidebarBrandWidthProbe } from "./sidebar/SidebarChrome";
 import { isAppModalPage } from "./sidebar/mainAppLocation";
 import type { SidebarRouteReveal } from "./sidebar/routeReveal";
@@ -56,7 +57,6 @@ import {
   Sidebar,
   SidebarProvider,
   SidebarRail,
-  SidebarTrigger,
   useSidebar,
   useSidebarVisibility,
 } from "./ui/sidebar";
@@ -386,7 +386,8 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
         <Tooltip>
           <TooltipTrigger
             render={
-              <SidebarTrigger
+              // KODO: logo-as-sidebar-toggle replaces SidebarTrigger
+              <SidebarBrandToggleButton
                 variant={isSidebarVisible && stageBackdropVariant ? "media-navigation" : "ghost"}
                 className={cn(
                   "pointer-events-auto",

@@ -113,7 +113,16 @@ const recordTwentyEvents = Effect.gen(function* () {
   }
 });
 
-const analyticsLayerWith = (client: HttpClient.HttpClient, policy?: ManagedPolicyDocument) =>
+const configuredEndpoint = {
+  T3CODE_POSTHOG_KEY: "phc_test_key",
+  T3CODE_POSTHOG_HOST: "http://localhost",
+};
+
+const analyticsLayerWith = (
+  client: HttpClient.HttpClient,
+  policy?: ManagedPolicyDocument,
+  endpoint: Readonly<Record<string, string>> = configuredEndpoint,
+) =>
   AnalyticsService.layer.pipe(
     Layer.provideMerge(
       ServerConfig.ServerConfig.layerTest(process.cwd(), { prefix: "t3-telemetry-retry-" }),
@@ -122,8 +131,7 @@ const analyticsLayerWith = (client: HttpClient.HttpClient, policy?: ManagedPolic
       ConfigProvider.layer(
         ConfigProvider.fromUnknown({
           T3CODE_TELEMETRY_ENABLED: true,
-          T3CODE_POSTHOG_KEY: "phc_test_key",
-          T3CODE_POSTHOG_HOST: "http://localhost",
+          ...endpoint,
         }),
       ),
     ),
@@ -151,6 +159,7 @@ const sendFor = (
     AnalyticsService.AnalyticsService | Effect.Services<typeof getTelemetryIdentity>
   > = recordTwentyEvents,
   policy?: ManagedPolicyDocument,
+  endpoint?: Readonly<Record<string, string>>,
 ) =>
   Effect.gen(function* () {
     const batches: Array<ReadonlyArray<SentEvent>> = [];
@@ -165,7 +174,7 @@ const sendFor = (
         return yield* respond(request);
       }),
     );
-    const runtimeLayer = analyticsLayerWith(client, policy);
+    const runtimeLayer = analyticsLayerWith(client, policy, endpoint);
 
     yield* Effect.gen(function* () {
       yield* record;
@@ -392,6 +401,34 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("AnalyticsService
         ),
         true,
       );
+    }),
+  );
+
+  it.effect.each([
+    { name: "neither a key nor a host", endpoint: {} },
+    { name: "a key but no host", endpoint: { T3CODE_POSTHOG_KEY: "phc_test_key" } },
+    { name: "a host but no key", endpoint: { T3CODE_POSTHOG_HOST: "http://localhost" } },
+    { name: "blank values", endpoint: { T3CODE_POSTHOG_KEY: " ", T3CODE_POSTHOG_HOST: " " } },
+  ])("sends nothing while telemetry is enabled but has $name", ({ endpoint }) =>
+    Effect.gen(function* () {
+      const requests: Array<string> = [];
+      const batches = yield* sendFor(
+        1,
+        (request) => {
+          requests.push(request.url);
+          return respondWithStatus(204)(request);
+        },
+        Effect.gen(function* () {
+          const analytics = yield* AnalyticsService.AnalyticsService;
+          yield* analytics.record("test.unconfigured");
+          yield* analytics.recordOwners([{ source: "openai", ownerId: "owner-1" }], "client");
+          yield* analytics.flush;
+        }),
+        undefined,
+        endpoint,
+      );
+      assert.deepEqual(requests, []);
+      assert.deepEqual(batches, []);
     }),
   );
 

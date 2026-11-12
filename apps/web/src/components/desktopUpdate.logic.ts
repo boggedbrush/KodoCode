@@ -1,8 +1,10 @@
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import { APP_REPOSITORY } from "@t3tools/shared/appBrand";
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
-const DEFAULT_DESKTOP_RELEASE_REPOSITORY = "pingdotgg/t3code";
+// KODO: brand-release-notes-repository - release notes default to the fork's repository
+const DEFAULT_DESKTOP_RELEASE_REPOSITORY = APP_REPOSITORY;
 const GITHUB_REPOSITORY_SEGMENT = /^[A-Za-z0-9._-]+$/u;
 
 function isValidRepositorySegment(value: string | undefined): value is string {

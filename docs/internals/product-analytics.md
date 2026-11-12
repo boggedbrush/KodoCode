@@ -1,6 +1,9 @@
 # Product analytics
 
 The server owns analytics delivery, opt-out, and identity for every connected client.
+This fork has no default endpoint: events are recorded and sent only when both
+`T3CODE_POSTHOG_KEY` and `T3CODE_POSTHOG_HOST` (or the build-time `KODO_POSTHOG_KEY` and
+`KODO_POSTHOG_HOST`) are set, so a fork build never reports to upstream's PostHog.
 Clients do not load the PostHog browser SDK. Client-use events require an
 authenticated connection, so visiting the hosted app without connecting does not
 count as product use.

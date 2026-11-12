@@ -7,6 +7,7 @@ import type { Message, MessageBus } from "dbus-next";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 import { GnomeCaptureSetup, installGnomeCaptureBundle } from "./GnomeCaptureSetup.ts";
 import { GNOME_CAPTURE_FILES, GNOME_CAPTURE_UUID } from "./gnomeCaptureBundle.ts";
+import { SNAP_SHOT_DATA_DIRECTORY } from "./kodoSnapShotNames.ts";
 
 let dataHome: string;
 const bundle = NodePath.resolve(import.meta.dirname, "../../gnome-extension");
@@ -72,7 +73,7 @@ it("preserves the replaced extension as a recoverable backup", async () => {
   await installGnomeCaptureBundle({ bundle, dataHome });
   await NodeFSP.writeFile(NodePath.join(installedPath(), "custom.txt"), "local change");
   await installGnomeCaptureBundle({ bundle, dataHome });
-  const backups = NodePath.join(dataHome, "t3code/extension-backups");
+  const backups = NodePath.join(dataHome, SNAP_SHOT_DATA_DIRECTORY, "extension-backups");
   const [backup] = await NodeFSP.readdir(backups);
   expect(
     await NodeFSP.readFile(

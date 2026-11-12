@@ -1,3 +1,4 @@
+import { managedUpdatesMessage } from "@t3tools/contracts";
 import { EnvironmentId, type ServerSelfUpdateCapability } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -112,7 +113,7 @@ describe("collectServerUpdateTargets", () => {
         entry.label,
         entry.reason,
       ]),
-    ).toEqual([["off", "Example Corp manages T3 Code updates."]]);
+    ).toEqual([["off", managedUpdatesMessage("Example Corp")]]);
     expect(
       collectServerUpdateTargets(
         machines.map((entry) => ({
@@ -242,7 +243,7 @@ describe("collectChannelSwitchTargets", () => {
       ["old-desktop", "needs a newer desktop app"],
       [
         "no-nightly",
-        "Example Corp manages T3 Code updates. Only stable releases can be installed.",
+        `${managedUpdatesMessage("Example Corp")} Only stable releases can be installed.`,
       ],
     ]);
   });

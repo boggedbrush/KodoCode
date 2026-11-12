@@ -1,0 +1,57 @@
+/*
+ * Kodo Code layer. Imported once from index.css, after Tailwind, so everything Kodo adds
+ * to the upstream design lives here and survives upstream merges. The Kodo colour palette
+ * itself is the built-in "kodo" theme (packages/shared/src/kodoTheme.ts), not CSS.
+ */
+
+/* GNOME look, scoped to the Kodo theme (see kodo-gnome.css). */
+@import "./kodo-gnome.css";
+
+/*
+ * Interaction-mode accents. These are named tokens that do not change with the selected
+ * theme: ask, plan, code and review each keep their own colour. Tailwind exposes them as
+ * utilities (`text-mode-code`, `bg-mode-ask`, `border-mode-plan`, ...); TypeScript consumers
+ * use lib/modeAccents.ts. Light values are at least 4.5:1 as text on the light composer surface;
+ * dark mode lifts them (and the Kodo purple, #5236cc) so they read on near-black surfaces.
+ */
+:root {
+  --mode-ask: #1a6fc4;
+  --mode-plan: #8f5f12;
+  --mode-code: #5236cc;
+  --mode-review: #00796b;
+}
+
+.dark {
+  --mode-ask: #64b5f6;
+  --mode-plan: #c8954a;
+  --mode-code: #8b78f0;
+  --mode-review: #4db6ac;
+}
+
+@theme inline {
+  --color-mode-ask: var(--mode-ask);
+  --color-mode-plan: var(--mode-plan);
+  --color-mode-code: var(--mode-code);
+  --color-mode-review: var(--mode-review);
+}
+
+/*
+ * Chat typography, Kodo theme only. The user's font variables always lead the stack
+ * (`--font-sans`, and `--font-composer` for the composer when a separate font is set in
+ * Settings -> Typography); the Noto families only trail them to fill in scripts the
+ * stack lacks (Arabic, Hebrew, Devanagari, Thai, CJK) when installed, so RTL and
+ * non-Latin conversations render with a matching face instead of a random system fallback.
+ */
+:root {
+  --font-chat-script-fallbacks:
+    "Noto Sans", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Devanagari", "Noto Sans Thai",
+    "Noto Sans CJK JP", "Noto Sans CJK SC", "Noto Sans CJK KR";
+}
+
+html[data-theme-id="kodo"] .chat-markdown {
+  font-family: var(--font-sans), var(--font-chat-script-fallbacks);
+}
+
+html[data-theme-id="kodo"] .composer-tiptap {
+  font-family: var(--font-composer, var(--font-sans)), var(--font-chat-script-fallbacks);
+}

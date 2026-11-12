@@ -1,6 +1,8 @@
 /* Clerk injects its component styles into the clerk layer (clerkAppearance.cssLayerName). */
 @layer theme, base, clerk, components, utilities;
 @import "tailwindcss";
+/* KODO: kodo-css-layer - Kodo layer (mode tokens, chat typography) */
+@import "./kodo.css";
 
 @custom-variant dark (&:is(.dark, .dark *));
 @custom-variant light (&:not(.dark, .dark *));

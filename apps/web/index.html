@@ -50,7 +50,24 @@
         };
         // Keep this small boot-time copy in sync with the built-in palettes so
         // the selected theme is visible before the app has mounted.
+        // KODO: theme-default-kodo - Kodo is the default theme and its palette is mirrored below.
+        const DEFAULT_THEME_ID = "kodo";
         const BUILT_IN_THEME_PALETTES = {
+          kodo: {
+            // KODO: gnome-palette (mirror of KODO_THEME in packages/shared/src/kodoTheme.ts)
+            light: {
+              background: "#fafafb",
+              foreground: "#333333",
+              accent: "#5236cc",
+              chrome: "#ffffff",
+            },
+            dark: {
+              background: "#222226",
+              foreground: "#ffffff",
+              accent: "#7257e8",
+              chrome: "#2e2e32",
+            },
+          },
           "t3-chat": {
             light: {
               background: "oklch(0.982446 0.010114 325.653)",
@@ -132,6 +149,8 @@
           "system",
           "light",
           "dark",
+          // KODO: theme-reserved-id - reserved id
+          "kodo",
           "t3-chat",
           "grove",
           "ocean",
@@ -213,7 +232,7 @@
         };
 
         try {
-          const storedTheme = window.localStorage.getItem("t3code:theme");
+          const storedTheme = window.localStorage.getItem("t3code:theme") ?? DEFAULT_THEME_ID; // KODO: theme-default-id - default theme
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           const LEGACY_THEME_IDS = {
             "t3-chat-dark": "t3-chat",
@@ -256,7 +275,7 @@
               ? "system"
               : storedFollowSystem === "false"
                 ? preferenceMode
-                : theme === "system"
+                : theme === "system" || theme === DEFAULT_THEME_ID
                   ? "system"
                   : preferenceMode;
           // A valid mix half for the wanted appearance takes over: it decides
@@ -423,20 +442,114 @@
         color: var(--boot-foreground);
       }
 
+      /* KODO: startup-screen-style - startup screen: a soft accent glow, a pulsing emblem, the name and stage chip. */
+      #boot-shell-glow {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: radial-gradient(
+          40rem 16rem at top,
+          color-mix(in srgb, var(--boot-accent, #5236cc) 18%, transparent),
+          transparent
+        );
+      }
+
       #boot-shell-card {
         position: relative;
         z-index: 1;
         display: flex;
+        flex-direction: column;
         align-items: center;
         justify-content: center;
-        width: 96px;
-        height: 96px;
+        gap: 16px;
+        text-align: center;
+      }
+
+      #boot-shell-emblem {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 144px;
+        height: 144px;
+      }
+
+      #boot-shell-emblem::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: 9999px;
+        background: radial-gradient(
+          circle,
+          color-mix(in srgb, var(--boot-accent, #5236cc) 34%, transparent) 0%,
+          transparent 70%
+        );
+        filter: blur(24px);
+        animation: boot-shell-halo 2.8s ease-in-out infinite;
       }
 
       #boot-shell-logo {
-        width: 64px;
-        height: 64px;
+        position: relative;
+        width: 96px;
+        height: 96px;
         object-fit: contain;
+        animation: boot-shell-emblem 2.8s ease-in-out infinite;
+      }
+
+      #boot-shell-name {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      #boot-shell-stage {
+        padding: 2px 8px;
+        border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+        border-radius: 9999px;
+        font-size: 10px;
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        opacity: 0.7;
+      }
+
+      #boot-shell-stage:empty {
+        display: none;
+      }
+
+      @keyframes boot-shell-emblem {
+        0%,
+        100% {
+          opacity: 0.84;
+          transform: scale(0.96);
+        }
+        50% {
+          opacity: 1;
+          transform: scale(1);
+        }
+      }
+
+      @keyframes boot-shell-halo {
+        0%,
+        100% {
+          opacity: 0.12;
+          transform: scale(0.9);
+        }
+        50% {
+          opacity: 0.3;
+          transform: scale(1.08);
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        #boot-shell-logo,
+        #boot-shell-emblem::before {
+          animation: none;
+        }
       }
 
       /* App CSS locks body and #root scrolling once main loads, so the error screen scrolls itself. */
@@ -668,15 +781,32 @@
         white-space: nowrap;
       }
     </style>
-    <title>T3 Code (Beta)</title>
+    <title>Kodo Code (Alpha)</title>
+    <!-- KODO: brand-title-and-splash - title, splash aria-label/alt, and manifest names changed from "T3 Code" -->
   </head>
   <body>
     <div id="root">
       <div id="boot-shell">
-        <div id="boot-shell-card" aria-label="T3 Code splash screen">
-          <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="T3 Code" />
+        <!-- KODO: startup-screen-markup - startup screen markup (glow, emblem, name, stage chip) -->
+        <div id="boot-shell-glow"></div>
+        <div id="boot-shell-card" aria-label="Kodo Code splash screen">
+          <div id="boot-shell-emblem">
+            <img id="boot-shell-logo" src="/apple-touch-icon.png" alt="Kodo Code" />
+          </div>
+          <div id="boot-shell-name">
+            <span>Kodo Code</span>
+            <span id="boot-shell-stage"></span>
+          </div>
         </div>
       </div>
+      <script>
+        // The stage chip reads the stage from the title, e.g. "Kodo Code (Alpha)".
+        (() => {
+          const stage = document.title.match(/\(([^)]+)\)\s*$/)?.[1];
+          const chip = document.getElementById("boot-shell-stage");
+          if (stage && chip) chip.textContent = stage;
+        })();
+      </script>
     </div>
     <script type="module" src="/src/bootstrap.ts"></script>
   </body>

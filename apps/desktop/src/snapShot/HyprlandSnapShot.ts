@@ -10,12 +10,20 @@ import type { LinuxWindowSnapshot } from "./LinuxSnapShot.ts";
 import { CaptureSetupRequiredError, readPortalPng } from "./linuxCaptureSession.ts";
 import { startNativeCaptureFeedback } from "./NativeCaptureFeedback.ts";
 import { HYPRLAND_CAPTURE_ACTION } from "./linuxCaptureSession.ts";
+import { APP_BASE_NAME } from "@t3tools/shared/appBrand";
+import { SNAP_SHOT_DATA_DIRECTORY } from "./kodoSnapShotNames.ts";
 export { isHyprlandCaptureSession } from "./linuxCaptureSession.ts";
 
 export const HYPRLAND_CAPTURE_EXECUTABLE = "t3-hyprland-snap-shot";
 export type HyprlandCapturePaths = { readonly bundle: string; readonly dataHome: string };
 export function hyprlandCaptureExecutable(paths: HyprlandCapturePaths) {
-  return NodePath.join(paths.dataHome, "t3code", "hyprland-capture", HYPRLAND_CAPTURE_EXECUTABLE);
+  // KODO: brand-snapshot-data-directory - own data directory
+  return NodePath.join(
+    paths.dataHome,
+    SNAP_SHOT_DATA_DIRECTORY,
+    "hyprland-capture",
+    HYPRLAND_CAPTURE_EXECUTABLE,
+  );
 }
 
 function hyprlandCaptureBinding(appId: string, lua: boolean): string {
@@ -96,7 +104,7 @@ export class HyprlandCaptureSetup {
       const bundle = await regularFile(this.paths.bundle);
       if (!bundle)
         throw new Error(
-          "The Hyprland capture helper is missing from this build. Update or reinstall T3 Code.",
+          `The Hyprland capture helper is missing from this build. Update or reinstall ${APP_BASE_NAME}.`,
         );
       if (!installed.equals(bundle))
         return {

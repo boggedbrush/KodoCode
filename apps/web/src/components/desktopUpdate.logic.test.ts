@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { DesktopUpdateState } from "@t3tools/contracts";
+import { APP_RELEASES_URL } from "@t3tools/shared/appBrand";
 
 import {
   canCheckForUpdate,
@@ -65,14 +66,12 @@ describe("desktop update button state", () => {
 });
 
 describe("desktop update UI helpers", () => {
-  it.each(["owner/repo/extra", "owner#notes/repo", "owner/repo?tab=notes"])(
-    "falls back to upstream for an invalid configured repository: %s",
+  it.each([undefined, "owner/repo/extra", "owner#notes/repo", "owner/repo?tab=notes"])(
+    "falls back to this fork's repository, never upstream's, for a missing or invalid configuration: %s",
     (repository) => {
-      expect(getDesktopUpdateReleaseHistoryUrl(repository)).toBe(
-        "https://github.com/pingdotgg/t3code/releases",
-      );
+      expect(getDesktopUpdateReleaseHistoryUrl(repository)).toBe(APP_RELEASES_URL);
       expect(getDesktopUpdateReleaseUrl("1.2.3", repository)).toBe(
-        "https://github.com/pingdotgg/t3code/releases/tag/v1.2.3",
+        `${APP_RELEASES_URL}/tag/v1.2.3`,
       );
     },
   );

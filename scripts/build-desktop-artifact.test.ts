@@ -18,6 +18,7 @@ import * as Path from "effect/Path";
 import * as Sink from "effect/Sink";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
+import { APP_ID, APP_PACKAGE_NAME } from "@t3tools/shared/appBrand";
 import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import {
@@ -234,6 +235,10 @@ const makeMacPayloadFixture = Effect.fn("test.makeMacPayloadFixture")(function* 
   );
   return { stageDistDir } as const;
 });
+
+const decodeDebConfig = Schema.decodeUnknownEffect(
+  Schema.Struct({ deb: Schema.Struct({ fpm: Schema.Array(Schema.String) }) }),
+);
 
 it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it.effect("rejects overlapping builds from another process until restoration finishes", () =>
@@ -545,6 +550,44 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         ),
       ),
     ),
+  );
+
+  it.effect("names the Electron window class and the package identity in the Linux build", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const linux = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "0.0.33",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+
+      assert.nestedPropertyVal(linux, "linux.desktop.entry.StartupWMClass", APP_ID);
+      assert.nestedPropertyVal(linux, "linux.executableName", APP_PACKAGE_NAME);
+
+      const { deb } = yield* decodeDebConfig(linux);
+      const [metainfo, license] = deb.fpm;
+      assert.isDefined(metainfo);
+      const [metainfoSource, metainfoTarget] = metainfo?.split("=") ?? [];
+      assert.isTrue(
+        metainfoSource?.endsWith(`/apps/desktop/resources/linux/${APP_ID}.metainfo.xml`),
+      );
+      assert.equal(metainfoTarget, `/usr/share/metainfo/${APP_ID}.metainfo.xml`);
+      assert.isTrue(yield* fs.exists(metainfoSource ?? ""));
+      assert.isFalse(metainfo?.includes("${"));
+      assert.isTrue(license?.endsWith(`=/usr/share/doc/${APP_PACKAGE_NAME}/copyright`));
+
+      const metainfoXml = yield* fs.readFileString(metainfoSource ?? "");
+      assert.include(metainfoXml, `<id>${APP_ID}</id>`);
+      assert.include(
+        metainfoXml,
+        `<launchable type="desktop-id">${APP_PACKAGE_NAME}.desktop</launchable>`,
+      );
+      assert.include(metainfoXml, `<binary>${APP_PACKAGE_NAME}</binary>`);
+    }),
   );
 
   it.effect("declares Calendar access for hosted commands in macOS builds", () =>
@@ -1445,7 +1488,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     });
 
     assert.deepStrictEqual(configuration, {
-      appId: "com.t3tools.t3code",
+      appId: APP_ID,
       teamId: "ABC1234567",
       rpDomains: ["example.clerk.accounts.dev"],
       provisioningProfilePath: "/tmp/t3code.provisionprofile",
@@ -1468,7 +1511,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       "clerk.example.com",
       "example.clerk.accounts.dev",
     ]);
-    assert.include(entitlements, "<string>ABC1234567.com.t3tools.t3code</string>");
+    assert.include(entitlements, `<string>ABC1234567.${APP_ID}</string>`);
     assert.include(entitlements, "<string>webcredentials:clerk.example.com</string>");
     assert.include(entitlements, "<string>webcredentials:example.clerk.accounts.dev</string>");
     assert.include(entitlements, "<key>com.apple.security.cs.allow-jit</key>");
@@ -1479,7 +1522,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   });
 
   it("grants in-app browser passkey entitlements only when the provisioning profile does", () => {
-    const configuration = { appId: "com.t3tools.t3code", teamId: "ABC1234567" };
+    const configuration = { appId: APP_ID, teamId: "ABC1234567" };
     const profile = (entitlements: string, outside = "") =>
       `0\x82\x1f\x9a\x06\t*\x86H<?xml version="1.0"?><plist version="1.0"><dict>${outside}<key>Entitlements</key><dict>${entitlements}</dict></dict></plist>\x00\x01`;
     const teamWildcardGroups = `<key>keychain-access-groups</key>
@@ -1521,7 +1564,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         configuration,
       ),
       {
-        touchIdKeychainAccessGroup: "ABC1234567.com.t3tools.t3code.webauthn",
+        touchIdKeychainAccessGroup: `ABC1234567.${APP_ID}.webauthn`,
         browserPasskeys: true,
       },
     );
@@ -1537,7 +1580,10 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
     );
     assert.match(
       entitlements,
-      /<key>keychain-access-groups<\/key>\s*<array>\s*<string>ABC1234567\.com\.t3tools\.t3code\.webauthn<\/string>\s*<\/array>/u,
+      new RegExp(
+        `<key>keychain-access-groups</key>\\s*<array>\\s*<string>ABC1234567\\.${APP_ID.replaceAll(".", "\\.")}\\.webauthn</string>\\s*</array>`,
+        "u",
+      ),
     );
     assert.match(
       entitlements,
