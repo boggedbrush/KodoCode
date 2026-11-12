@@ -19,6 +19,11 @@ import {
 import { kodoRunModeSnapshot } from "../kodo/interactionMode.ts"; // KODO: run-mode-snapshot
 import { kodoMaySteerIntoRun } from "../kodo/interactionMode.ts"; // KODO: mode-steer-guard
 import { makeKodoModeModelTurn } from "../kodo/modeModelTurn.ts"; // KODO: mode-models-turn
+import {
+  decideKodoLoopAdvance,
+  decideKodoLoopControl,
+  validKodoLoopStage,
+} from "../kodo/loop/loopControl.ts"; // KODO: loop-command
 import type { KodoThreadModeModel } from "@t3tools/contracts"; // KODO: mode-models-turn
 import { kodoThreadModeModelFor } from "@t3tools/shared/kodoModeModel"; // KODO: mode-models-turn
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts"; // KODO: mode-models-turn
@@ -626,6 +631,8 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.project.adopt-folder":
     case "thread.runtime-mode.set":
     case "thread.interaction-mode.set":
+    case "thread.kodo-loop.control": // KODO: loop-command
+    case "thread.kodo-loop.advance": // KODO: loop-command
     case "thread.model-selection.set":
     case "provider-session.detach":
     case "message.dispatch":
@@ -4849,6 +4856,63 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     },
   );
 
+  // KODO: loop-command - the thread's loop state changes only through these two commands; the rules are in kodo/loop/loopControl.ts.
+  const dispatchKodoLoop = Effect.fn("orchestrationV2.dispatch.kodoLoop")(function* (
+    command: Extract<
+      OrchestrationV2ServerCommand,
+      { readonly type: "thread.kodo-loop.control" | "thread.kodo-loop.advance" }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const projection = yield* projectionStore
+      .getThreadRecords(command.threadId, ["runs"], { turnItemTypes: [] })
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    const { thread } = projection;
+    if (thread.deletedAt !== null) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Thread ${command.threadId} is deleted.`,
+      });
+    }
+    const decided =
+      command.type === "thread.kodo-loop.control"
+        ? decideKodoLoopControl({
+            commandId: command.commandId,
+            control: command.control,
+            thread,
+            runs: projection.runs,
+          })
+        : decideKodoLoopAdvance({
+            loopId: command.loopId,
+            expectedRevision: command.expectedRevision,
+            step: command.step,
+            thread,
+          });
+    if (!decided.ok) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: decided.message,
+      });
+    }
+    const now = yield* DateTime.now;
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "thread.metadata-updated",
+      threadId: command.threadId,
+      providerInstanceId: thread.providerInstanceId,
+      occurredAt: now,
+      payload: { ...thread, kodoLoop: decided.loop, updatedAt: now },
+    });
+  });
+
   const dispatchThreadProjectAdoptFolder = Effect.fn(
     "orchestrationV2.dispatch.threadProjectAdoptFolder",
   )(function* (
@@ -6587,6 +6651,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       followsCurrentConversation:
         followsCurrentConversation(incomingMessage) ||
         isBufferedProviderNotification(incomingMessage),
+      loopStage: validKodoLoopStage(projection.thread.kodoLoop, command), // KODO: loop-stage
       // A goal command that stops the active run goes first, so nothing queued is ahead of it.
       queueTail:
         shouldQueue && queuedRunStop === undefined ? kodoQueueTailRun(projection) : undefined,
@@ -13873,6 +13938,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.guest-message.submit":
       case "thread.guest-message.dismiss":
         yield* dispatchGuestShare(command, events, effects);
+        break;
+      case "thread.kodo-loop.control": // KODO: loop-command
+      case "thread.kodo-loop.advance": // KODO: loop-command
+        yield* dispatchKodoLoop(command, events);
         break;
       case "provider-session.detach":
         yield* dispatchProviderSessionDetach(command, events, effects);

@@ -180,7 +180,10 @@ export const KodoLoop = Schema.Struct({
   planApproval: Schema.Literals(["auto", "ask"]),
   budget: KodoLoopBudget,
   baseline: Schema.Struct({
+    /** The latest run with a checkpoint when the loop began: the diff evidence starts after it. */
     checkpointTurnCount: Schema.optional(NonNegativeInt),
+    /** The thread's latest run ordinal when the loop began: any later run that is not the loop's is a person's. */
+    runOrdinal: Schema.optional(NonNegativeInt),
     headSha: Schema.optional(Schema.String),
   }),
   stages: Schema.Array(KodoLoopStageRecord).check(
@@ -266,3 +269,74 @@ export const KodoLoopSettingsPatch = Schema.Struct({
   ),
 });
 export type KodoLoopSettingsPatch = typeof KodoLoopSettingsPatch.Type;
+
+/** What a person (or an agent through the same service) can do to a loop. */
+export const KodoLoopControl = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("start"),
+    request: capped(KODO_LOOP_REQUEST_MAX_CHARS),
+    /** The person's `/loop` message; it is never run as a turn itself. */
+    requestMessageId: MessageId,
+    maxRounds: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: KODO_LOOP_MAX_ROUNDS })),
+    planApproval: Schema.Literals(["auto", "ask"]),
+    budget: KodoLoopBudget,
+  }),
+  Schema.Struct({ type: Schema.Literal("stop"), detail: Schema.optional(capped(2_000)) }),
+  Schema.Struct({ type: Schema.Literal("approve") }),
+  Schema.Struct({
+    type: Schema.Literal("extend"),
+    rounds: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: KODO_LOOP_MAX_ROUNDS })),
+  }),
+  Schema.Struct({ type: Schema.Literal("retry-judge") }),
+]);
+export type KodoLoopControl = typeof KodoLoopControl.Type;
+
+/** What the loop worker writes as it observes the thread; only the server can send it. */
+export const KodoLoopAdvanceStep = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("hold"), hold: Schema.Literal("runtime_request") }),
+  Schema.Struct({ type: Schema.Literal("release") }),
+  Schema.Struct({
+    type: Schema.Literal("advance"),
+    record: KodoLoopStageRecord,
+    hold: Schema.optional(Schema.Literal("plan_approval")),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("finish"),
+    status: Schema.Literals(["done", "stopped", "failed"]),
+    reason: KodoLoopStopReason,
+    detail: Schema.optional(capped(2_000)),
+    record: Schema.optional(KodoLoopStageRecord),
+    summary: Schema.optional(capped(8_000)),
+  }),
+]);
+export type KodoLoopAdvanceStep = typeof KodoLoopAdvanceStep.Type;
+
+/** Names a stage message so the turn it starts can be told from a person's. */
+export const KodoLoopStageRef = Schema.Struct({
+  loopId: Schema.String.check(Schema.isNonEmpty()),
+  round: PositiveInt,
+  stage: KodoLoopStage,
+});
+export type KodoLoopStageRef = typeof KodoLoopStageRef.Type;
+
+/** The slim loop summary a thread shell carries; the full loop travels only with the thread. */
+export const KodoLoopShellStatus = Schema.Struct({
+  status: KodoLoopStatus,
+  round: PositiveInt,
+  maxRounds: PositiveInt,
+  stage: KodoLoopStage,
+  hold: Schema.optional(KodoLoopHold),
+  stopReason: Schema.optional(KodoLoopStopReason),
+});
+export type KodoLoopShellStatus = typeof KodoLoopShellStatus.Type;
+
+export function kodoLoopShellStatus(loop: KodoLoop): KodoLoopShellStatus {
+  return {
+    status: loop.status,
+    round: loop.round,
+    maxRounds: loop.maxRounds,
+    stage: loop.stage,
+    ...(loop.hold === undefined ? {} : { hold: loop.hold }),
+    ...(loop.stopReason === undefined ? {} : { stopReason: loop.stopReason }),
+  };
+}

@@ -77,6 +77,13 @@ import {
 } from "./providerPolicy.ts";
 import { ThreadInteractionMode } from "./kodoInteractionMode.ts"; // KODO: thread-mode-type
 import { KodoRunModel, KodoThreadModeModel } from "./kodoModeModels.ts"; // KODO: mode-models-state
+import {
+  KodoLoop,
+  KodoLoopAdvanceStep,
+  KodoLoopControl,
+  KodoLoopShellStatus,
+  KodoLoopStageRef,
+} from "./kodoLoop.ts"; // KODO: loop-state
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 import {
@@ -454,6 +461,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   interactionMode: ThreadInteractionMode,
   /** KODO: mode-models-state - set while a mode default stands in for the thread's own model. */
   kodoModeModel: Schema.optional(KodoThreadModeModel),
+  /** KODO: loop-state - the plan, code, review, judge loop running or last run on this thread. */
+  kodoLoop: Schema.optional(KodoLoop),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -2118,6 +2127,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ThreadInteractionMode,
   kodoModeModel: Schema.optional(KodoThreadModeModel), // KODO: mode-models-state
+  kodoLoopStatus: Schema.optional(KodoLoopShellStatus), // KODO: loop-state
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -3187,6 +3197,13 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     modelSelection: ModelSelection,
   }),
+  /** KODO: loop-command - start, stop, approve, extend or retry the thread's loop. */
+  Schema.Struct({
+    type: Schema.Literal("thread.kodo-loop.control"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    control: KodoLoopControl,
+  }),
   Schema.Struct({
     type: Schema.Literal("provider-session.detach"),
     commandId: CommandId,
@@ -3205,6 +3222,8 @@ export const OrchestrationV2Command = Schema.Union([
     idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
     /** Start a new provider session without the thread's earlier context. Never steers. */
     freshContext: Schema.optional(Schema.Boolean),
+    /** KODO: loop-stage - set by the loop worker; the server ignores it unless it names the active loop's current stage. */
+    kodoLoopStage: Schema.optional(KodoLoopStageRef),
     commandId: CommandId,
     threadId: ThreadId,
     messageId: MessageId,
@@ -3431,6 +3450,15 @@ export type OrchestrationV2Command = typeof OrchestrationV2Command.Type;
 
 // Excluded from dispatchCommand so only the server can send these.
 const OrchestrationV2InternalCommand = Schema.Union([
+  /** KODO: loop-command - the loop worker's writes to loop state; refused when `expectedRevision` is stale. */
+  Schema.Struct({
+    type: Schema.Literal("thread.kodo-loop.advance"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    loopId: Schema.String.check(Schema.isNonEmpty()),
+    expectedRevision: NonNegativeInt,
+    step: KodoLoopAdvanceStep,
+  }),
   // Guest share commands the server issues after checking T3 Connect and the guest token.
   Schema.Struct({
     type: Schema.Literal("thread.guest-share.open"),

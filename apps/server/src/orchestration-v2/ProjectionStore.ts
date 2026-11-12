@@ -1,5 +1,6 @@
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
 import { pendingGuestMessageCount } from "@t3tools/contracts";
+import { kodoLoopShellStatus } from "@t3tools/contracts"; // KODO: loop-state
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
@@ -1636,6 +1637,10 @@ export function threadShellFromProjection(
     ...(projection.thread.kodoModeModel === undefined
       ? {}
       : { kodoModeModel: projection.thread.kodoModeModel }),
+    // KODO: loop-state
+    ...(projection.thread.kodoLoop === undefined
+      ? {}
+      : { kodoLoopStatus: kodoLoopShellStatus(projection.thread.kodoLoop) }),
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
     pullRequests: threadPullRequestsOf(projection.thread),
@@ -1943,6 +1948,10 @@ function shellFromState(input: {
     ...(input.state.thread.kodoModeModel === undefined
       ? {}
       : { kodoModeModel: input.state.thread.kodoModeModel }),
+    // KODO: loop-state
+    ...(input.state.thread.kodoLoop === undefined
+      ? {}
+      : { kodoLoopStatus: kodoLoopShellStatus(input.state.thread.kodoLoop) }),
     branch: input.state.thread.branch,
     worktreePath: input.state.thread.worktreePath,
     pullRequests: threadPullRequestsOf(input.state.thread),

@@ -365,7 +365,22 @@ describe("stop precedence", () => {
       expect(decideLoopStep(loop, observation)).toEqual({ kind: "idle" });
     });
 
-    it("beats a complete verdict, the round cap and the budget", () => {
+    it("beats the round cap and the budget", () => {
+      const { loop, observation } = atStage(
+        "judge",
+        "completed",
+        { text: verdictBlock(incompleteVerdict) },
+        { round: 3, budget: { stopAtLimitPercent: 50 } },
+        { usage: { costUsd: null, limitPercent: 99 } },
+      );
+      const withForeign = {
+        ...observation,
+        runs: [...observation.runs, run({ runId: "x", userMessageId: "m-user", status: "queued" })],
+      };
+      expect(decideLoopStep(loop, withForeign)).toMatchObject({ reason: "user_message" });
+    });
+
+    it("loses to a complete verdict that settled at the same time", () => {
       const { loop, observation } = atStage(
         "judge",
         "completed",
@@ -377,7 +392,86 @@ describe("stop precedence", () => {
         ...observation,
         runs: [...observation.runs, run({ runId: "x", userMessageId: "m-user", status: "queued" })],
       };
-      expect(decideLoopStep(loop, withForeign)).toMatchObject({ reason: "user_message" });
+      expect(decideLoopStep(loop, withForeign)).toMatchObject({
+        kind: "finish",
+        status: "done",
+        reason: "complete",
+      });
+    });
+
+    describe("a message that began and ended between two looks", () => {
+      const loopAfter = (over: Partial<KodoLoop> = {}) =>
+        testLoop({ stage: "code", baseline: { runOrdinal: 4 }, ...over });
+
+      it("stops the loop when its run is already over", () => {
+        const loop = loopAfter();
+        const observation = observe({
+          threadMode: "code",
+          runs: [
+            run({ runId: "r1", userMessageId: msg(loop), status: "running", ordinal: 5 }),
+            run({ runId: "x", userMessageId: "m-user", status: "completed", ordinal: 6 }),
+          ],
+        });
+        expect(decideLoopStep(loop, observation)).toMatchObject({
+          kind: "finish",
+          status: "stopped",
+          reason: "user_message",
+        });
+      });
+
+      it.each(["failed", "cancelled", "interrupted"] as const)("also when it %s", (status) => {
+        const loop = loopAfter();
+        const observation = observe({
+          threadMode: "code",
+          runs: [
+            run({ runId: "r1", userMessageId: msg(loop), status: "running", ordinal: 5 }),
+            run({ runId: "x", userMessageId: "m-user", status, ordinal: 6 }),
+          ],
+        });
+        expect(decideLoopStep(loop, observation)).toMatchObject({ reason: "user_message" });
+      });
+
+      it("does not read the runs from before the loop, or the loop's own, as a person's", () => {
+        const loop = loopAfter();
+        const observation = observe({
+          threadMode: "code",
+          runs: [
+            run({ runId: "old", userMessageId: "m-old", status: "completed", ordinal: 4 }),
+            run({ runId: "r1", userMessageId: msg(loop), status: "completed", ordinal: 5 }),
+          ],
+        });
+        expect(decideLoopStep(loop, observation)).toEqual({ kind: "idle" });
+      });
+
+      it("does not read a restart continuation of the loop's run as a person's", () => {
+        const loop = loopAfter();
+        const observation = observe({
+          threadMode: "code",
+          runs: [
+            run({ runId: "r1", userMessageId: msg(loop), status: "cancelled", ordinal: 5 }),
+            run({
+              runId: "r2",
+              userMessageId: "restart-note",
+              restartContinuationOfRunId: "r1",
+              status: "running",
+              ordinal: 6,
+            }),
+          ],
+        });
+        expect(decideLoopStep(loop, observation)).toEqual({ kind: "idle" });
+      });
+
+      it("is not noticed by a loop that recorded no starting point", () => {
+        const loop = testLoop({ stage: "code" });
+        const observation = observe({
+          threadMode: "code",
+          runs: [
+            run({ runId: "r1", userMessageId: msg(loop), status: "running", ordinal: 5 }),
+            run({ runId: "x", userMessageId: "m-user", status: "completed", ordinal: 6 }),
+          ],
+        });
+        expect(decideLoopStep(loop, observation)).toEqual({ kind: "idle" });
+      });
     });
 
     it("a request message and the loop's earlier stage messages are the loop's own", () => {
@@ -447,6 +541,25 @@ describe("stop precedence", () => {
           }),
         ),
       ).toMatchObject({ kind: "advance", outcome: { runId: "r2" } });
+    });
+
+    it("a run a restart ended waits for its continuation, which is created after the restart", () => {
+      const loop = testLoop({ stage: "code" });
+      const ended = (continuationPending: boolean) =>
+        observe({
+          threadMode: "code",
+          runs: [
+            run({
+              runId: "r1",
+              userMessageId: msg(loop),
+              status: "cancelled",
+              continuationPending,
+            }),
+          ],
+        });
+      expect(decideLoopStep(loop, ended(true))).toEqual({ kind: "idle" });
+      // The continuation was declined or could not start: now the stage really failed.
+      expect(decideLoopStep(loop, ended(false))).toMatchObject({ kind: "finish", reason: "error" });
     });
 
     it("an interrupted stage run is an error only when nothing continued it", () => {

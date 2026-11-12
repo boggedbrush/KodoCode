@@ -4,6 +4,7 @@
 // calls `selectForDispatch` when it creates a run and `reconcileQueuedStart` when a queued run starts.
 import {
   DEFAULT_KODO_MODE_MODELS,
+  type KodoLoopStageRef,
   type KodoRunModel,
   type ModelSelection,
   type OrchestrationV2Command,
@@ -60,6 +61,8 @@ export interface KodoDispatchSelectionInput {
   readonly modelSelection: ModelSelection;
   /** Delegated completions, monitor notices and buffered wakes carry on the conversation as it is. */
   readonly followsCurrentConversation: boolean;
+  /** The loop stage this message really carries (validated by the caller); the judge runs on its own slot. */
+  readonly loopStage?: KodoLoopStageRef | undefined;
   /** The last queued run ahead of this message, when it queues; the thread's own model follows it. */
   readonly queueTail: OrchestrationV2Run | undefined;
   readonly activeProviderThread: OrchestrationV2ProviderThread | undefined;
@@ -184,7 +187,8 @@ export const makeKodoModeModelTurn = (services: KodoModeModelTurnServices) => {
       Effect.orElseSucceed(() => DEFAULT_KODO_MODE_MODELS),
     );
     const resolveInput = {
-      mode: projection.thread.interactionMode,
+      // The judge reads in Review mode but answers on its own slot (judge, else review, else the thread's own).
+      mode: input.loopStage?.stage === "judge" ? "judge" : projection.thread.interactionMode,
       thread: projection.thread,
       settings: { modeModelSelections },
       requested: command.modelSelection,

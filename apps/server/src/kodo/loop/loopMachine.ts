@@ -51,6 +51,14 @@ export interface LoopRunView {
   readonly usageLimit?: boolean | undefined;
   /** One line saying why a failed run failed. */
   readonly failureMessage?: string | undefined;
+  /** The run's ordinal on the thread; later than the loop's baseline means it began after the loop did. */
+  readonly ordinal?: number | undefined;
+  /**
+   * A server restart ended this run and has not started its continuation yet: the continuation run
+   * is created by an effect that runs after the restart commit, so for a while the run looks
+   * abandoned. The loop waits through that gap instead of failing.
+   */
+  readonly continuationPending?: boolean | undefined;
 }
 
 export interface LoopRunOutput {
@@ -145,7 +153,11 @@ export function kodoLoopStageMessageId(
  * in place of one of them. A restart continuation has a message of its own, so it is followed by
  * link; judging by message alone would read it as the person interrupting.
  */
-function loopRunIds(loop: KodoLoop, runs: ReadonlyArray<LoopRunView>, currentMessageId: string) {
+export function loopRunIds(
+  loop: KodoLoop,
+  runs: ReadonlyArray<LoopRunView>,
+  currentMessageId: string = kodoLoopStageMessageId(loop, loop.round, loop.stage),
+) {
   const messageIds = new Set([
     loop.requestMessageId as string,
     currentMessageId,
@@ -375,6 +387,8 @@ export function decideLoopStep(loop: KodoLoop, observation: LoopObservation): Lo
       : null;
 
   if (run !== undefined && !ACTIVE_RUN_STATUSES.has(run.status) && run.status !== "completed") {
+    // A restart's continuation is created after the run is ended; until it exists, wait.
+    if (run.continuationPending === true) return { kind: "idle" };
     return failedRunStep(loop, messageId, run);
   }
   if (
@@ -384,8 +398,20 @@ export function decideLoopStep(loop: KodoLoop, observation: LoopObservation): Lo
     return settled;
   }
 
+  // A complete verdict is the answer the loop was after; a message sent while the judge answered
+  // does not undo it.
+  if (settled?.kind === "finish" && settled.status === "done") return settled;
+
+  // A person's message counts whether it is still running or already ended, as long as it began
+  // after the loop did: a run that started and finished between two looks is not missed.
+  const baselineOrdinal = loop.baseline.runOrdinal;
   const foreign = observation.runs.find(
-    (candidate) => !members.has(candidate.runId) && ACTIVE_RUN_STATUSES.has(candidate.status),
+    (candidate) =>
+      !members.has(candidate.runId) &&
+      (ACTIVE_RUN_STATUSES.has(candidate.status) ||
+        (baselineOrdinal !== undefined &&
+          candidate.ordinal !== undefined &&
+          candidate.ordinal > baselineOrdinal)),
   );
   if (foreign !== undefined) {
     return {
