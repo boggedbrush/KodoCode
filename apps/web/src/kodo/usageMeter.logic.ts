@@ -105,7 +105,8 @@ export function summarizeProviderLimits(
 function poolWindowInput(window: LimitPoolWindow): WindowInput {
   return {
     label: window.label,
-    usedPercent: window.usedPercent,
+    // The Limits cards round the pooled remainder, so derive from it to print the same number.
+    usedPercent: 100 - window.remainingPercent,
     resetsAtMs: window.resets.map((reset) => reset.at),
   };
 }
@@ -196,11 +197,14 @@ export function kodoPickerUsageHint(
   };
 }
 
-/** Providers that never report subscription limits, listed so their absence is explicit. */
-export function providersWithoutLimitData(providers: readonly ServerProvider[]): readonly string[] {
+/** Providers with no subscription limits to show, so a gap is explicit. A driver a hub reports is covered. */
+export function providersWithoutLimitData(
+  providers: readonly ServerProvider[],
+  coveredDrivers: ReadonlySet<ServerProvider["driver"]> = new Set(),
+): readonly string[] {
   const names = new Set<string>();
   for (const provider of providers) {
-    if (!provider.enabled || !provider.installed) continue;
+    if (!provider.enabled || !provider.installed || coveredDrivers.has(provider.driver)) continue;
     if (provider.usageLimits !== undefined && provider.usageLimits.unavailable === undefined) {
       continue;
     }

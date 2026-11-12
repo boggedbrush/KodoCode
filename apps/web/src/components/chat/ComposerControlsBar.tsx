@@ -35,6 +35,8 @@ import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
 // KODO: controls-bar-mode
 import { resolveKodoModeBlockHidden } from "../../kodo/interactionModes.logic";
 import { KodoInteractionModeChip } from "./KodoInteractionModePicker";
+import { KodoModelNoteLabel } from "../../kodo/KodoModelNote"; // KODO: mode-models-composer
+import type { KodoModelNote } from "../../kodo/modeModels.logic"; // KODO: mode-models-composer
 
 /**
  * The composer footer controls: the model picker (which also holds effort, speed and
@@ -93,6 +95,7 @@ export function ComposerControlsBar(props: {
   onModelPickerOpenChange: (open: boolean) => void;
   modelPickerIconClassName: string | undefined;
   getModelDisabledReason: ChatComposerProps["getModelDisabledReason"];
+  kodoModelNote: KodoModelNote | null; // KODO: mode-models-composer
 }) {
   const {
     environmentId,
@@ -139,6 +142,7 @@ export function ComposerControlsBar(props: {
     onModelPickerOpenChange,
     modelPickerIconClassName,
     getModelDisabledReason,
+    kodoModelNote,
   } = props;
   const accessMatchesDefault = compatibleRuntimeMode === defaultRuntimeMode;
   const {
@@ -182,12 +186,20 @@ export function ComposerControlsBar(props: {
   const kodoModeBlockDef = {
     id: "kodo-mode",
     content: (
-      <KodoInteractionModeChip
-        interactionMode={interactionMode}
-        size={controlSize}
-        hidden={composerControlsHidden || kodoModeHidden}
-        onInteractionModeChange={handleInteractionModeChange}
-      />
+      <>
+        <KodoInteractionModeChip
+          interactionMode={interactionMode}
+          size={controlSize}
+          hidden={composerControlsHidden || kodoModeHidden}
+          onInteractionModeChange={handleInteractionModeChange}
+        />
+        {kodoModelNote !== null ? (
+          <KodoModelNoteLabel
+            note={kodoModelNote}
+            hidden={composerControlsHidden || kodoModeHidden}
+          />
+        ) : null}
+      </>
     ),
   };
   const restingBlockDefs = showModeBlock

@@ -1,4 +1,4 @@
-import type { LimitPresentations } from "@t3tools/shared/usageLimits";
+import { collectLimitAccounts, type LimitPresentations } from "@t3tools/shared/usageLimits";
 
 import { providersWithoutLimitData } from "./usageMeter.logic";
 
@@ -12,6 +12,7 @@ export function KodoNoLimitProviders({
     [...presentations.values()].flatMap(
       (presentation) => presentation.serverConfig?.providers ?? [],
     ),
+    new Set(collectLimitAccounts(presentations).map((account) => account.driver)),
   );
   if (names.length === 0) return null;
   return (

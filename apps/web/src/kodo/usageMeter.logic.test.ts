@@ -252,6 +252,15 @@ describe("providersWithoutLimitData", () => {
       ]),
     ).toEqual(["Cursor", "Kiro", "Pi"]);
   });
+
+  it("does not list a driver whose accounts are already reported elsewhere, such as by a hub", () => {
+    expect(
+      providersWithoutLimitData(
+        [make("claudeAgent", {}, "Claude"), make("kiro", {}, "Kiro")],
+        new Set([ProviderDriverKind.make("claudeAgent")]),
+      ),
+    ).toEqual(["Kiro"]);
+  });
 });
 
 describe("/usage slash command", () => {

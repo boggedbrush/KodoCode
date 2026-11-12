@@ -39,6 +39,8 @@ import type {
 } from "@t3tools/contracts";
 // KODO: composer-mode-props
 import { isKodoModeSlashCommand } from "../../kodo/interactionModes.logic";
+// KODO: mode-models-composer
+import { resolveKodoComposerModel } from "../../kodo/modeModels.logic";
 // KODO: usage-slash-select
 import { isKodoUsageSlashCommand } from "../../kodo/usageMeter.logic";
 import { openKodoUsageLimits } from "../../kodo/usageOpen";
@@ -345,6 +347,12 @@ export interface ChatComposerHandle {
     selectedModel: string;
     selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
     shownPendingApprovalIds: ReadonlyArray<RuntimeRequestId>;
+    /** KODO: mode-models-composer - `shown`: the mode default is displayed, so a send carries `own` (or nothing) and lets the server apply it. */
+    kodoModelSend: {
+      readonly shown: boolean;
+      readonly own: ModelSelection | null;
+      readonly explicit: boolean;
+    };
   };
   validateProviderInput: (providerInput: string) => boolean;
   setMultipleModelSelections: (selections: ReadonlyArray<ModelSelection>) => void;
@@ -870,6 +878,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     supportsAttachmentUploads,
   ]);
 
+  // KODO: mode-models-composer - the model the thread's mode runs on, shown while no pick overrides it.
+  const kodoComposerModel = resolveKodoComposerModel({
+    mode: interactionMode,
+    thread: activeThreadModelSelection
+      ? {
+          modelSelection: activeThreadModelSelection,
+          kodoModeModel: activeThread?.kodoModeModel,
+        }
+      : null,
+    modeModels: settings.modeModelSelections,
+    providers: providerStatuses,
+    lockedDriver: lockedProvider,
+    explicitPick: composerDraft.modelSelectionExplicit === true,
+  });
   const {
     providerInstanceEntries,
     selectedProviderEntry,
@@ -881,7 +903,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerModelOptions,
     selectedModel,
     composerProviderState,
+    kodoCarried,
   } = useComposerProviderModel({
+    kodoModeSelection: kodoComposerModel?.shown ?? null, // KODO: mode-models-composer
     providerStatuses,
     settings,
     activeProjectId,
@@ -899,6 +923,20 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     lockedInstanceId:
       activeThread?.runtime?.providerInstanceId ?? activeThreadModelSelection?.instanceId,
   });
+  // KODO: mode-models-composer - read when a send starts, so it stays out of the handle's deps.
+  const kodoModelSendRef = useRef<ReturnType<ChatComposerHandle["getSendContext"]>["kodoModelSend"]>({
+    shown: false,
+    own: null,
+    explicit: false,
+  });
+  kodoModelSendRef.current = {
+    shown: kodoComposerModel?.shown != null,
+    own:
+      kodoCarried === null
+        ? null
+        : createModelSelection(kodoCarried.instanceId, kodoCarried.model, kodoCarried.options),
+    explicit: composerDraft.modelSelectionExplicit === true,
+  };
   const noProviderAvailable =
     selectedProviderEntry === undefined && multipleModelSelections === null;
   const providerCatalogPending = noProviderAvailable && !providerCatalogKnown;
@@ -2493,6 +2531,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       onModelPickerOpenChange={setIsComposerModelPickerOpen}
       modelPickerIconClassName={composerProviderState.modelPickerIconClassName}
       getModelDisabledReason={getModelDisabledReason}
+      kodoModelNote={kodoComposerModel?.note ?? null} // KODO: mode-models-composer
     />
   );
   // An open question owns the space above the composer. Only a machine problem,
@@ -3125,6 +3164,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         environmentContexts: composerEnvironmentContexts,
         selectedPromptEffort,
         selectedModelSelection,
+        // KODO: mode-models-composer
+        kodoModelSend: kodoModelSendRef.current,
         multipleModelSelections:
           routeKind === "draft" && multipleModelSelections !== null
             ? multipleModelSelections.map((selection) =>

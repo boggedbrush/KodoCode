@@ -6,7 +6,14 @@ import * as Schema from "effect/Schema";
 
 import { ModelSelection } from "./modelSelection.ts";
 
-export const KODO_MODE_MODEL_SLOTS = ["ask", "plan", "code", "review", "orchestrator", "judge"] as const;
+export const KODO_MODE_MODEL_SLOTS = [
+  "ask",
+  "plan",
+  "code",
+  "review",
+  "orchestrator",
+  "judge",
+] as const;
 export const KodoModeModelSlot = Schema.Literals(KODO_MODE_MODEL_SLOTS);
 export type KodoModeModelSlot = typeof KodoModeModelSlot.Type;
 
@@ -71,5 +78,7 @@ export type KodoThreadModeModel = typeof KodoThreadModeModel.Type;
 export const KodoRunModel = Schema.Struct({
   source: KodoModelSource,
   base: ModelSelection,
+  /** The mode's configured model, when it could not be used and the run fell back to `base`. */
+  unavailable: Schema.optional(Schema.Struct({ wanted: ModelSelection, reason: Schema.String })),
 });
 export type KodoRunModel = typeof KodoRunModel.Type;

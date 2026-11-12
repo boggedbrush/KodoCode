@@ -35,6 +35,8 @@ export function useComposerProviderModel(
     readonly threadModelSelection: ModelSelection | null | undefined;
     readonly projectModelSelection: ModelSelection | null | undefined;
     readonly promptInjectionState: ReturnType<typeof getComposerPromptInjectionState>;
+    /** KODO: mode-models-composer - the mode's default model, shown in place of the draft's pick. */
+    readonly kodoModeSelection?: ModelSelection | null;
   },
 ) {
   const {
@@ -48,19 +50,35 @@ export function useComposerProviderModel(
     candidateInstanceIds,
     lockedProvider,
     lockedInstanceId,
+    kodoModeSelection,
   } = input;
-  const draftModelState = useComposerDraftModelState(threadRef);
+  const realDraftModelState = useComposerDraftModelState(threadRef);
+  // KODO: mode-models-composer
+  const draftModelState = kodoModeSelection
+    ? {
+        activeProvider: kodoModeSelection.instanceId,
+        modelSelectionByProvider: { [kodoModeSelection.instanceId]: kodoModeSelection },
+      }
+    : realDraftModelState;
   const providerInstanceEntries: ReadonlyArray<ProviderInstanceEntry> = providerInstanceEntriesFor(
     providerStatuses,
     settings,
     activeProjectId,
   );
-  const selection = resolveComposerProviderSelection({
+  const baseSelection = resolveComposerProviderSelection({
     entries: providerInstanceEntries,
     candidateInstanceIds,
     lockedProvider,
     lockedInstanceId,
   });
+  const selection = kodoModeSelection
+    ? resolveComposerProviderSelection({
+        entries: providerInstanceEntries,
+        candidateInstanceIds: [kodoModeSelection.instanceId, ...candidateInstanceIds],
+        lockedProvider,
+        lockedInstanceId,
+      })
+    : baseSelection;
   const selectedInstanceId =
     selection.selectedProviderEntry?.instanceId ?? NO_PROVIDER_MODEL_SELECTION.instanceId;
   const selectedProvider: ProviderDriverKind =
@@ -75,6 +93,29 @@ export function useComposerProviderModel(
     projectModelSelection,
     settings,
   });
+  // KODO: mode-models-composer - what a send carries as the thread's own model while a default is shown.
+  const kodoCarried = kodoModeSelection
+    ? (() => {
+        const instanceId =
+          baseSelection.selectedProviderEntry?.instanceId ?? NO_PROVIDER_MODEL_SELECTION.instanceId;
+        const driver = baseSelection.selectedProviderEntry?.driverKind ?? baseSelection.requestedDriverKind;
+        const carriedState = deriveEffectiveComposerModelState({
+          draft: realDraftModelState,
+          providers: providerStatuses,
+          selectedProvider: driver,
+          selectedInstanceId: instanceId,
+          requestedInstanceId: baseSelection.requestedInstanceId,
+          threadModelSelection,
+          projectModelSelection,
+          settings,
+        });
+        return {
+          instanceId,
+          model: carriedState.selectedModel,
+          options: carriedState.modelOptions?.[instanceId],
+        };
+      })()
+    : null;
   const selectedProviderModels = selection.selectedProviderEntry?.models ?? NO_PROVIDER_MODELS;
   const composerProviderState = getComposerProviderState({
     provider: selectedProvider,
@@ -92,5 +133,6 @@ export function useComposerProviderModel(
     composerModelOptions: modelState.modelOptions,
     selectedModel: modelState.selectedModel,
     composerProviderState,
+    kodoCarried,
   };
 }

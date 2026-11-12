@@ -13,6 +13,7 @@ import {
   type KodoModeModelSlot,
   type KodoModeModels,
   type ModelSelection,
+  type ServerProvider,
   normalizeKodoInteractionMode,
 } from "@t3tools/contracts";
 
@@ -58,7 +59,9 @@ export function kodoThreadOwnModel(thread: KodoModeModelThread): ModelSelection 
  */
 export function kodoOwnModelAfterQueue(
   thread: KodoModeModelThread,
-  queueTail: { readonly modelSelection: ModelSelection; readonly kodoModel?: KodoRunModel | undefined } | undefined,
+  queueTail:
+    | { readonly modelSelection: ModelSelection; readonly kodoModel?: KodoRunModel | undefined }
+    | undefined,
 ): ModelSelection {
   if (queueTail === undefined) return kodoThreadOwnModel(thread);
   return queueTail.kodoModel?.source === "mode-default"
@@ -111,7 +114,7 @@ export function kodoSendIsExplicitPick(input: {
 }): boolean {
   const { requested } = input;
   if (requested === undefined || input.configured === null) return false;
-  if (input.flagged === true) return true;
+  if (input.flagged !== undefined) return input.flagged;
   return (
     !draftModelPickMatchesThread(requested, input.own) &&
     !draftModelPickMatchesThread(requested, input.configured)
@@ -124,7 +127,8 @@ export function kodoThreadModeModelFor(resolved: {
   readonly source: KodoModelSource;
   readonly own: ModelSelection;
 }): KodoThreadModeModel | undefined {
-  return resolved.source === "mode-default" && !modelSelectionsEqual(resolved.selection, resolved.own)
+  return resolved.source === "mode-default" &&
+    !modelSelectionsEqual(resolved.selection, resolved.own)
     ? { applied: resolved.selection, base: resolved.own }
     : undefined;
 }
@@ -133,6 +137,34 @@ export function kodoThreadModeModelFor(resolved: {
 export function kodoRunModelFor(resolved: {
   readonly source: KodoModelSource;
   readonly own: ModelSelection;
+  readonly unavailable?: KodoResolvedModel["unavailable"];
 }): KodoRunModel {
-  return { source: resolved.source, base: resolved.own };
+  return {
+    source: resolved.source,
+    base: resolved.own,
+    ...(resolved.unavailable == null ? {} : { unavailable: resolved.unavailable }),
+  };
+}
+
+/** Availability from the provider catalogue: installed, enabled, signed in, and still offering the model. */
+export function kodoAvailabilityFromProviders(
+  providers: ReadonlyArray<ServerProvider>,
+): KodoModelAvailability {
+  return (selection) => {
+    const provider = providers.find((entry) => entry.instanceId === selection.instanceId);
+    if (provider === undefined) return "its provider is not configured";
+    if (!provider.enabled) return "its provider is turned off";
+    if (!provider.installed) return "its provider is not installed";
+    if (provider.status === "error") return "its provider reports an error";
+    if (provider.auth.status === "unauthenticated") return "its provider is not signed in";
+    if (
+      provider.models.length > 0 &&
+      !provider.models.some(
+        (model) => model.slug === selection.model || model.aliases?.includes(selection.model),
+      )
+    ) {
+      return "the provider no longer offers that model";
+    }
+    return null;
+  };
 }
