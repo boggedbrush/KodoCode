@@ -6,7 +6,6 @@ import {
   buildPlanAcceptanceTurn,
   findActionableProposedPlan,
   findResponsePlanOffer,
-  planAcceptanceBlocker,
   resolveKodoPlanOffer,
   responseTitle,
   runKodoPlanAcceptance,
@@ -72,6 +71,28 @@ describe("kodo plan artifact offers", () => {
     // A plan from a later run is offered; so is any plan while the start of Plan is unknown.
     expect(find([...plans, plan("real", "run-3", "active")], "run-3", 2)?.id).toBe("real");
     expect(find(plans, "run-2", null)?.id).toBe("ask-answer");
+  });
+
+  it("trusts a run's recorded mode over the client's cutoff guess", () => {
+    const recorded = [
+      { id: "run-1", ordinal: 1, interactionMode: "plan" as const },
+      { id: "run-2", ordinal: 2, interactionMode: "ask" as const },
+      { id: "run-3", ordinal: 3 },
+    ];
+    const offerFor = (runId: string, cutoffOrdinal: number | null) =>
+      findActionableProposedPlan({
+        plans: [plan("p", runId, "active")],
+        latestRunId: runId,
+        runs: recorded,
+        cutoffOrdinal,
+      });
+    // Planned before the guessed cutoff, and still a plan; asked after it, and not one.
+    expect(offerFor("run-1", 2)?.id).toBe("p");
+    expect(offerFor("run-2", null)).toBeNull();
+    expect(offerFor("run-2", 1)).toBeNull();
+    // A run without a record falls back to the cutoff.
+    expect(offerFor("run-3", 2)?.id).toBe("p");
+    expect(offerFor("run-3", 3)).toBeNull();
   });
 
   it("drops a plan with no run once the start of Plan is known", () => {
@@ -204,11 +225,6 @@ describe("kodo plan acceptance offer", () => {
   it("hides the offer from someone who cannot operate the thread", () => {
     expect(shouldOfferPlanAcceptance({ ...base, canOperateThread: false })).toBe(false);
   });
-
-  it("refuses to accept while messages are queued behind the switch to Code", () => {
-    expect(planAcceptanceBlocker({ queuedRunCount: 0 })).toBeNull();
-    expect(planAcceptanceBlocker({ queuedRunCount: 2 })).toMatch(/queued messages/);
-  });
 });
 
 describe("kodo plan acceptance turn", () => {
@@ -248,7 +264,6 @@ describe("kodo plan acceptance run", () => {
   const run = (
     overrides: Partial<{
       stillOffered: boolean;
-      blocker: string | null;
       switchToCode: PlanAcceptanceStep;
       startTurn: PlanAcceptanceStep;
       returnToPlan: PlanAcceptanceStep;
@@ -261,7 +276,6 @@ describe("kodo plan acceptance run", () => {
     };
     const outcome = runKodoPlanAcceptance({
       stillOffered: () => overrides.stillOffered ?? true,
-      blocker: () => overrides.blocker ?? null,
       switchToCode: step("code", overrides.switchToCode ?? ok),
       startTurn: step("start", overrides.startTurn ?? ok),
       returnToPlan: step("plan", overrides.returnToPlan ?? ok),
@@ -278,15 +292,6 @@ describe("kodo plan acceptance run", () => {
   it("does nothing when the offer no longer stands at click time", async () => {
     const { calls, outcome } = run({ stillOffered: false });
     expect(await outcome).toEqual({ status: "skipped" });
-    expect(calls).toEqual([]);
-  });
-
-  it("does not touch the mode while messages are queued", async () => {
-    const { calls, outcome } = run({ blocker: "Send or remove the queued messages first." });
-    expect(await outcome).toEqual({
-      status: "blocked",
-      message: "Send or remove the queued messages first.",
-    });
     expect(calls).toEqual([]);
   });
 
@@ -327,7 +332,6 @@ describe("kodo plan acceptance run", () => {
     const stillOffered = vi.fn(() => true);
     await runKodoPlanAcceptance({
       stillOffered,
-      blocker: () => null,
       switchToCode: async () => ok,
       startTurn: async () => ok,
       returnToPlan: async () => ok,

@@ -20,6 +20,7 @@ import {
   runCodemodAudit,
   runStatus,
   runSync,
+  runVerify,
 } from "./engine.ts";
 import { type KodoManifest, validateManifest } from "./manifest.ts";
 
@@ -89,7 +90,7 @@ const checkCommand = Command.make(
     manifest: manifestFlag,
     release: Flag.Boolean("release").pipe(
       Flag.withDescription(
-        "Release gate: also fail when the fork is on an unreleased upstream base.",
+        "Release gate: also fail unless the fork is on a stable upstream release and the recorded sync passed check and verification (`kodo:verify`).",
       ),
       Flag.withDefault(false),
     ),
@@ -132,6 +133,12 @@ const syncCommand = Command.make(
       ),
       Flag.withDefault(false),
     ),
+    allowUnverified: Flag.Boolean("allow-unverified").pipe(
+      Flag.withDescription(
+        "Accept a release tag that could not be checked against the upstream remote (offline use).",
+      ),
+      Flag.withDefault(false),
+    ),
     verify: Flag.Boolean("verify").pipe(
       Flag.withDescription(
         "Run the manifest's verification commands. Use --no-verify to skip them.",
@@ -139,7 +146,7 @@ const syncCommand = Command.make(
       Flag.withDefault(true),
     ),
   },
-  ({ manifest, ref, dryRun, resume, fetch, allowUnreleased, verify }) =>
+  ({ manifest, ref, dryRun, resume, fetch, allowUnreleased, allowUnverified, verify }) =>
     withContext(
       manifest,
       (ctx) =>
@@ -149,12 +156,21 @@ const syncCommand = Command.make(
           resume,
           fetch,
           allowUnreleased,
+          allowUnverified,
           verify,
         }).exitCode,
     ),
 ).pipe(
   Command.withDescription(
     "Merge the newest stable upstream release onto a sync/upstream-<release> branch, re-apply the overlay, check, verify and log it. Never pushes.",
+  ),
+);
+
+const verifyCommand = Command.make("verify", { manifest: manifestFlag }, ({ manifest }) =>
+  withContext(manifest, (ctx) => runVerify(ctx).exitCode),
+).pipe(
+  Command.withDescription(
+    "Run check and the manifest's verification commands on the working tree; on a full pass, write the verification marker `kodo:check --release` requires.",
   ),
 );
 
@@ -215,6 +231,7 @@ export const kodoCommand = Command.make("kodo").pipe(
     checkCommand,
     syncCommand,
     statusCommand,
+    verifyCommand,
     codemodAuditCommand,
   ]),
 );

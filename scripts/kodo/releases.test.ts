@@ -2,13 +2,16 @@ import { assert, describe, it } from "@effect/vitest";
 
 import {
   compareStableTags,
+  compareTagWithRemote,
   isPrereleaseBeyond,
   isStableTag,
   newestStableTag,
+  parseLsRemoteTags,
   parseUpstreamBase,
   renderUpstreamBase,
   stableTagsNewestFirst,
   syncBranchBase,
+  upstreamTagRef,
 } from "./releases.ts";
 
 describe("stable tag selection", () => {
@@ -82,5 +85,46 @@ describe("sync branch names and the base file", () => {
     const unreleased = parseUpstreamBase(renderUpstreamBase({ ...base, tag: undefined }));
     assert.strictEqual(unreleased?.tag, undefined);
     assert.strictEqual(parseUpstreamBase("garbage"), undefined);
+  });
+
+  it("round-trips the verification marker, which a plain base does not carry", () => {
+    const base = { tag: "v0.1.9", commit: "a".repeat(40), synced: "2026-11-12" };
+    assert.isUndefined(parseUpstreamBase(renderUpstreamBase(base))?.verified);
+    const verified = { ...base, verified: { date: "2026-11-13", commit: "b".repeat(40) } };
+    assert.deepStrictEqual(parseUpstreamBase(renderUpstreamBase(verified)), verified);
+  });
+});
+
+describe("upstream tag verification", () => {
+  const sha = (char: string) => char.repeat(40);
+
+  it("reads ls-remote output and prefers the peeled commit of an annotated tag", () => {
+    const tags = parseLsRemoteTags(
+      [
+        `${sha("a")}\trefs/tags/v0.1.9`,
+        `${sha("b")}\trefs/tags/v0.1.10`,
+        `${sha("c")}\trefs/tags/v0.1.10^{}`,
+        "garbage",
+      ].join("\n"),
+    );
+    assert.strictEqual(tags.get("v0.1.9"), sha("a"));
+    assert.strictEqual(tags.get("v0.1.10"), sha("c"));
+    assert.strictEqual(upstreamTagRef("v0.1.9"), "refs/upstream-tags/v0.1.9");
+  });
+
+  it("accepts a tag only when the remote advertises the same commit", () => {
+    const remoteTags = new Map([["v0.1.9", sha("a")]]);
+    const check = (localCommit: string | undefined, tags: typeof remoteTags | undefined) =>
+      compareTagWithRemote({ tag: "v0.1.9", remote: "upstream", localCommit, remoteTags: tags });
+    assert.deepStrictEqual(check(sha("a"), remoteTags), { ok: true, commit: sha("a") });
+    const mismatch = check(sha("b"), remoteTags);
+    assert.isFalse(mismatch.ok);
+    assert.include(mismatch.ok ? "" : mismatch.reason, "advertises");
+    assert.isFalse(check(undefined, remoteTags).ok);
+    assert.include(
+      (check(sha("a"), undefined) as { reason: string }).reason,
+      "could not be reached",
+    );
+    assert.include((check(sha("a"), new Map()) as { reason: string }).reason, "does not advertise");
   });
 });

@@ -76,21 +76,9 @@ export function resolveKodoDisplayedMode(input: {
 }
 
 /**
- * Switching into Code while messages are queued would run them with write access, whatever mode
- * they were written in (a queued message takes the thread's mode when it starts).
- */
-export function kodoModeSwitchNeedsQueueClear(input: {
-  readonly from: KodoInteractionMode;
-  readonly to: KodoInteractionMode;
-  readonly queuedRunCount: number;
-}): boolean {
-  return input.to === "code" && input.from !== "code" && input.queuedRunCount > 0;
-}
-
-/**
  * A mode picked while a turn runs applies from the next turn: the server fixes a turn's
  * restrictions when it starts. True while the shown mode differs from the one the running turn
- * started in.
+ * recorded (or, for an old run without one, the thread's mode when the client saw it start).
  */
 export function kodoModeWaitsForNextTurn(input: {
   readonly activeRunId: string | null;
@@ -147,4 +135,18 @@ export function resolveKodoModeBlockHidden(input: {
 }): boolean {
   const blockCount = input.hasPermissionsBlock ? 2 : 1;
   return input.measuredHiddenBlockCount >= blockCount;
+}
+
+/**
+ * The mode a queued message will run in, when it differs from the thread's current mode. A
+ * queued message keeps the mode it was queued in; runs from before that was recorded show none.
+ */
+export function kodoQueuedRunModeLabel(input: {
+  readonly runMode: ThreadInteractionMode | null | undefined;
+  readonly threadMode: ThreadInteractionMode | null | undefined;
+}): string | null {
+  if (input.runMode === null || input.runMode === undefined) return null;
+  const runMode = normalizeKodoInteractionMode(input.runMode);
+  if (runMode === normalizeKodoInteractionMode(input.threadMode)) return null;
+  return KODO_INTERACTION_MODE_OPTIONS.find((option) => option.mode === runMode)?.label ?? null;
 }

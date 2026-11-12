@@ -2,7 +2,6 @@ import {
   normalizeKodoInteractionMode,
   type EnvironmentId,
   type KodoInteractionMode,
-  type RunId,
   type ThreadId,
   type ThreadInteractionMode,
 } from "@t3tools/contracts";
@@ -12,14 +11,12 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { useEffect, useState } from "react";
 
-import { requestConfirmDialog } from "../confirmDialog";
 import { type ComposerThreadTarget, useComposerDraftStore } from "../composerDraftStore";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import {
   cycleKodoInteractionMode,
-  kodoModeSwitchNeedsQueueClear,
   kodoModeWaitsForNextTurn,
   resolveKodoDisplayedMode,
   resolveKodoInteractionMode,
@@ -44,7 +41,8 @@ export function useKodoInteractionMode(input: {
   readonly canOperateThread: boolean;
   readonly activeRunId: string | null;
   readonly latestRunOrdinal: number;
-  readonly queuedRunIds: ReadonlyArray<RunId>;
+  /** The mode the running run recorded when it was created; absent on runs that predate it. */
+  readonly activeRunMode: ThreadInteractionMode | undefined;
   readonly setThreadError: (threadId: ThreadId, message: string | null) => void;
 }) {
   const { composerDraftTarget, threadMode, isLocalDraftThread, threadKey, serverThreadId } = input;
@@ -61,9 +59,6 @@ export function useKodoInteractionMode(input: {
     (store) => store.epochByThreadKey[threadKey]?.cutoffOrdinal ?? null,
   );
   const setServerMode = useOrchestrationCommand(threadEnvironment.setInteractionMode, {
-    reportFailure: false,
-  });
-  const cancelQueuedRun = useOrchestrationCommand(threadEnvironment.cancelQueuedRun, {
     reportFailure: false,
   });
 
@@ -86,9 +81,11 @@ export function useKodoInteractionMode(input: {
   const modeAppliesNextTurn = kodoModeWaitsForNextTurn({
     activeRunId: input.activeRunId,
     runStartedInMode:
-      runStart.threadKey === threadKey && runStart.runId === input.activeRunId
-        ? runStart.serverMode
-        : serverMode,
+      input.activeRunMode !== undefined
+        ? normalizeKodoInteractionMode(input.activeRunMode)
+        : runStart.threadKey === threadKey && runStart.runId === input.activeRunId
+          ? runStart.serverMode
+          : serverMode,
     displayedMode: interactionMode,
   });
 
@@ -143,38 +140,11 @@ export function useKodoInteractionMode(input: {
     if (isServerThread) recordPlanEpoch(serverMode);
   }, [isServerThread, serverMode, recordPlanEpoch]);
 
-  const changeServerMode = useStableCallback(
-    async (target: KodoInteractionMode, serverId: ThreadId, from: KodoInteractionMode) => {
-      const queuedRunCount = input.queuedRunIds.length;
-      if (kodoModeSwitchNeedsQueueClear({ from, to: target, queuedRunCount })) {
-        const confirmed =
-          (await requestConfirmDialog(
-            `${queuedRunCount} queued message${queuedRunCount === 1 ? "" : "s"} would run in Code, which can change your files, whatever mode ${queuedRunCount === 1 ? "it was" : "they were"} written in.\nRemove ${queuedRunCount === 1 ? "it" : "them"} from the queue and switch to Code?`,
-            { variant: "destructive" },
-          )) ?? false;
-        if (!confirmed) return;
-        for (const runId of input.queuedRunIds) {
-          const result = await cancelQueuedRun({
-            environmentId: input.environmentId,
-            input: { threadId: serverId, runId },
-          });
-          if (result._tag === "Failure") {
-            if (!isAtomCommandInterrupted(result)) {
-              const error = squashAtomCommandFailure(result);
-              input.setThreadError(
-                serverId,
-                error instanceof Error ? error.message : "Could not clear the queued messages.",
-              );
-            }
-            return;
-          }
-        }
-      }
-      recordPlanEpoch(target);
-      sync.request(target);
-      input.scheduleComposerFocus();
-    },
-  );
+  const changeServerMode = useStableCallback(async (target: KodoInteractionMode) => {
+    recordPlanEpoch(target);
+    sync.request(target);
+    input.scheduleComposerFocus();
+  });
 
   // Key presses can outrun a render, so the latest pick is read from where it was just written.
   const currentMode = (): KodoInteractionMode =>
@@ -200,7 +170,7 @@ export function useKodoInteractionMode(input: {
       input.setThreadError(serverThreadId, "This connection cannot change this thread's mode.");
       return;
     }
-    void changeServerMode(target, serverThreadId, currentMode());
+    void changeServerMode(target);
   });
   const toggleInteractionMode = useStableCallback(() => {
     handleInteractionModeChange(cycleKodoInteractionMode(currentMode()));

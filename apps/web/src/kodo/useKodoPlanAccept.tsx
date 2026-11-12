@@ -23,7 +23,6 @@ import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import {
   buildPlanAcceptanceTurn,
-  planAcceptanceBlocker,
   runKodoPlanAcceptance,
   shouldOfferPlanAcceptance,
   type KodoPlanOffer,
@@ -44,7 +43,6 @@ export function useKodoPlanAccept(input: {
   readonly offer: KodoPlanOffer | null;
   readonly latestRunSettled: boolean;
   readonly pendingUserInputCount: number;
-  readonly queuedRunCount: number;
   readonly isSendBusy: boolean;
   readonly interactionMode: KodoInteractionMode;
   readonly runtimeMode: RuntimeMode;
@@ -95,7 +93,6 @@ export function useKodoPlanAccept(input: {
     const outcome = await runKodoPlanAcceptance({
       // The offer can have gone stale since the click was rendered: a run started, the mode changed.
       stillOffered,
-      blocker: () => planAcceptanceBlocker({ queuedRunCount: input.queuedRunCount }),
       switchToCode: async () =>
         step(
           await input.persistThreadSettingsForNextTurn({
@@ -138,7 +135,7 @@ export function useKodoPlanAccept(input: {
           : { ok: false, message: outcome.message, interrupted: false };
       },
     });
-    if ((outcome.status === "blocked" || outcome.status === "failed") && outcome.message) {
+    if (outcome.status === "failed" && outcome.message) {
       input.setThreadError(threadId, outcome.message);
     }
     setAccepting(false);

@@ -24,6 +24,8 @@ const entry: SyncLogEntry = {
   ownedViolations: [{ file: "kodo/up.ts", owned: "kodo/" }],
   checkProblems: [],
   verification: [{ name: "vp test run", ok: false, detail: "exit 1" }],
+  verificationSkipped: false,
+  reviewItems: ["new provider package provider-x added upstream."],
   followUps: ["Reinstall."],
 };
 
@@ -42,6 +44,23 @@ describe("sync log", () => {
     assert.include(text, "- `kodo:check`: pass.");
     assert.include(text, "- `vp test run`: FAIL (exit 1)");
     assert.include(text, "### Follow-ups\n\n- Reinstall.");
+  });
+
+  it("states the outcome at the top and lists what needs a human look", () => {
+    const failed = renderSyncLogEntry(entry);
+    assert.include(failed, "- Result: **NOT READY**: `vp test run` failed. Do not release");
+    assert.include(failed, "### Needs a human look\n\n- new provider package provider-x");
+    const checkFailed = renderSyncLogEntry({
+      ...entry,
+      checkProblems: ["x is a test file the layer touches"],
+      verification: [],
+    });
+    assert.include(checkFailed, "**NOT READY**: `kodo:check` (1 problem line(s)) failed");
+    const skipped = renderSyncLogEntry({ ...entry, verification: [], verificationSkipped: true });
+    assert.include(skipped, "**NOT READY**: verification was skipped");
+    const ready = renderSyncLogEntry({ ...entry, verification: [], reviewItems: [] });
+    assert.include(ready, "- Result: Ready: check and every verification command passed.");
+    assert.notInclude(ready, "Needs a human look");
   });
 
   it("inserts newest first under the title and creates a missing log", () => {

@@ -139,8 +139,14 @@ export const KodoManifestSchema = Schema.Struct({
   leakChecks: Schema.Array(LeakCheck),
   brandCodemod: Schema.optionalKey(BrandCodemod),
   verify: Schema.Struct({
-    // Run as `vp test run <files>`.
+    // Run as `vp test run <files>`. Every test file the Kodo layer adds or edits (the diff from
+    // the recorded upstream base to HEAD) must be here or in `testExempt`; `kodo:check` fails
+    // otherwise, so a new Kodo test cannot be forgotten.
     testFiles: Schema.Array(Schema.NonEmptyString),
+    // Layer test files deliberately left out of the run, each with the reason.
+    testExempt: Schema.Array(
+      Schema.Struct({ file: Schema.NonEmptyString, why: Schema.NonEmptyString }),
+    ),
     // Run as `vp run --filter <package> typecheck`.
     typecheckPackages: Schema.Array(Schema.NonEmptyString),
     commands: Schema.Array(VerifyCommand),
@@ -274,6 +280,12 @@ const semanticProblems = (manifest: KodoManifest): string[] => {
     }
   }
   for (const file of manifest.verify.testFiles) path("verify.testFiles", file, false);
+  for (const entry of manifest.verify.testExempt) {
+    path("verify.testExempt", entry.file, false);
+    if (manifest.verify.testFiles.includes(entry.file)) {
+      problems.push(`verify.testExempt: ${entry.file} is also in verify.testFiles.`);
+    }
+  }
   return problems;
 };
 

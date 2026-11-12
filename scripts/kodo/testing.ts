@@ -21,7 +21,7 @@ export const makeManifest = (overrides: Partial<KodoManifestInput> = {}): KodoMa
     hooks: [],
     kodoOwned: [],
     leakChecks: [],
-    verify: { testFiles: [], typecheckPackages: [], commands: [] },
+    verify: { testFiles: [], testExempt: [], typecheckPackages: [], commands: [] },
     ...overrides,
   };
   const validation = validateManifest(input);

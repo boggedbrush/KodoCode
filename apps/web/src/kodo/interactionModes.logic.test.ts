@@ -4,8 +4,8 @@ import {
   KODO_INTERACTION_MODE_OPTIONS,
   cycleKodoInteractionMode,
   isKodoModeSlashCommand,
-  kodoModeSwitchNeedsQueueClear,
   kodoModeWaitsForNextTurn,
+  kodoQueuedRunModeLabel,
   parseKodoModeSlashCommand,
   parseStoredInteractionMode,
   resolveKodoDisplayedMode,
@@ -95,17 +95,12 @@ describe("kodo interaction modes", () => {
     expect(resolveKodoDisplayedMode({ ...base, composerMode: "default" })).toBe("code");
   });
 
-  it("asks about queued messages only when switching into Code from a read-only mode", () => {
-    const base = { queuedRunCount: 2 };
-    for (const from of ["ask", "plan", "review"] as const) {
-      expect(kodoModeSwitchNeedsQueueClear({ ...base, from, to: "code" })).toBe(true);
-    }
-    expect(kodoModeSwitchNeedsQueueClear({ ...base, from: "ask", to: "plan" })).toBe(false);
-    expect(kodoModeSwitchNeedsQueueClear({ ...base, from: "code", to: "ask" })).toBe(false);
-    expect(kodoModeSwitchNeedsQueueClear({ ...base, from: "code", to: "code" })).toBe(false);
-    expect(kodoModeSwitchNeedsQueueClear({ queuedRunCount: 0, from: "ask", to: "code" })).toBe(
-      false,
-    );
+  it("labels a queued message only when its recorded mode differs from the thread's", () => {
+    expect(kodoQueuedRunModeLabel({ runMode: "ask", threadMode: "code" })).toBe("Ask");
+    expect(kodoQueuedRunModeLabel({ runMode: "review", threadMode: "plan" })).toBe("Review");
+    expect(kodoQueuedRunModeLabel({ runMode: "ask", threadMode: "ask" })).toBeNull();
+    expect(kodoQueuedRunModeLabel({ runMode: "default", threadMode: "code" })).toBeNull();
+    expect(kodoQueuedRunModeLabel({ runMode: undefined, threadMode: "code" })).toBeNull();
   });
 
   it("flags a mode that waits for the next turn only while a turn runs in another mode", () => {

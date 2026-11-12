@@ -11,9 +11,11 @@ import {
   runCheck,
   runStatus,
   runSync,
+  runVerify,
   type SyncOptions,
 } from "./engine.ts";
 import { git, gitOrThrow, runCommand } from "./git.ts";
+import { UPSTREAM_TAG_REFSPEC } from "./releases.ts";
 import { makeManifest } from "./testing.ts";
 
 const sandboxes: string[] = [];
@@ -73,7 +75,12 @@ const manifest = makeManifest({
   jsonEdits: [{ id: "pkg", file: "package.json", set: [{ path: ["productName"], value: "Kodo" }] }],
   hooks: [{ file: "src/hooked.ts", hooks: ["mode"] }],
   kodoOwned: [{ path: "kodo/" }],
-  verify: { testFiles: ["scripts/kodo/x.test.ts"], typecheckPackages: ["pkg-a"], commands: [] },
+  verify: {
+    testFiles: ["scripts/kodo/x.test.ts"],
+    testExempt: [],
+    typecheckPackages: ["pkg-a"],
+    commands: [],
+  },
 });
 
 interface Fixture {
@@ -118,11 +125,14 @@ const makeFixture = (
 
   gitOrThrow(sandbox, ["clone", "-q", upstream, fork]);
   gitOrThrow(fork, ["remote", "rename", "origin", "upstream"]);
+  // Upstream's tags live in their own namespace; the clone's refs/tags copies do not count.
+  gitOrThrow(fork, ["fetch", "-q", "--no-tags", "upstream", UPSTREAM_TAG_REFSPEC]);
   configure(fork);
   gitOrThrow(fork, ["switch", "-q", "-c", "kodo"]);
   // The Kodo layer: owned files, a hook edit, then the overlay itself.
   write(fork, "kodo/assets/icon.txt", "KODO ICON\n");
   write(fork, "kodo/own.ts", "export const mine = true;\n");
+  write(fork, "scripts/kodo/x.test.ts", "export {};\n");
   write(fork, "src/hooked.ts", HOOKED_BASE.replace("e = 5;", "e = 5; // KODO: mode"));
   options.extraKodoLayer?.(fork);
   const lines: string[] = [];
@@ -361,7 +371,12 @@ describe("kodo sync", () => {
             },
           ],
           hooks: [{ file: "src/legacy-hook.ts", hooks: ["legacy-mode"] }],
-          verify: { testFiles: [], typecheckPackages: [], commands: [] },
+          verify: {
+            testFiles: ["scripts/kodo/x.test.ts"],
+            testExempt: [],
+            typecheckPackages: [],
+            commands: [],
+          },
         }),
       },
     );
@@ -664,5 +679,203 @@ describe("kodo release policy", () => {
     const released = makeFixture(() => {});
     assert.strictEqual(runStatus(released.ctx, { fetch: false, record: true }).exitCode, 0);
     assert.include(read(released.fork, "kodo/upstream-base.txt"), "tag: v0.9.0\n");
+  });
+});
+
+describe("kodo upstream tag verification", () => {
+  const releaseOne = (up: string) => {
+    write(up, "a.txt", "release one\n");
+    commitAll(up, "release one");
+  };
+  const fetchTags = (fork: string) =>
+    gitOrThrow(fork, ["fetch", "-q", "--no-tags", "--prune", "upstream", UPSTREAM_TAG_REFSPEC]);
+
+  it("refuses a tag whose commit differs from what the remote advertises", () => {
+    const fx = makeFixture(releaseOne);
+    fetchTags(fx.fork);
+    // Upstream moves the tag after we fetched it; --no-fetch leaves the stale local copy.
+    write(fx.upstream, "b.txt", "moved\n");
+    commitAll(fx.upstream, "moved");
+    gitOrThrow(fx.upstream, ["tag", "-f", "v1.0.0"]);
+    const outcome = runSync(fx.ctx, { ...SYNC, fetch: false });
+    assert.strictEqual(outcome.status, "refused");
+    assert.include(fx.lines.join("\n"), "points at");
+    assert.include(fx.lines.join("\n"), "advertises");
+    assert.deepStrictEqual(branches(fx.fork), ["kodo", "main"]);
+    // A dry run only notes it.
+    fx.lines.length = 0;
+    assert.strictEqual(runSync(fx.ctx, { ...SYNC, fetch: false, dryRun: true }).status, "dry-run");
+    assert.include(fx.lines.join("\n"), "a real sync would refuse it");
+  });
+
+  it("refuses when the remote cannot be reached, unless the override is given", () => {
+    const fx = makeFixture(releaseOne);
+    fetchTags(fx.fork);
+    gitOrThrow(fx.fork, ["remote", "set-url", "upstream", NodePath.join(fx.fork, "nowhere")]);
+    const refused = runSync(fx.ctx, { ...SYNC, fetch: false });
+    assert.strictEqual(refused.status, "refused");
+    assert.include(fx.lines.join("\n"), "could not be reached");
+    fx.lines.length = 0;
+    const allowed = runSync(fx.ctx, { ...SYNC, fetch: false, allowUnverified: true });
+    assert.strictEqual(allowed.status, "completed");
+    assert.include(fx.lines.join("\n"), "--allow-unverified");
+  });
+
+  it("never mistakes Kodo's own version tags for upstream releases", () => {
+    const fx = makeFixture(releaseOne);
+    // Kodo publishes v1.0.0 (a different commit) and a v1.5.0 that upstream never had.
+    const kodoHead = head(fx.fork);
+    gitOrThrow(fx.fork, ["tag", "v1.0.0", kodoHead]);
+    gitOrThrow(fx.fork, ["tag", "v1.5.0", kodoHead]);
+    const refusedOwn = runSync(fx.ctx, { ...SYNC, ref: "v1.5.0" });
+    assert.strictEqual(refusedOwn.status, "refused");
+    assert.include(fx.lines.join("\n"), "not a stable upstream release");
+    fx.lines.length = 0;
+    // The fetch does not clobber or consult them: the sync merges upstream's v1.0.0.
+    const outcome = runSync(fx.ctx, SYNC);
+    assert.strictEqual(outcome.status, "completed");
+    assert.strictEqual(outcome.branch, "sync/upstream-v1.0.0");
+    assert.strictEqual(read(fx.fork, "a.txt"), "release one\n");
+    assert.strictEqual(gitOrThrow(fx.fork, ["rev-parse", "v1.0.0"]).trim(), kodoHead);
+    fx.lines.length = 0;
+    runStatus(fx.ctx, { fetch: true });
+    assert.include(fx.lines.join("\n"), "Newest stable upstream release: v1.0.0");
+    assert.include(fx.lines.join("\n"), "verified against upstream");
+  });
+});
+
+describe("kodo sync readiness", () => {
+  const releaseOne = (up: string) => {
+    write(up, "a.txt", "release one\n");
+    commitAll(up, "release one");
+  };
+
+  it("commits a failed verification but says NOT READY, logs it, and withholds the marker", () => {
+    const fx = makeFixture(releaseOne);
+    const failing = {
+      ...fx.ctx,
+      exec: () => ({ ok: false, status: 1, output: "1 test failed\n" }),
+    };
+    const outcome = runSync(failing, SYNC);
+    assert.strictEqual(outcome.status, "completed-with-failures");
+    assert.strictEqual(outcome.exitCode, 1);
+    const output = fx.lines.join("\n");
+    assert.include(output, "NOT READY: branch sync/upstream-v1.0.0 failed");
+    assert.include(output, "Do not release or merge it.");
+    assert.notInclude(output, "DONE");
+    assert.include(subjects(fx.fork, 1)[0] ?? "", "docs: record upstream sync");
+    assert.include(read(fx.fork, "docs/upstream-sync-log.md"), "- Result: **NOT READY**");
+    assert.notMatch(read(fx.fork, "kodo/upstream-base.txt"), /^verified:/m);
+    fx.lines.length = 0;
+    assert.strictEqual(runCheck(fx.ctx, { requireRelease: true }).exitCode, 1);
+    assert.include(fx.lines.join("\n"), "no verification marker");
+  });
+
+  it("marks a fully passing sync, which the release gate then accepts", () => {
+    const fx = makeFixture(releaseOne);
+    assert.strictEqual(runSync(fx.ctx, SYNC).exitCode, 0);
+    assert.include(fx.lines.join("\n"), "DONE: branch sync/upstream-v1.0.0 passed check");
+    assert.match(read(fx.fork, "kodo/upstream-base.txt"), /^verified: 2026-12-01$/m);
+    assert.include(read(fx.fork, "docs/upstream-sync-log.md"), "- Result: Ready:");
+    assert.strictEqual(runCheck(fx.ctx, { requireRelease: true }).exitCode, 0);
+  });
+
+  it("does not mark a sync that skipped verification", () => {
+    const fx = makeFixture(releaseOne);
+    const outcome = runSync(fx.ctx, { ...SYNC, verify: false });
+    assert.strictEqual(outcome.exitCode, 0);
+    assert.include(fx.lines.join("\n"), "NOT READY: branch sync/upstream-v1.0.0 was not verified");
+    assert.notMatch(read(fx.fork, "kodo/upstream-base.txt"), /^verified:/m);
+    assert.strictEqual(runCheck(fx.ctx, { requireRelease: true }).exitCode, 1);
+  });
+
+  it("verify marks a branch fixed forward, and removes a stale marker when it fails", () => {
+    const fx = makeFixture(releaseOne);
+    runSync({ ...fx.ctx, exec: () => ({ ok: false, status: 1, output: "" }) }, SYNC);
+    fx.lines.length = 0;
+    assert.strictEqual(runVerify(fx.ctx).exitCode, 0);
+    assert.match(read(fx.fork, "kodo/upstream-base.txt"), /^verified: 2026-12-01$/m);
+    assert.strictEqual(runCheck(fx.ctx, { requireRelease: true }).exitCode, 0);
+    // A later failure takes the marker away again.
+    const failed = runVerify({ ...fx.ctx, exec: () => ({ ok: false, status: 1, output: "" }) });
+    assert.strictEqual(failed.exitCode, 1);
+    assert.notMatch(read(fx.fork, "kodo/upstream-base.txt"), /^verified:/m);
+    assert.strictEqual(runCheck(fx.ctx, { requireRelease: true }).exitCode, 1);
+  });
+});
+
+describe("kodo verify coverage", () => {
+  it("fails check for a layer test file the manifest does not run, until it is listed or exempted", () => {
+    const fx = makeFixture(() => {});
+    assert.strictEqual(runCheck(fx.ctx).exitCode, 0);
+    // Added but not even committed yet.
+    write(fx.fork, "kodo/new.test.ts", "export {};\n");
+    fx.lines.length = 0;
+    assert.strictEqual(runCheck(fx.ctx).exitCode, 1);
+    assert.include(fx.lines.join("\n"), "kodo/new.test.ts is a test file the Kodo layer touches");
+    const listed = makeManifest({
+      ...fx.ctx.manifest,
+      verify: {
+        ...fx.ctx.manifest.verify,
+        testFiles: [...fx.ctx.manifest.verify.testFiles, "kodo/new.test.ts"],
+      },
+    } as never);
+    assert.strictEqual(runCheck({ ...fx.ctx, manifest: listed }).exitCode, 0);
+    const exempt = makeManifest({
+      ...fx.ctx.manifest,
+      verify: {
+        ...fx.ctx.manifest.verify,
+        testExempt: [{ file: "kodo/new.test.ts", why: "needs a browser" }],
+      },
+    } as never);
+    assert.strictEqual(runCheck({ ...fx.ctx, manifest: exempt }).exitCode, 0);
+  });
+
+  it("ignores test files that upstream owns and fails on a listed file that does not exist", () => {
+    const fx = makeFixture((up) => {
+      write(up, "src/up.test.ts", "export {};\n");
+      commitAll(up, "upstream test");
+    });
+    runSync(fx.ctx, SYNC);
+    fx.lines.length = 0;
+    assert.strictEqual(runCheck(fx.ctx).exitCode, 0);
+    const stale = makeManifest({
+      ...fx.ctx.manifest,
+      verify: {
+        ...fx.ctx.manifest.verify,
+        testFiles: [...fx.ctx.manifest.verify.testFiles, "gone.test.ts"],
+      },
+    } as never);
+    assert.strictEqual(runCheck({ ...fx.ctx, manifest: stale }).exitCode, 1);
+    assert.include(fx.lines.join("\n"), "verify.testFiles: gone.test.ts does not exist");
+  });
+});
+
+describe("kodo needs-a-human-look report", () => {
+  const addProviderAndTool = (up: string) => {
+    write(up, "packages/provider-newone/package.json", '{ "name": "provider-newone" }\n');
+    write(up, "apps/server/src/orchestration-v2/Adapters/NewOneAdapterV2.ts", "export {};\n");
+    write(up, "apps/server/src/orchestration-v2/NewOneAdapterV2.test.ts", "export {};\n");
+    write(
+      up,
+      "apps/server/src/mcp/toolkits/x/tools.ts",
+      'const T = Tool.make("t3_new_tool", {});\nconst run: OrchestrationV2Run = {\n  id: 1,\n};\n',
+    );
+    commitAll(up, "new provider, adapter, tool and run site");
+  };
+
+  it("lists new providers, adapters, MCP tools and run sites in a dry run and in status", () => {
+    const fx = makeFixture(addProviderAndTool);
+    assert.strictEqual(runSync(fx.ctx, { ...SYNC, dryRun: true }).status, "dry-run");
+    const dry = fx.lines.join("\n");
+    assert.include(dry, "Needs a human look: 4 item(s)");
+    assert.include(dry, "new provider package provider-newone");
+    assert.include(dry, "NewOneAdapterV2.ts");
+    assert.notInclude(dry, "NewOneAdapterV2.test.ts added");
+    assert.include(dry, "MCP tool definition(s) added upstream: t3_new_tool");
+    assert.include(dry, "1 new run-creation site(s)");
+    fx.lines.length = 0;
+    runStatus(fx.ctx, { fetch: true });
+    assert.include(fx.lines.join("\n"), "Needs a human look: 4 item(s)");
   });
 });

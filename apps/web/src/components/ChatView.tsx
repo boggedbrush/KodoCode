@@ -1837,9 +1837,7 @@ export default function ChatView(props: ChatViewProps) {
   };
   const scheduleComposerFocusStable = useStableCallback(scheduleComposerFocus);
   // KODO: chat-mode-state
-  const kodoQueuedRunIds = serverProjection
-    ? getUserQueuedThreadRuns(serverProjection).map((run) => run.id)
-    : [];
+  const kodoActiveRunId = activeRuntime?.activeRunId ?? null;
   const {
     interactionMode,
     handleInteractionModeChange,
@@ -1856,10 +1854,13 @@ export default function ChatView(props: ChatViewProps) {
     threadKey: routeThreadKey,
     serverThreadId: isServerThread ? activeThreadId : null,
     canOperateThread,
-    activeRunId: activeRuntime?.activeRunId ?? null,
+    activeRunId: kodoActiveRunId,
+    activeRunMode:
+      kodoActiveRunId === null
+        ? undefined
+        : serverProjection?.runs.find((run) => run.id === kodoActiveRunId)?.interactionMode,
     latestRunOrdinal:
       serverProjection?.runs.reduce((max, run) => Math.max(max, run.ordinal), 0) ?? 0,
-    queuedRunIds: kodoQueuedRunIds,
     setThreadError,
   });
   const insertArtifactTemplate = (template: CodexArtifactTemplate) => {
@@ -2587,7 +2588,6 @@ export default function ChatView(props: ChatViewProps) {
     offer: kodoPlanOffer,
     latestRunSettled,
     pendingUserInputCount: pendingUserInputs.length,
-    queuedRunCount: kodoQueuedRunIds.length,
     isSendBusy,
     interactionMode,
     runtimeMode,
@@ -3067,6 +3067,7 @@ export default function ChatView(props: ChatViewProps) {
           environmentId={activeThread.environmentId}
           threadId={activeThread.id}
           steerBlocked={modeAppliesNextTurn} // KODO: chat-mode-state
+          threadInteractionMode={interactionMode} // KODO: queued-run-mode
           optimisticMessages={optimisticUserMessages}
           editingRunId={queuedRunEdit.editingRunId}
           editBlockedReason={queuedRunEditBlockedReason({

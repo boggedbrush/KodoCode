@@ -18,6 +18,20 @@ describe("validateManifest", () => {
     assert.isTrue(result.ok, result.ok ? "" : result.problems.join("\n"));
   });
 
+  it("rejects a test that is both verified and exempt, and an exemption with no reason", () => {
+    const verify = { ...base.verify, testFiles: ["a.test.ts"] };
+    const both = problemsOf({
+      ...base,
+      verify: { ...verify, testExempt: [{ file: "a.test.ts", why: "x" }] },
+    });
+    assert.include(both.join("\n"), "a.test.ts is also in verify.testFiles");
+    const noWhy = problemsOf({
+      ...base,
+      verify: { ...verify, testExempt: [{ file: "b.test.ts", why: "" }] },
+    });
+    assert.lengthOf(noWhy, 1);
+  });
+
   it("reports a shape error with the offending field", () => {
     const problems = problemsOf({ ...base, assets: [{ id: "a", source: "x" }] });
     assert.lengthOf(problems, 1);

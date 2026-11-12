@@ -28,6 +28,10 @@ export interface SyncLogEntry {
   readonly ownedViolations: ReadonlyArray<OwnedPathViolation>;
   readonly checkProblems: ReadonlyArray<string>;
   readonly verification: ReadonlyArray<VerificationOutcome>;
+  // --no-verify: the commands did not run, so the branch is not release-ready.
+  readonly verificationSkipped: boolean;
+  // Clean-merge changes a human should read (new providers, MCP tools, run sites, hooked files).
+  readonly reviewItems: ReadonlyArray<string>;
   readonly followUps: ReadonlyArray<string>;
 }
 
@@ -42,10 +46,26 @@ const countBy = (results: ReadonlyArray<EntryResult>) => {
   return [...counts].map(([status, count]) => `${count} ${status}`).join(", ") || "no entries";
 };
 
+export const syncLogResult = (entry: SyncLogEntry): string => {
+  const failures = [
+    ...(entry.checkProblems.length > 0
+      ? [`${code("kodo:check")} (${entry.checkProblems.length} problem line(s))`]
+      : []),
+    ...entry.verification.filter((outcome) => !outcome.ok).map((outcome) => code(outcome.name)),
+  ];
+  if (failures.length > 0) {
+    return `**NOT READY**: ${failures.join(", ")} failed. Do not release this branch.`;
+  }
+  return entry.verificationSkipped
+    ? "**NOT READY**: verification was skipped (`--no-verify`)."
+    : "Ready: check and every verification command passed.";
+};
+
 export const renderSyncLogEntry = (entry: SyncLogEntry): string => {
   const lines: string[] = [
     `## ${entry.date}`,
     "",
+    `- Result: ${syncLogResult(entry)}`,
     `- Fork branch: ${code(entry.branch)}`,
     `- Fork base: ${code(`${entry.forkRepo}@${short(entry.forkBase)}`)}`,
     `- Upstream range: ${code(`${entry.upstreamRepo}@${short(entry.rangeFrom)}..${short(entry.rangeTo)}`)} (${entry.upstreamRef}), ${entry.commitCount} commit${entry.commitCount === 1 ? "" : "s"}`,
@@ -115,6 +135,9 @@ export const renderSyncLogEntry = (entry: SyncLogEntry): string => {
         `- ${code(outcome.name)}: ${outcome.ok ? "pass" : "FAIL"}${outcome.detail ? ` (${outcome.detail})` : ""}`,
     ),
   );
+  if (entry.reviewItems.length > 0) {
+    lines.push("", "### Needs a human look", "", ...entry.reviewItems.map((item) => `- ${item}`));
+  }
   if (entry.followUps.length > 0) {
     lines.push("", "### Follow-ups", "", ...entry.followUps.map((item) => `- ${item}`));
   }

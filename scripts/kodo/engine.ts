@@ -31,9 +31,16 @@ import {
 } from "./brandCodemodRun.ts";
 import { normalizedTokens, transformBrandLiterals } from "./brandCodemod.ts";
 import {
+  compareTagWithRemote,
   isPrereleaseBeyond,
   newestStableTag,
+  parseLsRemoteTags,
   parseUpstreamBase,
+  UPSTREAM_TAG_NAMESPACE,
+  UPSTREAM_TAG_REFSPEC,
+  upstreamTagRef,
+  type TagVerification,
+  type UpstreamBase,
   RELEASE_POLICY_MESSAGE,
   RELEASE_POLICY_SUMMARY,
   renderUpstreamBase,
@@ -63,7 +70,9 @@ import {
   type SyncLogEntry,
   type VerificationOutcome,
 } from "./syncLog.ts";
-import { findTouchpoints, parseNameStatusZ } from "./touchpoints.ts";
+import { findTouchpoints, parseNameStatusZ, type UpstreamChange } from "./touchpoints.ts";
+import { findReviewItems, findRunLiteralsWithoutSnapshot } from "./reviewItems.ts";
+import { findVerifyCoverage } from "./verifyCoverage.ts";
 
 export interface EngineContext {
   readonly root: string;
@@ -132,10 +141,79 @@ export const findUnlistedMarkerFiles = (ctx: EngineContext): ReadonlyArray<strin
     );
 };
 
+const readBaseFile = (ctx: EngineContext): UpstreamBase | undefined => {
+  const file = ctx.manifest.upstream.baseFile;
+  const text = file === undefined ? undefined : readTextIfExists(ctx.root, file);
+  return text === undefined ? undefined : parseUpstreamBase(text);
+};
+
+const commitExists = (root: string, rev: string): boolean =>
+  git(root, ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`]).status === 0;
+
+// The upstream commit the Kodo layer sits on: the recorded base when HEAD contains it, else the
+// newest fetched stable release HEAD contains. The layer is the diff from there to HEAD.
+export const layerBaseCommit = (ctx: EngineContext): string | undefined => {
+  const recorded = readBaseFile(ctx)?.commit;
+  if (
+    recorded !== undefined &&
+    commitExists(ctx.root, recorded) &&
+    git(ctx.root, ["merge-base", "--is-ancestor", recorded, "HEAD"]).status === 0
+  ) {
+    return recorded;
+  }
+  const tag = detectBase(ctx).baseTag;
+  return tag === undefined ? undefined : upstreamTagRef(tag);
+};
+
+// What a clean merge could break silently, found in the working tree rather than a range.
+const verifyProblems = (
+  ctx: EngineContext,
+): { readonly problems: string[]; readonly warnings: string[] } => {
+  const problems: string[] = [];
+  const warnings: string[] = [];
+  const base = layerBaseCommit(ctx);
+  const io = createFsIo(ctx.root);
+  const exists = (path: string) => io.readBytes(path) !== undefined;
+  if (base === undefined) {
+    warnings.push(
+      "cannot tell which test files the Kodo layer touches: no recorded upstream base in HEAD's history. Run `kodo:status` to fetch upstream tags.",
+    );
+  }
+  // The working tree against the base, plus new untracked files, so a test is caught before it is committed.
+  const layerFiles =
+    base === undefined
+      ? []
+      : [
+          ...gitNulList(ctx.root, ["diff", "--name-only", "--diff-filter=ACMR", "-z", base]),
+          ...gitNulList(ctx.root, ["ls-files", "--others", "--exclude-standard", "-z"]),
+        ];
+  const coverage = findVerifyCoverage(ctx.manifest.verify, layerFiles, exists);
+  for (const path of coverage.unverified) {
+    problems.push(
+      `${path} is a test file the Kodo layer touches but verify.testFiles does not run it. Add it to verify.testFiles (or to verify.testExempt with a reason) in the manifest.`,
+    );
+  }
+  for (const entry of coverage.stale) {
+    problems.push(`${entry} does not exist; remove or rename it in the manifest.`);
+  }
+  const serverFiles = gitNulList(ctx.root, ["ls-files", "-z", "--", "apps/server/src"]).flatMap(
+    (path) => {
+      const text = path.endsWith(".ts") ? readTextIfExists(ctx.root, path) : undefined;
+      return text === undefined ? [] : [{ path, text }];
+    },
+  );
+  for (const site of findRunLiteralsWithoutSnapshot(serverFiles)) {
+    warnings.push(
+      `needs a human look: ${site} creates a run with no kodoRunModeSnapshot nearby; a run must record the mode it was created in.`,
+    );
+  }
+  return { problems, warnings };
+};
+
 export const runCheck = (
   ctx: EngineContext,
   options: { readonly requireRelease?: boolean } = {},
-): { report: CheckReport; exitCode: number } => {
+): { report: CheckReport; exitCode: number; problems: ReadonlyArray<string> } => {
   const report = buildCheckReport(ctx.manifest, createFsIo(ctx.root));
   for (const line of formatCheckReport(report, ctx.compact)) ctx.log(line);
   const unlisted = findUnlistedMarkerFiles(ctx);
@@ -147,13 +225,115 @@ export const runCheck = (
   }
   const baseWarnings = baseWarningsFor(ctx);
   for (const warning of baseWarnings) ctx.log(`WARNING: ${warning}`);
-  const gateFails = options.requireRelease === true && baseWarnings.length > 0;
-  if (gateFails) ctx.log("Release gate: FAIL (the fork is not on a stable upstream release).");
-  return { report, exitCode: report.problems.length === 0 && !gateFails ? 0 : 1 };
+  const coverage = verifyProblems(ctx);
+  for (const problem of coverage.problems) ctx.log(`VERIFY COVERAGE: ${problem}`);
+  for (const warning of coverage.warnings) ctx.log(`WARNING: ${warning}`);
+  const problems = [...report.problems, ...coverage.problems];
+  const releaseFailures =
+    options.requireRelease === true ? releaseGateFailures(ctx, baseWarnings) : [];
+  for (const failure of releaseFailures) ctx.log(`Release gate: FAIL (${failure})`);
+  if (options.requireRelease === true && releaseFailures.length === 0) {
+    ctx.log("Release gate: PASS");
+  }
+  return {
+    report,
+    problems,
+    exitCode: problems.length === 0 && releaseFailures.length === 0 ? 0 : 1,
+  };
+};
+
+// What `check --release` asserts beyond a plain check: a stable, fully verified upstream base.
+const releaseGateFailures = (ctx: EngineContext, baseWarnings: ReadonlyArray<string>): string[] => {
+  const failures: string[] = [];
+  if (baseWarnings.some((warning) => warning.includes("unreleased upstream base"))) {
+    failures.push("the fork is not on a stable upstream release");
+  }
+  const baseFile = ctx.manifest.upstream.baseFile;
+  if (baseFile === undefined) return failures;
+  const recorded = readBaseFile(ctx);
+  if (recorded === undefined) {
+    failures.push(`${baseFile} is missing; run kodo:status --record, then kodo:verify`);
+  } else if (recorded.tag === undefined) {
+    failures.push(`${baseFile} records an unreleased upstream commit, not a stable release`);
+  } else if (recorded.verified === undefined) {
+    failures.push(
+      `${baseFile} has no verification marker: the sync's check or verification failed or was skipped. Fix it, then run kodo:verify`,
+    );
+  } else if (
+    !commitExists(ctx.root, recorded.verified.commit) ||
+    git(ctx.root, ["merge-base", "--is-ancestor", recorded.verified.commit, "HEAD"]).status !== 0
+  ) {
+    failures.push(
+      `the verification marker names ${recorded.verified.commit.slice(0, 10)}, which is not in HEAD's history`,
+    );
+  } else {
+    const changed = gitNulList(ctx.root, [
+      "diff",
+      "--name-only",
+      "-z",
+      recorded.verified.commit,
+      "HEAD",
+    ]).filter((path) => path !== baseFile && path !== ctx.manifest.upstream.logFile);
+    if (changed.length > 0) {
+      ctx.log(
+        `WARNING: ${changed.length} file(s) changed since the last verification (${short(recorded.verified.commit)}); re-run kodo:verify before shipping.`,
+      );
+    }
+  }
+  return failures;
+};
+
+// Runs check and every verification command on the working tree. Only a full pass writes the
+// verification marker into the base file (left uncommitted); any failure removes a stale one.
+export const runVerify = (ctx: EngineContext): { exitCode: number } => {
+  const log = ctx.log;
+  log("Checking the overlay...");
+  const check = runCheck(ctx);
+  const outcomes = runVerification(ctx);
+  const failures = [
+    ...(check.exitCode !== 0 ? ["check"] : []),
+    ...outcomes.filter((outcome) => !outcome.ok).map((outcome) => outcome.name),
+  ];
+  const baseFile = ctx.manifest.upstream.baseFile;
+  const recorded = readBaseFile(ctx);
+  log("");
+  if (failures.length > 0) {
+    if (baseFile !== undefined && recorded?.verified !== undefined) {
+      writeText(
+        ctx.root,
+        baseFile,
+        renderUpstreamBase({ tag: recorded.tag, commit: recorded.commit, synced: recorded.synced }),
+      );
+      log(`Removed the stale verification marker from ${baseFile}.`);
+    }
+    log(`NOT READY: ${failures.join("; ")} failed.`);
+    return { exitCode: 1 };
+  }
+  if (baseFile === undefined || recorded === undefined) {
+    log("PASS, but there is no recorded upstream base to mark (run `kodo:status --record` first).");
+    return { exitCode: 1 };
+  }
+  writeText(
+    ctx.root,
+    baseFile,
+    renderUpstreamBase({
+      ...recorded,
+      verified: {
+        date: ctx.today,
+        commit: gitOrThrow(ctx.root, ["rev-parse", "HEAD"]).trim(),
+      },
+    }),
+  );
+  log(
+    `PASS: check and ${outcomes.length} verification command(s). Marked verified in ${baseFile}; commit it.`,
+  );
+  return { exitCode: 0 };
 };
 
 export interface SyncOptions {
   readonly ref?: string;
+  // Accept a release tag that could not be checked against the upstream remote (offline use).
+  readonly allowUnverified?: boolean;
   readonly dryRun: boolean;
   readonly resume: boolean;
   // Fetch the upstream remote first (default). Off for offline use and tests.
@@ -276,9 +456,9 @@ const startSync = (ctx: EngineContext, options: SyncOptions): SyncOutcome => {
   }
 
   if (options.fetch) {
-    const fetched = git(root, ["fetch", remote, "--tags"]);
-    if (fetched.status !== 0) {
-      const message = `git fetch ${remote} --tags failed: ${fetched.stderr.trim()}`;
+    const failure = fetchUpstream(ctx);
+    if (failure !== undefined) {
+      const message = `fetching ${remote} failed: ${failure}`;
       if (!options.dryRun)
         return refuse(
           ctx,
@@ -294,13 +474,13 @@ const startSync = (ctx: EngineContext, options: SyncOptions): SyncOutcome => {
     if (newest === undefined) {
       return refuse(
         ctx,
-        `REFUSED: no stable release tag (vX.Y.Z) found for ${remote}. ${RELEASE_POLICY_MESSAGE}`,
+        `REFUSED: no stable release tag (vX.Y.Z) found for ${remote} in ${UPSTREAM_TAG_NAMESPACE}. ${RELEASE_POLICY_MESSAGE}`,
         options.fetch ? "" : "Run without --no-fetch to fetch the tags first.",
       );
     }
     ref = newest;
   } else if (!isStableRelease(root, ref)) {
-    const note = `"${ref}" is not a stable upstream release. ${RELEASE_POLICY_MESSAGE}`;
+    const note = `"${ref}" is not a stable upstream release${isStableTag(ref) ? ` (no ${upstreamTagRef(ref)}; a tag of that name in refs/tags is not upstream's)` : ""}. ${RELEASE_POLICY_MESSAGE}`;
     if (!options.dryRun && options.allowUnreleased !== true) return refuse(ctx, `REFUSED: ${note}`);
     log(
       options.dryRun
@@ -308,7 +488,30 @@ const startSync = (ctx: EngineContext, options: SyncOptions): SyncOutcome => {
         : `WARNING: syncing to an unreleased ref (--allow-unreleased): ${ref}`,
     );
   }
-  const resolved = git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  const releaseRef = isStableRelease(root, ref);
+  if (releaseRef) {
+    const verification = verifyUpstreamTag(ctx, ref);
+    if (!verification.ok) {
+      const note = `${verification.reason} Release tags must match what ${remote} advertises.`;
+      if (options.allowUnverified === true) {
+        log(`WARNING: tag not verified against ${remote} (--allow-unverified): ${note}`);
+      } else if (options.dryRun) {
+        log(`NOTE: ${note} (a real sync would refuse it unless --allow-unverified is given).`);
+      } else {
+        return refuse(
+          ctx,
+          `REFUSED: ${note}`,
+          "Fix the remote or the fetch, or pass --allow-unverified to accept the local tag (offline use).",
+        );
+      }
+    }
+  }
+  const resolved = git(root, [
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    `${releaseRef ? upstreamTagRef(ref) : ref}^{commit}`,
+  ]);
   if (resolved.status !== 0) {
     return refuse(
       ctx,
@@ -463,6 +666,26 @@ const verificationCommands = (
   ...manifest.verify.commands,
 ];
 
+// Runs every verification command, logging the tail of any failure.
+const runVerification = (ctx: EngineContext): VerificationOutcome[] => {
+  const outcomes: VerificationOutcome[] = [];
+  const exec = ctx.exec ?? ((dir, argv) => runCommand(dir, argv, ctx.shell ?? false));
+  for (const command of verificationCommands(ctx.manifest)) {
+    ctx.log("");
+    ctx.log(`Verifying: ${command.argv.join(" ")}`);
+    const result = exec(ctx.root, command.argv);
+    outcomes.push({
+      name: command.name,
+      ok: result.ok,
+      detail: result.ok ? "" : `exit ${result.status}`,
+    });
+    if (!result.ok) {
+      for (const line of result.output.trimEnd().split("\n").slice(-30)) ctx.log(`    ${line}`);
+    }
+  }
+  return outcomes;
+};
+
 const finalize = (ctx: EngineContext, state: SyncState, options: SyncOptions): SyncOutcome => {
   const { root, manifest, log } = ctx;
 
@@ -537,23 +760,7 @@ const finalize = (ctx: EngineContext, state: SyncState, options: SyncOptions): S
     log(`WARNING: upstream now ships ${violation.file} inside Kodo-owned ${violation.owned}.`);
   }
 
-  const verification: VerificationOutcome[] = [];
-  if (options.verify) {
-    const exec = ctx.exec ?? ((dir, argv) => runCommand(dir, argv, ctx.shell ?? false));
-    for (const command of verificationCommands(manifest)) {
-      log("");
-      log(`Verifying: ${command.argv.join(" ")}`);
-      const result = exec(root, command.argv);
-      verification.push({
-        name: command.name,
-        ok: result.ok,
-        detail: result.ok ? "" : `exit ${result.status}`,
-      });
-      if (!result.ok) {
-        for (const line of result.output.trimEnd().split("\n").slice(-30)) log(`    ${line}`);
-      }
-    }
-  }
+  const verification = options.verify ? runVerification(ctx) : [];
 
   const changedUpstream = parseNameStatusZ(
     gitOrThrow(root, ["diff", "--name-status", "-M", "-z", state.rangeFrom, state.rangeTo]),
@@ -565,6 +772,25 @@ const finalize = (ctx: EngineContext, state: SyncState, options: SyncOptions): S
   const followUps = [
     ...new Set([...state.followUps, ...(dependencyChanged ? [REINSTALL_NOTE] : [])]),
   ];
+  const reviewItems = logReviewItems(ctx, state.rangeFrom, state.rangeTo, changedUpstream);
+
+  const failed = check.exitCode !== 0 || verification.some((outcome) => !outcome.ok);
+  // The marker `kodo:check --release` requires: written only when nothing failed and nothing was skipped.
+  const verifiedCommit = gitOrThrow(root, ["rev-parse", "HEAD"]).trim();
+  if (baseFile !== undefined) {
+    writeText(
+      root,
+      baseFile,
+      renderUpstreamBase({
+        tag: state.releaseTag,
+        commit: state.rangeTo,
+        synced: ctx.today,
+        ...(!failed && options.verify
+          ? { verified: { date: ctx.today, commit: verifiedCommit } }
+          : {}),
+      }),
+    );
+  }
 
   const entry: SyncLogEntry = {
     date: ctx.today,
@@ -583,8 +809,10 @@ const finalize = (ctx: EngineContext, state: SyncState, options: SyncOptions): S
     hooks: check.report.hooks,
     leaks: check.report.leaks,
     ownedViolations,
-    checkProblems: check.report.problems,
+    checkProblems: check.problems,
     verification,
+    verificationSkipped: !options.verify,
+    reviewItems,
     followUps,
   };
   const logPath = manifest.upstream.logFile;
@@ -597,19 +825,62 @@ const finalize = (ctx: EngineContext, state: SyncState, options: SyncOptions): S
   gitOrThrow(root, ["commit", "-m", `docs: record upstream sync ${state.releaseTag ?? ctx.today}`]);
   removeFileIfExists(stateFile(root));
 
-  const failed = check.exitCode !== 0 || verification.some((outcome) => !outcome.ok);
   log("");
-  log(`${failed ? "DONE WITH FAILURES" : "DONE"}: branch ${state.branch}. Nothing was pushed.`);
-  if (failed)
+  if (failed) {
+    const reasons = [
+      ...(check.exitCode !== 0 ? [`check failed (${check.problems.length} problem line(s))`] : []),
+      ...verification.filter((outcome) => !outcome.ok).map((outcome) => `${outcome.name} failed`),
+    ];
     log(
-      "Fix the problems above (the log entry records them), amend as needed, then review the branch.",
+      `NOT READY: branch ${state.branch} failed ${reasons.join("; ")}. Do not release or merge it.`,
     );
+    log(
+      "The merge and overlay commits are on the branch for inspection, and the log entry records the failures. Fix them, then run `kodo:verify`; `kodo:check --release` fails until it passes. Nothing was pushed.",
+    );
+  } else if (!options.verify) {
+    log(
+      `NOT READY: branch ${state.branch} was not verified (--no-verify). Run \`kodo:verify\`; \`kodo:check --release\` fails until it passes. Nothing was pushed.`,
+    );
+  } else {
+    log(
+      `DONE: branch ${state.branch} passed check and ${verification.length} verification command(s); marked verified. Nothing was pushed.`,
+    );
+  }
   for (const item of followUps) log(`TODO: ${item}`);
   return {
     status: failed ? "completed-with-failures" : "completed",
     exitCode: failed ? 1 : 0,
     branch: state.branch,
   };
+};
+
+const reviewItemsFor = (
+  ctx: EngineContext,
+  from: string,
+  to: string,
+  changes: ReadonlyArray<UpstreamChange>,
+): ReadonlyArray<string> =>
+  findReviewItems({
+    manifest: ctx.manifest,
+    changes,
+    serverDiff: git(ctx.root, ["diff", "-U0", from, to, "--", "apps/server/src"]).stdout,
+  }).map((item) => item.message);
+
+const logReviewItems = (
+  ctx: EngineContext,
+  from: string,
+  to: string,
+  changes: ReadonlyArray<UpstreamChange>,
+): ReadonlyArray<string> => {
+  const items = reviewItemsFor(ctx, from, to, changes);
+  ctx.log("");
+  ctx.log(
+    items.length === 0
+      ? "Needs a human look: nothing detected (new providers, MCP tools, run-creation sites, hooked enforcement files)."
+      : `Needs a human look: ${items.length} item(s) a clean merge can change without a conflict:`,
+  );
+  for (const item of items) ctx.log(`  REVIEW ${item}`);
+  return items;
 };
 
 const dryRun = (
@@ -677,6 +948,7 @@ const dryRun = (
       `  ${touchpoint.severity === "attention" ? "ATTENTION" : "info     "} ${touchpoint.message}`,
     );
   }
+  logReviewItems(ctx, range.rangeFrom, range.rangeTo, changes);
   const owned = findOwnedPathViolations(
     manifest.kodoOwned,
     gitNulList(root, ["ls-tree", "-r", "-z", "--name-only", range.rangeTo]),
@@ -778,11 +1050,46 @@ const describeTokenDifference = (expected: string[], actual: string[]): string =
   return `${hunks.length} hunk(s): ${shown.join("; ")}${hunks.length > 6 ? "; ..." : ""}`;
 };
 
-const listTags = (root: string): string[] => gitLines(root, ["tag", "--list", "v*"]);
+// Upstream's tags live in their own namespace; a `vX.Y.Z` in refs/tags is never trusted as a release.
+const listTags = (root: string): string[] =>
+  gitLines(root, ["for-each-ref", "--format=%(refname)", `${UPSTREAM_TAG_NAMESPACE}/`]).map(
+    (name) => name.slice(UPSTREAM_TAG_NAMESPACE.length + 1),
+  );
 
 const isStableRelease = (root: string, ref: string): boolean =>
   isStableTag(ref) &&
-  git(root, ["show-ref", "--verify", "--quiet", `refs/tags/${ref}`]).status === 0;
+  git(root, ["show-ref", "--verify", "--quiet", upstreamTagRef(ref)]).status === 0;
+
+// Fetches the remote's branches and, separately, its tags into the upstream namespace
+// (forced and pruned, so the namespace mirrors the remote). Returns the failure, if any.
+const fetchUpstream = (ctx: EngineContext): string | undefined => {
+  const { root, manifest } = ctx;
+  const { remote } = manifest.upstream;
+  const branches = git(root, ["fetch", "--no-tags", remote]);
+  if (branches.status !== 0) return branches.stderr.trim() || "git fetch failed";
+  const tags = git(root, ["fetch", "--no-tags", "--prune", remote, UPSTREAM_TAG_REFSPEC]);
+  return tags.status === 0 ? undefined : tags.stderr.trim() || "git fetch of tags failed";
+};
+
+// The fetched tag must point where the upstream remote says it does right now.
+const verifyUpstreamTag = (ctx: EngineContext, tag: string): TagVerification => {
+  const { root } = ctx;
+  const { remote } = ctx.manifest.upstream;
+  const local = git(root, ["rev-parse", "--verify", "--quiet", `${upstreamTagRef(tag)}^{commit}`]);
+  const listing = git(root, [
+    "ls-remote",
+    "--tags",
+    remote,
+    `refs/tags/${tag}`,
+    `refs/tags/${tag}^{}`,
+  ]);
+  return compareTagWithRemote({
+    tag,
+    remote,
+    localCommit: local.status === 0 ? local.stdout.trim() : undefined,
+    remoteTags: listing.status === 0 ? parseLsRemoteTags(listing.stdout) : undefined,
+  });
+};
 
 export interface BaseInfo {
   // Newest stable release contained in HEAD.
@@ -794,7 +1101,7 @@ export interface BaseInfo {
 export const detectBase = (ctx: EngineContext): BaseInfo => {
   const { root, manifest } = ctx;
   const baseTag = stableTagsNewestFirst(listTags(root)).find(
-    (tag) => git(root, ["merge-base", "--is-ancestor", tag, "HEAD"]).status === 0,
+    (tag) => git(root, ["merge-base", "--is-ancestor", upstreamTagRef(tag), "HEAD"]).status === 0,
   );
   const upstreamMain = `${manifest.upstream.remote}/${manifest.upstream.branch}`;
   if (
@@ -807,7 +1114,7 @@ export const detectBase = (ctx: EngineContext): BaseInfo => {
     .stdout.split("\n")
     .filter(Boolean);
   if (bases.length === 0) return { baseTag, unreleasedCount: 0 };
-  const count = git(root, ["rev-list", "--count", ...bases, `^${baseTag}`]);
+  const count = git(root, ["rev-list", "--count", ...bases, `^${upstreamTagRef(baseTag)}`]);
   return { baseTag, unreleasedCount: count.status === 0 ? Number(count.stdout.trim()) : 0 };
 };
 
@@ -842,13 +1149,15 @@ export const runStatus = (
   const { root, manifest, log } = ctx;
   const { remote } = manifest.upstream;
   if (options.fetch) {
-    const fetched = git(root, ["fetch", remote, "--tags"]);
-    if (fetched.status !== 0) log(`WARNING: git fetch ${remote} --tags failed; using local refs.`);
+    const failure = fetchUpstream(ctx);
+    if (failure !== undefined)
+      log(`WARNING: fetching ${remote} failed (${failure}); using local refs.`);
   }
   const tags = listTags(root);
   const newest = newestStableTag(tags);
   const { baseTag, unreleasedCount } = detectBase(ctx);
-  const dateOf = (rev: string) => git(root, ["log", "-1", "--format=%cs", rev]).stdout.trim();
+  const dateOf = (tag: string) =>
+    git(root, ["log", "-1", "--format=%cs", upstreamTagRef(tag)]).stdout.trim();
   const recordedText = manifest.upstream.baseFile
     ? readTextIfExists(root, manifest.upstream.baseFile)
     : undefined;
@@ -862,6 +1171,13 @@ export const runStatus = (
     }`,
   );
   for (const warning of baseWarningsFor(ctx)) log(`WARNING: ${warning}`);
+  if (recorded !== undefined) {
+    log(
+      recorded.verified
+        ? `Verification: check and every verification command passed on ${recorded.verified.date} at ${short(recorded.verified.commit)}.`
+        : `Verification: NOT VERIFIED. ${manifest.upstream.baseFile} has no verification marker, so \`kodo:check --release\` fails until \`kodo:verify\` passes.`,
+    );
+  }
   if (options.record) {
     const file = manifest.upstream.baseFile;
     if (file === undefined || baseTag === undefined || unreleasedCount > 0) {
@@ -875,7 +1191,7 @@ export const runStatus = (
       file,
       renderUpstreamBase({
         tag: baseTag,
-        commit: gitOrThrow(root, ["rev-parse", `${baseTag}^{commit}`]).trim(),
+        commit: gitOrThrow(root, ["rev-parse", `${upstreamTagRef(baseTag)}^{commit}`]).trim(),
         synced: ctx.today,
       }),
     );
@@ -885,19 +1201,25 @@ export const runStatus = (
     log(`Newest stable upstream release: none found for ${remote}.`);
     return { exitCode: 0 };
   }
-  log(`Newest stable upstream release: ${newest} (${dateOf(newest)})`);
+  const verification = verifyUpstreamTag(ctx, newest);
+  log(
+    `Newest stable upstream release: ${newest} (${dateOf(newest)}), ${verification.ok ? `verified against ${remote}` : `NOT VERIFIED: ${verification.reason} A sync would refuse it.`}`,
+  );
 
-  const upToDate = git(root, ["merge-base", "--is-ancestor", newest, "HEAD"]).status === 0;
+  const newestRef = upstreamTagRef(newest);
+  const upToDate = git(root, ["merge-base", "--is-ancestor", newestRef, "HEAD"]).status === 0;
   if (upToDate) {
     log(`Up to date: HEAD contains ${newest}. Nothing to update to.`);
   } else {
-    const from = baseTag ?? git(root, ["merge-base", "HEAD", newest]).stdout.trim();
-    const count = gitOrThrow(root, ["rev-list", "--count", `${from}..${newest}`]).trim();
+    const from = baseTag
+      ? upstreamTagRef(baseTag)
+      : git(root, ["merge-base", "HEAD", newestRef]).stdout.trim();
+    const count = gitOrThrow(root, ["rev-list", "--count", `${from}..${newestRef}`]).trim();
     log(
       `Update available: ${count} upstream commit(s) between ${baseTag ?? short(from)} and ${newest}.`,
     );
     const changes = parseNameStatusZ(
-      gitOrThrow(root, ["diff", "--name-status", "-M", "-z", from, newest]),
+      gitOrThrow(root, ["diff", "--name-status", "-M", "-z", from, newestRef]),
     );
     const touchpoints = findTouchpoints(manifest, changes);
     log(`  ${changes.length} file(s) changed; ${touchpoints.length} Kodo overlay touchpoint(s):`);
@@ -906,6 +1228,7 @@ export const runStatus = (
         `    ${touchpoint.severity === "attention" ? "ATTENTION" : "info     "} ${touchpoint.message}`,
       );
     }
+    logReviewItems(ctx, from, newestRef, changes);
     log("Run `pnpm kodo:sync --dry-run` to size the merge, `pnpm kodo:sync` to start it.");
   }
   const beyond = tags.filter((tag) => isPrereleaseBeyond(tag, newest)).toSorted();

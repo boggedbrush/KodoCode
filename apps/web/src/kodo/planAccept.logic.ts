@@ -18,9 +18,10 @@ export interface KodoPlanEpoch {
 }
 
 /**
- * Runs do not record their mode, so the client keeps the newest run number at the moment the
- * thread last entered Plan. Only a run after it can be offered as a plan, so an Ask answer is
- * never offered for implementation. An unknown start (first seen already in Plan) gates nothing.
+ * Fallback for runs that predate `run.interactionMode`: the client keeps the newest run number
+ * at the moment the thread last entered Plan. Only a run after it can be offered as a plan, so an
+ * Ask answer is never offered for implementation. An unknown start (first seen already in Plan)
+ * gates nothing.
  */
 export function advanceKodoPlanEpoch(
   previous: KodoPlanEpoch | undefined,
@@ -36,6 +37,8 @@ export function advanceKodoPlanEpoch(
 export interface PlanEpochRun {
   readonly id: string;
   readonly ordinal: number;
+  /** The mode the run recorded when it was created; absent on old runs. */
+  readonly interactionMode?: ThreadInteractionMode | undefined;
 }
 
 function runIsInPlanEpoch(
@@ -43,9 +46,11 @@ function runIsInPlanEpoch(
   runId: string | null,
   cutoffOrdinal: number | null,
 ): boolean {
+  const run = runId === null ? undefined : runs.find((candidate) => candidate.id === runId);
+  if (run?.interactionMode !== undefined) {
+    return normalizeKodoInteractionMode(run.interactionMode) === "plan";
+  }
   if (cutoffOrdinal === null) return true;
-  if (runId === null) return false;
-  const run = runs.find((candidate) => candidate.id === runId);
   return run !== undefined && run.ordinal > cutoffOrdinal;
 }
 
@@ -184,16 +189,6 @@ export function shouldOfferPlanAcceptance(input: {
   );
 }
 
-/**
- * Why accepting cannot go ahead even though the offer stands. Queued messages would run in
- * Code once the thread switches, whatever mode they were written in.
- */
-export function planAcceptanceBlocker(input: { readonly queuedRunCount: number }): string | null {
-  return input.queuedRunCount > 0
-    ? "Send or remove the queued messages first: they would run with Code's write access."
-    : null;
-}
-
 export const PLAN_RESPONSE_IMPLEMENTATION_PROMPT =
   "The plan you just presented is approved. Implement it now; you can modify the workspace.";
 
@@ -221,7 +216,6 @@ export type PlanAcceptanceStep =
 
 export type PlanAcceptanceOutcome =
   | { readonly status: "skipped" }
-  | { readonly status: "blocked"; readonly message: string }
   | { readonly status: "started" }
   | {
       readonly status: "failed";
@@ -232,21 +226,18 @@ export type PlanAcceptanceOutcome =
     };
 
 /**
- * Accepting a plan, in order: re-check the offer, refuse while messages are queued, switch the
- * thread to Code, start the turn, and on a failed start put the thread back in Plan. The
+ * Accepting a plan, in order: re-check the offer, switch the thread to Code, start the turn, and
+ * on a failed start put the thread back in Plan. The
  * switch and the start are two server commands, so the rollback is what keeps the thread's mode
  * and the unimplemented plan consistent for every client.
  */
 export async function runKodoPlanAcceptance(deps: {
   readonly stillOffered: () => boolean;
-  readonly blocker: () => string | null;
   readonly switchToCode: () => Promise<PlanAcceptanceStep>;
   readonly startTurn: () => Promise<PlanAcceptanceStep>;
   readonly returnToPlan: () => Promise<PlanAcceptanceStep>;
 }): Promise<PlanAcceptanceOutcome> {
   if (!deps.stillOffered()) return { status: "skipped" };
-  const blocker = deps.blocker();
-  if (blocker !== null) return { status: "blocked", message: blocker };
   const switched = await deps.switchToCode();
   if (!switched.ok) {
     return {

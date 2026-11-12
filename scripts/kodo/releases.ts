@@ -33,6 +33,64 @@ export const isPrereleaseBeyond = (prerelease: string, stable: string): boolean 
   return isPrereleaseTag(prerelease) && compareStableTags(base, stable) < 0;
 };
 
+// Upstream's tags are fetched into their own namespace, never into refs/tags, so a tag Kodo
+// publishes under the same name can neither collide with them nor be mistaken for a release.
+export const UPSTREAM_TAG_NAMESPACE = "refs/upstream-tags";
+
+export const upstreamTagRef = (tag: string): string => `${UPSTREAM_TAG_NAMESPACE}/${tag}`;
+
+export const UPSTREAM_TAG_REFSPEC = `+refs/tags/*:${UPSTREAM_TAG_NAMESPACE}/*`;
+
+// `git ls-remote --tags` output as tag name -> commit. An annotated tag is advertised twice
+// (the tag object, then `<tag>^{}` for the commit it points at); the commit wins.
+export const parseLsRemoteTags = (output: string): Map<string, string> => {
+  const direct = new Map<string, string>();
+  const peeled = new Map<string, string>();
+  for (const line of output.split("\n")) {
+    const match = /^([0-9a-f]{40,64})\s+refs\/tags\/(.+)$/.exec(line.trim());
+    if (match === null) continue;
+    const [, sha, name] = match;
+    if (name!.endsWith("^{}")) peeled.set(name!.slice(0, -3), sha!);
+    else direct.set(name!, sha!);
+  }
+  return new Map([...direct, ...peeled]);
+};
+
+export type TagVerification =
+  | { readonly ok: true; readonly commit: string }
+  | { readonly ok: false; readonly reason: string };
+
+// The fetched tag must point at the commit the upstream remote advertises right now.
+export const compareTagWithRemote = (input: {
+  readonly tag: string;
+  readonly remote: string;
+  readonly localCommit: string | undefined;
+  // undefined: the remote could not be reached.
+  readonly remoteTags: ReadonlyMap<string, string> | undefined;
+}): TagVerification => {
+  const { tag, remote, localCommit, remoteTags } = input;
+  if (localCommit === undefined) {
+    return {
+      ok: false,
+      reason: `${tag} is not among the tags fetched from ${remote} (${upstreamTagRef(tag)}); a tag of that name in refs/tags does not count.`,
+    };
+  }
+  if (remoteTags === undefined) {
+    return { ok: false, reason: `${remote} could not be reached to verify ${tag}.` };
+  }
+  const advertised = remoteTags.get(tag);
+  if (advertised === undefined) {
+    return { ok: false, reason: `${remote} does not advertise a tag ${tag}.` };
+  }
+  if (advertised !== localCommit) {
+    return {
+      ok: false,
+      reason: `${tag} points at ${localCommit.slice(0, 10)} locally but ${remote} advertises ${advertised.slice(0, 10)}.`,
+    };
+  }
+  return { ok: true, commit: localCommit };
+};
+
 export const RELEASE_POLICY_SUMMARY =
   "Sync to stable release tags only and never merge upstream/main.";
 
@@ -48,14 +106,20 @@ export interface UpstreamBase {
   readonly tag: string | undefined;
   readonly commit: string;
   readonly synced: string;
+  // Set only by a run in which `check` and every verification command passed; see `kodo:verify`.
+  readonly verified?: { readonly date: string; readonly commit: string };
 }
 
 export const renderUpstreamBase = (base: UpstreamBase): string =>
   [
-    "# Written by `pnpm kodo:sync`. The upstream (T3 Code) release this fork is based on.",
+    "# Written by `pnpm kodo:sync` and `pnpm kodo:verify`. The upstream (T3 Code) release this fork is based on.",
+    "# `verified` appears only after check and every verification command passed; `kodo:check --release` requires it.",
     `tag: ${base.tag ?? "none (unreleased upstream commit)"}`,
     `commit: ${base.commit}`,
     `synced: ${base.synced}`,
+    ...(base.verified
+      ? [`verified: ${base.verified.date}`, `verified-commit: ${base.verified.commit}`]
+      : []),
     "",
   ].join("\n");
 
@@ -66,5 +130,14 @@ export const parseUpstreamBase = (text: string): UpstreamBase | undefined => {
   const commit = field("commit");
   const synced = field("synced");
   if (tag === undefined || commit === undefined || synced === undefined) return undefined;
-  return { tag: isStableTag(tag) ? tag : undefined, commit, synced };
+  const verifiedDate = field("verified");
+  const verifiedCommit = field("verified-commit");
+  return {
+    tag: isStableTag(tag) ? tag : undefined,
+    commit,
+    synced,
+    ...(verifiedDate !== undefined && verifiedCommit !== undefined
+      ? { verified: { date: verifiedDate, commit: verifiedCommit } }
+      : {}),
+  };
 };

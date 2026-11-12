@@ -11,6 +11,7 @@ import type {
   MessageId,
   RunId,
   ThreadId,
+  ThreadInteractionMode,
 } from "@t3tools/contracts";
 import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import { Link } from "@tanstack/react-router";
@@ -26,6 +27,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import { useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 
+import { kodoQueuedRunModeLabel } from "../../kodo/interactionModes.logic"; // KODO: queued-run-mode
 import { useAssetUrls } from "../../assets/assetUrls";
 import { threadEnvironment } from "../../state/threads";
 import { useQuietThreadShell, useThreadProjection } from "../../state/entities";
@@ -88,6 +90,8 @@ export function QueuedRunsControl({
   readonly editingRunId: RunId | null;
   // KODO: chat-mode-state (a queued message must not be steered into a turn that runs in another mode)
   readonly steerBlocked?: boolean;
+  // KODO: queued-run-mode (a queued message keeps the mode it was queued in)
+  readonly threadInteractionMode?: ThreadInteractionMode | undefined;
   /** Set while something else holds the composer, such as an open question. */
   readonly editBlockedReason: string | null;
   readonly onEditQueuedRun: (request: EditQueuedRunRequest) => void;
@@ -137,6 +141,10 @@ export function QueuedRunsControl({
       runId: run.id,
       messageId: run.userMessageId,
       freshContext: run.freshContext === true,
+      modeLabel: kodoQueuedRunModeLabel({
+        runMode: run.interactionMode,
+        threadMode: props.threadInteractionMode,
+      }), // KODO: queued-run-mode
       serverIndex,
       text,
       // A guest's message keeps the guest's words; the owner can cancel it, not rewrite it.
@@ -157,6 +165,7 @@ export function QueuedRunsControl({
       runId: null,
       messageId: null,
       freshContext: false,
+      modeLabel: null,
       serverIndex: null,
       text: message.text,
       editable: true,
@@ -301,6 +310,10 @@ export function QueuedRunsControl({
                       </TooltipPopup>
                     </Tooltip>
                   </>
+                ) : null}
+                {item.modeLabel !== null ? (
+                  // KODO: queued-run-mode
+                  <span className="px-1">Runs in {item.modeLabel}</span>
                 ) : null}
                 {item.pending ? (
                   <span className="flex items-center gap-1 px-1">
