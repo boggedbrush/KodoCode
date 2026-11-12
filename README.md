@@ -1,130 +1,23 @@
-# T3 Code
+# Kodo Code
 
-T3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
+Kodo Code is a fork of [T3 Code](https://github.com/pingdotgg/t3code), a minimal GUI for coding agents. Kodo Code keeps T3 Code's foundation and adds its own design and a structured set of interaction modes for working with agents.
 
-Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, Google Antigravity, and fx. If they're set up on your computer, T3 Code can control them.
+## Modes
 
-## "Wait, what are you selling me?"
+Kodo Code's interaction modes keep exploring, planning, implementing, and reviewing separate:
 
-Nothing. We built T3 Code because we wanted the best possible development experience with agents. We were inspired by existing solutions like the Codex desktop app, Conductor, Claude Desktop and Cursor Glass, but none met our bar.
+- **Ask**: read-only Q&A about the codebase.
+- **Plan**: produce a plan before changing anything.
+- **Code**: implement changes.
+- **Review**: read-only review of working changes.
 
-We wanted something performant, remote-ready, and truly open. If we ever go the wrong direction, we want you to have everything you need to fork and build the editor that you want.
+Kodo Code is still early and under active re-development on top of the latest stable T3 Code release (currently `v0.1.9`). Some Kodo-only features are not yet re-ported; see [docs/upstream-sync-log.md](./docs/upstream-sync-log.md) for the current list.
 
-## Installation
+## Development
 
-> [!WARNING]
-> T3 Code currently supports Codex, Claude, Cursor, Grok Build, OpenCode, Antigravity, and fx. Install and authenticate at least one provider before use:
->
-> - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
-> - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
-> - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `agent login`
-> - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
-> - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
-> - Antigravity: enable it in Settings, then use **Install Antigravity** and **Sign in with Google**. No CLI is required.
-> - fx: install [fx](https://fx.sh) and run `fx login` on the machine running the T3 Code server ([setup guide](./docs/user/providers-fx.md))
-
-### Command line
-
-```bash
-curl -fsSL https://t3.codes/install.sh | sh
-```
-
-On Windows, in PowerShell:
-
-```powershell
-irm https://t3.codes/install.ps1 | iex
-```
-
-Then run `t3` to start the server and open the local web app. `t3 service install` keeps it running in the background, `t3 update` moves to a newer release, and `t3 --help` has the full reference.
-
-To try it once without installing, run `npx t3@latest`. It offers to install the `t3` command for you.
-
-### Desktop app
-
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
-
-#### Windows (`winget`)
-
-```bash
-winget install T3Tools.T3Code
-```
-
-#### Windows (`scoop`)
-
-```bash
-scoop install extras/t3code
-```
-
-#### macOS (Homebrew)
-
-```bash
-brew install --cask t3-code
-```
-
-#### Debian, Ubuntu (`.deb`)
-
-Download the `.deb` from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), then:
-
-```bash
-sudo apt install ./T3-Code-*.deb
-```
-
-#### Arch Linux (AUR)
-
-Stable:
-
-```bash
-yay -S t3code-bin
-```
-
-Nightly:
-
-```bash
-yay -S t3code-nightly-bin
-```
-
-The AUR packaging is maintained in this repository under [`packaging/aur`](./packaging/aur).
-
-#### Nix (nixpkgs)
-
-```bash
-nix profile add github:NixOS/nixpkgs/nixos-unstable#t3code
-```
-
-The package is maintained in [nixpkgs](https://github.com/NixOS/nixpkgs/tree/nixos-unstable/pkgs/by-name/t3/t3code)
-and includes the desktop app (`t3code-desktop`) and the `t3` command.
-See [Nix installation](./docs/user/install.md#nix-nixpkgs) for NixOS configuration and updates.
-
-## Some notes
-
-We are very very early in this project. Expect bugs.
-
-We are (mostly) not accepting contributions yet. Small fixes may be considered. Big features will not be.
-
-## Documentation
-
-Full docs live in [docs/](./docs). There's no docs site yet.
-
-- [FAQ](./docs/user/faq.md)
-- [Install and first run](./docs/user/install.md)
-- [Permission modes](./docs/user/permission-modes.md)
-- [Keyboard shortcuts](./docs/user/keybindings.md)
-- [Project settings](./docs/user/project-settings.md)
-- [Appearance preferences](./docs/user/appearance.md)
-- [Remote access from a phone or another machine](./docs/user/remote-access.md)
-- [Connect Claude Code, Codex, ChatGPT and other agents over MCP](./docs/user/outside-agents.md)
-- [Keeping app and server in sync](./docs/user/updating.md)
-- [Source control integrations](./docs/user/source-control.md)
-- Multiple accounts: [Codex](./docs/user/providers-codex.md) · [Claude](./docs/user/providers-claude.md)
-- [Run T3 Code as a background service](./docs/user/background-service.md)
-
-Building from source? Start at [docs/internals/overview.md](./docs/internals/overview.md).
-
-## If you REALLY want to contribute still.... read this first
+Kodo Code uses [Vite+](https://viteplus.dev/guide/), so you'll need the global `vp` command-line tool.
 
 ### Install `vp`
-
-T3 Code uses Vite+ so you'll need to install the global `vp` command-line tool.
 
 #### macOS / Linux
 
@@ -146,8 +39,32 @@ Checkout their getting started guide for more information: https://viteplus.dev/
 vp i
 ```
 
-Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR.
+### Run in development
 
-Have a feature request? Start an [Ideas discussion](https://github.com/pingdotgg/t3code/discussions/categories/ideas).
+```bash
+vp run dev
+```
 
-Need support? Join the [Discord](https://discord.gg/jn4EGJjrvv).
+This starts the server and the web app. Ports can shift when occupied; the `[dev-runner]` line in the output shows the real ones.
+
+### Checks
+
+```bash
+vp run check:changed   # format, lint, knip, typecheck, and tests for changed files
+vp run typecheck       # typecheck all packages
+vp test run <files>    # run tests for specific files while iterating
+```
+
+Read [CONTRIBUTING.md](./CONTRIBUTING.md) before reporting a bug or opening a PR. For the architecture, start at [docs/internals/overview.md](./docs/internals/overview.md). Agent and contributor guidance lives in [AGENTS.md](./AGENTS.md).
+
+## Syncing with upstream
+
+Kodo Code tracks T3 Code's stable releases (`vX.Y.Z` tags, never `main`) and merges each one after it ships. See [docs/kodo-upstream-sync.md](./docs/kodo-upstream-sync.md) for the policy and tooling. Each sync is recorded in [docs/upstream-sync-log.md](./docs/upstream-sync-log.md).
+
+## Acknowledgement
+
+Kodo Code builds on [T3 Code](https://github.com/pingdotgg/t3code), created by [Theo Browne](https://github.com/t3dotgg), [Julius Marminge](https://github.com/juliusmarminge), and the T3 Tools team. Their work made this project possible.
+
+## License
+
+Kodo Code is released under the MIT License, the same license as T3 Code. See [LICENSE](./LICENSE). Copyright (c) 2026 T3 Tools Inc.

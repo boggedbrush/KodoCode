@@ -4,6 +4,15 @@ T3 Code is a minimal GUI for coding agents. A Node WebSocket server wraps provid
 
 You can think of T3 Code as an open source "bring-your-own-subscription" alternative to apps like Claude Desktop, Codex App, Cursor Glass and Conductor.
 
+## Kodo fork
+
+This repo is the Kodo Code fork of T3 Code, which is the upstream described below.
+Kodo tracks upstream's stable releases only (the latest is recorded in `kodo/upstream-base.txt`; never merge `upstream/main`), so prefer new Kodo-owned modules and small call-site hooks over rewriting upstream files.
+Do not rename the `@t3tools/*` scope, the `T3CODE_*` env vars, or internal identifiers; that keeps upstream merges clean.
+The Kodo layer is the branding/theme and the ask, plan, code, and review interaction modes.
+Keep Kodo-specific logic out of shared upstream paths where a hook or separate module will do.
+Log each upstream sync in `docs/upstream-sync-log.md`.
+
 ## What makes T3 Code special?
 
 We have over 500,000 users who love T3 Code. It's important we maintain the things they love as we continue to iterate on the product. Here's a brief list of the things we can never compromise on.
