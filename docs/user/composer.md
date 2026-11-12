@@ -30,7 +30,8 @@ shortcuts or turn off rich text to edit the formatting of those ranges.
 
 Enter sends. In a list or quote, **Shift+Enter** continues it, and Shift+Enter
 on an empty line moves out one level, then leaves it; **Tab** nests a list item
-under the one above and **Shift+Tab** moves it back out. In a code block, Enter
+under the one above and **Shift+Tab** moves it back out (outside a list it
+switches the [mode](#modes)). In a code block, Enter
 starts a new line at the current indentation, **Tab** and **Shift+Tab** indent
 the selected lines, and a closing ` ``` ` followed by Enter, or two blank lines
 at the end, leave the block. **Backspace** at the start of a code block turns it
@@ -59,6 +60,39 @@ On Android, you can also drag images from another app into the message input
 in split screen.
 
 See [images and videos](#images-and-videos-in-messages) for previewing and saving media.
+
+## Modes
+
+Every thread has a mode, shown as a chip in the composer footer. **Code** is the
+default and the only mode that can change your workspace; new threads always
+start in it.
+
+- **Ask** answers questions about the code. Read-only.
+- **Plan** works out an approach and presents a plan; nothing changes until you
+  accept it. Read-only.
+- **Code** implements changes.
+- **Review** reviews your working changes. Read-only.
+
+Switch with the chip, with **Shift+Tab** in the composer (it cycles Ask, Plan,
+Code, Review; in a nested list item it outdents instead), or by sending `/ask`,
+`/plan`, `/code` or `/review` on its own. The mode belongs to the thread: it is
+saved on the server as soon as you switch, and every client that has the thread
+open follows it. Messages sent from the phone, from a connected app or by a
+background agent run in the thread's current mode. Read-only modes ask the
+provider to refuse writes; how strictly it can differ by provider.
+
+A turn that is running keeps the mode it started in. If you switch meanwhile, the
+chip says the new mode applies from the next turn, and new messages queue instead
+of steering the running turn. A queued message runs in whatever mode the thread is
+in when it starts, so switching to Code while messages are queued asks you to
+remove them first.
+
+When a Plan turn finishes with a plan, a banner offers **Implement in Code**.
+Accepting switches the thread to Code and starts a turn that implements the plan.
+**Keep planning** dismisses the banner; replying also keeps the thread in Plan.
+Providers that do not produce a separate plan offer the same choice for the
+agent's final reply. If the turn cannot start, the thread returns to Plan and the
+banner stays. Accepting is unavailable while messages are queued.
 
 ## Send while the agent is working
 

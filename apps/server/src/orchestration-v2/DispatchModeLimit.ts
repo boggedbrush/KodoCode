@@ -1,7 +1,8 @@
+import { kodoInteractionModeRank } from "../kodo/interactionMode.ts"; // KODO: mode-rank
 import {
   isRuntimeModeAbove,
   type OrchestrationV2DomainEvent,
-  type ProviderInteractionMode,
+  type ThreadInteractionMode,
   type RuntimeMode,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -10,7 +11,7 @@ import type * as Ref from "effect/Ref";
 
 export interface DispatchModes {
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
+  readonly interactionMode: ThreadInteractionMode;
 }
 
 export interface DispatchModeRefusal extends DispatchModes {
@@ -28,15 +29,14 @@ export const DispatchModeLimit = Context.Reference<DispatchModeLimitValue | unde
   { defaultValue: () => undefined },
 );
 
-const interactionModeRank: Record<ProviderInteractionMode, number> = { plan: 0, default: 1 };
-
 export const exceededDispatchModeLimit = (
   limit: DispatchModes,
   modes: DispatchModes,
 ): "runtime" | "interaction" | undefined =>
   isRuntimeModeAbove(modes.runtimeMode, limit.runtimeMode)
     ? "runtime"
-    : interactionModeRank[modes.interactionMode] > interactionModeRank[limit.interactionMode]
+    : kodoInteractionModeRank(modes.interactionMode) >
+        kodoInteractionModeRank(limit.interactionMode)
       ? "interaction"
       : undefined;
 

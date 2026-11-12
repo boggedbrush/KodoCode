@@ -86,6 +86,8 @@ export function QueuedRunsControl({
     Pick<ChatMessage, "id" | "inputIntent" | "text" | "attachments">
   >;
   readonly editingRunId: RunId | null;
+  // KODO: chat-mode-state (a queued message must not be steered into a turn that runs in another mode)
+  readonly steerBlocked?: boolean;
   /** Set while something else holds the composer, such as an open question. */
   readonly editBlockedReason: string | null;
   readonly onEditQueuedRun: (request: EditQueuedRunRequest) => void;
@@ -116,7 +118,8 @@ export function QueuedRunsControl({
   // A fresh message starts its own turn: it may skip compaction, but not steer into a turn.
   const canSendRun = (freshContext: boolean) =>
     workflow?.canSendNow === true ||
-    (workflow?.canPromoteToSteer === true &&
+    (props.steerBlocked !== true && // KODO: chat-mode-state
+      workflow?.canPromoteToSteer === true &&
       (!freshContext || workflow.promoteSkipsCompaction === true));
   const queuedImageUrlById = new Map(
     queuedImageAttachmentUrls.flatMap((url, index) => {

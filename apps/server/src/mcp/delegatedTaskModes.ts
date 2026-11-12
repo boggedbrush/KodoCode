@@ -1,10 +1,11 @@
+import { kodoInteractionModeRank } from "../kodo/interactionMode.ts"; // KODO: mode-rank
 import {
   type ModelSelection,
   OrchestratorMcpFailure,
   type OrchestratorMcpDelegateTaskInput,
   type OrchestratorMcpInteractionMode,
   type OrchestratorMcpRuntimeMode,
-  type ProviderInteractionMode,
+  type ThreadInteractionMode,
   type RuntimeMode,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -23,9 +24,9 @@ export function runtimeModeRank(mode: RuntimeMode): number {
   }
 }
 
-/** How much an interaction mode allows: plan, then default. */
-export function interactionModeRank(mode: ProviderInteractionMode): number {
-  return mode === "plan" ? 0 : 1;
+/** How much an interaction mode allows: only code (and legacy default) writes. */
+export function interactionModeRank(mode: ThreadInteractionMode): number {
+  return kodoInteractionModeRank(mode); // KODO: mode-rank
 }
 
 /**
@@ -73,9 +74,9 @@ export function resolveRuntimeMode(
 
 /** The same, for interaction modes. */
 export function resolveInteractionMode(
-  parentMode: ProviderInteractionMode,
-  requested: OrchestratorMcpInteractionMode | undefined,
-): Effect.Effect<ProviderInteractionMode, OrchestratorMcpFailure> {
+  parentMode: ThreadInteractionMode,
+  requested: OrchestratorMcpInteractionMode | ThreadInteractionMode | undefined,
+): Effect.Effect<ThreadInteractionMode, OrchestratorMcpFailure> {
   const resolved = requested === undefined || requested === "inherit" ? parentMode : requested;
   return interactionModeRank(resolved) > interactionModeRank(parentMode)
     ? Effect.fail(

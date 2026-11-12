@@ -1,3 +1,4 @@
+import { kodoInteractionModeLimit } from "../kodo/interactionMode.ts"; // KODO: mode-peer-limit
 import {
   CommandId,
   type EnvironmentId,
@@ -270,7 +271,9 @@ const make = Effect.gen(function* () {
           title,
           modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
           ...(runtimeMode === undefined ? {} : { runtimeMode }),
-          ...(interactionMode === undefined ? {} : { interactionMode }),
+          ...(interactionMode === undefined
+            ? {}
+            : { interactionMode: kodoInteractionModeLimit(interactionMode) }), // KODO: mode-peer-limit
           message: task,
           clientRequestId: `delegate:${scope.thread.threadId}:${key}`,
           // The thread there shows it is this thread's subagent, with a way back.

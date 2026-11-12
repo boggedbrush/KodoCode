@@ -13,7 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
-import { DispatchModeLimit } from "./DispatchModeLimit.ts";
+import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimit.ts";
 import * as EventSink from "./EventSink.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
@@ -356,4 +356,20 @@ it.layer(layerWithCeiling)("runtime mode ceiling", (it) => {
       assert.notEqual(started?.status, "queued");
     }),
   );
+});
+
+// KODO: mode-rank - the limit compares Kodo modes, with a legacy "default" meaning code.
+it("limits dispatches by what a Kodo mode may write, not by its spelling", () => {
+  const limit = (interactionMode: "ask" | "review" | "plan" | "code" | "default") => ({
+    runtimeMode: "auto" as const,
+    interactionMode,
+  });
+  for (const readOnly of ["ask", "review", "plan"] as const) {
+    assert.equal(exceededDispatchModeLimit(limit(readOnly), limit("code")), "interaction");
+    assert.equal(exceededDispatchModeLimit(limit(readOnly), limit("default")), "interaction");
+    assert.isUndefined(exceededDispatchModeLimit(limit(readOnly), limit("ask")));
+    assert.isUndefined(exceededDispatchModeLimit(limit("code"), limit(readOnly)));
+  }
+  assert.isUndefined(exceededDispatchModeLimit(limit("code"), limit("default")));
+  assert.isUndefined(exceededDispatchModeLimit(limit("default"), limit("code")));
 });

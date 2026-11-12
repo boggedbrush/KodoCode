@@ -682,6 +682,12 @@ export function openCodePermissionRules(
     }
   }
 
+  // KODO: mode-read-only-opencode - a read-only Kodo mode with approvals on (Review) denies edits
+  // outright and leaves shell on user approval, which the permission rules cannot tell apart.
+  if (requiresApproval && runtimePolicy.modeReadOnly === true) {
+    rules.push({ permission: "edit", pattern: "*", action: "deny" });
+  }
+
   return rules;
 }
 

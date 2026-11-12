@@ -1,3 +1,4 @@
+import { kodoInteractionModeLimit } from "../kodo/interactionMode.ts"; // KODO: mode-peer-limit
 import {
   type EnvironmentId,
   OrchestratorMcpFailure,
@@ -136,6 +137,10 @@ const make = Effect.gen(function* () {
       params,
     ).pipe(Effect.mapError(unavailable))) as Record<string, unknown>;
     const { environmentId: _target, ...args } = encoded;
+    // KODO: mode-peer-limit - an upstream peer only knows "default" | "plan".
+    if (typeof args.interactionMode === "string" && args.interactionMode !== "inherit") {
+      args.interactionMode = kodoInteractionModeLimit(args.interactionMode);
+    }
     // A pending upload lives here, so it cannot go with the call.
     if (Array.isArray(args.attachments) && args.attachments.length > 0) {
       return yield* new OrchestratorMcpFailure({

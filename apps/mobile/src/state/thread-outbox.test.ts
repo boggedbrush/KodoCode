@@ -349,47 +349,45 @@ describe("thread outbox", () => {
     });
   });
 
-  it("normalizes queued plan mode against the queued provider, not the current thread", () => {
-    const codex = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" };
-    const antigravity = {
-      instanceId: ProviderInstanceId.make("google-personal"),
-      model: "gemini-test-thinking",
-      options: [{ id: "native-option", value: "keep-this-choice" }],
-    };
-    const providers = [
-      { instanceId: codex.instanceId, showInteractionModeToggle: true },
-      { instanceId: antigravity.instanceId, showInteractionModeToggle: false },
-    ];
-    const message = {
-      ...queuedMessage({ messageId: "queued-plan", createdAt: "2026-09-02T10:00:00.000Z" }),
-      text: "/plan inspect the project",
-      modelSelection: antigravity,
-      interactionMode: "plan",
-    } satisfies QueuedThreadMessage;
+  // KODO: mode-preserve - mobile has no mode picker, so a send must keep the thread's own mode.
+  it.each(["ask", "plan", "review", "code", "default"] as const)(
+    "keeps a %s thread in its mode whatever the message captured or the provider offers",
+    (threadMode) => {
+      const codex = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" };
+      const antigravity = {
+        instanceId: ProviderInstanceId.make("google-personal"),
+        model: "gemini-test-thinking",
+        options: [{ id: "native-option", value: "keep-this-choice" }],
+      };
+      const providers = [
+        { instanceId: codex.instanceId, showInteractionModeToggle: true },
+        { instanceId: antigravity.instanceId, showInteractionModeToggle: false },
+      ];
+      const message = {
+        ...queuedMessage({ messageId: "queued-plan", createdAt: "2026-09-02T10:00:00.000Z" }),
+        modelSelection: antigravity,
+        interactionMode: "default",
+      } satisfies QueuedThreadMessage;
 
-    expect(
-      resolveQueuedThreadSettings(
-        message,
-        { modelSelection: codex, runtimeMode: "approval-required", interactionMode: "plan" },
-        providers,
-      ),
-    ).toEqual({
-      modelSelection: antigravity,
-      runtimeMode: "approval-required",
-      interactionMode: "default",
-    });
-    expect(
-      resolveQueuedThreadSettings(
-        { ...message, modelSelection: codex },
-        {
-          modelSelection: antigravity,
+      for (const queued of [message, { ...message, modelSelection: codex }]) {
+        expect(
+          resolveQueuedThreadSettings(
+            queued,
+            {
+              modelSelection: codex,
+              runtimeMode: "approval-required",
+              interactionMode: threadMode,
+            },
+            providers,
+          ),
+        ).toEqual({
+          modelSelection: queued.modelSelection,
           runtimeMode: "approval-required",
-          interactionMode: "default",
-        },
-        providers,
-      ).interactionMode,
-    ).toBe("plan");
-  });
+          interactionMode: threadMode,
+        });
+      }
+    },
+  );
 
   it("holds the mutation queue while persisted messages are loading", async () => {
     const registry = AtomRegistry.make();

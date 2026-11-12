@@ -1,3 +1,4 @@
+// KODO: thread-mode-type
 import { presentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type {
   EnvironmentId,
@@ -5,7 +6,7 @@ import type {
   ProjectId,
   ModelSelection,
   RuntimeMode,
-  ProviderInteractionMode,
+  ThreadInteractionMode,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
@@ -15,7 +16,7 @@ export function draftThreadShell(input: {
   readonly projectId: ProjectId;
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
+  readonly interactionMode: ThreadInteractionMode;
   readonly branch: string | null;
   readonly worktreePath: string | null;
   readonly createdAt: string;

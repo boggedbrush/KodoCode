@@ -1641,6 +1641,16 @@ describe("composerDraftStore modelSelection", () => {
     },
   );
 
+  it("keeps every Kodo interaction mode picked in a draft and drops unknown ones", () => {
+    const store = useComposerDraftStore.getState();
+    for (const mode of ["ask", "plan", "code", "review"] as const) {
+      store.setInteractionMode(threadRef, mode);
+      expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.interactionMode).toBe(mode);
+    }
+    store.setInteractionMode(threadRef, "swarm" as never);
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.interactionMode ?? null).toBeNull();
+  });
+
   it("releases an inactive thread pick only after its queued model becomes durable", () => {
     const store = useComposerDraftStore.getState();
     const pick = modelSelection(CODEX_DRIVER, "gpt-5.5", { fastMode: false });

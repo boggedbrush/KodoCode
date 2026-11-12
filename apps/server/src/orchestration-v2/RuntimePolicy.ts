@@ -16,6 +16,7 @@ import * as Schema from "effect/Schema";
 
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import { kodoRuntimePolicyOverlay } from "../kodo/interactionMode.ts"; // KODO: mode-resolver
 import * as ServerSettings from "../serverSettings.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 
@@ -78,15 +79,26 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
   "t3/orchestration-v2/RuntimePolicy/RuntimePolicyV2",
 ) {}
 
-export const layer: Layer.Layer<RuntimePolicyV2> = Layer.succeed(RuntimePolicyV2, {
-  resolve: Effect.fn("RuntimePolicyV2.resolve")(function (input) {
-    return Effect.succeed({
-      runtimeMode: input.thread.runtimeMode,
-      interactionMode: input.thread.interactionMode,
-      cwd: input.thread.worktreePath,
-    });
-  }),
-});
+/**
+ * KODO: mode-resolver - a policy for a known provider driver, for fixtures and harnesses with no
+ * provider instance registry. An unresolved driver fails closed (read-only modes get the approval
+ * ceiling plus instructions), so pass the real one wherever it is known.
+ */
+export const layerForDriver = (driver: string | undefined): Layer.Layer<RuntimePolicyV2> =>
+  Layer.succeed(RuntimePolicyV2, {
+    resolve: Effect.fn("RuntimePolicyV2.resolve")(function (input) {
+      return Effect.succeed({
+        cwd: input.thread.worktreePath,
+        ...kodoRuntimePolicyOverlay({
+          interactionMode: input.thread.interactionMode,
+          driver,
+          runtimeMode: input.thread.runtimeMode,
+        }),
+      });
+    }),
+  });
+
+export const layer: Layer.Layer<RuntimePolicyV2> = layerForDriver(undefined);
 
 function providerRuntimeMode(
   runtimeMode: RuntimeMode,
@@ -185,9 +197,13 @@ export const layerFromProjectStore: Layer.Layer<
             ),
           ));
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-          runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
-          interactionMode: input.thread.interactionMode,
           cwd,
+          // KODO: mode-resolver - over the provider-supported mode.
+          ...kodoRuntimePolicyOverlay({
+            interactionMode: input.thread.interactionMode,
+            driver: instance?.driverKind,
+            runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
+          }),
           ...(maxRuntimeMode === undefined ? {} : { maxRuntimeMode }),
         });
       }),

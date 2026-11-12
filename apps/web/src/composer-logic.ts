@@ -15,10 +15,13 @@ import {
   type ComposerPromptSegment,
 } from "./composer-editor-mentions";
 
+// KODO: mode-slash-type
+import type { KodoModeSlashCommand } from "./kodo/interactionModes.logic";
 import { resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
 
 export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
-export type ComposerSlashCommand = "model" | "side" | "btw" | "clear";
+// KODO: mode-slash-type
+export type ComposerSlashCommand = "model" | "side" | "btw" | "clear" | KodoModeSlashCommand;
 export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
 export interface ComposerTrigger {

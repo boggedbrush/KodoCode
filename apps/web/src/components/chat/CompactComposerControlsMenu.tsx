@@ -1,11 +1,13 @@
-import type { RuntimeMode } from "@t3tools/contracts";
+import type { KodoInteractionMode, RuntimeMode, ThreadInteractionMode } from "@t3tools/contracts";
 import { memo, useRef } from "react";
 import { EllipsisIcon } from "lucide-react";
-import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
+import { Menu, MenuPopup, MenuSeparator, MenuTrigger } from "../ui/menu";
 import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
 import { focusRequestedPermission, useComposerMenuProps } from "./composerEventScope";
 import { useComposerMenuState } from "./useComposerMenuState";
 import { ComposerPermissionsSection, type RuntimeModeOption } from "./ComposerFooterControls";
+// KODO: compact-menu-mode
+import { KodoInteractionModeSection } from "./KodoInteractionModePicker";
 
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   runtimeMode: RuntimeMode;
@@ -15,6 +17,10 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
   /** Close the portaled popup when its trigger hides. */
   hidden?: boolean;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
+  // KODO: compact-menu-mode
+  showInteractionMode: boolean;
+  interactionMode: KodoInteractionMode;
+  onInteractionModeChange: (mode: ThreadInteractionMode) => void;
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const size = props.size ?? "sm";
@@ -41,6 +47,16 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
         <ComposerControlIcon icon={EllipsisIcon} size={size} />
       </MenuTrigger>
       <MenuPopup align="start" {...composerFloatingLayerProps}>
+        {/* KODO: compact-menu-mode */}
+        {props.showInteractionMode ? (
+          <>
+            <KodoInteractionModeSection
+              interactionMode={props.interactionMode}
+              onInteractionModeChange={props.onInteractionModeChange}
+            />
+            {props.showPermissions ? <MenuSeparator /> : null}
+          </>
+        ) : null}
         {props.showPermissions ? (
           <ComposerPermissionsSection
             runtimeMode={props.runtimeMode}

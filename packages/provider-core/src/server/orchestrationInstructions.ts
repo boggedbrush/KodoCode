@@ -69,6 +69,11 @@ Investigate with read-only actions and do not edit files or otherwise execute th
 
 export interface T3AcpInstructionState {
   readonly interactionMode: ProviderInteractionMode;
+  /**
+   * KODO: mode-instructions - the user's text already carries a Kodo mode block (Ask, Review, or
+   * Plan on a provider without a plan mode), which replaces the default-mode paragraph.
+   */
+  readonly kodoModeBlock?: boolean;
   readonly hasT3Mcp: boolean;
   readonly hasDeviceTools: boolean;
 }
@@ -83,15 +88,18 @@ export function t3AcpPromptWithInstructions(input: {
   if (input.prompt.trimStart().startsWith("/")) return input.prompt;
   if (
     input.previousState?.interactionMode === input.state.interactionMode &&
+    input.previousState.kodoModeBlock === input.state.kodoModeBlock &&
     input.previousState.hasT3Mcp === input.state.hasT3Mcp &&
     input.previousState.hasDeviceTools === input.state.hasDeviceTools
   ) {
     return input.prompt;
   }
   const instructions = [
-    input.state.interactionMode === "plan"
-      ? T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS
-      : T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS,
+    ...(input.state.interactionMode === "plan"
+      ? [T3_CODE_ACP_PLAN_MODE_INSTRUCTIONS]
+      : input.state.kodoModeBlock === true // KODO: mode-instructions
+        ? []
+        : [T3_CODE_ACP_DEFAULT_MODE_INSTRUCTIONS]),
     ...(input.state.hasT3Mcp
       ? [
           T3_CODE_BROWSER_TOOL_INSTRUCTIONS.trim(),

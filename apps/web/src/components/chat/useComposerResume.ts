@@ -1,6 +1,6 @@
 import {
   type EnvironmentId,
-  type ProviderInteractionMode,
+  type ThreadInteractionMode,
   type RunId,
   type RuntimeMode,
 } from "@t3tools/contracts";
@@ -13,7 +13,6 @@ import {
 import { useState } from "react";
 import { newMessageId } from "~/lib/utils";
 import type { ComposerHandleRef } from "../../composerHandleContext";
-import { DEFAULT_INTERACTION_MODE } from "../../types";
 import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import type { makeThreadErrorSetter } from "../ChatView.logic";
@@ -40,8 +39,10 @@ interface ComposerResumeInput {
     createdAt: string;
     branch?: string;
     runtimeMode: RuntimeMode;
-    interactionMode: ProviderInteractionMode;
+    interactionMode: ThreadInteractionMode;
   }) => Promise<AtomCommandResult<void, unknown>>;
+  // KODO: send-mode
+  readonly interactionMode: ThreadInteractionMode;
   readonly clearUsageLimitsFor: ReturnType<typeof useUsageLimitsPanel>["clearFor"];
   readonly scrollToEnd: ReturnType<typeof useTimelineFollow>["scrollToEnd"];
   readonly setThreadError: ReturnType<typeof makeThreadErrorSetter>;
@@ -67,6 +68,7 @@ export function useComposerResume(input: ComposerResumeInput) {
     localCheckoutBranchMismatch,
     composerRef,
     persistThreadSettingsForNextTurn,
+    interactionMode,
     clearUsageLimitsFor,
     scrollToEnd,
     setThreadError,
@@ -116,7 +118,7 @@ export function useComposerResume(input: ComposerResumeInput) {
           ? { branch: localCheckoutBranchMismatch.currentBranch }
           : {}),
         runtimeMode,
-        interactionMode: DEFAULT_INTERACTION_MODE,
+        interactionMode, // KODO: send-mode
       });
       if (settingsResult._tag === "Failure") return settingsResult;
       const turnResult = await startThreadTurn({
@@ -132,7 +134,7 @@ export function useComposerResume(input: ComposerResumeInput) {
             attachments: [],
           },
           runtimeMode,
-          interactionMode: DEFAULT_INTERACTION_MODE,
+          interactionMode, // KODO: send-mode
           dispatchMode: "start",
         },
       });

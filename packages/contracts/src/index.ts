@@ -21,6 +21,8 @@ export * from "./providerRuntime.ts";
 export * from "./providerUsageLimits.ts";
 export * from "./usageLimitSourceId.ts";
 export * from "./providerPolicy.ts";
+export * from "./kodoInteractionMode.ts"; // KODO: thread-mode-type
+export * from "./kodoPromptEnhance.ts"; // KODO: prompt-enhance-contract
 export * from "./modelSelection.ts";
 export * from "./chatAttachment.ts";
 export * from "./checkpointDiff.ts";

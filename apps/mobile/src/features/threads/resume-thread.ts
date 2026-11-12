@@ -1,6 +1,6 @@
+// KODO: thread-mode-type
 import type {
   ResumeThreadQueueInput,
-  SetThreadInteractionModeInput,
   SetThreadRuntimeModeInput,
   StartThreadTurnInput,
 } from "@t3tools/client-runtime/operations";
@@ -9,7 +9,7 @@ import type {
   EnvironmentId,
   MessageId,
   ModelSelection,
-  ProviderInteractionMode,
+  ThreadInteractionMode,
   RunId,
   RuntimeMode,
   ThreadId,
@@ -26,21 +26,19 @@ export async function resumeThread<E>(input: {
     readonly environmentId: EnvironmentId;
     readonly id: ThreadId;
     readonly runtimeMode: RuntimeMode;
-    readonly interactionMode: ProviderInteractionMode;
+    readonly interactionMode: ThreadInteractionMode;
   };
   readonly resumableRunId: RunId | null;
   readonly queueHeld: boolean;
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
   readonly modelSelection: ModelSelection | null;
   readonly messageId: MessageId;
   readonly createdAt: string;
   readonly setRuntimeMode: Command<SetThreadRuntimeModeInput, E>;
-  readonly setInteractionMode: Command<SetThreadInteractionModeInput, E>;
   readonly startTurn: Command<StartThreadTurnInput, E>;
   readonly resumeQueue: Command<ResumeThreadQueueInput, E>;
 }): Promise<AtomCommandResult<unknown, E>> {
-  const { thread, runtimeMode, interactionMode, createdAt } = input;
+  const { thread, runtimeMode, createdAt } = input;
   const environmentId = thread.environmentId;
   // The server holds the queue behind a stopped or usage-limited run until that run is continued.
   if (input.resumableRunId !== null) {
@@ -52,13 +50,7 @@ export async function resumeThread<E>(input: {
       });
       if (saved._tag === "Failure") return saved;
     }
-    if (interactionMode !== thread.interactionMode) {
-      const saved = await input.setInteractionMode({
-        environmentId,
-        input: { threadId: thread.id, interactionMode, createdAt },
-      });
-      if (saved._tag === "Failure") return saved;
-    }
+    // KODO: mode-preserve - mobile has no mode picker, so resuming never changes the thread's mode.
     const continued = await input.startTurn({
       environmentId,
       input: {
@@ -73,7 +65,7 @@ export async function resumeThread<E>(input: {
           attachments: [],
         },
         runtimeMode,
-        interactionMode,
+        interactionMode: thread.interactionMode, // KODO: mode-preserve
         dispatchMode: "start",
       },
     });

@@ -9,6 +9,8 @@ export interface AcpRuntimePolicy {
   readonly cwd: string | null;
   readonly approvalPolicy?: unknown;
   readonly sandboxPolicy?: unknown;
+  /** KODO: mode-read-only-acp - the thread's Kodo mode (Ask, Plan, Review) may not modify the workspace. */
+  readonly modeReadOnly?: boolean | undefined;
 }
 
 export type AcpPermissionDisposition = "allow" | "ask" | "deny";
@@ -149,7 +151,9 @@ function acpOperationDisposition(
     return acpReadDisposition(runtimePolicy);
   }
   if (acpPolicyRequiresApproval(runtimePolicy)) {
-    return "ask";
+    // KODO: mode-read-only-acp - a read-only Kodo mode with approvals on (Review) denies edits
+    // outright and leaves the rest, shell included, on user approval.
+    return runtimePolicy.modeReadOnly === true && isAcpMutationKind(toolKind) ? "deny" : "ask";
   }
 
   const sandboxPolicy = unknownRecord(runtimePolicy.sandboxPolicy);

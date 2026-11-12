@@ -22,6 +22,11 @@ import {
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 
 import type { ComposerTrigger } from "../../composer-logic";
+// KODO: mode-slash-items
+import {
+  KODO_MODE_SLASH_COMMAND_ITEMS,
+  isKodoModeSlashCommand,
+} from "../../kodo/interactionModes.logic";
 import type { DraftId } from "../../composerDraftStore";
 import { basenameOfPath } from "../../pierre-icons";
 import {
@@ -238,6 +243,12 @@ export function useComposerMenuItems({
           label: "/model",
           description: "Switch response model for this thread",
         },
+        // KODO: mode-slash-items
+        ...KODO_MODE_SLASH_COMMAND_ITEMS.map((item) => ({
+          id: `slash:mode:${item.command}`,
+          type: "slash-command" as const,
+          ...item,
+        })),
         ...(sideChatAvailable
           ? ([
               {
@@ -299,7 +310,9 @@ export function useComposerMenuItems({
       const visibleProviderSlashCommandItems = providerSlashCommandItems.filter(
         (item) =>
           (item.command.name !== "compact" || compactSlashCommandAvailable) &&
-          (item.command.name !== "clear" || !freshSessionAvailable),
+          (item.command.name !== "clear" || !freshSessionAvailable) &&
+          // KODO: mode-slash-items (a mode command wins over a provider command of the same name)
+          !isKodoModeSlashCommand(item.command.name),
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
         [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],

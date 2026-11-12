@@ -1,10 +1,12 @@
+// KODO: thread-mode-type
+import { kodoInteractionModeRank } from "../kodo/interactionMode.ts"; // KODO: mode-rank
 import type { ProjectionRecordField } from "../orchestration-v2/ProjectionStore.ts";
 import {
   CommandId,
   OrchestratorMcpFailure,
   type ProjectId,
   type ProviderInstanceId,
-  type ProviderInteractionMode,
+  type ThreadInteractionMode,
   type RuntimeMode,
   ThreadId,
   type OrchestrationV2ThreadShell,
@@ -63,7 +65,7 @@ export const dispatchFailure = (
 
 export interface CallerLimits {
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
+  readonly interactionMode: ThreadInteractionMode;
 }
 
 export interface Caller {
@@ -114,7 +116,7 @@ export const loadCaller = Effect.fn("mcp.loadCaller")(function* () {
 
 export const assertTargetWithinLimits = (
   limits: CallerLimits,
-  target: { readonly runtimeMode: RuntimeMode; readonly interactionMode: ProviderInteractionMode },
+  target: { readonly runtimeMode: RuntimeMode; readonly interactionMode: ThreadInteractionMode },
 ) =>
   resolveRuntimeMode(limits.runtimeMode, target.runtimeMode).pipe(
     Effect.andThen(resolveInteractionMode(limits.interactionMode, target.interactionMode)),
@@ -152,7 +154,9 @@ export function assertLiveCaller({ caller, scope }: Caller) {
 }
 
 export const assertFullAccess = (context: Caller, message: string) =>
-  context.limits.runtimeMode === "full-access" && context.limits.interactionMode === "default"
+  context.limits.runtimeMode === "full-access" &&
+  // KODO: mode-rank - code threads store "code"; a legacy "default" reads as code too.
+  kodoInteractionModeRank(context.limits.interactionMode) === 1
     ? Effect.void
     : Effect.fail(new OrchestratorMcpFailure({ code: "capability_denied", message }));
 

@@ -9,6 +9,7 @@
     "thread-titles": "node --env-file-if-exists=../.env thread-titles/run.ts",
     "pr-content": "node --env-file-if-exists=../.env pr-content/run.ts",
     "voice-cleanup": "node --env-file-if-exists=../.env voice-cleanup/run.ts",
+    "prompt-enhance": "node --env-file-if-exists=../.env prompt-enhance/run.ts",
     "test-signal": "node --env-file-if-exists=../.env test-signal/run.ts",
     "typecheck": "effect-tsgo tsrs --noEmit",
     "test": "vp test run --config ../vite.config.ts --dir ."

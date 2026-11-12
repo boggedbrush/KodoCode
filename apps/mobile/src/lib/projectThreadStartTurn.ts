@@ -1,3 +1,4 @@
+// KODO: thread-mode-type
 import {
   CommandId,
   MessageId,
@@ -6,7 +7,7 @@ import {
   type ModelSelection,
   type OrchestrationMessageContext,
   type ProjectId,
-  type ProviderInteractionMode,
+  type ThreadInteractionMode,
   type RuntimeMode,
 } from "@t3tools/contracts";
 import {
@@ -29,7 +30,7 @@ export interface ProjectThreadStartTurnSpec {
   readonly uploadedAttachments: ReadonlyArray<UploadedMobileAttachment | ChatAttachment>;
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
+  readonly interactionMode: ThreadInteractionMode;
   readonly workspaceMode: "local" | "worktree";
   readonly branch: string | null;
   readonly worktreePath: string | null;

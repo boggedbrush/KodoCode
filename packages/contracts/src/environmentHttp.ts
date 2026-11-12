@@ -65,6 +65,12 @@ import {
   EnvironmentSpeechStatus,
   EnvironmentSpeechTranscriptionResult,
 } from "./speech.ts";
+// KODO: prompt-enhance-http - the Enhance endpoint
+import {
+  KodoPromptEnhanceError,
+  KodoPromptEnhanceRequest,
+  KodoPromptEnhanceResult,
+} from "./kodoPromptEnhance.ts";
 import { SecretReference } from "./secretReference.ts";
 import {
   OrchestrationV2ShellSnapshot,
@@ -932,6 +938,16 @@ export class EnvironmentVoiceHttpApi extends HttpApiGroup.make("voice")
     }).middleware(EnvironmentAuthenticatedAuth),
   ) {}
 
+// KODO: prompt-enhance-http - rewrites a draft prompt; it starts no turn and reads no workspace
+export class EnvironmentKodoPromptEnhanceHttpApi extends HttpApiGroup.make("kodoPromptEnhance").add(
+  HttpApiEndpoint.post("enhance", "/api/kodo/prompt-enhance", {
+    headers: OptionalBearerHeaders,
+    payload: KodoPromptEnhanceRequest,
+    success: KodoPromptEnhanceResult,
+    error: [KodoPromptEnhanceError, ...EnvironmentScopedOperationErrors],
+  }).middleware(EnvironmentAuthenticatedAuth),
+) {}
+
 class EnvironmentConnectHttpApi extends HttpApiGroup.make("connect")
   .add(
     HttpApiEndpoint.post("linkProof", "/api/connect/link-proof", {
@@ -1021,5 +1037,6 @@ export class EnvironmentHttpApi extends HttpApi.make("environment")
   .add(EnvironmentPullRequestsHttpApi)
   .add(EnvironmentProjectsHttpApi)
   .add(EnvironmentVoiceHttpApi)
+  .add(EnvironmentKodoPromptEnhanceHttpApi) // KODO: prompt-enhance-http
   .add(EnvironmentConnectHttpApi)
   .add(EnvironmentWebhooksHttpApi) {}

@@ -390,10 +390,6 @@ function ThreadRouteContent(
     label: "set thread runtime mode",
     reportFailure: false,
   });
-  const setThreadInteractionMode = useAtomCommand(threadEnvironment.setInteractionMode, {
-    label: "set thread interaction mode",
-    reportFailure: false,
-  });
   const loadEarlierHistory = useAtomCommand(threadEnvironment.loadEarlierHistory, {
     label: "load earlier thread history",
     reportFailure: false,
@@ -663,12 +659,11 @@ function ThreadRouteContent(
       resumableRunId: composer.resumableRunId,
       queueHeld: composer.queueHeld,
       runtimeMode: composer.runtimeMode ?? selectedThread.runtimeMode,
-      interactionMode: composer.interactionMode ?? selectedThread.interactionMode,
+      // KODO: mode-preserve - resuming never changes the thread's interaction mode.
       modelSelection: composer.modelSelection,
       messageId: MessageId.make(uuidv4()),
       createdAt: new Date().toISOString(),
       setRuntimeMode: setThreadRuntimeMode,
-      setInteractionMode: setThreadInteractionMode,
       startTurn: continueThreadRun,
       resumeQueue: resumeThreadQueue,
     });

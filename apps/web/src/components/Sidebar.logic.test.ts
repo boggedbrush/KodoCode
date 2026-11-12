@@ -471,6 +471,22 @@ describe("resolveThreadStatusPill", () => {
     ).toMatchObject({ label: "Plan Ready", pulse: false });
   });
 
+  it.each(["default", "code", "ask", "review"] as const)(
+    "does not show plan ready for a plan left in %s mode",
+    (interactionMode) => {
+      const pill = resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode,
+          hasActionableProposedPlan: true,
+          latestRun: makeLatestRun(),
+          runtime: { ...baseThread.runtime, status: "completed", activeRunId: null },
+        },
+      });
+      expect(pill?.label).not.toBe("Plan Ready");
+    },
+  );
+
   it("does not manufacture completed state without a client visit marker", () => {
     expect(
       resolveThreadStatusPill({

@@ -143,6 +143,10 @@
       "types": "./src/voice-input/index.ts",
       "default": "./src/voice-input/index.ts"
     },
+    "./kodoPromptEnhance": {
+      "types": "./src/kodoPromptEnhance.ts",
+      "default": "./src/kodoPromptEnhance.ts"
+    },
     "./t3ToolSummary": {
       "types": "./src/t3ToolSummary.ts",
       "default": "./src/t3ToolSummary.ts"

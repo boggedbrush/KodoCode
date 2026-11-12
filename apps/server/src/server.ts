@@ -45,6 +45,7 @@ import * as SpeechModelStore from "./speech/SpeechModelStore.ts";
 import * as SpeechService from "./speech/SpeechService.ts";
 import * as CloudSpeech from "./speech/CloudSpeech.ts";
 import { speechHttpApiLayer } from "./speech/http.ts";
+import { promptEnhanceHttpApiLayer } from "./kodo/promptEnhanceHttp.ts"; // KODO: prompt-enhance-http
 import { speechStreamRouteLayer } from "./speech/stream.ts";
 import * as PullRequestProviderRegistry from "./pullRequest/PullRequestProviderRegistry.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
@@ -788,6 +789,7 @@ const layerMakeRoutes = Layer.mergeAll(
       Layer.provide(PullRequestHttp.layer),
       Layer.provide(ProjectHttp.layer),
       Layer.provide(speechHttpApiLayer),
+      Layer.provide(promptEnhanceHttpApiLayer), // KODO: prompt-enhance-http
       Layer.provide(ServerHttp.layerServerEnvironmentHttpApi),
       Layer.provide(WebhookRoute.layer.pipe(Layer.provide(RelayDeliveryProof.layer))),
       Layer.provide(AuthHttp.layerAuthenticatedAuth),

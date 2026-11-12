@@ -12,6 +12,11 @@ import {
   usageLimitBlockedRun,
 } from "@t3tools/shared/orchestrationV2ThreadError";
 import { canonicalizeGitCafePullRequestUrl } from "@t3tools/source-control-definitions/registry";
+import {
+  KODO_MODE_DETACH_REASON,
+  kodoModeSwitchDetachSessionIds,
+} from "../kodo/interactionMode.ts"; // KODO: mode-session-restart
+import { kodoRunModeSnapshot } from "../kodo/interactionMode.ts"; // KODO: run-mode-snapshot
 import { threadPullRequestsOf } from "../sourceControl/threadPullRequests.ts";
 import {
   normalizeThreadPullRequestKey,
@@ -64,7 +69,7 @@ import {
   orchestrationV2RunWorkStartedAt,
   orchestrationV2WorktreePending,
   ProviderInstanceId,
-  ProviderInteractionMode,
+  ThreadInteractionMode,
   isRuntimeModeAbove,
   resolveProviderInstanceEnabled,
   resolveProjectProviderInstanceEnabled,
@@ -284,7 +289,7 @@ export class OrchestratorThreadAboveModeLimitError extends Schema.TaggedError<Or
     threadId: ThreadId,
     mode: Schema.Literals(["runtime", "interaction"]),
     runtimeMode: RuntimeMode,
-    interactionMode: ProviderInteractionMode,
+    interactionMode: ThreadInteractionMode,
   },
 ) {
   override get message(): string {
@@ -3813,6 +3818,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     const needsProviderState =
       command.type === "thread.runtime-mode.set" ||
+      command.type === "thread.interaction-mode.set" || // KODO: mode-session-restart
       command.type === "thread.model-selection.set" ||
       command.type === "provider.switch" ||
       command.type === "thread.archive" ||
@@ -4617,6 +4623,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     // Archive and settle stop idle background work; serialized commands prevent starts racing detach.
     // Settlement rejects active or blocked runs.
+    // KODO: mode-session-restart
+    const modeSwitchRunActive =
+      command.type === "thread.interaction-mode.set"
+        ? (yield* loadProjectionForCommand(command, ["runs"], { turnItemTypes: [] })).runs.some(
+            isActiveRun,
+          )
+        : false;
     const detachSessionIds = new Set(
       command.type === "thread.archive" || command.type === "thread.settle"
         ? (providerContext?.providerSessions ?? []).map((session) => session.id)
@@ -4630,7 +4643,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                   (session) => !session.capabilities.sessions.supportsRuntimeModeSwitchInSession,
                 )
                 .map((session) => session.id)
-            : (providerSwitchPlan?.releaseProviderSessionIds ?? []),
+            : command.type === "thread.interaction-mode.set"
+              ? // KODO: mode-session-restart - a mode with a different effective policy reaches sessions that cannot
+                // take it in place only through a restart.
+                kodoModeSwitchDetachSessionIds({
+                  runtimeMode: thread.runtimeMode,
+                  from: thread.interactionMode,
+                  to: command.interactionMode,
+                  // A running turn is never interrupted: its sessions keep the policy they started with.
+                  sessions: modeSwitchRunActive ? [] : (providerContext?.providerSessions ?? []),
+                })
+              : (providerSwitchPlan?.releaseProviderSessionIds ?? []),
     );
     if (detachSessionIds.size > 0) {
       const liveSessions = (providerContext?.providerSessions ?? []).filter(
@@ -4664,7 +4687,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                         ? "Workspace changed."
                         : command.type === "thread.runtime-mode.set"
                           ? "Runtime mode changed."
-                          : "Provider or model selection changed.",
+                          : command.type === "thread.interaction-mode.set"
+                            ? KODO_MODE_DETACH_REASON // KODO: mode-session-restart
+                            : "Provider or model selection changed.",
               },
             });
             const pendingEffect = {
@@ -4683,7 +4708,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
                         ? "Workspace changed."
                         : command.type === "thread.runtime-mode.set"
                           ? "Runtime mode changed."
-                          : "Provider or model selection changed.",
+                          : command.type === "thread.interaction-mode.set"
+                            ? KODO_MODE_DETACH_REASON // KODO: mode-session-restart
+                            : "Provider or model selection changed.",
                 // Terminal detaches revoke MCP credentials; reattachments need other detach reasons to preserve them.
                 ...(command.type === "thread.archive" ? { revokeMcpCredential: true } : {}),
               },
@@ -4816,7 +4843,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       threadId: ThreadId,
       modes: {
         readonly runtimeMode: RuntimeMode;
-        readonly interactionMode: ProviderInteractionMode;
+        readonly interactionMode: ThreadInteractionMode;
       },
     ) {
       const limit = narrowToCeiling(yield* DispatchModeLimit, runtimeModeCeiling);
@@ -6618,6 +6645,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         modelSelection,
         providerThreadId: queuedProviderThread.id,
         userMessageId: command.messageId,
+        ...kodoRunModeSnapshot(projection.thread.interactionMode), // KODO: run-mode-snapshot
         rootNodeId,
         activeAttemptId: attemptId,
         status: "queued",
@@ -7016,6 +7044,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         modelSelection,
         providerThreadId,
         userMessageId: command.messageId,
+        ...kodoRunModeSnapshot(projection.thread.interactionMode), // KODO: run-mode-snapshot
         rootNodeId,
         activeAttemptId: attemptId,
         status: dispatchMode.type === "defer_start" ? "preparing" : "starting",
@@ -7800,6 +7829,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       modelSelection,
       providerThreadId: providerThread.id,
       userMessageId: command.messageId,
+      ...kodoRunModeSnapshot(projection.thread.interactionMode), // KODO: run-mode-snapshot
       rootNodeId,
       activeAttemptId: attemptId,
       status: "starting",

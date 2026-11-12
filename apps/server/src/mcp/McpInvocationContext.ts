@@ -1,3 +1,4 @@
+import { kodoInteractionModeRank } from "../kodo/interactionMode.ts"; // KODO: mode-rank
 import {
   type AuthMcpClientAccess,
   type EnvironmentId,
@@ -5,7 +6,7 @@ import {
   OrchestratorMcpFailure,
   PreviewAutomationUnavailableError,
   type ProviderInstanceId,
-  type ProviderInteractionMode,
+  type ThreadInteractionMode,
   type RuntimeMode,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -59,7 +60,7 @@ export const MODE_LIMIT_HEADER = "t3-mode-limit";
 
 export interface ClientModes {
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
+  readonly interactionMode: ThreadInteractionMode;
 }
 
 const runtimeModeRank: Record<RuntimeMode, number> = {
@@ -68,7 +69,6 @@ const runtimeModeRank: Record<RuntimeMode, number> = {
   auto: 2,
   "full-access": 3,
 };
-const interactionModeRank: Record<ProviderInteractionMode, number> = { plan: 0, default: 1 };
 
 /**
  * The modes a client caller's writes are capped at: what it was approved
@@ -90,7 +90,8 @@ export const clientModeCeiling = (client: McpClientCaller | undefined): ClientMo
         ? asked.runtimeMode
         : approved.runtimeMode,
     interactionMode:
-      interactionModeRank[asked.interactionMode] < interactionModeRank[approved.interactionMode]
+      kodoInteractionModeRank(asked.interactionMode) <
+      kodoInteractionModeRank(approved.interactionMode)
         ? asked.interactionMode
         : approved.interactionMode,
   };

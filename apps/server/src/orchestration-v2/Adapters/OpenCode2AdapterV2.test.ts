@@ -44,8 +44,10 @@ import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeI
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import {
+  grantsFor,
   OPENCODE_2_STILL_STOPPING,
   OPENCODE_PROVIDER,
+  sessionRules,
   t3McpServerName,
 } from "@t3tools/provider-opencode/testing";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
@@ -6842,3 +6844,47 @@ const providerTurnId = Effect.gen(function* () {
     nativeTurnId: `${SESSION}:attempt:attempt:opencode2-adapter`,
   });
 }).pipe(Effect.provide(IdAllocator.layer));
+
+// KODO: mode-read-only-opencode - Kodo's modes over OpenCode v2's session rules (last match wins).
+it("denies edits and shell last in Ask and Plan, so no grant or agent path rule re-allows them", () => {
+  const effectOf = (rules: ReturnType<typeof sessionRules>, action: string) =>
+    rules.findLast((rule) => rule.action === action || rule.action === "*")?.effect;
+  const grants = [
+    { action: "shell", resource: "git commit*", effect: "allow" as const },
+    { action: "edit", resource: "*", effect: "allow" as const },
+  ];
+  const planPaths = [{ action: "edit", resource: ".opencode/plans/*", effect: "allow" as const }];
+  for (const runtimeMode of ["approval-required", "full-access"] as const) {
+    for (const interactionMode of ["default", "plan"] as const) {
+      const rules = sessionRules(
+        { runtimeMode, interactionMode, approvalPolicy: "never", modeReadOnly: true },
+        planPaths,
+        [],
+        null,
+      );
+      assert.equal(effectOf(rules, "edit"), "deny");
+      assert.equal(effectOf(rules, "shell"), "deny");
+    }
+  }
+  // Review leaves shell on user approval and still denies edits.
+  const review = sessionRules(
+    { runtimeMode: "approval-required", interactionMode: "default", modeReadOnly: true },
+    planPaths,
+    [],
+    null,
+  );
+  assert.equal(effectOf(review, "edit"), "deny");
+  assert.equal(effectOf(review, "shell"), "ask");
+  // Saved "always allow" grants made in Code are dropped in a read-only mode, and kept in Code.
+  const readOnlyPolicy = {
+    runtimeMode: "approval-required",
+    interactionMode: "default",
+    modeReadOnly: true,
+  } as const;
+  const codePolicy = { runtimeMode: "approval-required", interactionMode: "default" } as const;
+  assert.deepEqual(grantsFor(readOnlyPolicy, grants), []);
+  assert.deepEqual(grantsFor(codePolicy, grants), grants);
+  const code = sessionRules(codePolicy, [], grantsFor(codePolicy, grants), null);
+  assert.equal(effectOf(code, "edit"), "allow");
+  assert.equal(effectOf(code, "shell"), "allow");
+});

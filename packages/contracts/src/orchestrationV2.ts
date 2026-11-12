@@ -69,13 +69,13 @@ import {
   ProviderApprovalDecision,
   ProviderApprovalFullAccessOverride,
   ProviderApprovalOption,
-  ProviderInteractionMode,
   ProviderRequestKind,
   ProviderUserInputAnswers,
   UserInputAttachments,
   UserInputAttachmentAnswerPayload,
   RuntimeMode,
 } from "./providerPolicy.ts";
+import { ThreadInteractionMode } from "./kodoInteractionMode.ts"; // KODO: thread-mode-type
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 import {
@@ -450,7 +450,7 @@ export const OrchestrationV2AppThread = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
-  interactionMode: ProviderInteractionMode,
+  interactionMode: ThreadInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -716,6 +716,11 @@ export const OrchestrationV2Run = Schema.Struct({
   workspacePreparation: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),
   /** Starts a new provider conversation; earlier runs stay visible but never reach the provider. */
   freshContext: Schema.optional(Schema.Boolean),
+  /**
+   * KODO: run-mode-snapshot - the thread's Kodo mode when the run was created. A run never starts
+   * with more write access than this; absent on runs from before it existed.
+   */
+  interactionMode: Schema.optional(ThreadInteractionMode),
 });
 export type OrchestrationV2Run = typeof OrchestrationV2Run.Type;
 
@@ -2106,7 +2111,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
-  interactionMode: ProviderInteractionMode,
+  interactionMode: ThreadInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -2952,7 +2957,7 @@ export const OrchestrationV2Command = Schema.Union([
     title: TrimmedNonEmptyString,
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
-    interactionMode: ProviderInteractionMode,
+    interactionMode: ThreadInteractionMode,
     branch: Schema.NullOr(TrimmedNonEmptyString),
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
     /** Only the server sets this; a client's thread.create never carries one. */
@@ -3168,7 +3173,7 @@ export const OrchestrationV2Command = Schema.Union([
     type: Schema.Literal("thread.interaction-mode.set"),
     commandId: CommandId,
     threadId: ThreadId,
-    interactionMode: ProviderInteractionMode,
+    interactionMode: ThreadInteractionMode,
   }),
   Schema.Struct({
     type: Schema.Literal("thread.model-selection.set"),
@@ -3369,7 +3374,7 @@ export const OrchestrationV2Command = Schema.Union([
     title: Schema.optional(TrimmedNonEmptyString),
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
-    interactionMode: ProviderInteractionMode,
+    interactionMode: ThreadInteractionMode,
     workspaceStrategy: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),
     // Defaults to settled_only; fire-and-forget wakes require always.
     completionWake: Schema.optional(Schema.Literals(["always", "settled_only"])),
@@ -3695,7 +3700,7 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   generateTitle: Schema.optional(Schema.Boolean),
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
-  interactionMode: ProviderInteractionMode,
+  interactionMode: ThreadInteractionMode,
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
   initialMessage: Schema.optional(
     Schema.Struct({

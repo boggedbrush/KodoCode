@@ -41,12 +41,13 @@ const testState = vi.hoisted(() => {
             threadId: "thread-open",
             createdAt: "2026-01-01T00:00:00.000Z",
             runtimeMode: "full-access",
-            interactionMode: "default",
+            interactionMode: "ask",
           },
     ),
     getDraftThread: vi.fn(() => null),
     applyStickyState: vi.fn(),
     setDraftThreadContext: vi.fn(),
+    setInteractionMode: vi.fn(),
     setLogicalProjectDraftThreadId: vi.fn(),
     setModelSelection: vi.fn(),
     setPrompt: vi.fn(),
@@ -105,6 +106,7 @@ const testState = vi.hoisted(() => {
       router.state.location.href = "/";
       router.navigate.mockClear();
       draftStore.setDraftThreadContext.mockClear();
+      draftStore.setInteractionMode.mockClear();
       draftStore.setLogicalProjectDraftThreadId.mockClear();
       draftStore.setPrompt.mockClear();
       projectFileRead = new Promise<null>((resolve) => {
@@ -151,6 +153,7 @@ vi.mock("@t3tools/client-runtime/environment", () => ({
   scopeThreadRef: (environmentId: string, threadId: string) => ({ environmentId, threadId }),
 }));
 vi.mock("@t3tools/contracts", () => ({
+  DEFAULT_KODO_INTERACTION_MODE: "code",
   DEFAULT_RUNTIME_MODE: "default",
   DEFAULT_SERVER_SETTINGS: {},
 }));
@@ -354,6 +357,82 @@ describe("useNewThreadHandler", () => {
       "draft-open",
       "Read the playbook. ",
     );
+  });
+
+  it("starts a reused empty draft in Code, clearing the mode it was left in", async () => {
+    testState.reset({
+      draftId: "draft-existing",
+      environmentId: "environment-ssh",
+      promotedTo: null,
+      threadId: "thread-existing",
+    });
+    const pendingOpen = useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+    testState.completeProjectFileRead(null);
+    await pendingOpen;
+
+    expect(testState.draftStore.setInteractionMode).toHaveBeenCalledWith("draft-existing", null);
+    expect(testState.draftStore.setDraftThreadContext).toHaveBeenCalledWith("draft-existing", {
+      interactionMode: "code",
+    });
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "draft-existing",
+      expect.objectContaining({ interactionMode: "code" }),
+    );
+  });
+
+  it("starts the open empty draft in Code even when it was left in Ask", async () => {
+    testState.reset(null);
+    testState.openEmptyDraft("draft-open");
+
+    await useNewThreadHandler()({
+      environmentId: "environment-ssh",
+      projectId: "project-remote",
+    } as never);
+
+    expect(testState.draftStore.setInteractionMode).toHaveBeenCalledWith("draft-open", null);
+    expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      "draft-open",
+      expect.objectContaining({ interactionMode: "code" }),
+    );
+  });
+
+  it("starts a draft that was registered while waiting in Code unless it has text", async () => {
+    const raced = {
+      draftId: "draft-raced",
+      environmentId: "environment-ssh",
+      promotedTo: null,
+      threadId: "thread-raced",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      runtimeMode: "full-access",
+      interactionMode: "review",
+    };
+    for (const hasText of [false, true]) {
+      testState.reset(null);
+      testState.draftStore.getDraftSessionByLogicalProjectKey
+        .mockReturnValueOnce(null)
+        .mockReturnValueOnce(raced as never);
+      if (hasText) testState.giveUserText("draft-raced");
+
+      await useNewThreadHandler()({
+        environmentId: "environment-ssh",
+        projectId: "project-remote",
+      } as never);
+
+      expect(testState.draftStore.setLogicalProjectDraftThreadId).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        "draft-raced",
+        expect.objectContaining({ interactionMode: hasText ? "review" : "code" }),
+      );
+      expect(testState.draftStore.setInteractionMode).toHaveBeenCalledTimes(hasText ? 0 : 1);
+    }
   });
 
   it("opens the draft without waiting on a project file from an offline machine", async () => {

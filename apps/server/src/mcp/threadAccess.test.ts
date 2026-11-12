@@ -6,7 +6,7 @@ import * as Layer from "effect/Layer";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import { liveThreadShell } from "./McpToolAccess.testkit.ts";
-import { readThread } from "./threadAccess.ts";
+import { assertFullAccess, readThread } from "./threadAccess.ts";
 
 const bareId = ThreadId.make("5d0b4a3e-8c1f-4a52-9d37-2f6c7e1b9a04");
 const client: McpInvocationContext.McpInvocationScope = {
@@ -37,4 +37,22 @@ it.effect("points a bare uuid at the mcp: thread it belongs to", () =>
     expect(error.code).toBe("thread_not_found");
     expect(error.message).toBe(`The thread was not found. Did you mean \`mcp:${bareId}\`?`);
   }),
+);
+
+// KODO: mode-rank - Code threads store "code"; a legacy "default" reads as code, and only code writes.
+it.effect.each([
+  ["code", "full-access", true],
+  ["default", "full-access", true],
+  ["ask", "full-access", false],
+  ["review", "full-access", false],
+  ["plan", "full-access", false],
+  ["code", "auto", false],
+] as const)("assertFullAccess for a %s thread at %s: allowed %s", ([mode, runtimeMode, allowed]) =>
+  assertFullAccess(
+    { limits: { runtimeMode, interactionMode: mode } } as Parameters<typeof assertFullAccess>[0],
+    "denied",
+  ).pipe(
+    Effect.exit,
+    Effect.map((exit) => expect(exit._tag === "Success").toBe(allowed)),
+  ),
 );

@@ -23,7 +23,7 @@ import {
   type ModelSelection,
   type PreviewAnnotationPayload,
   type ThreadId,
-  ProviderInteractionMode,
+  ThreadInteractionMode,
   RuntimeMode,
 } from "@t3tools/contracts";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
@@ -56,7 +56,9 @@ import {
   type ComposerSubmissionIntent,
   collapseExpandedComposerCursor,
 } from "../../composer-logic";
-import { type ChatMessage, DEFAULT_INTERACTION_MODE } from "../../types";
+import { type ChatMessage } from "../../types";
+// KODO: send-mode
+import { parseKodoModeSlashCommand } from "../../kodo/interactionModes.logic";
 import { recordPromptSent } from "../GitHubStarPrompt";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { newMessageId, newThreadId } from "~/lib/utils";
@@ -238,12 +240,15 @@ interface ComposerSendInput {
   /** Refuses `/side` with this reason and keeps the draft. */
   readonly sideChatDisabledReason: string | null;
   readonly handleNewThreadInActiveProject: () => void;
+  // KODO: send-mode
+  readonly interactionMode: ThreadInteractionMode;
+  readonly handleInteractionModeChange: (mode: ThreadInteractionMode) => void;
   readonly persistThreadSettingsForNextTurn: (input: {
     threadId: ThreadId;
     createdAt: string;
     branch?: string;
     runtimeMode: RuntimeMode;
-    interactionMode: ProviderInteractionMode;
+    interactionMode: ThreadInteractionMode;
   }) => Promise<AtomCommandResult<void, unknown>>;
 }
 
@@ -324,6 +329,8 @@ export function useComposerSend(input: ComposerSendInput) {
     sideChatDisabledReason,
     handleNewThreadInActiveProject,
     persistThreadSettingsForNextTurn,
+    interactionMode,
+    handleInteractionModeChange,
   } = input;
   const linkedEnvironments = useLinkedEnvironments(environmentId);
   const handleNewThread = useNewThreadHandler();
@@ -346,6 +353,8 @@ export function useComposerSend(input: ComposerSendInput) {
     composerRef,
     promptRef,
     runtimeMode,
+    // KODO: send-mode
+    interactionMode,
     startFromOrigin,
     resetLocalDispatch,
     setThreadError,
@@ -387,6 +396,26 @@ export function useComposerSend(input: ComposerSendInput) {
         setComposerDraftPrompt(composerDraftTarget, "");
         composerRef.current?.resetCursorState();
       }
+      return;
+    }
+
+    // KODO: mode-slash-send (a bare /ask, /plan, /code or /review switches mode and is never sent;
+    // an open question still takes the text as its answer)
+    const modeCommand =
+      !directAnnotation &&
+      !queuedRunEdit.isEditing &&
+      !draftHasNonPromptContent(composerDraftTarget) &&
+      !(
+        Boolean(activePendingProgress) &&
+        composerRef.current?.getSendContext()?.answeringPendingUserInput !== false
+      )
+        ? parseKodoModeSlashCommand(promptAtSend)
+        : null;
+    if (modeCommand !== null) {
+      handleInteractionModeChange(modeCommand);
+      promptRef.current = "";
+      setComposerDraftPrompt(composerDraftTarget, "");
+      composerRef.current?.resetCursorState();
       return;
     }
 
@@ -1151,7 +1180,7 @@ export function useComposerSend(input: ComposerSendInput) {
           ? { branch: localCheckoutBranchMismatch.currentBranch }
           : {}),
         runtimeMode,
-        interactionMode: DEFAULT_INTERACTION_MODE,
+        interactionMode, // KODO: send-mode
       });
       if (settingsResult._tag === "Failure") {
         failure = settingsResult;
@@ -1184,7 +1213,7 @@ export function useComposerSend(input: ComposerSendInput) {
           },
           modelSelection: ctxSelectedModelSelection,
           runtimeMode,
-          interactionMode: DEFAULT_INTERACTION_MODE,
+          interactionMode, // KODO: send-mode
         },
       });
       if (compactResult._tag === "Failure") {
@@ -1205,7 +1234,7 @@ export function useComposerSend(input: ComposerSendInput) {
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
-                      interactionMode: DEFAULT_INTERACTION_MODE,
+                      interactionMode, // KODO: send-mode
                       branch: activeThreadBranch,
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
@@ -1247,7 +1276,7 @@ export function useComposerSend(input: ComposerSendInput) {
           modelSelection: ctxSelectedModelSelection,
           titleSeed: title,
           runtimeMode,
-          interactionMode: DEFAULT_INTERACTION_MODE,
+          interactionMode, // KODO: send-mode
           dispatchMode: turnDispatchMode,
           ...(freshArm === undefined ? {} : { freshContext: true }),
           ...(bootstrap ? { bootstrap } : {}),

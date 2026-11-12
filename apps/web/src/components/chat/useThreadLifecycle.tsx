@@ -20,7 +20,7 @@ import {
   type EnvironmentId,
   type ScopedThreadRef,
   type ThreadId,
-  ProviderInteractionMode,
+  ThreadInteractionMode,
   RuntimeMode,
 } from "@t3tools/contracts";
 import {
@@ -46,7 +46,7 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import { useUiStateStore } from "../../uiStateStore";
-import { type ChatMessage, DEFAULT_INTERACTION_MODE } from "../../types";
+import { type ChatMessage } from "../../types";
 import { AlarmClockIcon, CheckCircle2Icon } from "lucide-react";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { newMessageId } from "~/lib/utils";
@@ -129,8 +129,10 @@ interface ThreadLifecycleInput {
     createdAt: string;
     branch?: string;
     runtimeMode: RuntimeMode;
-    interactionMode: ProviderInteractionMode;
+    interactionMode: ThreadInteractionMode;
   }) => Promise<AtomCommandResult<void, unknown>>;
+  // KODO: send-mode
+  readonly interactionMode: ThreadInteractionMode;
 }
 
 /**
@@ -174,6 +176,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
     resetLocalDispatch,
     scrollToEnd,
     persistThreadSettingsForNextTurn,
+    interactionMode,
   } = input;
   const navigate = useNavigate();
   const router = useRouter();
@@ -536,7 +539,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
       createdAt,
       ...(localCheckoutBranchMismatch ? { branch: localCheckoutBranchMismatch.currentBranch } : {}),
       runtimeMode,
-      interactionMode: DEFAULT_INTERACTION_MODE,
+      interactionMode, // KODO: send-mode
     });
     const result =
       settingsResult._tag === "Failure"
@@ -548,7 +551,7 @@ export function useThreadLifecycle(input: ThreadLifecycleInput) {
               message: { messageId, role: "user", text, attachments: [] },
               modelSelection: context.selectedModelSelection,
               runtimeMode,
-              interactionMode: DEFAULT_INTERACTION_MODE,
+              interactionMode, // KODO: send-mode
               createdAt,
             },
           });

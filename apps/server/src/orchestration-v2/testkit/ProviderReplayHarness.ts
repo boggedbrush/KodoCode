@@ -263,11 +263,15 @@ export function layerProviderReplay<Transcript extends ProviderReplayTranscript,
     scenario.transcript,
     options.replayGate === undefined ? {} : { replayGate: options.replayGate },
   );
-  return layerWithRegistry(scenario, layerRegistry, options);
+  // KODO: mode-resolver
+  return layerWithRegistry({ ...scenario, driver: harness.driver }, layerRegistry, options);
 }
 
 export function layerWithRegistry<Error>(
-  scenario: Pick<OrchestratorV2ProviderReplayScenario, "name" | "runtimePolicyOverride">,
+  scenario: Pick<OrchestratorV2ProviderReplayScenario, "name" | "runtimePolicyOverride"> & {
+    /** KODO: mode-resolver - the registry's driver, so read-only modes resolve for it. */
+    readonly driver?: ProviderDriverKind;
+  },
   registryLayer: Layer.Layer<
     ProviderAdapterRegistry.ProviderAdapterRegistryV2,
     Error,
@@ -298,9 +302,9 @@ export function layerWithRegistry<Error>(
   ).pipe(Layer.provide(NodeServices.layer));
   const layerRuntimeBase =
     scenario.runtimePolicyOverride === undefined
-      ? RuntimePolicy.layer
+      ? RuntimePolicy.layerForDriver(scenario.driver) // KODO: mode-resolver
       : RuntimePolicy.layerWithOverride(scenario.runtimePolicyOverride).pipe(
-          Layer.provide(RuntimePolicy.layer),
+          Layer.provide(RuntimePolicy.layerForDriver(scenario.driver)), // KODO: mode-resolver
         );
   const layerDatabase = options.databaseLayer ?? SqlitePersistence.layerMemory;
   // Share one continuation queue across adapters, orchestrator, and worker through layer memoization.

@@ -3111,3 +3111,46 @@ it.live.each([true, false])("opens an authenticated OpenCode session (external=%
     ]),
   ),
 );
+
+// KODO: mode-read-only-opencode - Kodo's Ask and Plan (approvals never) and Review (approvals on) over a readOnly sandbox.
+describe("Kodo read-only modes", () => {
+  const rules = (overrides: Record<string, unknown>) =>
+    openCodePermissionRules({
+      runtimeMode: "approval-required",
+      interactionMode: "default",
+      cwd: "/workspace",
+      sandboxPolicy: { type: "readOnly" },
+      modeReadOnly: true,
+      ...overrides,
+    } as Parameters<typeof openCodePermissionRules>[0]);
+
+  it("denies edit and shell outright while reads and search stay allowed when approvals are never", () => {
+    for (const runtimeMode of ["approval-required", "full-access"] as const) {
+      const ask = rules({ runtimeMode, approvalPolicy: "never" });
+      assert.equal(permissionAction(ask, "edit"), "deny");
+      assert.equal(permissionAction(ask, "bash"), "deny");
+      assert.equal(permissionAction(ask, "webfetch"), "deny");
+      for (const permission of ["read", "glob", "grep"]) {
+        assert.equal(permissionAction(ask, permission), "allow");
+      }
+    }
+  });
+
+  it("denies edit but leaves shell on user approval when approvals are on (Review)", () => {
+    const review = rules({});
+    assert.equal(permissionAction(review, "edit"), "deny");
+    assert.equal(permissionAction(review, "bash"), "ask");
+    assert.equal(permissionAction(review, "read"), "allow");
+    // Auto-accept-edits must not re-allow edits under a read-only mode.
+    assert.equal(permissionAction(rules({ runtimeMode: "auto-accept-edits" }), "edit"), "deny");
+  });
+
+  it("keeps asking for edits when the policy is not a Kodo read-only mode", () => {
+    for (const overrides of [
+      { sandboxPolicy: undefined, modeReadOnly: undefined },
+      { modeReadOnly: undefined },
+    ]) {
+      assert.equal(permissionAction(rules(overrides), "edit"), "ask");
+    }
+  });
+});

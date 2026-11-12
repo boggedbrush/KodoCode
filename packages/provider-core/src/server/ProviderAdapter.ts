@@ -56,6 +56,23 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
    * it; adapters use it to refuse native mode choices a user makes beside T3 Code's own.
    */
   maxRuntimeMode: Schema.optional(RuntimeMode),
+  /**
+   * KODO: mode-instructions-field - instructions for the turn's interaction mode (ask, review), resolved by
+   * `apps/server/src/kodo/interactionMode.ts`. The orchestrator delivers them with the user's
+   * message; adapters do not read this field.
+   */
+  modeInstructions: Schema.optional(Schema.String),
+  /**
+   * KODO: mode-policy-fields - true when the thread's Kodo mode (ask, plan, review) may not modify
+   * the workspace. Adapters with tool lists or pre-approvals of their own (Claude) read it to
+   * narrow them; the sandbox and approval fields above carry the enforcement everywhere else.
+   */
+  modeReadOnly: Schema.optional(Schema.Boolean),
+  /**
+   * KODO: mode-policy-fields - true when the provider runs in its native plan mode for a Kodo mode
+   * that is not Plan (ask, review), so a plan the agent proposes there is not captured as one.
+   */
+  modeSuppressesPlanCapture: Schema.optional(Schema.Boolean),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 

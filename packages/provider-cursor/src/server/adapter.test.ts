@@ -1408,6 +1408,146 @@ describe("CursorAdapterV2", () => {
     ),
   );
 
+  // KODO: mode-suppress-plan-capture - Ask and Review run in Cursor's plan mode; their answer is not an actionable plan.
+  it.effect.each([
+    [false, "active"],
+    [true, "completed"],
+  ] as const)(
+    "captures a createPlan call as a plan with suppressed capture %s: %s",
+    ([suppressed, expectedStatus]) =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "cursor-v2-plan-" });
+        const instanceId = ProviderInstanceId.make("cursor");
+        const threadId = ThreadId.make("cursor-plan-thread");
+        const modelSelection = { instanceId, model: "composer-2.5" };
+        const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          runtimeMode: "approval-required",
+          interactionMode: "plan",
+          cwd: workspace,
+          ...(suppressed ? { modeReadOnly: true, modeSuppressesPlanCapture: true } : {}),
+        });
+        const updates: ReadonlyArray<InteractionUpdate> = (
+          ["tool-call-started", "tool-call-completed"] as const
+        ).map((type) => ({
+          type,
+          modelCallId: "native-model-call",
+          callId: "create-plan",
+          toolCall: {
+            type: "createPlan" as const,
+            args: { plan: "1. Read the code\n2. Answer" },
+            ...(type === "tool-call-completed"
+              ? { result: { status: "success" as const, value: {} } }
+              : {}),
+          },
+        })) as ReadonlyArray<InteractionUpdate>;
+        const adapter = yield* makeCursorAdapterV2({
+          instanceId,
+          environment: { HOME: workspace },
+        }).pipe(
+          Effect.provideService(CursorAgentSdk.CursorAgentSdkRunner, {
+            assertComplete: Effect.void,
+            open: () =>
+              Effect.succeed({
+                agentId: "native-cursor-plan",
+                listMessages: Effect.succeed([]),
+                close: Effect.void,
+                send: (input) =>
+                  Effect.gen(function* () {
+                    for (const update of updates) {
+                      if (input.onDelta !== undefined) {
+                        yield* input.onDelta(update).pipe(Effect.orDie);
+                      }
+                    }
+                    return {
+                      agentId: "native-cursor-plan",
+                      runId: "native-cursor-run",
+                      wait: Effect.succeed({
+                        id: "native-cursor-run",
+                        requestId: "native-request",
+                        status: "finished" as const,
+                        model: { id: "composer-2.5" },
+                        durationMs: 1,
+                      }),
+                      cancel: Effect.void,
+                    };
+                  }),
+              }),
+          }),
+          Effect.provide(TestProviderHost.layer({ cwd: workspace })),
+        );
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("cursor-plan-session"),
+          modelSelection,
+          runtimePolicy,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection,
+          runtimePolicy,
+        });
+        const now = yield* DateTime.now;
+        yield* runtime.startTurn({
+          threadId,
+          providerThread,
+          modelSelection,
+          runtimePolicy,
+          runId: RunId.make("cursor-plan-run"),
+          runOrdinal: 1,
+          providerTurnOrdinal: 1,
+          attemptId: RunAttemptId.make("cursor-plan-attempt"),
+          rootNodeId: NodeId.make("cursor-plan-root"),
+          appThread: {
+            id: threadId,
+            projectId: ProjectId.make("cursor-plan-project"),
+            createdBy: "user",
+            creationSource: "web",
+            title: "Cursor plan",
+            providerInstanceId: instanceId,
+            modelSelection,
+            runtimeMode: "approval-required",
+            interactionMode: "ask",
+            branch: null,
+            worktreePath: null,
+            activeProviderThreadId: providerThread.id,
+            lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+            forkedFrom: null,
+            createdAt: now,
+            updatedAt: now,
+            archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
+            lastVisitedAt: null,
+            deletedAt: null,
+          },
+          message: {
+            messageId: MessageId.make("cursor-plan-message"),
+            createdBy: "user",
+            creationSource: "web",
+            text: "what does this do?",
+            attachments: [],
+          },
+        });
+        const events = yield* runtime.events.pipe(
+          Stream.takeUntil((event) => event.type === "turn.terminal"),
+          Stream.runCollect,
+        );
+        const statuses = events.flatMap((event) =>
+          event.type === "plan.updated" && event.plan.kind === "proposed_plan"
+            ? [event.plan.status]
+            : [],
+        );
+        // The plan streams as a draft and ends completed (suppressed) or active (actionable).
+        assert.deepEqual(statuses, ["draft", expectedStatus]);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(NodeServices.layer, IdAllocator.layer, McpProviderSessions.layer),
+        ),
+      ),
+  );
+
   it.effect("projects subagent directory trees Cursor serialized without empty lists", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

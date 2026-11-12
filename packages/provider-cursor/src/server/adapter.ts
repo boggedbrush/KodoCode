@@ -1496,7 +1496,13 @@ export const makeCursorAdapterV2 = Effect.fn("makeCursorAdapterV2")(function* (
             runId: input.context.input.runId,
             nodeId,
             kind: "proposed_plan",
-            status: input.completed ? "active" : "draft",
+            // KODO: mode-suppress-plan-capture - Ask and Review run in Cursor's plan mode; what they
+            // present is shown but never becomes an actionable ("active") plan.
+            status: input.completed
+              ? input.context.input.runtimePolicy.modeSuppressesPlanCapture === true
+                ? "completed"
+                : "active"
+              : "draft",
             markdown: input.markdown,
           };
           yield* emitProviderEvent({

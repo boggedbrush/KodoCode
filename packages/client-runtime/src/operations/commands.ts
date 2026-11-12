@@ -1,3 +1,4 @@
+// KODO: thread-mode-type
 import { remapComposerContextAttachments } from "@t3tools/shared/composerContextReferences";
 import {
   type ThreadLinkedPullRequest,
@@ -18,7 +19,7 @@ import {
   type ProjectIconOverride,
   type ProjectScript,
   type ProviderApprovalDecision,
-  type ProviderInteractionMode,
+  type ThreadInteractionMode,
   type ProviderUserInputAnswers,
   type RunId,
   type RuntimeMode,
@@ -75,7 +76,7 @@ export interface CreateThreadInput extends CommandMetadata {
   readonly title: string;
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
+  readonly interactionMode: ThreadInteractionMode;
   readonly branch: string | null;
   readonly worktreePath: string | null;
 }
@@ -142,7 +143,7 @@ export interface SetThreadRuntimeModeInput extends ThreadCommandInput {
 }
 
 export interface SetThreadInteractionModeInput extends ThreadCommandInput {
-  readonly interactionMode: ProviderInteractionMode;
+  readonly interactionMode: ThreadInteractionMode;
 }
 
 interface StartThreadBootstrap {
@@ -151,7 +152,7 @@ interface StartThreadBootstrap {
     readonly title: string;
     readonly modelSelection: ModelSelection;
     readonly runtimeMode: RuntimeMode;
-    readonly interactionMode: ProviderInteractionMode;
+    readonly interactionMode: ThreadInteractionMode;
     readonly branch: string | null;
     readonly worktreePath: string | null;
     readonly createdAt: string;
@@ -179,7 +180,7 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
   readonly modelSelection?: ModelSelection;
   readonly titleSeed?: string;
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
+  readonly interactionMode: ThreadInteractionMode;
   readonly bootstrap?: StartThreadBootstrap;
   readonly sourceProposedPlan?: { readonly threadId: ThreadId; readonly planId: PlanId };
   readonly dispatchMode?: "auto" | "queue" | "steer" | "restart" | "start";

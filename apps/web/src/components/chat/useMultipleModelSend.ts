@@ -3,6 +3,7 @@ import {
   type ModelSelection,
   type RuntimeMode,
   type ThreadId,
+  type ThreadInteractionMode,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
@@ -24,7 +25,6 @@ import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
-import { DEFAULT_INTERACTION_MODE } from "../../types";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
   boundAttachmentIds,
@@ -51,6 +51,8 @@ interface MultipleModelSendInput {
   readonly composerRef: ComposerHandleRef;
   readonly promptRef: { current: string };
   readonly runtimeMode: RuntimeMode;
+  // KODO: send-mode
+  readonly interactionMode: ThreadInteractionMode;
   readonly startFromOrigin: boolean;
   readonly resetLocalDispatch: ReturnType<typeof useLocalDispatchState>["resetLocalDispatch"];
   readonly setThreadError: ReturnType<typeof makeThreadErrorSetter>;
@@ -71,6 +73,7 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
     composerRef,
     promptRef,
     runtimeMode,
+    interactionMode,
     startFromOrigin,
     resetLocalDispatch,
     setThreadError,
@@ -175,14 +178,14 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
                   modelSelection: target.selection,
                   titleSeed: title,
                   runtimeMode,
-                  interactionMode: DEFAULT_INTERACTION_MODE,
+                  interactionMode, // KODO: send-mode
                   bootstrap: {
                     createThread: {
                       projectId: project.id,
                       title,
                       modelSelection: target.selection,
                       runtimeMode,
-                      interactionMode: DEFAULT_INTERACTION_MODE,
+                      interactionMode, // KODO: send-mode
                       branch,
                       worktreePath: null,
                       createdAt: createdAt,

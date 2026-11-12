@@ -133,6 +133,7 @@ function RestoreBranchHarness(props: {
     resetLocalDispatch: () => undefined,
     scrollToEnd: () => undefined,
     persistThreadSettingsForNextTurn: async () => ({ _tag: "Success", value: undefined }) as never,
+    interactionMode: "code",
   });
   return (
     <>

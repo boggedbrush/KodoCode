@@ -48,6 +48,7 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
+import { kodoModeAnnouncer } from "../kodo/interactionMode.ts"; // KODO: mode-instructions
 import type { ProjectionStoreV2Error } from "./ProjectionStore.ts";
 import {
   knownProviderFailureMessage,
@@ -1798,7 +1799,13 @@ export const layer: Layer.Layer<
           attemptId: input.attemptId,
           rootNodeId: input.rootNode.id,
           providerThread: input.providerThread,
-          message: input.message,
+          // KODO: mode-instructions - the mode's instructions ride in front of the user's text for every provider.
+          message: kodoModeAnnouncer.apply(input.message, {
+            threadId: input.run.threadId,
+            mode: input.appThread.interactionMode,
+            instructions: input.runtimePolicy.modeInstructions,
+            hasPriorTurns: input.nativeThreadHasTurns ?? input.providerTurnOrdinal > 1,
+          }),
           modelSelection: input.modelSelection,
           runtimePolicy: input.runtimePolicy,
           ...(appContext.length === 0 ? {} : { appContext }),

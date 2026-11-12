@@ -55,6 +55,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
+import { kodoRuntimePolicyOverlay } from "../../kodo/interactionMode.ts"; // KODO: mode-read-only-claude
 import { assert, describe, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -19696,5 +19697,180 @@ describe("ClaudeAdapterV2 query message stream", () => {
       yield* Scope.close(scope, Exit.void);
       assert.isTrue(closed);
     }),
+  );
+});
+
+// KODO: mode-read-only-claude - the query policy and the options Claude is opened with for each mode.
+describe("ClaudeAdapterV2 Kodo read-only modes", () => {
+  const policyFor = (
+    interactionMode: string,
+    runtimeMode: "full-access" | "auto" = "full-access",
+  ) =>
+    ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+      cwd: "/workspace",
+      ...kodoRuntimePolicyOverlay({ interactionMode, driver: "claudeAgent", runtimeMode }),
+    });
+  const disallowed = ClaudeAdapterV2.CLAUDE_READ_ONLY_MODE_DISALLOWED_TOOLS;
+
+  it("denies edit tools outright in Ask, Review and Plan, and nowhere else", () => {
+    for (const mode of ["ask", "review", "plan"]) {
+      assert.deepEqual(
+        ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(policyFor(mode)).disallowedTools,
+        disallowed,
+        mode,
+      );
+    }
+    for (const mode of ["code", "default"]) {
+      const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(policyFor(mode));
+      assert.isUndefined(queryPolicy.disallowedTools);
+      assert.isUndefined(queryPolicy.readOnly);
+    }
+  });
+
+  it("runs Ask without approvals on the read-only tool list, Review on approvals, Plan in plan mode", () => {
+    const ask = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(policyFor("ask"));
+    assert.equal(ask.permissionMode, "dontAsk");
+    assert.deepEqual(ask.tools, ClaudeAdapterV2.CLAUDE_READ_ONLY_ALLOWED_TOOLS);
+    assert.isFalse(ask.installPermissionCallback);
+
+    // Full access is capped, so the shell asks the user instead of running.
+    const review = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(policyFor("review"));
+    assert.equal(review.permissionMode, "default");
+    assert.isTrue(review.installPermissionCallback);
+    assert.isUndefined(review.tools);
+
+    const plan = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
+      policyFor("plan", "auto"),
+    );
+    assert.equal(plan.permissionMode, "plan");
+    assert.isTrue(plan.readOnly);
+  });
+
+  it("pre-approves only read-only T3 tools in every read-only mode, which Review and Plan lacked", () => {
+    const mcpSession = {
+      environmentId: EnvironmentId.make("environment-claude-kodo-mcp"),
+      threadId: ThreadId.make("thread-claude-kodo-mcp"),
+      providerSessionId: "mcp-session-claude-kodo",
+      providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      endpoint: "http://127.0.0.1:43123/mcp",
+      authorizationHeader: "Bearer secret-claude-token",
+      browserToolsAvailable: true,
+    };
+    for (const [mode, preApproved] of [
+      ["ask", false],
+      ["review", false],
+      ["plan", false],
+      ["code", true],
+    ] as const) {
+      const runtimePolicy = policyFor(mode);
+      const queryPolicy = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(runtimePolicy);
+      const overrides = ClaudeAdapterV2.claudeMcpQueryOverrides({
+        mcpSession,
+        readOnlySandbox: ClaudeAdapterV2.claudeMcpReadOnly(runtimePolicy, queryPolicy),
+        ...(queryPolicy.allowedTools === undefined
+          ? {}
+          : { allowedTools: queryPolicy.allowedTools }),
+      });
+      assert.equal(
+        overrides.allowedTools?.includes(ClaudeAdapterV2.CLAUDE_T3_MCP_TOOL_WILDCARD),
+        preApproved,
+        mode,
+      );
+    }
+  });
+
+  it("reopens the query when the mode changes, so a live query never keeps old deny rules", () => {
+    const key = (mode: string) =>
+      ClaudeAdapterV2.claudeEffectiveQueryPolicyKey(
+        ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(policyFor(mode)),
+        {},
+      );
+    assert.notEqual(key("code"), key("review"));
+    assert.notEqual(key("review"), key("ask"));
+    assert.equal(key("code"), key("default"));
+  });
+
+  it.effect("opens the query with the edit tools disallowed and the mode's permission mode", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const idAllocator = yield* IdAllocator.IdAllocatorV2;
+        const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-claude-kodo-review-",
+        });
+        let openedOptions: ClaudeAdapterV2.ClaudeAgentSdkQueryOptions | undefined;
+        const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CLAUDE_SETTINGS,
+          environment: {},
+          attachmentsDir,
+          fileSystem,
+          path: yield* Path.Path,
+          random: yield* SecureRandom.SecureRandom,
+          idAllocator,
+          queryRunner: {
+            allocateSessionId: Effect.succeed("native-thread-claude-kodo-review"),
+            open: (input) =>
+              Effect.sync(() => {
+                openedOptions = input.options;
+                return {
+                  messages: Stream.never,
+                  offer: () => Effect.void,
+                  setModel: () => Effect.void,
+                  applyFlagSettings: () => Effect.void,
+                  setPermissionMode: () => Effect.void,
+                  backgroundTasks: () => Effect.succeed(false),
+                  mcpServerStatus: Effect.succeed([]),
+                  readMcpResource: () => Effect.die("unexpected MCP resource read"),
+                  callMcpTool: () => Effect.die("unexpected MCP tool call"),
+                  listPermissionRules: Effect.die("unexpected permission rules read"),
+                  stopTask: () => Effect.void,
+                  interrupt: Effect.void,
+                  close: Effect.void,
+                };
+              }),
+            forkSession: () => Effect.die("unused"),
+            subagentLaunchToolUseId: () => Effect.succeed(null),
+            assertComplete: Effect.void,
+          },
+        });
+        const runtimePolicy = policyFor("review");
+        const threadId = ThreadId.make("thread-claude-kodo-review");
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-claude-kodo-review"),
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy,
+        });
+        const now = yield* DateTime.now;
+        yield* runtime.startTurn(
+          makeClaudeTestTurnInput({
+            threadId,
+            providerThread,
+            now,
+            attemptId: RunAttemptId.make("attempt-claude-kodo-review"),
+            text: "Review the working changes.",
+            attachments: [],
+            runtimePolicy,
+          }),
+        );
+        assert.equal(openedOptions?.permissionMode, "default");
+        assert.deepEqual(openedOptions?.disallowedTools, [...disallowed]);
+      }),
+    ).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
   );
 });

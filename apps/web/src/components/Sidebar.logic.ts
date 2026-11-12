@@ -18,6 +18,7 @@ import {
 import { foldSearchQuery, rankSearchItems, scoreThreadSearch } from "@t3tools/shared/paletteSearch";
 import {
   isListedThreadLineage,
+  normalizeKodoInteractionMode, // KODO: thread-mode-compare
   type ContextMenuItem,
   type EnvironmentId,
   type ResolvedKeybindingsConfig,
@@ -1261,7 +1262,7 @@ export function resolveThreadStatusPill(input: {
 
   const hasPlanReadyPrompt =
     !thread.hasPendingUserInput &&
-    thread.interactionMode === "plan" &&
+    normalizeKodoInteractionMode(thread.interactionMode) === "plan" &&
     isLatestRunSettled(thread.latestRun, thread.runtime) &&
     thread.hasActionableProposedPlan;
   if (hasPlanReadyPrompt) {

@@ -1,9 +1,10 @@
+// KODO: thread-mode-type
 import {
   type EnvironmentId,
   type OrchestrationV2LinkOrigin,
   OrchestratorMcpEnvironmentTarget,
   OrchestratorMcpFailure,
-  type ProviderInteractionMode,
+  type ThreadInteractionMode,
   type RuntimeMode,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -21,6 +22,12 @@ import {
   type DispatchModeRefusal,
 } from "../orchestration-v2/DispatchModeLimit.ts";
 import * as PeerForwarding from "../peer/PeerForwarding.ts";
+import {
+  guardReadOnlyModes,
+  refuseReadOnlyCaller,
+  refusesInReadOnlyModes,
+  refusesWhenAnyRefuses,
+} from "./kodoReadOnlyGuard.ts"; // KODO: mode-read-only-tools
 import { assertNotLinked, assertSameLink, callerLinkOrigin } from "./linkOrigin.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import { resolveInteractionMode, resolveRuntimeMode } from "./delegatedTaskModes.ts";
@@ -107,11 +114,13 @@ const refuseReadOnlyClient = McpInvocationContext.McpInvocationContext.pipe(
 const writingCaller = refuseReadOnlyClient.pipe(
   Effect.andThen(loadCaller()),
   Effect.tap(assertLiveCaller),
+  Effect.tap(refuseReadOnlyCaller), // KODO: mode-read-only-tools
 );
 
 const orchestratingCaller = refuseReadOnlyClient.pipe(
   Effect.andThen(readCaller()),
   Effect.tap(assertLiveCaller),
+  Effect.tap(refuseReadOnlyCaller), // KODO: mode-read-only-tools
 );
 
 const requireThreadCaller = McpInvocationContext.McpInvocationContext.pipe(
@@ -128,13 +137,16 @@ export const readsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A
   declare((params: P) => requireThreadCaller.pipe(Effect.flatMap(() => handle(params))), undefined);
 
 export const actsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
-  declare(
-    (params: P) =>
-      requireThreadCaller.pipe(
-        Effect.andThen(writingCaller),
-        Effect.flatMap(() => handle(params)),
-      ),
-    undefined,
+  refusesInReadOnlyModes(
+    // KODO: mode-read-only-tools
+    declare(
+      (params: P) =>
+        requireThreadCaller.pipe(
+          Effect.andThen(writingCaller),
+          Effect.flatMap(() => handle(params)),
+        ),
+      undefined,
+    ),
   );
 
 /**
@@ -149,28 +161,34 @@ export const writes = <P, A, E, R>(
     readonly linkedCallers?: "allowed";
   },
 ) =>
-  declare(
-    (params: P) =>
-      orchestratingCaller.pipe(
-        Effect.tap((caller) =>
-          options?.linkedCallers === "allowed"
-            ? Effect.void
-            : assertNotLinked(caller, "change this environment's scheduled tasks"),
+  refusesInReadOnlyModes(
+    // KODO: mode-read-only-tools
+    declare(
+      (params: P) =>
+        orchestratingCaller.pipe(
+          Effect.tap((caller) =>
+            options?.linkedCallers === "allowed"
+              ? Effect.void
+              : assertNotLinked(caller, "change this environment's scheduled tasks"),
+          ),
+          Effect.flatMap(() => handle(params)),
         ),
-        Effect.flatMap(() => handle(params)),
-      ),
-    () => orchestratingCaller,
+      () => orchestratingCaller,
+    ),
   );
 
 /** Requires handler capability checks, not thread control; linked work is refused the same way. */
 export const writesWithCapability = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
-  declare(
-    (params: P) =>
-      writingCaller.pipe(
-        Effect.tap((caller) => assertNotLinked(caller, "start work here that is not its link's")),
-        Effect.flatMap(() => handle(params)),
-      ),
-    () => writingCaller,
+  refusesInReadOnlyModes(
+    // KODO: mode-read-only-tools
+    declare(
+      (params: P) =>
+        writingCaller.pipe(
+          Effect.tap((caller) => assertNotLinked(caller, "start work here that is not its link's")),
+          Effect.flatMap(() => handle(params)),
+        ),
+      () => writingCaller,
+    ),
   );
 
 export const writesThreads = <P, A, E, R>(
@@ -218,7 +236,7 @@ const escalationDenied = (refusal: DispatchModeRefusal) =>
 
 export interface StartedModes {
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
+  readonly interactionMode: ThreadInteractionMode;
   /** The linked environment the caller acts for. The thread must carry it. */
   readonly linkOrigin: OrchestrationV2LinkOrigin | undefined;
 }
@@ -231,7 +249,7 @@ export interface StartedModes {
 export const startsThreads = <P, A, E, R>(
   modes: (params: P) => {
     readonly runtimeMode?: RuntimeMode | undefined;
-    readonly interactionMode?: ProviderInteractionMode | undefined;
+    readonly interactionMode?: ThreadInteractionMode | undefined;
   },
   handle: (params: P, modes: StartedModes) => Effect.Effect<A, E, R>,
   linked: "stamped" | { readonly refused: string },
@@ -247,14 +265,17 @@ export const startsThreads = <P, A, E, R>(
       linkOrigin: callerLinkOrigin(caller),
     } satisfies StartedModes;
   });
-  return declare(
-    (params: P) =>
-      Effect.gen(function* () {
-        const caller = yield* writingCaller;
-        if (linked !== "stamped") yield* assertNotLinked(caller, linked.refused);
-        return yield* handle(params, yield* started(caller, params));
-      }),
-    (params: P) => Effect.flatMap(writingCaller, (caller) => started(caller, params)),
+  return refusesInReadOnlyModes(
+    // KODO: mode-read-only-tools
+    declare(
+      (params: P) =>
+        Effect.gen(function* () {
+          const caller = yield* writingCaller;
+          if (linked !== "stamped") yield* assertNotLinked(caller, linked.refused);
+          return yield* handle(params, yield* started(caller, params));
+        }),
+      (params: P) => Effect.flatMap(writingCaller, (caller) => started(caller, params)),
+    ),
   );
 };
 
@@ -267,17 +288,21 @@ export const either = <P, A, E, R, A2, E2, R2>(
   const remotes = [remoteCheckOf(first), remoteCheckOf(second)] as ReadonlyArray<
     RemoteCheck<P> | undefined
   >;
-  return declare(
-    (params: P): Effect.Effect<A | A2, E | E2, R | R2> =>
-      useFirst(params) ? checkedHandler(first)(params) : checkedHandler(second)(params),
-    (params) =>
-      remotes[useFirst(params) ? 0 : 1]?.(params) ??
-      Effect.fail(
-        new OrchestratorMcpFailure({
-          code: "invalid_request",
-          message: "This action acts as the calling thread, which is here. Omit environmentId.",
-        }),
-      ),
+  return refusesWhenAnyRefuses(
+    // KODO: mode-read-only-tools
+    declare(
+      (params: P): Effect.Effect<A | A2, E | E2, R | R2> =>
+        useFirst(params) ? checkedHandler(first)(params) : checkedHandler(second)(params),
+      (params) =>
+        remotes[useFirst(params) ? 0 : 1]?.(params) ??
+        Effect.fail(
+          new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "This action acts as the calling thread, which is here. Omit environmentId.",
+          }),
+        ),
+    ),
+    [first, second],
   );
 };
 
@@ -414,7 +439,12 @@ export const toLayer = <Tools extends Record<string, Tool.Any>, EX = never, RX =
 ): HandlersLayer<Tools, EX, Exclude<RX, Scope.Scope>> => {
   // Checked as soon as they are given, so a forged declaration fails here.
   const withDeclarations = (declarations: Handlers<Tools>) =>
-    routed(toolkit, declarations, checkedHandlers(declarations));
+    routed(toolkit, declarations, checkedHandlers(declarations)).pipe(
+      // KODO: mode-read-only-tools - Ask, Plan and Review threads may not call tools that write.
+      Effect.map(
+        (handlers) => guardReadOnlyModes(toolkit, handlers, declarations) as typeof handlers,
+      ),
+    );
   return handlersLayer(
     toolkit.toLayer(
       Effect.isEffect(build) ? Effect.flatMap(build, withDeclarations) : withDeclarations(build),

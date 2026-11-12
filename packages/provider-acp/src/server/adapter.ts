@@ -7912,6 +7912,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           const mcpSession = yield* mcpSessions.read(turnInput.threadId);
           const instructionState = {
             interactionMode: turnInput.runtimePolicy.interactionMode,
+            // KODO: mode-instructions
+            ...(turnInput.runtimePolicy.modeReadOnly === true ? { kodoModeBlock: true } : {}),
             hasT3Mcp: mcpSession !== undefined,
             hasDeviceTools: mcpSession?.capabilities?.has("device") === true,
           } satisfies T3AcpInstructionState;

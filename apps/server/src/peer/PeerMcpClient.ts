@@ -1,8 +1,9 @@
+import { kodoInteractionModeLimit } from "../kodo/interactionMode.ts"; // KODO: mode-peer-limit
 import {
   type EnvironmentId,
   OrchestratorMcpFailure,
   type PeerLinkError,
-  type ProviderInteractionMode,
+  type ThreadInteractionMode,
   type RuntimeMode,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -24,7 +25,7 @@ const PROTOCOL_VERSION = "2025-06-18";
 /** The limits a call carries to the peer: the calling agent's modes here. */
 export interface PeerCallLimits {
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
+  readonly interactionMode: ThreadInteractionMode;
 }
 
 /**
@@ -159,7 +160,7 @@ const make = Effect.gen(function* () {
         .resolve(input.environmentId)
         .pipe(Effect.mapError(fromLinkError));
       const limitHeader = {
-        [McpInvocationContext.MODE_LIMIT_HEADER]: `${input.limits.runtimeMode}/${input.limits.interactionMode}`,
+        [McpInvocationContext.MODE_LIMIT_HEADER]: `${input.limits.runtimeMode}/${kodoInteractionModeLimit(input.limits.interactionMode)}`,
       };
       const sessionKey = `${input.environmentId} ${resolved.url}`;
       const callOnce = (sessionId: string) =>

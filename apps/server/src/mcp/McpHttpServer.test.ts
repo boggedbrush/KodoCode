@@ -1519,13 +1519,15 @@ it.effect(
 
         // Approved for auto: without the header the client keeps its ceiling.
         expect(yield* start(undefined)).toBe("auto/default");
-        // The header narrows both modes, and asking above it is refused.
-        expect(yield* start("approval-required/plan")).toBe("approval-required/plan");
-        expect(yield* start("approval-required/plan", { runtimeMode: "auto" })).toBe(
+        // The header narrows the runtime mode, and asking above it is refused.
+        expect(yield* start("approval-required/default")).toBe("approval-required/default");
+        expect(yield* start("approval-required/default", { runtimeMode: "auto" })).toBe(
           "runtime_mode_escalation_denied",
         );
+        // KODO: mode-read-only-tools - narrowed to plan, the client is read-only and starts no thread.
+        expect(yield* start("approval-required/plan")).toBe("capability_denied");
         expect(yield* start("auto-accept-edits/plan", { interactionMode: "default" })).toBe(
-          "interaction_mode_escalation_denied",
+          "capability_denied",
         );
         // A broader header changes nothing: the approved ceiling still holds.
         expect(yield* start("full-access/default")).toBe("auto/default");

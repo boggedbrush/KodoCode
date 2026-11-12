@@ -345,3 +345,56 @@ describe("makeAcpClientPolicyGrants", () => {
     assert.isTrue(grants.allowsExecute("turn-2"));
   });
 });
+
+// KODO: mode-read-only-acp - Kodo's Ask and Plan (approvals never) and Review (approvals on) over a readOnly sandbox.
+describe("Kodo read-only modes", () => {
+  const cwd = NodePath.resolve(process.cwd(), "acp-kodo-workspace");
+  const base = {
+    runtimeMode: "approval-required",
+    cwd,
+    sandboxPolicy: { type: "readOnly" },
+    modeReadOnly: true,
+  } as const satisfies AcpRuntimePolicy;
+  const kinds = ["read", "search", "edit", "delete", "move", "execute", "fetch", "other"] as const;
+  const dispositions = (policy: AcpRuntimePolicy) =>
+    kinds.map((kind) => acpPermissionDisposition(policy, permissionRequest(kind)));
+
+  it("auto-denies everything but reads and search when approvals are never (Ask and Plan)", () => {
+    for (const runtimeMode of ["approval-required", "full-access"] as const) {
+      assert.deepEqual(dispositions({ ...base, runtimeMode, approvalPolicy: "never" }), [
+        "allow",
+        "allow",
+        "deny",
+        "deny",
+        "deny",
+        "deny",
+        "deny",
+        "deny",
+      ]);
+    }
+    assert.equal(acpClientExecuteDisposition({ ...base, approvalPolicy: "never" }), "deny");
+  });
+
+  it("denies edits outright but leaves shell on user approval when approvals are on (Review)", () => {
+    assert.deepEqual(dispositions(base), [
+      "allow",
+      "allow",
+      "deny",
+      "deny",
+      "deny",
+      "ask",
+      "ask",
+      "ask",
+    ]);
+    assert.equal(acpClientExecuteDisposition(base), "ask");
+  });
+
+  it("does not change a policy that is not a Kodo read-only mode, which still asks for edits", () => {
+    for (const policy of [
+      { runtimeMode: "approval-required", cwd },
+      { runtimeMode: "approval-required", cwd, sandboxPolicy: { type: "readOnly" } },
+    ] satisfies ReadonlyArray<AcpRuntimePolicy>) {
+      assert.equal(acpPermissionDisposition(policy, permissionRequest("edit")), "ask");
+    }
+  });
+});

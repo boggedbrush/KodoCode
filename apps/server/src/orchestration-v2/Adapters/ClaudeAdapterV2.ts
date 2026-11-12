@@ -509,6 +509,18 @@ export type ClaudeAgentSdkQueryTools = ClaudeAgentSdkQueryToolList | ClaudeAgent
 
 export const CLAUDE_READ_ONLY_ALLOWED_TOOLS = ["Read", "Glob", "Grep"] as const;
 
+/**
+ * KODO: mode-read-only-claude - denied outright in Ask, Plan and Review. Deny rules beat the allow
+ * rules of user and project settings and saved "always allow" grants, which would otherwise skip
+ * the permission callback. Shell stays out of the list: Review leaves it on user approval.
+ */
+export const CLAUDE_READ_ONLY_MODE_DISALLOWED_TOOLS = [
+  "Edit",
+  "Write",
+  "MultiEdit",
+  "NotebookEdit",
+] as const;
+
 function claudeAgentSdkQueryToolsForSdk(
   tools: ClaudeAgentSdkQueryTools,
 ): NonNullable<ClaudeQueryOptions["tools"]> {
@@ -2853,10 +2865,25 @@ function permissionModeForClaudeRuntimePolicy(
   }
 }
 
+/** Whether T3 MCP pre-approvals narrow to read-only tools: a read-only sandbox, or Ask, Plan or Review. */
+export function claudeMcpReadOnly(
+  runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+  queryPolicy: ClaudeRuntimeQueryPolicy,
+): boolean {
+  return (
+    sandboxPolicyKindForClaudeRuntimePolicy(runtimePolicy) === "readOnly" ||
+    queryPolicy.readOnly === true // KODO: mode-read-only-claude
+  );
+}
+
 export interface ClaudeRuntimeQueryPolicy {
   readonly permissionMode: PermissionMode;
   readonly tools?: ClaudeAgentSdkQueryTools;
   readonly allowedTools?: ReadonlyArray<string>;
+  /** KODO: mode-read-only-claude - edit tools denied outright in read-only Kodo modes. */
+  readonly disallowedTools?: ReadonlyArray<string>;
+  /** KODO: mode-read-only-claude - narrows T3 MCP pre-approvals to the read-only tools. */
+  readonly readOnly?: true;
   readonly allowDangerouslySkipPermissions?: true;
   readonly installPermissionCallback: boolean;
 }
@@ -2898,9 +2925,17 @@ export function claudeRuntimeQueryPolicyForRuntimePolicy(
         runtimePolicy.runtimeMode === "auto-accept-edits"
       : runtimePolicy.approvalPolicy !== "never");
 
+  // KODO: mode-read-only-claude - Ask, Plan and Review: T3 MCP pre-approvals narrow to the
+  // read-only tools, and edit tools are denied outright.
+  const modeReadOnly =
+    runtimePolicy.modeReadOnly === true
+      ? { readOnly: true as const, disallowedTools: CLAUDE_READ_ONLY_MODE_DISALLOWED_TOOLS }
+      : {};
+
   if (permissionMode === "plan") {
     return {
       permissionMode,
+      ...modeReadOnly,
       ...(readOnlyTools === undefined ? {} : { tools: readOnlyTools }),
       ...(allowedTools === undefined ? {} : { allowedTools }),
       // Claude routes Plan-mode writes to the callback even in Auto or Full access.
@@ -2910,6 +2945,7 @@ export function claudeRuntimeQueryPolicyForRuntimePolicy(
 
   return {
     permissionMode,
+    ...modeReadOnly,
     ...(readOnlyTools === undefined ? {} : { tools: readOnlyTools }),
     ...(allowedTools === undefined ? {} : { allowedTools }),
     ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
@@ -3020,6 +3056,8 @@ function claudeRuntimeQueryPolicyKey(policy: ClaudeRuntimeQueryPolicy): string {
     permissionMode: policy.permissionMode,
     tools: policy.tools,
     allowedTools: policy.allowedTools,
+    disallowedTools: policy.disallowedTools,
+    readOnly: policy.readOnly,
     allowDangerouslySkipPermissions: policy.allowDangerouslySkipPermissions,
     installPermissionCallback: policy.installPermissionCallback,
   });
@@ -10913,8 +10951,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
           const mcpSession = yield* mcpSessions.read(turnInput.threadId);
           const mcpOverrides = claudeMcpQueryOverrides({
             mcpSession,
-            readOnlySandbox:
-              sandboxPolicyKindForClaudeRuntimePolicy(turnInput.runtimePolicy) === "readOnly",
+            readOnlySandbox: claudeMcpReadOnly(turnInput.runtimePolicy, queryPolicy), // KODO: mode-read-only-claude
             ...(queryPolicy.allowedTools === undefined
               ? {}
               : { allowedTools: queryPolicy.allowedTools }),
@@ -11063,6 +11100,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(mcpOverrides.allowedTools === undefined
               ? {}
               : { allowedTools: mcpOverrides.allowedTools }),
+            ...(queryPolicy.disallowedTools === undefined
+              ? {}
+              : { disallowedTools: queryPolicy.disallowedTools }), // KODO: mode-read-only-claude
             ...(mcpOverrides.mcpServers === undefined
               ? {}
               : { mcpServers: mcpOverrides.mcpServers }),

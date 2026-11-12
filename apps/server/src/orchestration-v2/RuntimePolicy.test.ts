@@ -4,6 +4,7 @@ import {
   type ModelSelection,
   type OrchestrationV2AppThread,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
   type RuntimeMode,
   type ServerProvider,
@@ -32,6 +33,7 @@ function makeThread(input: {
   readonly now: DateTime.Utc;
   readonly worktreePath: string | null;
   readonly runtimeMode?: RuntimeMode;
+  readonly interactionMode?: OrchestrationV2AppThread["interactionMode"];
 }): OrchestrationV2AppThread {
   const threadId = ThreadId.make("thread:runtime-policy");
   return {
@@ -43,7 +45,7 @@ function makeThread(input: {
     providerInstanceId,
     modelSelection,
     runtimeMode: input.runtimeMode ?? "full-access",
-    interactionMode: "default",
+    interactionMode: input.interactionMode ?? "default",
     branch: null,
     worktreePath: input.worktreePath,
     activeProviderThreadId: null,
@@ -71,6 +73,7 @@ const supportedRuntimeModesByInstance = new Map<ProviderInstanceId, ReadonlyArra
 ]);
 const providerInstanceFor = (instanceId: ProviderInstanceId) =>
   ({
+    driverKind: ProviderDriverKind.make(instanceId),
     snapshot: {
       getSnapshot: Effect.succeed({
         supportedRuntimeModes: supportedRuntimeModesByInstance.get(instanceId),
@@ -156,7 +159,118 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
       assert.equal(yield* modeFor(providerInstanceId, "auto-accept-edits"), "auto-accept-edits");
     }),
   );
+
+  // KODO: mode-resolver
+  it.effect("resolves Kodo ask and review into provider-specific read-only policies", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const resolve = (
+        instanceId: ProviderInstanceId,
+        interactionMode: "ask" | "review" | "code",
+      ) =>
+        policy.resolve({
+          thread: makeThread({ now, worktreePath: null, interactionMode }),
+          modelSelection: { instanceId, model: "test-model" },
+        });
+
+      // Codex: read-only sandbox and approvals never, so no escalated write can be approved.
+      const codexAsk = yield* resolve(providerInstanceId, "ask");
+      assert.equal(codexAsk.interactionMode, "default");
+      assert.deepEqual(codexAsk.sandboxPolicy, { type: "readOnly" });
+      assert.equal(codexAsk.approvalPolicy, "never");
+      assert.equal(codexAsk.runtimeMode, "approval-required");
+      assert.isTrue(codexAsk.modeReadOnly);
+      assert.isString(codexAsk.modeInstructions);
+
+      const grokReview = yield* resolve(grokInstanceId, "review");
+      assert.equal(grokReview.interactionMode, "default");
+      assert.equal(grokReview.runtimeMode, "approval-required");
+      assert.isString(grokReview.modeInstructions);
+
+      const grokCode = yield* resolve(grokInstanceId, "code");
+      assert.equal(grokCode.interactionMode, "default");
+      assert.equal(grokCode.runtimeMode, "full-access");
+      assert.isUndefined(grokCode.modeInstructions);
+      assert.isUndefined(grokCode.modeReadOnly);
+    }),
+  );
+
+  // KODO: mode-read-only-acp - what the resolved policy does to a permission request, per mode.
+  it.effect(
+    "auto-denies edits in every read-only mode on the ACP family, shell only in Ask and Plan",
+    () =>
+      Effect.gen(function* () {
+        const policy = yield* RuntimePolicy.RuntimePolicyV2;
+        const now = yield* DateTime.now;
+        const request = (kind: "read" | "edit" | "execute" | "delete") => ({
+          sessionId: "session-1",
+          toolCall: { toolCallId: "call-1", title: "Tool", kind },
+          options: [{ optionId: "allow", name: "Allow", kind: "allow_once" as const }],
+        });
+        for (const instanceId of [grokInstanceId, antigravityInstanceId]) {
+          const dispositions = (interactionMode: "ask" | "review" | "plan" | "code") =>
+            policy
+              .resolve({
+                thread: makeThread({
+                  now,
+                  worktreePath: null,
+                  interactionMode,
+                  runtimeMode: "approval-required",
+                }),
+                modelSelection: { instanceId, model: "test-model" },
+              })
+              .pipe(
+                Effect.map((resolved) =>
+                  (["read", "edit", "delete", "execute"] as const).map((kind) =>
+                    acpPermissionDisposition(resolved, request(kind)),
+                  ),
+                ),
+              );
+          // Reads always work; mutations and shell are denied without a prompt.
+          assert.deepEqual(yield* dispositions("ask"), ["allow", "deny", "deny", "deny"]);
+          assert.deepEqual(yield* dispositions("plan"), ["allow", "deny", "deny", "deny"]);
+          // Review keeps `git diff` available by leaving shell on user approval; edits stay denied.
+          assert.deepEqual(yield* dispositions("review"), ["allow", "deny", "deny", "ask"]);
+          // Code keeps upstream's approval prompts.
+          assert.deepEqual(yield* dispositions("code"), ["allow", "ask", "ask", "ask"]);
+        }
+      }),
+  );
 });
+
+// KODO: mode-resolver - an unresolved driver must fail closed.
+it.effect(
+  "resolves read-only modes for an unresolved driver without trusting a native plan mode",
+  () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      for (const interactionMode of ["ask", "review", "plan"] as const) {
+        const resolved = yield* policy.resolve({
+          thread: makeThread({ now, worktreePath: "/work", interactionMode }),
+          modelSelection,
+        });
+        assert.equal(resolved.interactionMode, "default", interactionMode);
+        assert.equal(resolved.runtimeMode, "approval-required", interactionMode);
+        assert.isString(resolved.modeInstructions, interactionMode);
+        assert.isTrue(resolved.modeReadOnly, interactionMode);
+      }
+    }).pipe(Effect.provide(RuntimePolicy.layer)),
+);
+
+it.effect("resolves read-only modes for the driver a fixture names", () =>
+  Effect.gen(function* () {
+    const policy = yield* RuntimePolicy.RuntimePolicyV2;
+    const now = yield* DateTime.now;
+    const resolved = yield* policy.resolve({
+      thread: makeThread({ now, worktreePath: "/work", interactionMode: "plan" }),
+      modelSelection,
+    });
+    assert.equal(resolved.interactionMode, "plan");
+    assert.isUndefined(resolved.modeInstructions);
+  }).pipe(Effect.provide(RuntimePolicy.layerForDriver("codex"))),
+);
 
 it.layer(
   layerWithPolicy({

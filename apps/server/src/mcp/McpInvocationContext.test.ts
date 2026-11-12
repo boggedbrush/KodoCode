@@ -95,3 +95,27 @@ it("acts at an administrator's ceiling for a client approved above it", () => {
   expect(modes(scope("auto-accept-edits"), "auto").runtimeMode).toBe("auto-accept-edits");
   expect(modes(scope("full-access")).runtimeMode).toBe("full-access");
 });
+
+// KODO: mode-rank - a client's ceiling compares Kodo modes by what they may write, not by spelling.
+it("narrows a client to the lower of Kodo modes, treating legacy default as code", () => {
+  const scope = (narrowedTo: McpInvocationContext.ClientModes) => ({
+    client: {
+      sessionId: "session-1",
+      label: "Claude Code",
+      access: "full-access" as const,
+      narrowedTo,
+    },
+  });
+  for (const asked of ["ask", "review", "plan"] as const) {
+    expect(
+      McpInvocationContext.clientModeCeiling(
+        scope({ runtimeMode: "full-access", interactionMode: asked }).client,
+      ).interactionMode,
+    ).toBe(asked);
+  }
+  expect(
+    McpInvocationContext.clientModeCeiling(
+      scope({ runtimeMode: "full-access", interactionMode: "code" }).client,
+    ).interactionMode,
+  ).toBe("default");
+});

@@ -10,12 +10,14 @@ import type {
   OrchestrationV2UserMessageInputIntent,
   PlanId,
   ProjectScript as ContractProjectScript,
-  ProviderInteractionMode,
   RunId,
   RuntimeMode,
   ScheduledTaskId,
   ThreadId,
+  ThreadInteractionMode,
 } from "@t3tools/contracts";
+// KODO: default-interaction-mode
+import { DEFAULT_KODO_INTERACTION_MODE } from "@t3tools/contracts";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -29,7 +31,8 @@ export { videoMimeType } from "@t3tools/shared/video";
 export type SessionPhase = "disconnected" | "connecting" | "ready" | "running";
 export const DEFAULT_RUNTIME_MODE: RuntimeMode = "full-access";
 
-export const DEFAULT_INTERACTION_MODE: ProviderInteractionMode = "default";
+// KODO: default-interaction-mode
+export const DEFAULT_INTERACTION_MODE: ThreadInteractionMode = DEFAULT_KODO_INTERACTION_MODE;
 export const DEFAULT_THREAD_TERMINAL_HEIGHT = 280;
 export const DEFAULT_THREAD_TERMINAL_ID = "term-1";
 export const MAX_TERMINALS_PER_GROUP = 4;

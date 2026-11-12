@@ -372,7 +372,7 @@ type TurnTerminal =
 type Rule = Permission.Rule;
 type RulesPolicy = Pick<
   ProviderAdapter.ProviderAdapterV2RuntimePolicy,
-  "runtimeMode" | "interactionMode"
+  "runtimeMode" | "interactionMode" | "approvalPolicy" | "modeReadOnly"
 >;
 type NativeForm = EventOf<"form.created">["data"]["form"];
 
@@ -417,7 +417,22 @@ const mcpRules = (mcpServerName: string | null): ReadonlyArray<Rule> =>
         { action: `${mcpServerName}_*`, resource: "*", effect: "allow" },
       ];
 
-const sessionRules = (
+/**
+ * KODO: mode-read-only-opencode - last, so no agent path rule or saved grant can re-allow them.
+ * Ask and Plan (approvals "never") deny edits and shell; Review denies edits and leaves shell on
+ * user approval, which these rules cannot tell apart from read-only shell.
+ */
+const readOnlyModeRules = (policy: RulesPolicy): ReadonlyArray<Rule> =>
+  policy.modeReadOnly !== true
+    ? []
+    : [rule("edit", "deny"), rule("shell", policy.approvalPolicy === "never" ? "deny" : "ask")];
+
+/** KODO: mode-read-only-opencode - saved "always allow" grants never apply in a read-only mode. */
+export const grantsFor = (policy: RulesPolicy, grants: ReadonlyArray<Rule>): ReadonlyArray<Rule> =>
+  policy.runtimeMode === "full-access" || policy.modeReadOnly === true ? [] : grants;
+
+// KODO: mode-read-only-opencode - exported for tests.
+export const sessionRules = (
   policy: RulesPolicy,
   paths: ReadonlyArray<Rule>,
   grants: ReadonlyArray<Rule>,
@@ -434,6 +449,7 @@ const sessionRules = (
   // Plan edits are re-allowed only for plan paths; free-tier sessions refuse denied shell/read.
   ...(policy.interactionMode === "plan" ? [rule("edit", "deny")] : []),
   ...paths,
+  ...readOnlyModeRules(policy), // KODO: mode-read-only-opencode
   ...mcpRules(mcpServerName),
 ];
 
@@ -3687,7 +3703,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       return sessionRules(
         policy,
         paths,
-        policy.runtimeMode === "full-access" ? [] : thread.grants,
+        grantsFor(policy, thread.grants),
         appThreadId === null ? null : yield* mcpServerNameFor(appThreadId),
       );
     });

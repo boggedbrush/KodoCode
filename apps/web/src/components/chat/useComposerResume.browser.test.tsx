@@ -63,6 +63,7 @@ function ResumeButton(props: {
     clearUsageLimitsFor: () => undefined,
     scrollToEnd: () => undefined,
     setThreadError: () => undefined,
+    interactionMode: "code",
   });
   return (
     <button type="button" onClick={() => void onResume()}>

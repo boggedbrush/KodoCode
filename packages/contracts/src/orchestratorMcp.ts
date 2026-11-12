@@ -25,6 +25,7 @@ import {
   ScheduledTaskSchedule,
   ScheduledTaskUpsertSchedule,
 } from "./scheduledTask.ts";
+import { ThreadInteractionMode } from "./kodoInteractionMode.ts"; // KODO: thread-mode-type
 import { ProviderInteractionMode, ProviderRequestKind, RuntimeMode } from "./providerPolicy.ts";
 import { PullRequestState } from "./pullRequest.ts";
 import {
@@ -372,7 +373,7 @@ export const OrchestratorMcpThreadListItem = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   model: Schema.String,
   runtimeMode: RuntimeMode,
-  interactionMode: ProviderInteractionMode,
+  interactionMode: ThreadInteractionMode,
   linkedPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
   pullRequests: Schema.optional(Schema.Array(OrchestratorMcpThreadPullRequest)),
   settled: Schema.Boolean,
@@ -443,7 +444,7 @@ export const OrchestratorMcpThreadDetail = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   model: Schema.String,
   runtimeMode: RuntimeMode,
-  interactionMode: ProviderInteractionMode,
+  interactionMode: ThreadInteractionMode,
   linkedPullRequest: Schema.NullOr(ThreadLinkedPullRequest),
   pullRequests: Schema.optional(Schema.Array(OrchestratorMcpThreadPullRequest)),
   titleRegeneration: Schema.NullOr(ThreadTitleRegeneration),
@@ -649,7 +650,7 @@ export const OrchestratorMcpCapabilitiesResult = Schema.Struct({
   inheritedModel: Schema.NullOr(Schema.String),
   inheritedOptions: Schema.optional(Schema.Array(ProviderOptionSelection)),
   runtimeMode: RuntimeMode,
-  interactionMode: ProviderInteractionMode,
+  interactionMode: ThreadInteractionMode,
   providers: Schema.Array(OrchestratorMcpProviderCapability),
   features: Schema.Struct({
     appOwnedSubagents: Schema.Boolean,

@@ -117,10 +117,16 @@ const autoEditRules = (name: string) => [
   ...mcpRules(name),
 ];
 
+// KODO: mode-read-only-opencode - Plan caps the runtime mode at approval-required, so the rules start
+// from the supervised set, and end with the hard deny of edits and shell that no path rule re-allows.
 const planRules = (name: string) => [
-  { action: "*", resource: "*", effect: "allow" },
+  { action: "shell", resource: "*", effect: "ask" },
+  { action: "edit", resource: "*", effect: "ask" },
+  { action: "external_directory", resource: "*", effect: "ask" },
   { action: "edit", resource: "*", effect: "deny" },
   ...PLAN_PATHS,
+  { action: "edit", resource: "*", effect: "deny" },
+  { action: "shell", resource: "*", effect: "deny" },
   ...mcpRules(name),
 ];
 

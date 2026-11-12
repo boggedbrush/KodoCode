@@ -9,7 +9,7 @@ import {
   TrimmedNonEmptyString,
   ModelSelection,
   RuntimeMode,
-  ProviderInteractionMode,
+  ThreadInteractionMode,
   RuntimeRequestId,
   ProviderUserInputAnswers,
   IsoDateTime,
@@ -148,7 +148,7 @@ const threadConfiguration = Schema.Struct({
   threadId: ThreadId,
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
-  interactionMode: ProviderInteractionMode,
+  interactionMode: ThreadInteractionMode, // KODO: thread-mode-type
 });
 const ThreadConfigureTool = Tool.make("t3_thread_configure", {
   ...commandTool,

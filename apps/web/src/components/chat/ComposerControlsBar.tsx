@@ -14,9 +14,11 @@ import {
   type EnvironmentId,
   type ModelSelection,
   type ProviderDriverKind,
+  type KodoInteractionMode,
   type ProviderInstanceId,
   type RuntimeMode,
   type ServerProvider,
+  type ThreadInteractionMode,
 } from "@t3tools/contracts";
 import type { EffortDisplay } from "@t3tools/contracts/settings";
 import { cn } from "~/lib/utils";
@@ -30,6 +32,9 @@ import {
 } from "./ComposerModelEffort";
 import type { useComposerProviderModel } from "./useComposerProviderModel";
 import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
+// KODO: controls-bar-mode
+import { resolveKodoModeBlockHidden } from "../../kodo/interactionModes.logic";
+import { KodoInteractionModeChip } from "./KodoInteractionModePicker";
 
 /**
  * The composer footer controls: the model picker (which also holds effort, speed and
@@ -59,6 +64,9 @@ export function ComposerControlsBar(props: {
   defaultRuntimeMode: RuntimeMode | undefined;
   compatibleRuntimeModeOptions: ReadonlyArray<RuntimeModeOption>;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
+  // KODO: controls-bar-mode
+  interactionMode: KodoInteractionMode;
+  handleInteractionModeChange: (mode: ThreadInteractionMode) => void;
   composerControlsCollapsed: boolean;
   composerControlsHidden: boolean;
   restingHiddenBlockCount: number;
@@ -103,6 +111,8 @@ export function ComposerControlsBar(props: {
     defaultRuntimeMode,
     compatibleRuntimeModeOptions,
     handleRuntimeModeChange,
+    interactionMode,
+    handleInteractionModeChange,
     composerControlsCollapsed,
     composerControlsHidden,
     restingHiddenBlockCount: measuredHiddenBlockCount,
@@ -143,6 +153,11 @@ export function ComposerControlsBar(props: {
     collapsed: composerControlsCollapsed,
     measuredHiddenBlockCount,
   });
+  // KODO: controls-bar-mode
+  const kodoModeHidden = resolveKodoModeBlockHidden({
+    hasPermissionsBlock: showModeBlock,
+    measuredHiddenBlockCount,
+  });
   const controlSize = composerControlsCollapsed ? "xs" : "sm";
   const applyThreadModelPick = useApplyThreadModelPick();
   const applyRouteThreadModelPick = useStableCallback(() => applyThreadModelPick(routeThreadRef));
@@ -160,9 +175,24 @@ export function ComposerControlsBar(props: {
     promptUltrathink,
     onPromptEdit,
   });
+  // KODO: controls-bar-mode
+  const overflowHidden = hiddenRestingBlockIds.length === 0 && !kodoModeHidden;
   const effort = describeComposerEffort(traitsInput, props.effortDisplay, controlSize);
+  // KODO: controls-bar-mode (the mode block leads, so width pressure hides permissions first)
+  const kodoModeBlockDef = {
+    id: "kodo-mode",
+    content: (
+      <KodoInteractionModeChip
+        interactionMode={interactionMode}
+        size={controlSize}
+        hidden={composerControlsHidden || kodoModeHidden}
+        onInteractionModeChange={handleInteractionModeChange}
+      />
+    ),
+  };
   const restingBlockDefs = showModeBlock
     ? [
+        kodoModeBlockDef,
         {
           id: "mode",
           content: (
@@ -178,7 +208,7 @@ export function ComposerControlsBar(props: {
           ),
         },
       ]
-    : [];
+    : [kodoModeBlockDef];
   // Its own element, so typing (which rebuilds the controls around it) leaves it cached.
   const composerModelPicker = (
     <ComposerModelPicker
@@ -264,7 +294,8 @@ export function ComposerControlsBar(props: {
 
       <>
         {restingBlockDefs.map((def, index) => {
-          const hidden = index >= restingBlockDefs.length - restingHiddenBlockCount;
+          // KODO: controls-bar-mode (the measured count covers the mode chip, which the ownership resolver's count leaves out)
+          const hidden = index >= restingBlockDefs.length - measuredHiddenBlockCount;
           return (
             <div
               key={def.id}
@@ -287,21 +318,25 @@ export function ComposerControlsBar(props: {
         })}
         <div
           data-resting-controls-overflow
-          aria-hidden={hiddenRestingBlockIds.length === 0 || undefined}
-          inert={hiddenRestingBlockIds.length === 0 || undefined}
+          aria-hidden={overflowHidden || undefined}
+          inert={overflowHidden || undefined}
           className={cn(
             "min-w-0 shrink-0",
-            hiddenRestingBlockIds.length === 0 && "pointer-events-none invisible absolute",
+            overflowHidden && "pointer-events-none invisible absolute",
           )}
         >
           <CompactComposerControlsMenu
             runtimeMode={compatibleRuntimeMode}
             runtimeModeOptions={compatibleRuntimeModeOptions}
             size={controlSize}
-            hidden={composerControlsHidden || hiddenRestingBlockIds.length === 0}
+            hidden={composerControlsHidden || overflowHidden}
             // Permissions join the overflow only when their normal home is in it.
             showPermissions={overflowShowsPermissions}
             onRuntimeModeChange={handleRuntimeModeChange}
+            // KODO: controls-bar-mode
+            showInteractionMode={kodoModeHidden}
+            interactionMode={interactionMode}
+            onInteractionModeChange={handleInteractionModeChange}
           />
         </div>
       </>

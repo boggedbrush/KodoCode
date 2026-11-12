@@ -3,7 +3,12 @@ import {
   scopeProjectRef,
   scopeThreadRef,
 } from "@t3tools/client-runtime/environment";
-import { DEFAULT_SERVER_SETTINGS, type ScopedProjectRef, type ThreadId } from "@t3tools/contracts";
+import {
+  DEFAULT_KODO_INTERACTION_MODE, // KODO: new-thread-mode
+  DEFAULT_SERVER_SETTINGS,
+  type ScopedProjectRef,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { type AnyRouter, useRouter } from "@tanstack/react-router";
 import {
   composerDraftHasUserContent,
@@ -118,6 +123,7 @@ export function createNewThreadHandler(router: AnyRouter) {
       setLogicalProjectDraftThreadId,
       setModelSelection,
       setPrompt,
+      setInteractionMode, // KODO: new-thread-mode
     } = useComposerDraftStore.getState();
     // Never over text the user wrote: a draft can gain some while this awaits.
     const seedPrompt = (draftId: DraftId) => {
@@ -130,8 +136,6 @@ export function createNewThreadHandler(router: AnyRouter) {
     const currentRouteTarget = getCurrentRouteTarget();
     const carrySourceShell =
       currentRouteTarget?.kind === "server" ? readThreadShell(currentRouteTarget.threadRef) : null;
-    const carrySourceDraft =
-      currentRouteTarget?.kind === "draft" ? getDraftSession(currentRouteTarget.draftId) : null;
     const carrySourceComposer = currentRouteTarget
       ? getComposerDraft(
           currentRouteTarget.kind === "server"
@@ -144,11 +148,12 @@ export function createNewThreadHandler(router: AnyRouter) {
       ? (carrySourceComposer?.modelSelectionByProvider[composerActiveProvider] ?? null)
       : null;
     const carryModelSelection = composerModelSelection ?? carrySourceShell?.modelSelection ?? null;
-    const carryInteractionMode =
-      carrySourceComposer?.interactionMode ??
-      carrySourceShell?.interactionMode ??
-      carrySourceDraft?.interactionMode ??
-      null;
+    // KODO: new-thread-mode (a new thread starts in Code: it neither inherits the mode of the one on screen nor keeps a reused draft's)
+    const carryInteractionMode = DEFAULT_KODO_INTERACTION_MODE;
+    const startReusedDraftInCode = (draftId: DraftId) => {
+      setInteractionMode(draftId, null);
+      setDraftThreadContext(draftId, { interactionMode: DEFAULT_KODO_INTERACTION_MODE });
+    };
     const project = projects.find(
       (candidate) =>
         candidate.id === projectRef.projectId &&
@@ -255,6 +260,7 @@ export function createNewThreadHandler(router: AnyRouter) {
         : getDraftSession(currentRouteTarget.draftId)
       : null;
     if (emptyStoredDraftThread) {
+      startReusedDraftInCode(emptyStoredDraftThread.draftId); // KODO: new-thread-mode
       return (async () => {
         const isDraftAlreadyOpen =
           currentRouteTarget?.kind === "draft" &&
@@ -355,6 +361,7 @@ export function createNewThreadHandler(router: AnyRouter) {
       latestActiveDraftThread.promotedTo == null &&
       !composerDraftHasUserContent(getComposerDraft(currentRouteTarget.draftId))
     ) {
+      startReusedDraftInCode(currentRouteTarget.draftId); // KODO: new-thread-mode
       if (
         hasBranchOption ||
         hasWorktreePathOption ||
@@ -367,7 +374,7 @@ export function createNewThreadHandler(router: AnyRouter) {
         threadId: latestActiveDraftThread.threadId,
         createdAt: latestActiveDraftThread.createdAt,
         runtimeMode: latestActiveDraftThread.runtimeMode,
-        interactionMode: latestActiveDraftThread.interactionMode,
+        interactionMode: carryInteractionMode, // KODO: new-thread-mode
         ...pickExplicitWorkspaceOptions(options),
       });
       seedPrompt(currentRouteTarget.draftId);
@@ -396,9 +403,15 @@ export function createNewThreadHandler(router: AnyRouter) {
           threadId: racedDraft.threadId,
           createdAt: racedDraft.createdAt,
           runtimeMode: racedDraft.runtimeMode,
-          interactionMode: racedDraft.interactionMode,
+          // KODO: new-thread-mode (a raced draft the person already typed in keeps its mode)
+          interactionMode: composerDraftHasUserContent(getComposerDraft(racedDraft.draftId))
+            ? racedDraft.interactionMode
+            : carryInteractionMode,
           ...pickExplicitWorkspaceOptions(options),
         });
+        if (!composerDraftHasUserContent(getComposerDraft(racedDraft.draftId))) {
+          startReusedDraftInCode(racedDraft.draftId); // KODO: new-thread-mode
+        }
         seedPrompt(racedDraft.draftId);
         await router.navigate({
           to: "/draft/$draftId",

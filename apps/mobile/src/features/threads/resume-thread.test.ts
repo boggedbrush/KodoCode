@@ -24,12 +24,10 @@ function setup(options: { readonly startTurnFails?: boolean } = {}) {
       interactionMode: "default",
     },
     runtimeMode: "full-access",
-    interactionMode: "default",
     modelSelection: null,
     messageId: MessageId.make("message"),
     createdAt: "2026-10-30T00:00:00.000Z",
     setRuntimeMode: record("setRuntimeMode"),
-    setInteractionMode: record("setInteractionMode"),
     startTurn: record("startTurn", options.startTurnFails),
     resumeQueue: record("resumeQueue"),
   } as const;
@@ -64,22 +62,34 @@ describe("resumeThread", () => {
     expect(calls.map((call) => call.command)).toEqual(["startTurn"]);
   });
 
-  it("saves changed modes to the thread before continuing", async () => {
+  it("saves a changed runtime mode to the thread before continuing", async () => {
     const { calls, base } = setup();
     await resumeThread({
       ...base,
       runtimeMode: "approval-required",
-      interactionMode: "plan",
       resumableRunId: runId,
       queueHeld: false,
     });
 
-    expect(calls.map((call) => call.command)).toEqual([
-      "setRuntimeMode",
-      "setInteractionMode",
-      "startTurn",
-    ]);
+    expect(calls.map((call) => call.command)).toEqual(["setRuntimeMode", "startTurn"]);
   });
+
+  // KODO: mode-preserve - mobile has no mode picker, so resuming an Ask thread must leave it in Ask.
+  it.each(["ask", "plan", "review", "code"] as const)(
+    "continues a %s thread in its own mode and never changes it",
+    async (interactionMode) => {
+      const { calls, base } = setup();
+      await resumeThread({
+        ...base,
+        thread: { ...base.thread, interactionMode },
+        resumableRunId: runId,
+        queueHeld: false,
+      });
+
+      expect(calls.map((call) => call.command)).toEqual(["startTurn"]);
+      expect(calls[0]?.input).toMatchObject({ interactionMode });
+    },
+  );
 
   it("resumes a held queue directly when no run needs continuing", async () => {
     const { calls, base } = setup();

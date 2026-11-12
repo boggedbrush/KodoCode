@@ -309,8 +309,8 @@ export function useThreadComposerState(input: {
     serverConfig?.providers ?? [],
   );
   const runtimeMode = selectedDraft.runtimeMode ?? selectedThread?.runtimeMode ?? null;
-  // Plan mode is not offered to users; every send runs in build mode.
-  const interactionMode = selectedThread ? DEFAULT_PROVIDER_INTERACTION_MODE : null;
+  // KODO: mode-preserve - mobile has no mode picker; a send carries the thread's own mode.
+  const interactionMode = selectedThread ? selectedThread.interactionMode : null;
   const canSwitchThreadProvider = threadAllowsProviderSwitch({
     thread: selectedThreadShell,
     projection: selectedThreadProjection?.projection,

@@ -34,7 +34,11 @@ import type {
   ScopedThreadRef,
   ServerProvider,
   ThreadId,
+  KodoInteractionMode,
+  ThreadInteractionMode,
 } from "@t3tools/contracts";
+// KODO: composer-mode-props
+import { isKodoModeSlashCommand } from "../../kodo/interactionModes.logic";
 import {
   EnvironmentRequestInvalidError,
   AuthOrchestrationOperateScope,
@@ -136,6 +140,10 @@ import { useDictationShortcut } from "../../speech/useDictationShortcut";
 import { useDictationSubmissionShortcut } from "../../speech/useDictationSubmissionShortcut";
 import { useEnvironmentSpeechInput } from "../../speech/useEnvironmentSpeechInput";
 import { ComposerSpeechButton, ComposerSpeechRecordingPill } from "./ComposerSpeechButton";
+// KODO: composer-enhance - the Enhance control
+import { KodoEnhanceControl } from "./KodoEnhanceControl";
+import { useKodoInteractionModeStatus } from "../../kodo/interactionModeStatus";
+import { promptEnhanceUnavailableReason } from "../../kodo/promptEnhance.logic";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { shortcutLabelForCommand } from "../../keybindings";
 import {
@@ -476,6 +484,10 @@ export interface ChatComposerProps {
   onOpenProviderSetup: (instanceId: ProviderInstanceId) => void;
   getModelDisabledReason: (instanceId: ProviderInstanceId, model: string) => string | null;
   handleRuntimeModeChange: (mode: RuntimeMode) => void;
+  // KODO: composer-mode-props
+  interactionMode: KodoInteractionMode;
+  handleInteractionModeChange: (mode: ThreadInteractionMode) => void;
+  toggleInteractionMode: () => void;
 
   focusComposer: () => void;
   scheduleComposerFocus: () => void;
@@ -568,6 +580,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onOpenProviderSetup,
     getModelDisabledReason,
     handleRuntimeModeChange,
+    interactionMode,
+    handleInteractionModeChange,
+    toggleInteractionMode,
     focusComposer,
     scheduleComposerFocus,
     setThreadError,
@@ -576,6 +591,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     editingQueuedAttachments,
     onRemoveEditingQueuedAttachment,
   } = props;
+  // KODO: chat-mode-state - a mode picked mid-turn must not steer into the turn that predates it
+  const { appliesNextTurn: modeAppliesNextTurn } = useKodoInteractionModeStatus();
+  const steerBlocked = isCompacting || modeAppliesNextTurn;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const composerDraftTargetKey = composerTargetKey(composerDraftTarget);
   const {
@@ -1873,6 +1891,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       return;
     }
     if (item.type === "slash-command") {
+      // KODO: mode-slash-select
+      if (isKodoModeSlashCommand(item.command)) {
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+        });
+        if (applied) {
+          setComposerHighlightedItemId(null);
+          handleInteractionModeChange(item.command);
+        }
+        return;
+      }
       if (item.command === "model") {
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
@@ -2140,7 +2169,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               running: phase === "running",
               alternateModifier: false,
               activeTurnDefault: followUpBehavior,
-              canSteer: !isCompacting,
+              canSteer: !steerBlocked,
             }),
           submissionIntent,
         );
@@ -2181,7 +2210,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         resolveComposerDispatchMode({
           running: phase === "running",
           alternateModifier: intent === "alternate",
-          canSteer: !isCompacting,
+          canSteer: !steerBlocked,
           activeTurnDefault: followUpBehavior,
         }),
         intent,
@@ -2196,7 +2225,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         running: phase === "running",
         alternateModifier: event.metaKey || event.ctrlKey,
         activeTurnDefault: followUpBehavior,
-        canSteer: !isCompacting,
+        canSteer: !steerBlocked,
       }),
     );
   };
@@ -2208,7 +2237,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         running: phase === "running",
         alternateModifier: false,
         activeTurnDefault: followUpBehavior,
-        canSteer: !isCompacting,
+        canSteer: !steerBlocked,
       }),
     );
   };
@@ -2289,7 +2318,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       sendShortcut: settings.sendShortcut,
       routeKind,
       phase,
-      isCompacting,
+      isCompacting: steerBlocked,
       followUpBehavior,
       isSoftwareKeyboardOpen,
       isLiteralPendingAnswer,
@@ -2312,6 +2341,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setComposerTrigger,
       setComposerHighlightedItemId,
       dismissComposerTrigger,
+      toggleInteractionMode,
       nudgeComposerMenuHighlight,
       onSelectComposerItem,
       resolveActiveComposerTrigger,
@@ -2414,6 +2444,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       defaultRuntimeMode={props.defaultRuntimeMode}
       compatibleRuntimeModeOptions={compatibleRuntimeModeOptions}
       handleRuntimeModeChange={handleRuntimeModeChange}
+      // KODO: composer-mode-props
+      interactionMode={interactionMode}
+      handleInteractionModeChange={handleInteractionModeChange}
       composerControlsCollapsed={composerControlsCollapsed}
       effortDisplay={settings.effortDisplay}
       permissionsShownInStrip={props.permissionsShownInStrip}
@@ -3584,7 +3617,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isRunning={phase === "running"}
                     canInterrupt={canInterrupt}
                     followUpBehavior={followUpBehavior}
-                    canSteer={!isCompacting}
+                    canSteer={!steerBlocked}
                     alternateShortcutLabel={shortcutLabelForCommand(
                       keybindings,
                       "composer.sendAlternate",
@@ -3621,6 +3654,26 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     keepFullHistory={props.keepFullHistory}
                     onToggleKeepFullHistory={props.onToggleKeepFullHistory}
                   >
+                    {/* KODO: composer-enhance - rewrites the draft; a pending answer or dictation owns the editor */}
+                    {activePendingProgress === null && speechInput.state.phase === "idle" ? (
+                      <KodoEnhanceControl
+                        environmentId={environmentId}
+                        draft={prompt}
+                        interactionMode={interactionMode}
+                        unavailableReason={promptEnhanceUnavailableReason({
+                          noProviderAvailable,
+                          canOperateThread,
+                          environmentUnavailable: environmentUnavailable !== null,
+                          projectSelectionRequired,
+                          sendBusy: isSendBusy,
+                        })}
+                        replaceDraft={(expected, next) =>
+                          applyPromptReplacementStable(0, promptRef.current.length, next, {
+                            expectedText: expected,
+                          })
+                        }
+                      />
+                    ) : null}
                     {speechInput.available ? (
                       <>
                         <ComposerSpeechRecordingPill

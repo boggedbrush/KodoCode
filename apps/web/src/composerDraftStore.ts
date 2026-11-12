@@ -1,3 +1,4 @@
+// KODO: thread-mode-type
 import { stripInlineContextReferences } from "./lib/composerContextReferences";
 import { composerFileAttachmentMimeType } from "./components/chat/composerAttachmentFiles";
 import { elementContextToPreviewAnnotation } from "./lib/elementContext";
@@ -10,7 +11,7 @@ import {
   ModelSelection,
   ProjectId,
   ProviderInstanceId,
-  ProviderInteractionMode,
+  ThreadInteractionMode,
   ProviderDriverKind,
   ProviderOptionSelection,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
@@ -93,6 +94,8 @@ import { persist, type PersistStorage, type StorageValue } from "zustand/middlew
 import { useShallow } from "zustand/react/shallow";
 import { createDeferredStorage, createMemoryStorage } from "./lib/storage";
 import { getDefaultServerModel } from "./providerModels";
+// KODO: draft-mode-hydrate
+import { parseStoredInteractionMode } from "./kodo/interactionModes.logic";
 import {
   replaceComposerContextReferences,
   toComposerContextId,
@@ -252,7 +255,7 @@ const PersistedComposerThreadDraftState = Schema.Struct({
   activeProvider: Schema.optionalKey(Schema.NullOr(ProviderInstanceId)),
   modelSelectionExplicit: Schema.optionalKey(Schema.Boolean),
   runtimeMode: Schema.optionalKey(RuntimeMode),
-  interactionMode: Schema.optionalKey(ProviderInteractionMode),
+  interactionMode: Schema.optionalKey(ThreadInteractionMode),
 });
 type PersistedComposerThreadDraftState = typeof PersistedComposerThreadDraftState.Type;
 
@@ -314,7 +317,7 @@ const PersistedDraftThreadState = Schema.Struct({
   loadBalancedEnvironmentId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   createdAt: Schema.String,
   runtimeMode: RuntimeMode,
-  interactionMode: ProviderInteractionMode,
+  interactionMode: ThreadInteractionMode,
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
   envMode: DraftThreadEnvModeSchema,
@@ -376,7 +379,7 @@ export interface ComposerThreadDraftState {
   activeProvider: ProviderInstanceId | null;
   modelSelectionExplicit?: boolean;
   runtimeMode: RuntimeMode | null;
-  interactionMode: ProviderInteractionMode | null;
+  interactionMode: ThreadInteractionMode | null;
 }
 
 export function composerDraftHasUserContent(
@@ -407,7 +410,7 @@ export interface DraftSessionState {
   loadBalancedEnvironmentId?: EnvironmentId | null;
   createdAt: string;
   runtimeMode: RuntimeMode;
-  interactionMode: ProviderInteractionMode;
+  interactionMode: ThreadInteractionMode;
   branch: string | null;
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
@@ -463,7 +466,7 @@ interface ComposerDraftStoreState {
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
-      interactionMode?: ProviderInteractionMode;
+      interactionMode?: ThreadInteractionMode;
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
@@ -479,7 +482,7 @@ interface ComposerDraftStoreState {
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
-      interactionMode?: ProviderInteractionMode;
+      interactionMode?: ThreadInteractionMode;
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
@@ -494,7 +497,7 @@ interface ComposerDraftStoreState {
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
       runtimeMode?: RuntimeMode;
-      interactionMode?: ProviderInteractionMode;
+      interactionMode?: ThreadInteractionMode;
       environmentSelection?: "auto" | "manual";
       loadBalancedEnvironmentId?: EnvironmentId | null;
     },
@@ -538,7 +541,7 @@ interface ComposerDraftStoreState {
   ) => void;
   setInteractionMode: (
     threadRef: ComposerThreadTarget,
-    interactionMode: ProviderInteractionMode | null | undefined,
+    interactionMode: ThreadInteractionMode | null | undefined,
   ) => void;
   addImage: (threadRef: ComposerThreadTarget, image: ComposerImageAttachment) => boolean;
   addImages: (
@@ -1480,7 +1483,7 @@ function createDraftThreadState(
     envMode?: DraftThreadEnvMode;
     startFromOrigin?: boolean;
     runtimeMode?: RuntimeMode;
-    interactionMode?: ProviderInteractionMode;
+    interactionMode?: ThreadInteractionMode;
     environmentSelection?: "auto" | "manual";
     loadBalancedEnvironmentId?: EnvironmentId | null;
   },
@@ -1704,11 +1707,10 @@ function normalizePersistedDraftThreads(
         runtimeMode: isRuntimeMode(candidateDraftThread.runtimeMode)
           ? candidateDraftThread.runtimeMode
           : DEFAULT_RUNTIME_MODE,
+        // KODO: draft-mode-hydrate
         interactionMode:
-          candidateDraftThread.interactionMode === "plan" ||
-          candidateDraftThread.interactionMode === "default"
-            ? candidateDraftThread.interactionMode
-            : DEFAULT_INTERACTION_MODE,
+          parseStoredInteractionMode(candidateDraftThread.interactionMode) ??
+          DEFAULT_INTERACTION_MODE,
         branch: typeof branch === "string" ? branch : null,
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
@@ -1891,10 +1893,8 @@ function normalizePersistedDraftsByThreadId(
     const runtimeMode = isRuntimeMode(draftCandidate.runtimeMode)
       ? draftCandidate.runtimeMode
       : null;
-    const interactionMode =
-      draftCandidate.interactionMode === "plan" || draftCandidate.interactionMode === "default"
-        ? draftCandidate.interactionMode
-        : null;
+    // KODO: draft-mode-hydrate
+    const interactionMode = parseStoredInteractionMode(draftCandidate.interactionMode);
     const contextIds = new Map<string, string>();
     for (const [kind, entries] of [
       ["image", attachments],
@@ -3210,8 +3210,8 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           if (threadKey.length === 0) {
             return;
           }
-          const nextInteractionMode =
-            interactionMode === "plan" || interactionMode === "default" ? interactionMode : null;
+          // KODO: draft-mode-set
+          const nextInteractionMode = parseStoredInteractionMode(interactionMode);
           set((state) => {
             const existing = state.draftsByThreadKey[threadKey];
             if (!existing && nextInteractionMode === null) {

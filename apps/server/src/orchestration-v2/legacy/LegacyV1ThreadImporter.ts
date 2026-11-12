@@ -9,6 +9,7 @@ import {
   EventId,
   MessageId,
   ModelSelection,
+  normalizeKodoInteractionMode,
   type OrchestrationV2AppThread,
   OrchestrationV2AppThreadJson,
   type OrchestrationV2ConversationMessage,
@@ -179,7 +180,8 @@ function runtimeModeFor(value: string): OrchestrationV2AppThread["runtimeMode"] 
 }
 
 function interactionModeFor(value: string): OrchestrationV2AppThread["interactionMode"] {
-  return value === "plan" ? "plan" : "default";
+  // KODO: mode-legacy-import - keeps ask / plan / code / review; anything else (legacy default, swarm) reads as code.
+  return normalizeKodoInteractionMode(value);
 }
 
 function settledOverrideFor(value: string | null): OrchestrationV2AppThread["settledOverride"] {

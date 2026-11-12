@@ -503,23 +503,24 @@ it.effect("launches in a linked environment with the caller's modes, retry-safe"
           ...args,
         });
 
-      const first = yield* launch("thread:laptop-plan");
+      // KODO: mode-read-only-tools - a read-only caller starts nothing, here or in a linked environment.
+      const refused = yield* launch("thread:laptop-plan");
+      expect(failureOf(refused)).toMatchObject({ code: "capability_denied" });
+      expect((yield* Ref.get(seen)).launches).toHaveLength(0);
+
+      const first = yield* launch("thread:laptop-full");
       expect(first.isError).toBe(false);
       expect(first.structuredContent).toMatchObject({
         projectId: boxProject,
         modelSelection: codex,
       });
-      const retried = yield* launch("thread:laptop-plan");
+      const retried = yield* launch("thread:laptop-full");
       const [launched, relaunched] = (yield* Ref.get(seen)).launches;
-      // The thread there runs with the caller's own modes here, below the
-      // link's full access, and a retry asks for the same thread.
-      expect(launched).toMatchObject({ runtimeMode: "full-access", interactionMode: "plan" });
+      // The thread there runs with the caller's own modes here, and a retry asks for the same thread.
+      expect(launched).toMatchObject({ runtimeMode: "full-access", interactionMode: "default" });
       expect(relaunched?.threadId).toBe(launched?.threadId);
       expect(retried.structuredContent).toEqual(first.structuredContent);
 
-      // An escalation past the caller's own modes is refused here.
-      const escalated = yield* launch("thread:laptop-plan", { interactionMode: "default" });
-      expect(failureOf(escalated)).toMatchObject({ code: "interaction_mode_escalation_denied" });
       // A pending upload lives here, so it cannot go along.
       yield* Ref.set(b.bearers, []);
       const withUpload = yield* launch("thread:laptop-full", {

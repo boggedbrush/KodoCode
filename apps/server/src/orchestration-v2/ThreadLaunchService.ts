@@ -1,3 +1,4 @@
+// KODO: thread-mode-type
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
@@ -14,7 +15,7 @@ import {
   type OrchestrationV2ProviderThreadNativeMetadata,
   type OrchestrationV2ThreadProjection,
   type ProviderDriverKind,
-  type ProviderInteractionMode,
+  type ThreadInteractionMode,
   ProjectId,
   type RunId,
   type RuntimeMode,
@@ -86,7 +87,7 @@ export interface ThreadLaunchInput {
   readonly generateTitle?: boolean;
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
+  readonly interactionMode: ThreadInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   readonly importedNativeThread?: {

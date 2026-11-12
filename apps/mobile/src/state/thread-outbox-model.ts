@@ -7,7 +7,6 @@ import type { EnvironmentShellStatus } from "@t3tools/client-runtime/state/shell
 import type { ThreadFamilyRead } from "@t3tools/client-runtime/state/threads";
 import {
   CommandId,
-  DEFAULT_PROVIDER_INTERACTION_MODE,
   EnvironmentId,
   IsoDateTime,
   MessageId,
@@ -20,6 +19,7 @@ import {
   type ModelSelection as ModelSelectionType,
   type ProjectId as ProjectIdType,
   type ProviderInteractionMode as ProviderInteractionModeType,
+  type ThreadInteractionMode as ThreadInteractionModeType, // KODO: thread-mode-type
   type RuntimeMode as RuntimeModeType,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -102,35 +102,21 @@ export interface QueuedThreadMessage {
 export interface ThreadSettingsSnapshot {
   readonly modelSelection: ModelSelectionType;
   readonly runtimeMode: RuntimeModeType;
-  readonly interactionMode: ProviderInteractionModeType;
-}
-
-// Providers without a Build/Plan toggle always run in build mode.
-function resolveProviderInteractionMode(
-  provider: Pick<ServerProvider, "showInteractionModeToggle"> | undefined,
-  interactionMode: ProviderInteractionModeType,
-): ProviderInteractionModeType {
-  return provider?.showInteractionModeToggle === false
-    ? DEFAULT_PROVIDER_INTERACTION_MODE
-    : interactionMode;
+  readonly interactionMode: ThreadInteractionModeType;
 }
 
 export function resolveQueuedThreadSettings(
   message: QueuedThreadMessage,
   thread: ThreadSettingsSnapshot,
-  providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "showInteractionModeToggle">> = [],
+  _providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "showInteractionModeToggle">> = [],
 ): ThreadSettingsSnapshot {
   const modelSelection = message.modelSelection ?? thread.modelSelection;
-  const provider = providers.find(
-    (candidate) => candidate.instanceId === modelSelection.instanceId,
-  );
   return {
     modelSelection,
     runtimeMode: message.runtimeMode ?? thread.runtimeMode,
-    interactionMode: resolveProviderInteractionMode(
-      provider,
-      message.interactionMode ?? thread.interactionMode,
-    ),
+    // KODO: mode-preserve - mobile has no mode picker, so a send never changes the thread's mode
+    // (not for a provider without a plan toggle, and not for a mode a queued message captured).
+    interactionMode: thread.interactionMode,
   };
 }
 

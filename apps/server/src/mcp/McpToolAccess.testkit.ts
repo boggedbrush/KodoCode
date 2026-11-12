@@ -2,7 +2,7 @@ import {
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
   ProjectId,
-  type ProviderInteractionMode,
+  type ThreadInteractionMode,
   ProviderInstanceId,
   RunId,
   type RuntimeMode,
@@ -20,7 +20,7 @@ export const liveThreadShell = (
   id: ThreadId,
   modes: {
     readonly runtimeMode?: RuntimeMode;
-    readonly interactionMode?: ProviderInteractionMode;
+    readonly interactionMode?: ThreadInteractionMode;
     readonly activeRunId?: RunId | null;
   } = {},
 ): OrchestrationV2ThreadShell => {

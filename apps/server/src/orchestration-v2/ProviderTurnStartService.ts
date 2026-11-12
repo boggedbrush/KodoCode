@@ -48,6 +48,7 @@ import {
 import { deliverContextHandoffs, withInlineContext } from "./ContextHandoffDelivery.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import { kodoEffectiveRunMode } from "../kodo/interactionMode.ts"; // KODO: run-mode-snapshot
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 import {
@@ -693,9 +694,17 @@ export const layer: Layer.Layer<
       });
       const { isCurrentAttemptInStatus } = runControls;
 
+      // KODO: run-mode-snapshot - the run starts with the more restrictive of its mode and the thread's.
+      const modeThread = {
+        ...projection.thread,
+        interactionMode: kodoEffectiveRunMode(
+          run.interactionMode,
+          projection.thread.interactionMode,
+        ),
+      };
       const resolvedPolicy = yield* runtimePolicy
         .resolve({
-          thread: projection.thread,
+          thread: modeThread,
           modelSelection: run.modelSelection,
         })
         .pipe(Effect.result);
@@ -1671,7 +1680,7 @@ export const layer: Layer.Layer<
           : makeDeliverySession(session, startWithHandoffs);
       return runExecution.startRootRun({
         commandId: CommandId.make(`command:effect:provider-turn.start:${run.id}`),
-        appThread: projection.thread,
+        appThread: modeThread, // KODO: run-mode-snapshot
         providerSessionId,
         session: deliverySession,
         run: runningRun,

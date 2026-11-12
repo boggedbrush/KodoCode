@@ -1,7 +1,8 @@
+// KODO: thread-mode-type
 import type {
   ModelSelection,
   ProviderDriverKind,
-  ProviderInteractionMode,
+  ThreadInteractionMode,
   RuntimeMode,
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
@@ -21,7 +22,7 @@ export interface ProviderSessionTransitionState {
   readonly continuationIdentity: ProviderContinuationIdentity;
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
-  readonly interactionMode: ProviderInteractionMode;
+  readonly interactionMode: ThreadInteractionMode;
   readonly workspace: string;
 }
 

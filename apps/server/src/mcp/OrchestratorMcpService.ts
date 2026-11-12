@@ -1,3 +1,4 @@
+import { kodoInteractionModeLimit } from "../kodo/interactionMode.ts"; // KODO: mode-peer-limit
 import {
   CommandId,
   type RunId,
@@ -51,7 +52,7 @@ import {
   type OrchestratorMcpThreadTimelineItem,
   type OrchestratorMcpThreadWaitInput,
   type OrchestratorMcpThreadWaitResult,
-  type ProviderInteractionMode,
+  type ThreadInteractionMode,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
   ProviderRequestKind,
@@ -1886,9 +1887,9 @@ const make = Effect.gen(function* () {
   const withinLimits = (
     limits: {
       readonly runtimeMode: RuntimeMode;
-      readonly interactionMode: ProviderInteractionMode;
+      readonly interactionMode: ThreadInteractionMode;
     },
-    modes: { readonly runtimeMode: RuntimeMode; readonly interactionMode: ProviderInteractionMode },
+    modes: { readonly runtimeMode: RuntimeMode; readonly interactionMode: ThreadInteractionMode },
   ) =>
     runtimeModeRank(modes.runtimeMode) <= runtimeModeRank(limits.runtimeMode) &&
     interactionModeRank(modes.interactionMode) <= interactionModeRank(limits.interactionMode);
@@ -1905,7 +1906,7 @@ const make = Effect.gen(function* () {
         readonly parent: Pick<OrchestrationV2ThreadProjection, "thread" | "runs"> | undefined;
         readonly limits: {
           readonly runtimeMode: RuntimeMode;
-          readonly interactionMode: ProviderInteractionMode;
+          readonly interactionMode: ThreadInteractionMode;
         };
       },
       task: ScheduledTask,
@@ -1933,7 +1934,7 @@ const make = Effect.gen(function* () {
     scheduledTaskId: ScheduledTask["id"],
     limits: {
       readonly runtimeMode: RuntimeMode;
-      readonly interactionMode: ProviderInteractionMode;
+      readonly interactionMode: ThreadInteractionMode;
     },
   ): Effect.fn.Return<ScheduledTask, OrchestratorMcpFailure> {
     const { tasks } = yield* scheduledTasks
@@ -1991,7 +1992,7 @@ const make = Effect.gen(function* () {
         workspaceStrategy: yield* scheduledTaskWorkspaceStrategy(bindToCurrentThread, projectId),
         modelSelection,
         runtimeMode: limits.runtimeMode,
-        interactionMode: limits.interactionMode,
+        interactionMode: kodoInteractionModeLimit(limits.interactionMode), // KODO: mode-peer-limit
         createdBy: "agent",
         creationSource: "mcp",
         // Scope the idempotency key by provider session so two callers

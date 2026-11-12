@@ -30,7 +30,7 @@ import type { Dispatch, RefObject, SetStateAction } from "react";
 
 /**
  * The composer's key handling inside the editor: send shortcuts, the slash/mention menu,
- * prompt history on ArrowUp/ArrowDown, plan-mode toggle, prompt suggestions on Tab, and list continuation.
+ * prompt history on ArrowUp/ArrowDown, Shift+Tab cycling the Kodo mode, prompt suggestions on Tab, and list continuation.
  * Returns the editor's key handler; it reads the inputs captured by the render that built it.
  */
 export function composerCommandKeyHandler(input: {
@@ -67,6 +67,8 @@ export function composerCommandKeyHandler(input: {
   readonly setComposerTrigger: (trigger: ComposerTrigger | null) => void;
   readonly setComposerHighlightedItemId: Dispatch<SetStateAction<string | null>>;
   readonly dismissComposerTrigger: (trigger: ComposerTrigger | null) => void;
+  // KODO: mode-shift-tab
+  readonly toggleInteractionMode: () => void;
   readonly nudgeComposerMenuHighlight: (key: "ArrowDown" | "ArrowUp") => void;
   readonly onSelectComposerItem: (item: ComposerCommandItem) => void;
   readonly resolveActiveComposerTrigger: () => { trigger: ComposerTrigger | null };
@@ -114,6 +116,7 @@ export function composerCommandKeyHandler(input: {
     setComposerTrigger,
     setComposerHighlightedItemId,
     dismissComposerTrigger,
+    toggleInteractionMode,
     nudgeComposerMenuHighlight,
     onSelectComposerItem,
     resolveActiveComposerTrigger,
@@ -210,7 +213,10 @@ export function composerCommandKeyHandler(input: {
       prompt: promptRef.current,
     });
     if (key === "Tab" && event.shiftKey && submissionIntent === null) {
-      return applyListEdit(event, listOutdentForTab);
+      if (applyListEdit(event, listOutdentForTab)) return true;
+      // KODO: mode-shift-tab
+      toggleInteractionMode();
+      return true;
     }
     const { trigger } = resolveActiveComposerTrigger();
     const menuIsActive =
