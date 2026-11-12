@@ -231,6 +231,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           projectId,
           title: input.title,
           modelSelection,
+          explicitModelSelection: input.modelSelection !== undefined, // KODO: mode-models-send
           runtimeMode: startedRuntimeMode,
           interactionMode,
           workspaceStrategy: input.workspaceStrategy ?? { type: "root" },

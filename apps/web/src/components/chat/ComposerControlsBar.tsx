@@ -37,6 +37,7 @@ import { resolveKodoModeBlockHidden } from "../../kodo/interactionModes.logic";
 import { KodoInteractionModeChip } from "./KodoInteractionModePicker";
 import { KodoModelNoteLabel } from "../../kodo/KodoModelNote"; // KODO: mode-models-composer
 import type { KodoModelNote } from "../../kodo/modeModels.logic"; // KODO: mode-models-composer
+import { kodoHoldModelOptions, kodoRouteTraitsInput } from "../../kodo/heldModelPick"; // KODO: mode-models-composer
 
 /**
  * The composer footer controls: the model picker (which also holds effort, speed and
@@ -165,20 +166,36 @@ export function ComposerControlsBar(props: {
   const controlSize = composerControlsCollapsed ? "xs" : "sm";
   const applyThreadModelPick = useApplyThreadModelPick();
   const applyRouteThreadModelPick = useStableCallback(() => applyThreadModelPick(routeThreadRef));
-  const traitsInput = resolveComposerTraitsInput({
-    provider: selectedProvider,
-    instanceId: selectedInstanceId,
-    ...(routeKind === "server"
-      ? { threadRef: routeThreadRef, onDraftModelOptionsChange: applyRouteThreadModelPick }
-      : {}),
-    ...(routeKind === "draft" && draftId ? { draftId } : {}),
-    model: selectedModel,
-    models: selectedProviderModels,
-    modelOptions: composerModelOptions?.[selectedInstanceId],
-    reportedModelSelection,
-    promptUltrathink,
-    onPromptEdit,
-  });
+  // KODO: mode-models-composer - in a mode with a default model a change to the options waits for
+  // the send as a held pick; it never rewrites the thread's own model.
+  const kodoHoldsPick = kodoModelNote !== null;
+  const traitsInput = kodoRouteTraitsInput(
+    resolveComposerTraitsInput({
+      provider: selectedProvider,
+      instanceId: selectedInstanceId,
+      ...(routeKind === "server"
+        ? {
+            threadRef: routeThreadRef,
+            ...(kodoHoldsPick ? {} : { onDraftModelOptionsChange: applyRouteThreadModelPick }),
+          }
+        : {}),
+      ...(routeKind === "draft" && draftId ? { draftId } : {}),
+      model: selectedModel,
+      models: selectedProviderModels,
+      modelOptions: composerModelOptions?.[selectedInstanceId],
+      reportedModelSelection,
+      promptUltrathink,
+      onPromptEdit,
+    }),
+    kodoModelNote?.kind === "mode-default" && routeKind === "server"
+      ? (options) =>
+          kodoHoldModelOptions(
+            routeThreadRef,
+            { instanceId: selectedInstanceId, model: selectedModel },
+            options,
+          )
+      : undefined,
+  );
   // KODO: controls-bar-mode
   const overflowHidden = hiddenRestingBlockIds.length === 0 && !kodoModeHidden;
   const effort = describeComposerEffort(traitsInput, props.effortDisplay, controlSize);

@@ -2,7 +2,9 @@
 // not-yet-consumed Orchestrator slot. Stored in server settings next to `defaultModelSelection`;
 // resolved by `@t3tools/shared/kodoModeModel` (client preview) and apps/server/src/kodo/modeModel.ts.
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 
 import { ModelSelection } from "./modelSelection.ts";
 
@@ -10,10 +12,22 @@ const KODO_MODE_MODEL_SLOTS = ["ask", "plan", "code", "review", "orchestrator", 
 export const KodoModeModelSlot = Schema.Literals(KODO_MODE_MODEL_SLOTS);
 export type KodoModeModelSlot = typeof KodoModeModelSlot.Type;
 
-// A slot that fails to decode (a malformed selection from a newer or foreign build) reads as unset,
-// so one bad value cannot take the whole settings file with it.
-const Slot = Schema.NullOr(ModelSelection).pipe(
-  Schema.catchDecoding(() => Effect.succeedSome(null)),
+// A slot that is not a valid selection (a malformed value from a newer or foreign build) reads as
+// unset. The slot's encoded side is `unknown`: `withDecodingDefault` on the section validates the
+// section's encoded side first, so a catch placed on the decoded side would never see the bad slot
+// and the whole section would fall back to unset, erasing the valid slots next to it on the next save.
+const decodeSelection = Schema.decodeUnknownOption(ModelSelection);
+const Slot = Schema.Unknown.pipe(
+  Schema.decodeTo(
+    Schema.NullOr(ModelSelection),
+    SchemaTransformation.transform({
+      decode: (raw) =>
+        raw === null || raw === undefined || Option.isNone(decodeSelection(raw))
+          ? null
+          : (raw as typeof ModelSelection.Encoded),
+      encode: (value): unknown => value,
+    }),
+  ),
   Schema.withDecodingDefault(Effect.succeed(null)),
 );
 

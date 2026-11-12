@@ -15,6 +15,7 @@ import {
   kodoPickerUsageHint,
   kodoUsageIsStale,
   kodoUsageLevel,
+  kodoUsageTone,
   parseKodoUsageSlashCommand,
   providersWithoutLimitData,
   summarizeProviderLimits,
@@ -117,6 +118,39 @@ describe("summarizeProviderLimits", () => {
         now,
       ),
     ).toMatchObject({ level: "warning", resetsAtMs: null, stale: true });
+  });
+
+  it("a stale reading is drawn muted, a fresh one in its level's colour", () => {
+    const stale = summarizeProviderLimits(
+      limits([windowAt(95, "2026-09-03T13:00:00.000Z")], { checkedAt: "2026-09-03T09:00:00.000Z" }),
+      now,
+    )!;
+    const fresh = summarizeProviderLimits(limits([windowAt(95, "2026-09-03T13:00:00.000Z")]), now)!;
+    expect(stale).toMatchObject({ level: "critical", stale: true });
+    expect(kodoUsageTone(stale)).toBe("stale");
+    expect(kodoUsageTone(fresh)).toBe("critical");
+  });
+
+  it("a stale window with no reset time no longer reads as out, a fresh one does", () => {
+    const stale = { checkedAt: "2026-09-03T09:00:00.000Z" };
+    expect(summarizeProviderLimits(limits([windowAt(100, undefined)], stale), now)).toBeNull();
+    expect(summarizeProviderLimits(limits([windowAt(100, undefined)]), now)).toMatchObject({
+      level: "exhausted",
+      resetsAtMs: null,
+      stale: false,
+    });
+    // Not exhausted: it stays, muted.
+    expect(summarizeProviderLimits(limits([windowAt(85, undefined)], stale), now)).toMatchObject({
+      level: "warning",
+      stale: true,
+    });
+    expect(
+      collectKodoUsageMeterEntries(
+        hubPresentation([limits([windowAt(100, undefined)], stale)]),
+        now,
+        label,
+      ),
+    ).toEqual([]);
   });
 
   it("reports nothing for unsupported providers and missing limits", () => {

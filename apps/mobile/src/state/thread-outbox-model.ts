@@ -24,6 +24,7 @@ import {
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import { type KodoModeModelThread, kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel"; // KODO: mode-models-send
 
 import { DraftComposerAttachmentSchema } from "../lib/composer-image-schema";
 import type { ComposerDispatchMode } from "@t3tools/client-runtime/state/composer-dispatch";
@@ -55,6 +56,7 @@ export const QueuedThreadMessageSchema = Schema.Struct({
   context: Schema.optional(OrchestrationMessageContext),
   attachments: Schema.Array(DraftComposerAttachmentSchema),
   modelSelection: Schema.optional(ModelSelection),
+  modelPicked: Schema.optional(Schema.Boolean), // KODO: mode-models-send
   dispatchMode: Schema.optional(Schema.Literals(["auto", "queue", "steer", "restart"])),
   compactBeforeSend: Schema.optional(Schema.Boolean),
   freshContext: Schema.optional(Schema.Boolean),
@@ -87,6 +89,8 @@ export interface QueuedThreadMessage {
   readonly context?: OrchestrationMessageContext;
   readonly attachments: ReadonlyArray<DraftComposerAttachment>;
   readonly modelSelection?: ModelSelectionType;
+  /** KODO: mode-models-send - the user picked `modelSelection` for this message, so a mode default does not replace it. */
+  readonly modelPicked?: boolean;
   readonly runtimeMode?: RuntimeModeType;
   readonly interactionMode?: ProviderInteractionModeType;
   /** Captured at enqueue because draining may occur long after the tap. */
@@ -107,10 +111,11 @@ export interface ThreadSettingsSnapshot {
 
 export function resolveQueuedThreadSettings(
   message: QueuedThreadMessage,
-  thread: ThreadSettingsSnapshot,
+  thread: ThreadSettingsSnapshot & KodoModeModelThread, // KODO: mode-models-send
   _providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "showInteractionModeToggle">> = [],
 ): ThreadSettingsSnapshot {
-  const modelSelection = message.modelSelection ?? thread.modelSelection;
+  // KODO: mode-models-send - the thread's own model, not the mode default standing in for it
+  const modelSelection = message.modelSelection ?? kodoThreadOwnModel(thread);
   return {
     modelSelection,
     runtimeMode: message.runtimeMode ?? thread.runtimeMode,

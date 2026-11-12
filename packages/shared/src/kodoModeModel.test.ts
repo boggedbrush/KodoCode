@@ -8,6 +8,7 @@ import {
 import {
   kodoOwnModelAfterQueue,
   kodoSendIsExplicitPick,
+  kodoInstanceTurnedOff,
   kodoThreadModeModelFor,
   kodoThreadOwnModel,
   resolveKodoModeModelSelection,
@@ -167,7 +168,26 @@ describe("own model while a mode default displaces it", () => {
       base: own,
     });
     expect(kodoThreadModeModelFor({ selection: own, source: "mode-default", own })).toBeUndefined();
-    expect(kodoThreadModeModelFor({ selection: fast, source: "explicit", own })).toBeUndefined();
+    expect(kodoThreadModeModelFor({ selection: own, source: "thread", own })).toBeUndefined();
+  });
+
+  it("a pick in a mode with a default is displaced like one; without a default it is the thread's own", () => {
+    const withDefault = resolveKodoModeModelSelection({
+      mode: "ask",
+      own,
+      modeModels: models({ ask: fast }),
+      explicit: strong,
+    });
+    expect(withDefault).toMatchObject({ source: "explicit", own, hasDefault: true });
+    expect(kodoThreadModeModelFor(withDefault)).toEqual({ applied: strong, base: own });
+    const withoutDefault = resolveKodoModeModelSelection({
+      mode: "ask",
+      own,
+      modeModels: models({}),
+      explicit: strong,
+    });
+    expect(withoutDefault).toMatchObject({ source: "explicit", own: strong, hasDefault: false });
+    expect(kodoThreadModeModelFor(withoutDefault)).toBeUndefined();
   });
 
   it("a queue tail supplies the own model for runs queued behind it", () => {
@@ -178,12 +198,21 @@ describe("own model while a mode default displaces it", () => {
         kodoModel: { source: "mode-default", base: own },
       }),
     ).toEqual(own);
+    // A pick in a mode with a default keeps the thread's own model as its base.
     expect(
       kodoOwnModelAfterQueue(thread, {
         modelSelection: strong,
         kodoModel: { source: "explicit", base: own },
       }),
+    ).toEqual(own);
+    // A pick in a mode without one is the thread's model, which it records as its base.
+    expect(
+      kodoOwnModelAfterQueue(thread, {
+        modelSelection: strong,
+        kodoModel: { source: "explicit", base: strong },
+      }),
     ).toEqual(strong);
+    expect(kodoOwnModelAfterQueue(thread, { modelSelection: strong })).toEqual(strong);
     expect(kodoOwnModelAfterQueue(thread, undefined)).toEqual(own);
   });
 });
@@ -199,9 +228,28 @@ describe("kodoSendIsExplicitPick", () => {
     expect(kodoSendIsExplicitPick({ ...base, requested: own, flagged: undefined })).toBe(false);
     expect(kodoSendIsExplicitPick({ ...base, requested: fast, flagged: undefined })).toBe(false);
   });
+  it("while displaced, an unflagged selection equal to the own model differs from the displaced state", () => {
+    const displaced = { ...base, flagged: undefined, displaced: true };
+    expect(kodoSendIsExplicitPick({ ...displaced, requested: own })).toBe(true);
+    expect(kodoSendIsExplicitPick({ ...displaced, requested: fast })).toBe(false);
+    expect(kodoSendIsExplicitPick({ ...displaced, requested: own, flagged: false })).toBe(false);
+  });
   it("is never a pick when the mode has no default", () => {
     expect(
       kodoSendIsExplicitPick({ requested: strong, flagged: true, own, configured: null }),
     ).toBe(false);
+  });
+});
+
+describe("kodoInstanceTurnedOff", () => {
+  const settings = {
+    providerInstances: { custom: { driver: "codex", enabled: false } },
+    projectSettingsOverrides: { p1: { providerInstances: { custom: { enabled: true } } } },
+  } as never;
+  it("reads the project's override first, then the machine's, and trusts the catalogue for the rest", () => {
+    expect(kodoInstanceTurnedOff(settings, null, "custom" as never)).toBe(true);
+    expect(kodoInstanceTurnedOff(settings, "p1" as never, "custom" as never)).toBe(false);
+    expect(kodoInstanceTurnedOff(settings, "p2" as never, "custom" as never)).toBe(true);
+    expect(kodoInstanceTurnedOff(settings, null, "unconfigured" as never)).toBe(false);
   });
 });

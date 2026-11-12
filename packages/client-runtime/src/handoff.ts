@@ -18,7 +18,7 @@ import { REASONING_EFFORT_OPTION_IDS } from "./state/threadExecution.ts";
 
 export type HandoffTimelineRun = Pick<
   OrchestrationV2Run,
-  "id" | "ordinal" | "providerInstanceId" | "modelSelection"
+  "id" | "ordinal" | "providerInstanceId" | "modelSelection" | "kodoModel" // KODO: mode-models-notice
 >;
 
 export type HandoffEndpoints = ReturnType<typeof resolveHandoffEndpoints>;

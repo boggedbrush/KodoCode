@@ -5,7 +5,8 @@ import {
 import * as Dialog from "../../components/ui/Dialog";
 import { createV5StackNavigator as createNativeStackNavigator } from "../../native/createV5StackNavigator";
 import { useSheetStackOptions } from "../layout/nested-stacks";
-import { DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
+import { DEFAULT_KODO_MODE_MODELS, DEFAULT_SERVER_SETTINGS } from "@t3tools/contracts";
+import { kodoModeHasDefault, kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel"; // KODO: mode-models-send
 import {
   modelPreferencesMigrationPatch,
   resolveModelPreferences,
@@ -1331,7 +1332,7 @@ export function ExistingThreadSettingsRouteScreen({
   }
 
   const serverConfig = selectedEnvironmentRuntime?.serverConfig ?? null;
-  const modelSelection = draftSettings.modelSelection ?? selectedThread.modelSelection;
+  const modelSelection = draftSettings.modelSelection ?? kodoThreadOwnModel(selectedThread); // KODO: mode-models-send
   const lockedProviderInstanceId = threadAllowsProviderSwitch({
     thread: selectedThread,
     projection: structure?.projection,
@@ -1351,7 +1352,13 @@ export function ExistingThreadSettingsRouteScreen({
         option.selection.model === modelSelection.model,
     ) ?? null;
   const updateModelSelection = (selection: ModelSelection) =>
-    selectThreadModel(route.params, selection);
+    selectThreadModel(route.params, selection, {
+      // KODO: mode-models-send
+      hold: kodoModeHasDefault(
+        serverConfig?.settings.modeModelSelections ?? DEFAULT_KODO_MODE_MODELS,
+        selectedThread.interactionMode,
+      ),
+    });
 
   return (
     <ThreadSettingsPickerScreen

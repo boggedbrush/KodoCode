@@ -726,6 +726,7 @@ export function NewTaskFlowProvider(
       attachments: draft.attachments,
       context: draft.context,
       modelSelection: draftModelSelection,
+      ...(draft.modelSelection ? { modelPicked: true } : {}), // KODO: mode-models-send
       runtimeMode: resolveNewThreadRuntimeMode(
         draft.runtimeMode,
         defaultRuntimeMode,

@@ -122,6 +122,7 @@ import {
   type ThreadInspectorPresentation,
 } from "./thread-inspector-preview";
 import { useStartSideChat } from "./useStartSideChat";
+import { kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel"; // KODO: mode-models-send
 import type { ThreadInspectorMode, ThreadInspectorTarget } from "./thread-inspector-navigation";
 import { useSelectWorkspaceDetail } from "../layout/workspace/useSelectWorkspaceDetail";
 
@@ -488,7 +489,8 @@ function ThreadRouteContent(
   const selectedThreadWithDraftSettings = selectedThread
     ? {
         ...selectedThread,
-        modelSelection: composer.modelSelection ?? selectedThread.modelSelection,
+        // KODO: mode-models-send - shown as the thread's model: its own, not a mode default standing in for it
+        modelSelection: composer.modelSelection ?? kodoThreadOwnModel(selectedThread),
         runtimeMode: composer.runtimeMode ?? selectedThread.runtimeMode,
         interactionMode: composer.interactionMode ?? selectedThread.interactionMode,
       }
@@ -881,7 +883,7 @@ function ThreadRouteContent(
         titleText: selectedThread.title,
         ...(setupMessage.context ? { context: setupMessage.context } : {}),
         uploadedAttachments: setupMessage.attachments,
-        modelSelection: selectedThread.modelSelection,
+        modelSelection: kodoThreadOwnModel(selectedThread), // KODO: mode-models-send
         runtimeMode: selectedThread.runtimeMode,
         interactionMode: selectedThread.interactionMode,
         workspaceMode: "local",

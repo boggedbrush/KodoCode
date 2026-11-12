@@ -226,6 +226,7 @@ import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { resolveComposerMenuActiveItemId } from "./composerMenuHighlight";
 import { buildPullRequestReferenceContext } from "../pullRequest/pullRequestDetail.logic";
 import { getComposerPromptInjectionState, getComposerReasoningStep } from "./composerProviderState";
+import { kodoHoldModelOptions } from "../../kodo/heldModelPick"; // KODO: mode-models-composer
 import { readPromptUltrathink } from "./TraitsPicker";
 import { useApplyThreadModelPick } from "./useApplyThreadModelPick";
 import {
@@ -891,6 +892,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     providers: providerStatuses,
     lockedDriver: lockedProvider,
     explicitPick: composerDraft.modelSelectionExplicit === true,
+    instanceSettings: { settings, projectId: activeProjectId },
   });
   const {
     providerInstanceEntries,
@@ -925,6 +927,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       (activeThread?.kodoModeModel ? undefined : activeThread?.runtime?.providerInstanceId) ??
       activeThreadModelSelection?.instanceId, // KODO: mode-models-composer
   });
+  // KODO: mode-models-composer - a mode with a default holds a model change for the send, and shows it
+  const kodoHoldsPick = kodoComposerModel !== null;
+  const kodoShowsDefault = kodoComposerModel?.shown != null;
   // KODO: mode-models-composer - read when a send starts, so it stays out of the handle's deps.
   const kodoModelSendRef = useRef<
     ReturnType<ChatComposerHandle["getSendContext"]>["kodoModelSend"]
@@ -3051,14 +3056,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           direction,
         });
         if (!change) return;
-        useComposerDraftStore
-          .getState()
-          .setProviderModelOptions(composerDraftTarget, selectedProvider, change.modelOptions, {
-            instanceId: selectedInstanceId,
-            model: selectedModel,
-            persistSticky: true,
-          });
-        applyThreadModelPick(composerDraftTarget);
+        // KODO: mode-models-composer - with a mode default shown the change is a held pick of that
+        // model; in a mode with a default it never reaches the thread's own model either.
+        if (kodoShowsDefault) {
+          kodoHoldModelOptions(
+            composerDraftTarget,
+            { instanceId: selectedInstanceId, model: selectedModel },
+            change.modelOptions,
+          );
+        } else {
+          useComposerDraftStore
+            .getState()
+            .setProviderModelOptions(composerDraftTarget, selectedProvider, change.modelOptions, {
+              instanceId: selectedInstanceId,
+              model: selectedModel,
+              persistSticky: true,
+            });
+          if (!kodoHoldsPick) applyThreadModelPick(composerDraftTarget);
+        }
         if (change.prompt !== promptRef.current) {
           applyPromptReplacementStable(0, promptRef.current.length, change.prompt, {
             expandedCursorAfterReplace: change.cursor,
@@ -3251,6 +3266,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       selectedProvider,
       selectedProviderModels,
       compactThreadContextStable,
+      kodoHoldsPick, // KODO: mode-models-composer
+      kodoShowsDefault, // KODO: mode-models-composer
     ],
   );
 

@@ -981,6 +981,8 @@ export const layer = Layer.effect(
                     projectId: active.projectId,
                     title: active.title,
                     modelSelection: active.modelSelection,
+                    // KODO: mode-models-send - the task's own model was chosen, so a mode default does not replace it
+                    explicitModelSelection: true,
                     runtimeMode: active.runtimeMode,
                     interactionMode: active.interactionMode,
                     workspaceStrategy: active.workspaceStrategy,

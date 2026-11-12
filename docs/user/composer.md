@@ -103,22 +103,36 @@ and Judge appear below them as roles: they are saved but nothing uses them yet, 
 Judge follows the Review model until you set it.
 
 - The composer shows the model the current mode will use, labelled "Ask default"
-  (or the mode's name), and updates as you switch modes.
-- A model you pick in the composer wins for the message you send with it. Switching
-  mode drops the pick, and the next message in a mode with a default uses that
-  default again. In a mode without a default, a pick changes the thread's model as before.
+  (or the mode's name), and updates as you switch modes. Hover the label for the
+  details. Changing the reasoning effort there is a pick of that model with the new
+  effort, held for the next message like any other pick; the effort a mode default
+  starts with is set in Settings.
+- **A model a person or an agent chooses for a message always wins for that message.**
+  A mode's default fills in only when nobody chose. A pick made in a mode that has a
+  default applies to that one message: afterwards the thread's own model and the mode's
+  default are both as they were, and the next message in the mode uses its default again.
+  In a mode without a default, a pick changes the thread's model, as everywhere else.
+  What counts as a choice: a model picked in the composer or on mobile, the model a
+  scheduled task is set to, and the provider or model an agent names when it starts
+  or delegates to a thread. A thread, task or message that only inherits a model is not a choice.
 - Switching to a mode without a default returns to the thread's own model, not the
   previous mode's.
 - Each message records the model it ran on. If a mode's model is unavailable (its
-  provider is off, not installed or signed in, or no longer offers the model), the
-  message runs on the thread's model and the composer says so.
+  provider is off for the thread's project, not installed or signed in, or no longer
+  offers the model), the message runs on the thread's model and the composer says so
+  before you send. Some reasons only the server can see, such as a provider that refuses the
+  switch or background work still running in the current one; a message that ran
+  on the thread's model for one of them says so above it in the thread: which model
+  ran, which was wanted and why not. A queued message is checked again when it starts.
 - Moving between providers inside one thread passes a text summary of the
-  conversation, not the provider's own session. Threads whose provider cannot hand
-  over a conversation keep their provider, so a mode default from another provider
-  is skipped there. Moving between models of one provider keeps its session where
-  the provider allows it.
+  conversation, not the provider's own session, and the composer says so before you
+  send. Threads whose provider cannot hand over a conversation keep their provider,
+  so a mode default from another provider is skipped there. Moving between models of one
+  provider keeps its session where the provider allows it.
 - Messages from mobile, connected apps and background agents follow the same rule,
-  because the server applies it.
+  because the server applies it. Compaction, wake-ups and notices, and restarts and
+  continuations of an earlier turn keep the model the conversation is on and never
+  switch to a mode's default.
 
 ## Send while the agent is working
 

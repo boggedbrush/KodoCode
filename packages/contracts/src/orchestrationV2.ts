@@ -3213,7 +3213,7 @@ export const OrchestrationV2Command = Schema.Union([
     attachments: Schema.Array(ChatAttachment),
     titleSeed: Schema.optional(TrimmedNonEmptyString),
     modelSelection: Schema.optional(ModelSelection),
-    /** KODO: mode-models-send - true when `modelSelection` is a pick the user made for this message, so a mode default does not replace it; false when it is only the composer's carried model. Absent: inferred from the selection. */
+    /** KODO: mode-models-send - true when a person or an agent chose `modelSelection` for this message, so a mode default does not replace it; false when it is only the sender's carried model of the thread. Absent: inferred from the selection. */
     explicitModelSelection: Schema.optional(Schema.Boolean),
     sourcePlanRef: Schema.optional(Schema.Struct({ threadId: ThreadId, planId: PlanId })),
     restartContinuationOfRunId: Schema.optional(RunId),
@@ -3381,6 +3381,8 @@ export const OrchestrationV2Command = Schema.Union([
     task: TrimmedNonEmptyString,
     title: Schema.optional(TrimmedNonEmptyString),
     modelSelection: ModelSelection,
+    /** KODO: mode-models-send - see message.dispatch; true when the agent named the provider or model. */
+    explicitModelSelection: Schema.optional(Schema.Boolean),
     runtimeMode: RuntimeMode,
     interactionMode: ThreadInteractionMode,
     workspaceStrategy: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),

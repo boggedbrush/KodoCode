@@ -1,6 +1,7 @@
 import {
   normalizeKodoInteractionMode,
   type KodoInteractionMode,
+  type ModelSelection,
   type OrchestrationV2PlanArtifact,
   type PlanId,
   type ThreadId,
@@ -257,5 +258,23 @@ export async function runKodoPlanAcceptance(deps: {
     message: rollback.ok
       ? message
       : `${message ?? "The plan did not start."} The thread also could not return to Plan: ${rollback.message}`,
+  };
+}
+
+/**
+ * The model fields of the implementation turn. The Code mode's model applies unless the user picked
+ * one in the composer: a shown mode default or a carried model is not sent as a choice, so the
+ * server resolves it for Code, not for the Plan mode the composer is still in.
+ */
+export function planAcceptModelFields(input: {
+  readonly selection: ModelSelection | undefined;
+  readonly kodoModelSend: { readonly shown: boolean; readonly explicit: boolean } | undefined;
+}): { readonly modelSelection?: ModelSelection; readonly explicitModelSelection?: boolean } {
+  const { selection, kodoModelSend } = input;
+  return {
+    ...(selection === undefined || kodoModelSend?.shown === true
+      ? {}
+      : { modelSelection: selection }),
+    ...(kodoModelSend === undefined ? {} : { explicitModelSelection: kodoModelSend.explicit }),
   };
 }

@@ -75,6 +75,7 @@ import {
   getComposerDraftSnapshot,
   isFreshSessionPending,
   mergeComposerDraftContent,
+  releaseComposerDraftModelSelection, // KODO: mode-models-send
   removeComposerDraftAttachment,
   scheduleUnusedComposerAttachmentCleanup,
   setComposerDraftText,
@@ -114,6 +115,7 @@ import { enqueueThreadOutboxMessage } from "./thread-outbox";
 import { dispatchingQueuedMessageIdAtom, useThreadOutboxMessages } from "./use-thread-outbox";
 import { threadEnvironment } from "./threads";
 import { useAtomCommand } from "./use-atom-command";
+import { kodoModeHasDefault, kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel"; // KODO: mode-models-send
 
 const EMPTY_QUEUE_WORKFLOW_ATOM = Atom.make<null>(null).pipe(
   Atom.withLabel("mobile-thread-queue-workflow:empty"),
@@ -299,7 +301,9 @@ export function useThreadComposerState(input: {
   const selectedDraft = useComposerDraftSettings(selectedThreadKey);
   const selectedThreadQueueCount = selectedThreadQueuedMessages.length;
   const selectedThread = selectedThreadShell;
-  const modelSelection = selectedDraft.modelSelection ?? selectedThread?.modelSelection ?? null;
+  // KODO: mode-models-send - the thread's own model; a mode default standing in for it is not what the user has
+  const modelSelection =
+    selectedDraft.modelSelection ?? (selectedThread ? kodoThreadOwnModel(selectedThread) : null);
   const serverConfig = selectedEnvironmentRuntime?.serverConfig;
   const pendingHandoff = resolvePendingHandoff(
     selectedThreadProjection?.projection,
@@ -543,7 +547,7 @@ export function useThreadComposerState(input: {
     if (text.length === 0 && attachments.length === 0) {
       return null;
     }
-    const modelSelection = draft.modelSelection ?? thread.modelSelection;
+    const modelSelection = draft.modelSelection ?? kodoThreadOwnModel(thread); // KODO: mode-models-send
     const serverConfig = selectedEnvironmentRuntime?.serverConfig;
     const modelUnavailable =
       selectedEnvironmentRuntime?.connectionState === "connected" &&
@@ -754,6 +758,8 @@ export function useThreadComposerState(input: {
       attachments,
       context: draft.context,
       modelSelection,
+      // KODO: mode-models-send - a model picked in the picker is chosen; the thread's own is carried
+      ...(draft.modelSelection === undefined ? {} : { modelPicked: true }),
       runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       ...(compactBeforeSend
@@ -765,6 +771,14 @@ export function useThreadComposerState(input: {
       createdAt: metadata.createdAt,
     });
     clearComposerDraftContent(threadKey, { deferAttachmentCleanup: true });
+    // KODO: mode-models-send - in a mode with a default a pick is held for one message, not kept
+    if (
+      draft.modelSelection !== undefined &&
+      serverConfig != null &&
+      kodoModeHasDefault(serverConfig.settings.modeModelSelections, thread.interactionMode)
+    ) {
+      releaseComposerDraftModelSelection(threadKey, draft.modelSelection);
+    }
     if (freshContext) setFreshSessionPending(threadKey, false);
     enqueuePromise.then(
       () => scheduleUnusedComposerAttachmentCleanup(attachments),

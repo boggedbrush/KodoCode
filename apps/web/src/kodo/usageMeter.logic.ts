@@ -27,6 +27,11 @@ export function kodoUsageLevel(usedPercent: number): KodoUsageLevel {
 
 const LEVEL_RANK: Record<KodoUsageLevel, number> = { ok: 0, warning: 1, critical: 2, exhausted: 3 };
 
+/** How a reading is drawn: its level, or muted when it is out of date and so not a warning to act on. */
+export function kodoUsageTone(reading: Pick<KodoUsageReading, "level" | "stale">) {
+  return reading.stale ? ("stale" as const) : reading.level;
+}
+
 export interface KodoUsageReading {
   readonly label: string;
   readonly usedPercent: number;
@@ -55,6 +60,8 @@ function readWindows(
     // A reset that already passed means the stored percentage describes the previous window.
     if (resets.length > 0 && resets.every((at) => at <= now)) continue;
     const usedPercent = Math.max(0, Math.min(100, window.usedPercent));
+    // With no reset to count to and no fresh reading, "out" would stay on screen forever: unknown.
+    if (stale && resets.length === 0 && usedPercent >= 100) continue;
     const next = resets.filter((at) => at > now).toSorted((a, b) => a - b)[0] ?? null;
     const reading: KodoUsageReading = {
       label: window.label,

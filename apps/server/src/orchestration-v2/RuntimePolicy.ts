@@ -82,16 +82,19 @@ export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePol
 /**
  * KODO: mode-resolver - a policy for a known provider driver, for fixtures and harnesses with no
  * provider instance registry. An unresolved driver fails closed (read-only modes get the approval
- * ceiling plus instructions), so pass the real one wherever it is known.
+ * ceiling plus instructions), so pass the real one wherever it is known; a function maps each
+ * provider instance to its driver, for harnesses that run several.
  */
-export const layerForDriver = (driver: string | undefined): Layer.Layer<RuntimePolicyV2> =>
+export const layerForDriver = (
+  driver: string | undefined | ((instanceId: string) => string | undefined),
+): Layer.Layer<RuntimePolicyV2> =>
   Layer.succeed(RuntimePolicyV2, {
     resolve: Effect.fn("RuntimePolicyV2.resolve")(function (input) {
       return Effect.succeed({
         cwd: input.thread.worktreePath,
         ...kodoRuntimePolicyOverlay({
           interactionMode: input.thread.interactionMode,
-          driver,
+          driver: typeof driver === "function" ? driver(input.modelSelection.instanceId) : driver,
           runtimeMode: input.thread.runtimeMode,
         }),
       });

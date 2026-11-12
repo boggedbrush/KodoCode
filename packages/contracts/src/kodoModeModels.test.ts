@@ -28,8 +28,18 @@ describe("mode model settings decoding", () => {
     expect(decoded.orchestrator).toBeNull();
   });
 
-  it("a malformed slot or section reads as unset instead of failing the settings", () => {
+  it("a malformed section reads as unset instead of failing the settings", () => {
     expect(decode({ ask: { nope: true }, code: "x" })).toEqual(DEFAULT_KODO_MODE_MODELS);
     expect(decode("garbage")).toEqual(DEFAULT_KODO_MODE_MODELS);
+  });
+
+  it("a malformed slot reads as unset without taking the valid slots with it", () => {
+    const code = { instanceId: "codex", model: "gpt-x" };
+    const decoded = decode({ code, ask: { foo: 1 }, plan: "x", review: 7, judge: null });
+    expect(decoded.code).toEqual(code);
+    expect(decoded).toEqual({ ...DEFAULT_KODO_MODE_MODELS, code });
+    expect(
+      decodeSettings({ modeModelSelections: { code, ask: { foo: 1 } } }).modeModelSelections,
+    ).toEqual({ ...DEFAULT_KODO_MODE_MODELS, code });
   });
 });

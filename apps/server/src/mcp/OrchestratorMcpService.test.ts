@@ -2029,8 +2029,11 @@ describe("OrchestratorMcpService provider resolution", () => {
         assert.equal(commands.length, 1);
         const request = commands[0] as {
           modelSelection: { instanceId: string; model: string };
+          explicitModelSelection: boolean;
         };
         assert.equal(request.modelSelection.instanceId, altInstanceId);
+        // The agent named a driver: a mode default must not replace the provider it chose.
+        assert.isTrue(request.explicitModelSelection);
       }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
     }),
   );
@@ -2564,6 +2567,7 @@ describe("OrchestratorMcpService provider resolution", () => {
             assert.equal(commands.length, 1, testCase.name);
             const request = commands[0] as {
               type: string;
+              explicitModelSelection: boolean;
               modelSelection: {
                 instanceId: string;
                 model: string;
@@ -2576,6 +2580,9 @@ describe("OrchestratorMcpService provider resolution", () => {
               testCase.selectedInstanceId,
               testCase.name,
             );
+            // Every case names a driver, which is the agent's choice even when the parent's
+            // instance serves it.
+            assert.isTrue(request.explicitModelSelection, testCase.name);
             if (testCase.name === "healthy-inherited") {
               assert.deepEqual(request.modelSelection, parentModelSelection, testCase.name);
             } else {
@@ -3455,6 +3462,10 @@ describe("OrchestratorMcpService provider resolution", () => {
           ...inherited,
           options: [inherited.options[0]],
         });
+        // Options alone name no model: the inherited one is not the agent's choice.
+        assert.isFalse(
+          (commands[0] as { explicitModelSelection?: boolean }).explicitModelSelection,
+        );
       }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(dependencies))));
     }),
   );

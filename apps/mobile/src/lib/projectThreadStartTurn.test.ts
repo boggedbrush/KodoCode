@@ -70,3 +70,34 @@ describe("project thread title", () => {
     expect(relaunched.message.attachments).toEqual(uploadedAttachments);
   });
 });
+
+describe("model choice", () => {
+  const spec = {
+    projectId: ProjectId.make("project"),
+    projectCwd: "/workspace",
+    threadId: "thread",
+    commandId: "command",
+    messageId: "message",
+    createdAt: "2026-09-04T00:00:00Z",
+    text: "hello",
+    uploadedAttachments: [],
+    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    workspaceMode: "local",
+    branch: null,
+    worktreePath: null,
+    startFromOrigin: false,
+    worktreeBranchName: "branch",
+  } satisfies ProjectThreadStartTurnSpec;
+
+  it("passes on whether the user picked the model, so a mode default does not replace a pick", () => {
+    expect(buildProjectThreadStartTurnInput(spec)).not.toHaveProperty("explicitModelSelection");
+    expect(
+      buildProjectThreadStartTurnInput({ ...spec, explicitModelSelection: true }),
+    ).toMatchObject({ explicitModelSelection: true });
+    expect(
+      buildProjectThreadStartTurnInput({ ...spec, explicitModelSelection: false }),
+    ).toMatchObject({ explicitModelSelection: false });
+  });
+});

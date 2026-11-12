@@ -23,16 +23,20 @@ import {
   KODO_USAGE_METER_MAX_ENTRIES,
   type KodoUsageLevel,
   type KodoUsageMeterEntry,
+  kodoUsageTone,
 } from "./usageMeter.logic";
 
-const LEVEL_TEXT: Record<KodoUsageLevel, string> = {
+// An out-of-date reading is drawn muted: its warning colour would claim a state nobody has confirmed.
+const TONE_TEXT: Record<KodoUsageLevel | "stale", string> = {
   ok: "text-muted-foreground",
+  stale: "text-muted-foreground",
   warning: "text-warning",
   critical: "text-destructive",
   exhausted: "text-destructive",
 };
-const LEVEL_FILL: Record<KodoUsageLevel, string> = {
+const TONE_FILL: Record<KodoUsageLevel | "stale", string> = {
   ok: "bg-muted-foreground",
+  stale: "bg-muted-foreground/50",
   warning: "bg-warning",
   critical: "bg-destructive",
   exhausted: "bg-destructive",
@@ -56,6 +60,7 @@ function MeterRow({
     entry.resetsAtMs === null
       ? null
       : formatUpcomingTimestamp(new Date(entry.resetsAtMs).toISOString(), timestampFormat, now);
+  const tone = kodoUsageTone(entry);
   const summary =
     entry.level === "exhausted"
       ? `${entry.providerLabel} ${entry.label} limit reached`
@@ -68,11 +73,12 @@ function MeterRow({
             <SidebarMenuButton
               aria-label={`${summary}${resetsIn ? `, ${resetsIn}` : ""}. Open usage limits`}
               data-kodo-usage-level={entry.level}
+              data-kodo-usage-tone={tone}
               onClick={onOpen}
             />
           }
         >
-          <GaugeIcon className={LEVEL_TEXT[entry.level]} aria-hidden />
+          <GaugeIcon className={TONE_TEXT[tone]} aria-hidden />
           <span className="flex min-w-0 flex-1 items-center gap-2 text-xs">
             <span className="truncate">{entry.providerLabel}</span>
             <span className="truncate text-muted-foreground">{entry.label}</span>
@@ -81,16 +87,11 @@ function MeterRow({
               aria-hidden
             >
               <span
-                className={cn("absolute inset-y-0 start-0 rounded-full", LEVEL_FILL[entry.level])}
+                className={cn("absolute inset-y-0 start-0 rounded-full", TONE_FILL[tone])}
                 style={{ width: `${Math.max(4, entry.usedPercent)}%` }}
               />
             </span>
-            <span
-              className={cn(
-                "w-8 shrink-0 text-end font-medium tabular-nums",
-                LEVEL_TEXT[entry.level],
-              )}
-            >
+            <span className={cn("w-8 shrink-0 text-end font-medium tabular-nums", TONE_TEXT[tone])}>
               {entry.level === "exhausted" ? "Out" : `${entry.remainingPercent}%`}
             </span>
           </span>

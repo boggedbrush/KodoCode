@@ -942,6 +942,7 @@ export function createThreadOutboxDelivery(): {
           attachments: prepared.attachments,
         },
         modelSelection: sendSettings.modelSelection,
+        explicitModelSelection: queuedMessage.modelPicked === true, // KODO: mode-models-send
         titleSeed: deriveThreadTitleSeed({
           text: queuedMessage.text,
           attachments: queuedMessage.attachments,
@@ -1112,6 +1113,7 @@ export function createThreadOutboxDelivery(): {
         ),
         uploadedAttachments: prepared.attachments,
         modelSelection: sendSettings.modelSelection,
+        explicitModelSelection: queuedMessage.modelPicked === true, // KODO: mode-models-send
         runtimeMode: sendSettings.runtimeMode,
         interactionMode: sendSettings.interactionMode,
         workspaceMode: workspace.workspaceMode,

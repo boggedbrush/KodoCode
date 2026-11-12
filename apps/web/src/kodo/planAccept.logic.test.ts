@@ -1,4 +1,11 @@
-import { PlanId, RunId, ThreadId, type OrchestrationV2PlanArtifact } from "@t3tools/contracts";
+import {
+  PlanId,
+  ProviderInstanceId,
+  RunId,
+  ThreadId,
+  type ModelSelection,
+  type OrchestrationV2PlanArtifact,
+} from "@t3tools/contracts";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
@@ -6,6 +13,7 @@ import {
   buildPlanAcceptanceTurn,
   findActionableProposedPlan,
   findResponsePlanOffer,
+  planAcceptModelFields,
   resolveKodoPlanOffer,
   responseTitle,
   runKodoPlanAcceptance,
@@ -339,5 +347,29 @@ describe("kodo plan acceptance run", () => {
       returnToPlan: async () => ok,
     });
     expect(stillOffered).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("planAcceptModelFields", () => {
+  const sticky = {
+    instanceId: ProviderInstanceId.make("codex"),
+    model: "sticky",
+  } as ModelSelection;
+  it("says whether the model is a pick, so a carried one does not beat Code's default", () => {
+    expect(
+      planAcceptModelFields({
+        selection: sticky,
+        kodoModelSend: { shown: false, explicit: false },
+      }),
+    ).toEqual({ modelSelection: sticky, explicitModelSelection: false });
+    expect(
+      planAcceptModelFields({ selection: sticky, kodoModelSend: { shown: false, explicit: true } }),
+    ).toEqual({ modelSelection: sticky, explicitModelSelection: true });
+  });
+  it("sends no model while the Plan default is shown, which is not the user's", () => {
+    expect(
+      planAcceptModelFields({ selection: sticky, kodoModelSend: { shown: true, explicit: false } }),
+    ).toEqual({ explicitModelSelection: false });
+    expect(planAcceptModelFields({ selection: undefined, kodoModelSend: undefined })).toEqual({});
   });
 });

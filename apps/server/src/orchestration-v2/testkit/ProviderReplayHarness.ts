@@ -6,11 +6,13 @@ import type {
   ManagedPolicyDocument,
   ProviderDriverKind,
   ProviderReplayTranscript,
+  ServerProvider, // KODO: mode-models-turn
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import * as PlatformError from "effect/PlatformError";
 import type * as Scope from "effect/Scope";
 import type * as SqlClient from "effect/sql/SqlClient";
@@ -48,6 +50,7 @@ import * as ProviderContinuationRequests from "@t3tools/provider-core/server/Pro
 import * as ProviderContinuationService from "../ProviderContinuationService.ts";
 import * as ProviderEventIngestor from "../ProviderEventIngestor.ts";
 import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegistry.ts";
+import * as ProviderRegistry from "../../provider/ProviderRegistry.ts"; // KODO: mode-models-turn
 import * as ProviderRuntimeRecoveryService from "../ProviderRuntimeRecoveryService.ts";
 import * as ProviderSessionManager from "../ProviderSessionManager.ts";
 import * as CommandOutputRecorder from "./CommandOutputRecorder.ts";
@@ -271,6 +274,8 @@ export function layerWithRegistry<Error>(
   scenario: Pick<OrchestratorV2ProviderReplayScenario, "name" | "runtimePolicyOverride"> & {
     /** KODO: mode-resolver - the registry's driver, so read-only modes resolve for it. */
     readonly driver?: ProviderDriverKind;
+    /** KODO: mode-resolver - one driver per provider instance, for a registry with several. */
+    readonly driverByInstance?: Readonly<Record<string, ProviderDriverKind>>;
   },
   registryLayer: Layer.Layer<
     ProviderAdapterRegistry.ProviderAdapterRegistryV2,
@@ -289,6 +294,8 @@ export function layerWithRegistry<Error>(
     readonly managedPolicy?: ManagedPolicyDocument;
     /** KODO: mode-models-turn - server settings the run starts with. */
     readonly serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
+    /** KODO: mode-models-turn - changes to what the provider catalogue reports per instance (the default: ready). */
+    readonly providerCatalogue?: Ref.Ref<Readonly<Record<string, Partial<ServerProvider>>>>;
   } = {},
 ): Layer.Layer<
   | Orchestrator.OrchestratorV2
@@ -302,11 +309,16 @@ export function layerWithRegistry<Error>(
     ServerConfig.ServerConfig,
     makeReplayServerConfig(scenario.name).pipe(Effect.orDie),
   ).pipe(Layer.provide(NodeServices.layer));
+  // KODO: mode-resolver
+  const driverForPolicy =
+    scenario.driverByInstance === undefined
+      ? scenario.driver
+      : (instanceId: string) => scenario.driverByInstance?.[instanceId] ?? scenario.driver;
   const layerRuntimeBase =
     scenario.runtimePolicyOverride === undefined
-      ? RuntimePolicy.layerForDriver(scenario.driver) // KODO: mode-resolver
+      ? RuntimePolicy.layerForDriver(driverForPolicy) // KODO: mode-resolver
       : RuntimePolicy.layerWithOverride(scenario.runtimePolicyOverride).pipe(
-          Layer.provide(RuntimePolicy.layerForDriver(scenario.driver)), // KODO: mode-resolver
+          Layer.provide(RuntimePolicy.layerForDriver(driverForPolicy)), // KODO: mode-resolver
         );
   const layerDatabase = options.databaseLayer ?? SqlitePersistence.layerMemory;
   // Share one continuation queue across adapters, orchestrator, and worker through layer memoization.
@@ -407,6 +419,37 @@ export function layerWithRegistry<Error>(
   const layerProviderSwitchServiceProvided = ProviderSwitchService.layer.pipe(
     Layer.provide(layerProvidedRegistry),
   );
+  // KODO: mode-models-turn - the catalogue a mode default is checked against: every registered
+  // adapter is a ready, signed-in provider unless `providerOverrides` says otherwise.
+  const layerProviderCatalogue = Layer.effect(
+    ProviderRegistry.ProviderRegistry,
+    Effect.gen(function* () {
+      const adapters = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
+      const getProviders = Effect.gen(function* () {
+        const overrides =
+          options.providerCatalogue === undefined ? {} : yield* Ref.get(options.providerCatalogue);
+        const instanceIds = yield* adapters.list();
+        return yield* Effect.forEach(instanceIds, (instanceId) =>
+          adapters.get(instanceId).pipe(
+            Effect.map(
+              (adapter) =>
+                ({
+                  instanceId,
+                  driver: adapter.driver,
+                  enabled: true,
+                  installed: true,
+                  status: "ready",
+                  auth: { status: "authenticated" },
+                  models: [],
+                  ...overrides[instanceId],
+                }) as unknown as ServerProvider,
+            ),
+          ),
+        ).pipe(Effect.orDie);
+      });
+      return { getProviders } as unknown as ProviderRegistry.ProviderRegistry["Service"];
+    }),
+  ).pipe(Layer.provide(layerProvidedRegistry));
   const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -489,6 +532,7 @@ export function layerWithRegistry<Error>(
         layerContextHandoffServiceProvided,
         layerPersistence,
         layerProvidedRegistry,
+        layerProviderCatalogue, // KODO: mode-models-turn
         layerContinuationRequests,
         layerRuntime,
         layerProviderSessionManagerProvided,

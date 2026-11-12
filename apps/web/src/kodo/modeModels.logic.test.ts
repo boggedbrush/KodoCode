@@ -6,7 +6,11 @@ import {
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 
-import { resolveKodoComposerModel } from "./modeModels.logic";
+import {
+  kodoProviderChange,
+  kodoRunModelNotice,
+  resolveKodoComposerModel,
+} from "./modeModels.logic";
 
 const own = createModelSelection(ProviderInstanceId.make("codex"), "own");
 const ask = createModelSelection(ProviderInstanceId.make("claudeAgent"), "ask-model");
@@ -57,5 +61,104 @@ describe("resolveKodoComposerModel", () => {
       shown: null,
       note: { kind: "unavailable" },
     });
+  });
+
+  it("a provider turned off for the project is unavailable, as the server finds it", () => {
+    const settings = {
+      providerInstances: {},
+      projectSettingsOverrides: {
+        "project-1": { providerInstances: { claudeAgent: { enabled: false } } },
+      },
+    } as never;
+    expect(
+      resolveKodoComposerModel({
+        ...base,
+        instanceSettings: { settings, projectId: "project-1" as never },
+      }),
+    ).toMatchObject({ shown: null, note: { kind: "unavailable" } });
+    expect(
+      resolveKodoComposerModel({
+        ...base,
+        instanceSettings: { settings, projectId: "other-project" as never },
+      })?.shown,
+    ).toEqual(ask);
+  });
+
+  it("says before the send that a default on another provider carries the conversation as a summary", () => {
+    const result = resolveKodoComposerModel(base)!;
+    expect(result.note?.title).toContain("instead of codex");
+    expect(result.note?.title).toContain("summary");
+    const sameProvider = resolveKodoComposerModel({
+      ...base,
+      thread: { modelSelection: createModelSelection(ProviderInstanceId.make("claudeAgent"), "x") },
+    })!;
+    expect(sameProvider.note?.title).not.toContain("summary");
+    // The live conversation is the displaced model's, not the thread's own.
+    const displaced = resolveKodoComposerModel({
+      ...base,
+      thread: { modelSelection: ask, kodoModeModel: { applied: ask, base: own } },
+    })!;
+    expect(displaced.note?.title).not.toContain("summary");
+  });
+});
+
+describe("kodoProviderChange", () => {
+  const continuing = [
+    { ...provider("a", "claudeAgent", []), continuation: { groupKey: "g" } },
+    { ...provider("b", "claudeAgent", []), continuation: { groupKey: "g" } },
+  ] as unknown as ServerProvider[];
+  it("is none for the same instance or instances that continue each other's conversation", () => {
+    const a = createModelSelection(ProviderInstanceId.make("a"), "m");
+    const b = createModelSelection(ProviderInstanceId.make("b"), "m");
+    expect(kodoProviderChange(continuing, a, a)).toBeNull();
+    expect(kodoProviderChange(continuing, a, b)).toBeNull();
+    expect(kodoProviderChange(providers, own, ask)).toEqual({
+      from: "codex",
+      to: "claudeAgent",
+    });
+  });
+});
+
+describe("kodoRunModelNotice", () => {
+  const name = (selection: { model: string }) => selection.model;
+  it("says which model ran, which was wanted and why not, only for a displaced default", () => {
+    expect(
+      kodoRunModelNotice(
+        {
+          modelSelection: own,
+          kodoModel: {
+            source: "thread",
+            base: own,
+            unavailable: { wanted: ask, reason: "its provider is turned off." },
+          },
+        },
+        name,
+      ),
+    ).toEqual({
+      label: "Used own",
+      detail: "ask-model on claudeAgent not used: its provider is turned off",
+    });
+    // On another provider the wanted model says which one.
+    expect(
+      kodoRunModelNotice(
+        {
+          modelSelection: own,
+          kodoModel: {
+            source: "thread",
+            base: own,
+            unavailable: { wanted: ask, reason: "its provider is turned off" },
+          },
+        },
+        name,
+        (instanceId) => `provider ${instanceId}`,
+      )?.detail,
+    ).toBe("ask-model on provider claudeAgent not used: its provider is turned off");
+    expect(
+      kodoRunModelNotice(
+        { modelSelection: ask, kodoModel: { source: "mode-default", base: own } },
+        name,
+      ),
+    ).toBeNull();
+    expect(kodoRunModelNotice({ modelSelection: own }, name)).toBeNull();
   });
 });

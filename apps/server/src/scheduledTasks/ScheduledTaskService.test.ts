@@ -494,6 +494,7 @@ it.effect("a bound run follows its thread when promotion moves it mid-send", () 
 it.effect("a fresh-session task launches one thread, then starts each later run fresh in it", () =>
   Effect.gen(function* () {
     const launches = yield* Ref.make(0);
+    const explicitFlags = yield* Ref.make<Array<boolean | undefined>>([]);
     const sends = yield* Ref.make<Array<{ threadId: ThreadId; freshContext?: boolean }>>([]);
     const launched = ThreadId.make("thread:fresh-session-task");
     const layer = ScheduledTaskService.layer.pipe(
@@ -501,8 +502,9 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
         Layer.mergeAll(
           ManagedPolicy.layerTest(),
           Layer.mock(ThreadLaunchService.ThreadLaunchService)({
-            launch: () =>
-              Ref.update(launches, (n) => n + 1).pipe(
+            launch: (input) =>
+              Ref.update(explicitFlags, (all) => [...all, input.explicitModelSelection]).pipe(
+                Effect.andThen(Ref.update(launches, (n) => n + 1)),
                 Effect.as({ threadId: launched, resumed: false } as never),
               ),
           }),
@@ -559,6 +561,8 @@ it.effect("a fresh-session task launches one thread, then starts each later run 
       yield* service.runNow({ id: input.id });
 
       assert.equal(yield* Ref.get(launches), 1);
+      // The task's own model was chosen, so a mode default must not replace it at launch.
+      assert.deepEqual(yield* Ref.get(explicitFlags), [true]);
       assert.deepEqual(yield* Ref.get(sends), [{ threadId: launched, freshContext: true }]);
       // Its thread stays in the old project, so moving the task leaves it for a new one.
       const moved = yield* service.upsert({

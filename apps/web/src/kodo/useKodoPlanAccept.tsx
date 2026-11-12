@@ -11,6 +11,7 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import type { ModelSelection } from "@t3tools/contracts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { CodeXmlIcon, ListChecksIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -19,10 +20,12 @@ import { Button } from "../components/ui/button";
 import type { ComposerHandleRef } from "../composerHandleContext";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { newMessageId } from "~/lib/utils";
+import { useComposerDraftStore } from "../composerDraftStore";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import {
   buildPlanAcceptanceTurn,
+  planAcceptModelFields,
   runKodoPlanAcceptance,
   shouldOfferPlanAcceptance,
   type KodoPlanOffer,
@@ -104,10 +107,10 @@ export function useKodoPlanAccept(input: {
         ),
       // "start" never steers or queues into a turn that began since the click.
       startTurn: async () => {
-        const selection =
-          input.composerRef.current?.getSendContext()?.selectedModelSelection ??
-          input.fallbackModelSelection;
-        return step(
+        const sendContext = input.composerRef.current?.getSendContext();
+        const kodoModelSend = sendContext?.kodoModelSend;
+        const selection = sendContext?.selectedModelSelection ?? input.fallbackModelSelection;
+        const result = step(
           await startThreadTurn({
             environmentId: input.environmentId,
             input: {
@@ -118,7 +121,7 @@ export function useKodoPlanAccept(input: {
                 text: turn.text,
                 attachments: [],
               },
-              ...(selection ? { modelSelection: selection } : {}),
+              ...planAcceptModelFields({ selection, kodoModelSend }),
               runtimeMode: input.runtimeMode,
               interactionMode: turn.interactionMode,
               ...(turn.sourceProposedPlan ? { sourceProposedPlan: turn.sourceProposedPlan } : {}),
@@ -127,6 +130,17 @@ export function useKodoPlanAccept(input: {
             },
           }),
         );
+        // A pick held in the draft was for this message only.
+        if (result.ok && kodoModelSend?.explicit === true) {
+          const store = useComposerDraftStore.getState();
+          const heldRef = scopeThreadRef(input.environmentId, threadId);
+          const held = store.getComposerDraft(heldRef);
+          const heldPick = held?.activeProvider
+            ? held.modelSelectionByProvider[held.activeProvider]
+            : undefined;
+          if (heldPick) store.releaseModelSelection(heldRef, heldPick);
+        }
+        return result;
       },
       returnToPlan: async () => {
         const outcome = await input.commitInteractionMode("plan");

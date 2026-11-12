@@ -44,15 +44,22 @@ describe("resolveKodoModeModel", () => {
     expect(resolveKodoModeModel({ mode: "code", thread: displaced, settings }).selection).toEqual(
       own,
     );
-    // The composer reads the own model through the live session's provider instance.
+    // The composer reads the own model through the live session's provider instance and says it is
+    // only carrying it. Without the flag the same selection is a choice, and is honoured.
+    const viaLiveSession = sel("claudeAgent", "own");
     expect(
       resolveKodoModeModel({
         mode: "code",
         thread: displaced,
         settings,
-        requested: sel("claudeAgent", "own"),
+        requested: viaLiveSession,
+        explicitPick: false,
       }).selection,
     ).toEqual(own);
+    expect(
+      resolveKodoModeModel({ mode: "code", thread: displaced, settings, requested: viaLiveSession })
+        .selection,
+    ).toEqual(viaLiveSession);
     // A client that carries the applied model back (mobile) is not picking it.
     expect(
       resolveKodoModeModel({ mode: "code", thread: displaced, settings, requested: ask }).selection,
@@ -80,5 +87,37 @@ describe("resolveKodoModeModel", () => {
       resolveKodoModeModel({ mode: "orchestrator", thread, settings: roles }).selection,
     ).toEqual(picked);
     expect(resolveKodoModeModel({ mode: "judge", thread, settings: roles }).selection).toEqual(ask);
+  });
+
+  it("while displaced, a sender that names the thread's base model without the flag has chosen it", () => {
+    const planSettings = {
+      modeModelSelections: { ...DEFAULT_KODO_MODE_MODELS, plan: ask },
+    };
+    const displaced = { modelSelection: ask, kodoModeModel: { applied: ask, base: own } };
+    const base = { mode: "plan", thread: displaced, settings: planSettings };
+    // Mobile picked the base model: it wins over the Plan default, and is the thread's model only
+    // in a mode without one.
+    expect(resolveKodoModeModel({ ...base, requested: own })).toMatchObject({
+      selection: own,
+      source: "explicit",
+      own,
+    });
+    // Carrying the displaced model back is not a pick.
+    expect(resolveKodoModeModel({ ...base, requested: ask })).toMatchObject({
+      selection: ask,
+      source: "mode-default",
+    });
+  });
+
+  it("a pick in a mode without a default is the thread's own model afterwards", () => {
+    expect(
+      resolveKodoModeModel({
+        mode: "code",
+        thread: { modelSelection: own },
+        settings,
+        requested: picked,
+        explicitPick: true,
+      }),
+    ).toMatchObject({ selection: picked, own: picked, hasDefault: false });
   });
 });

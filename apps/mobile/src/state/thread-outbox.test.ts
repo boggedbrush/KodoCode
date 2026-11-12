@@ -389,6 +389,28 @@ describe("thread outbox", () => {
     },
   );
 
+  // KODO: mode-models-send - mobile shows and sends the thread's own model, not a mode default
+  // standing in for it, and a model picked in the picker survives the round trip as a choice.
+  it("sends the thread's own model while a mode default is applied, and keeps a pick as a pick", () => {
+    const own = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-own" };
+    const applied = { instanceId: ProviderInstanceId.make("claudeAgent"), model: "ask-default" };
+    const displaced = {
+      modelSelection: applied,
+      kodoModeModel: { applied, base: own },
+      runtimeMode: "approval-required" as const,
+      interactionMode: "ask" as const,
+    };
+    const carried = queuedMessage({ messageId: "carried", createdAt: "2026-09-02T10:00:00.000Z" });
+    expect(resolveQueuedThreadSettings(carried, displaced).modelSelection).toEqual(own);
+    const picked = {
+      ...carried,
+      modelSelection: own,
+      modelPicked: true,
+    } satisfies QueuedThreadMessage;
+    expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(picked))).toEqual(picked);
+    expect(resolveQueuedThreadSettings(picked, displaced).modelSelection).toEqual(own);
+  });
+
   it("holds the mutation queue while persisted messages are loading", async () => {
     const registry = AtomRegistry.make();
     const message = queuedMessage({

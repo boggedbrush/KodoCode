@@ -403,20 +403,42 @@ export default {
       file: "apps/desktop/src/wsl/DesktopWslBackend.test.ts",
       hooks: ["brand-wsl-ownership-message"],
     },
-    { file: "apps/mobile/src/features/threads/ThreadRouteScreen.tsx", hooks: ["mode-preserve"] },
+    {
+      file: "apps/mobile/src/features/threads/ThreadRouteScreen.tsx",
+      hooks: ["mode-preserve", "mode-models-send"],
+    },
+    {
+      file: "apps/mobile/src/features/threads/ThreadSettingsSheet.tsx",
+      hooks: ["mode-models-send"],
+    },
+    {
+      file: "apps/mobile/src/features/threads/new-task-flow-provider.tsx",
+      hooks: ["mode-models-send"],
+    },
     { file: "apps/mobile/src/features/threads/draft-thread-shell.ts", hooks: ["thread-mode-type"] },
     { file: "apps/mobile/src/features/threads/resume-thread.test.ts", hooks: ["mode-preserve"] },
     {
       file: "apps/mobile/src/features/threads/resume-thread.ts",
       hooks: ["thread-mode-type", "mode-preserve"],
     },
-    { file: "apps/mobile/src/lib/projectThreadStartTurn.ts", hooks: ["thread-mode-type"] },
+    {
+      file: "apps/mobile/src/lib/projectThreadStartTurn.ts",
+      hooks: ["thread-mode-type", "mode-models-send"],
+    },
+    { file: "apps/mobile/src/state/thread-model-selection.ts", hooks: ["mode-models-send"] },
     {
       file: "apps/mobile/src/state/thread-outbox-model.ts",
-      hooks: ["thread-mode-type", "mode-preserve"],
+      hooks: ["thread-mode-type", "mode-preserve", "mode-models-send"],
     },
-    { file: "apps/mobile/src/state/thread-outbox.test.ts", hooks: ["mode-preserve"] },
-    { file: "apps/mobile/src/state/use-thread-composer-state.ts", hooks: ["mode-preserve"] },
+    {
+      file: "apps/mobile/src/state/thread-outbox.test.ts",
+      hooks: ["mode-preserve", "mode-models-send"],
+    },
+    { file: "apps/mobile/src/state/threadOutboxDelivery.ts", hooks: ["mode-models-send"] },
+    {
+      file: "apps/mobile/src/state/use-thread-composer-state.ts",
+      hooks: ["mode-preserve", "mode-models-send"],
+    },
     { file: "apps/server/src/mcp/McpHttpServer.test.ts", hooks: ["mode-read-only-tools"] },
     { file: "apps/server/src/mcp/McpInvocationContext.test.ts", hooks: ["mode-rank"] },
     { file: "apps/server/src/mcp/McpInvocationContext.ts", hooks: ["mode-rank"] },
@@ -427,8 +449,10 @@ export default {
     },
     {
       file: "apps/server/src/mcp/OrchestratorMcpService.ts",
-      hooks: ["mode-peer-limit", "mode-child-limit", "mode-task-control"],
+      hooks: ["mode-peer-limit", "mode-child-limit", "mode-task-control", "mode-models-send"],
     },
+    { file: "apps/server/src/mcp/toolkits/project/handlers.ts", hooks: ["mode-models-send"] },
+    { file: "apps/server/src/scheduledTasks/ScheduledTaskService.ts", hooks: ["mode-models-send"] },
     { file: "apps/server/src/mcp/delegatedTaskModes.ts", hooks: ["mode-rank", "mode-child-limit"] },
     { file: "apps/server/src/mcp/threadAccess.test.ts", hooks: ["mode-rank"] },
     { file: "apps/server/src/mcp/threadAccess.ts", hooks: ["thread-mode-type", "mode-rank"] },
@@ -449,7 +473,7 @@ export default {
     { file: "apps/server/src/orchestration-v2/DispatchModeLimit.ts", hooks: ["mode-rank"] },
     {
       file: "apps/server/src/orchestration-v2/Orchestrator.ts",
-      hooks: ["mode-session-restart", "mode-steer-guard", "mode-models-turn"],
+      hooks: ["mode-session-restart", "mode-steer-guard", "mode-models-turn", "mode-models-send"],
     },
     {
       file: "apps/server/src/orchestration-v2/OpenCode2OrchestratorV2.integration.test.ts",
@@ -527,6 +551,15 @@ export default {
     { file: "apps/web/src/components/GitHubStarPrompt.tsx", hooks: ["brand-star-repository"] },
     { file: "apps/web/src/components/Sidebar.logic.ts", hooks: ["thread-mode-compare"] },
     {
+      file: "apps/web/src/components/chat/MessagesTimeline.logic.ts",
+      hooks: ["mode-models-notice"],
+    },
+    {
+      file: "apps/web/src/components/chat/TimelineUserMessageRow.tsx",
+      hooks: ["mode-models-notice"],
+    },
+    { file: "apps/web/src/components/chat/useTimelineRows.ts", hooks: ["mode-models-notice"] },
+    {
       file: "apps/web/src/components/chat/ChatComposer.tsx",
       hooks: [
         "composer-mode-props",
@@ -595,6 +628,7 @@ export default {
       file: "packages/client-runtime/src/operations/commands.ts",
       hooks: ["thread-mode-type", "mode-models-send"],
     },
+    { file: "packages/client-runtime/src/handoff.ts", hooks: ["mode-models-notice"] },
     { file: "packages/contracts/src/environmentHttp.ts", hooks: ["prompt-enhance-http"] },
     {
       file: "packages/contracts/src/index.ts",
@@ -933,6 +967,9 @@ export default {
       "packages/contracts/src/kodoModeModels.test.ts",
       "packages/shared/src/kodoModeModel.test.ts",
       "apps/server/src/kodo/modeModel.test.ts",
+      "apps/server/src/kodo/modeModelTurn.test.ts",
+      "apps/server/src/scheduledTasks/ScheduledTaskService.test.ts",
+      "apps/mobile/src/lib/projectThreadStartTurn.test.ts",
       "apps/server/src/kodo/modeModelSettings.test.ts",
       "apps/web/src/kodo/modeModels.logic.test.ts",
       "apps/server/src/orchestration-v2/OpenCode2OrchestratorV2.integration.test.ts",

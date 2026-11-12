@@ -150,6 +150,8 @@ const DEFAULT_THREAD_ITEM_MAX_CHARS = 20_000;
 interface ResolvedTarget {
   readonly modelSelection: ModelSelection;
   readonly supportedRuntimeModes: ReadonlyArray<RuntimeMode> | undefined;
+  /** KODO: mode-models-send - the agent named a provider, driver or model, so a mode default must not replace it. */
+  readonly modelNamed: boolean;
 }
 
 type TerminalTaskStatus = Extract<
@@ -1440,6 +1442,10 @@ const make = Effect.gen(function* () {
     return {
       modelSelection: { instanceId, model, ...(options === undefined ? {} : { options }) },
       supportedRuntimeModes: provider.supportedRuntimeModes,
+      modelNamed:
+        requestedInstanceId !== undefined ||
+        requestedDriver !== undefined ||
+        requestedModel !== undefined,
     };
   });
 
@@ -2471,6 +2477,7 @@ const make = Effect.gen(function* () {
           task: taskPrompt(input),
           ...(input.title === undefined ? {} : { title: input.title }),
           modelSelection: target.modelSelection,
+          explicitModelSelection: target.modelNamed, // KODO: mode-models-send
           runtimeMode,
           interactionMode,
           ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),
@@ -2896,6 +2903,7 @@ const make = Effect.gen(function* () {
                     text: request.prompt,
                     attachments: [],
                     modelSelection: resolvedModelSelection,
+                    explicitModelSelection: target.modelNamed, // KODO: mode-models-send
                     dispatchMode: { type: "start_immediately" },
                   })
                   .pipe(

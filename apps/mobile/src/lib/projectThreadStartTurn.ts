@@ -29,6 +29,8 @@ export interface ProjectThreadStartTurnSpec {
   readonly context?: OrchestrationMessageContext;
   readonly uploadedAttachments: ReadonlyArray<UploadedMobileAttachment | ChatAttachment>;
   readonly modelSelection: ModelSelection;
+  /** KODO: mode-models-send - the user picked `modelSelection`, so a mode default does not replace it. */
+  readonly explicitModelSelection?: boolean;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ThreadInteractionMode;
   readonly workspaceMode: "local" | "worktree";
@@ -56,6 +58,9 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
       attachments: spec.uploadedAttachments,
     },
     modelSelection: spec.modelSelection,
+    ...(spec.explicitModelSelection === undefined
+      ? {}
+      : { explicitModelSelection: spec.explicitModelSelection }), // KODO: mode-models-send
     titleSeed: title,
     runtimeMode: spec.runtimeMode,
     interactionMode: spec.interactionMode,

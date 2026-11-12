@@ -8,8 +8,11 @@ import {
   type KodoModeModelSlot,
   type KodoModeModels,
   type ModelSelection,
+  type ProjectId,
   type ServerProvider,
+  type ServerSettings,
   normalizeKodoInteractionMode,
+  resolveProviderInstanceEnabled,
 } from "@t3tools/contracts";
 
 import { draftModelPickMatchesThread, modelSelectionsEqual } from "./model.ts";
@@ -30,8 +33,13 @@ export interface KodoResolvedModel {
   readonly slot: KodoModeModelSlot;
   readonly selection: ModelSelection;
   readonly source: KodoModelSource;
-  /** The thread's own model, which `thread` falls back to and a mode default displaces. */
+  /**
+   * The thread's own model once this turn has started: what `thread` falls back to and a mode
+   * default displaces. A pick in a mode without a default becomes the thread's model, so it is its own.
+   */
   readonly own: ModelSelection;
+  /** The mode (or, for judge, review) has a configured model. */
+  readonly hasDefault: boolean;
   /** Set when the mode has a configured model that could not be used. */
   readonly unavailable: { readonly wanted: ModelSelection; readonly reason: string } | null;
 }
@@ -39,6 +47,10 @@ export interface KodoResolvedModel {
 /** The slot a thread mode reads; an unknown or legacy stored mode reads as the code slot. */
 export const kodoModeModelSlot = (mode: unknown): KodoModeModelSlot =>
   normalizeKodoInteractionMode(mode);
+
+/** Whether a mode (or role) has a configured default model. */
+export const kodoModeHasDefault = (modeModels: KodoModeModels, mode: unknown): boolean =>
+  modeModels[kodoModeModelSlot(mode)] !== null;
 
 /** The model the thread has by itself: its selection, unless a mode default is standing in for it. */
 export function kodoThreadOwnModel(thread: KodoModeModelThread): ModelSelection {
@@ -49,8 +61,8 @@ export function kodoThreadOwnModel(thread: KodoModeModelThread): ModelSelection 
 }
 
 /**
- * The thread's own model once every queued run has started: the last queued run's, which a
- * mode-default run carries as its base.
+ * The thread's own model once every queued run has started: the last queued run's `base`, which
+ * every run that records one keeps as the thread's own model after it; else its selection.
  */
 export function kodoOwnModelAfterQueue(
   thread: KodoModeModelThread,
@@ -59,9 +71,7 @@ export function kodoOwnModelAfterQueue(
     | undefined,
 ): ModelSelection {
   if (queueTail === undefined) return kodoThreadOwnModel(thread);
-  return queueTail.kodoModel?.source === "mode-default"
-    ? queueTail.kodoModel.base
-    : queueTail.modelSelection;
+  return queueTail.kodoModel?.base ?? queueTail.modelSelection;
 }
 
 export function resolveKodoModeModelSelection(input: {
@@ -76,12 +86,20 @@ export function resolveKodoModeModelSelection(input: {
     input.mode === "orchestrator" || input.mode === "judge"
       ? input.mode
       : kodoModeModelSlot(input.mode);
-  const base = { slot, own: input.own };
-  if (input.explicit !== undefined) {
-    return { ...base, selection: input.explicit, source: "explicit", unavailable: null };
-  }
   // Judge follows the review model when it has none of its own; both then follow the thread.
   const configured = input.modeModels[slot] ?? (slot === "judge" ? input.modeModels.review : null);
+  const base = { slot, own: input.own, hasDefault: configured !== null };
+  if (input.explicit !== undefined) {
+    // In a mode with a default a pick is for one message and the thread keeps its own model; in a
+    // mode without one it becomes the thread's model, as everywhere else.
+    return {
+      ...base,
+      own: configured === null ? input.explicit : input.own,
+      selection: input.explicit,
+      source: "explicit",
+      unavailable: null,
+    };
+  }
   if (configured === null) {
     return { ...base, selection: input.own, source: "thread", unavailable: null };
   }
@@ -98,32 +116,37 @@ export function resolveKodoModeModelSelection(input: {
 }
 
 /**
- * Whether a send carries a pick of its own: flagged by the client, or (agents, scheduled tasks,
- * mobile) a selection that is neither the thread's own model nor the mode's configured one.
+ * Whether a send carries a pick of its own. Senders say so with the flag; without it (older
+ * clients) a selection that is neither the thread's own model nor the mode's configured one is a
+ * pick. While the thread is displaced by a mode default, its own model is not what such a client
+ * carries, so even a selection equal to it differs from the displaced state and counts as a pick.
  */
 export function kodoSendIsExplicitPick(input: {
   readonly requested: ModelSelection | undefined;
   readonly flagged: boolean | undefined;
   readonly own: ModelSelection;
   readonly configured: ModelSelection | null;
+  readonly displaced?: boolean | undefined;
 }): boolean {
   const { requested } = input;
   if (requested === undefined || input.configured === null) return false;
   if (input.flagged !== undefined) return input.flagged;
   return (
-    !draftModelPickMatchesThread(requested, input.own) &&
+    (input.displaced === true || !draftModelPickMatchesThread(requested, input.own)) &&
     !draftModelPickMatchesThread(requested, input.configured)
   );
 }
 
-/** The record a thread keeps when `resolved` displaces its own model; undefined otherwise. */
+/**
+ * The record a thread keeps when `resolved` displaces its own model: a mode default, or a pick
+ * made in a mode that has one (a pick in a mode without one is its own model, so nothing differs).
+ */
 export function kodoThreadModeModelFor(resolved: {
   readonly selection: ModelSelection;
   readonly source: KodoModelSource;
   readonly own: ModelSelection;
 }): KodoThreadModeModel | undefined {
-  return resolved.source === "mode-default" &&
-    !modelSelectionsEqual(resolved.selection, resolved.own)
+  return resolved.source !== "thread" && !modelSelectionsEqual(resolved.selection, resolved.own)
     ? { applied: resolved.selection, base: resolved.own }
     : undefined;
 }
@@ -162,4 +185,25 @@ export function kodoAvailabilityFromProviders(
     }
     return null;
   };
+}
+
+/**
+ * Whether settings turn a provider instance off for a project: the project's own override, else the
+ * machine's. An instance settings say nothing about is not turned off here (the catalogue knows
+ * whether it is installed); both the composer preview and the turn start ask this.
+ */
+export function kodoInstanceTurnedOff(
+  settings: Pick<ServerSettings, "providerInstances" | "projectSettingsOverrides">,
+  projectId: ProjectId | null,
+  instanceId: ModelSelection["instanceId"],
+): boolean {
+  const override =
+    projectId === null
+      ? undefined
+      : settings.projectSettingsOverrides[projectId]?.providerInstances?.[instanceId]?.enabled;
+  if (override !== undefined) return !override;
+  const machine = Object.hasOwn(settings.providerInstances, instanceId)
+    ? settings.providerInstances[instanceId]
+    : undefined;
+  return machine !== undefined && !resolveProviderInstanceEnabled(machine);
 }

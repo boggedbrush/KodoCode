@@ -20,11 +20,14 @@ import {
 export function selectThreadModel(
   ref: { readonly environmentId: EnvironmentId; readonly threadId: ThreadId },
   value: ModelSelection,
+  // KODO: mode-models-send - the thread's mode has a default model: a pick waits for the message that uses it
+  options: { readonly hold?: boolean } = {},
 ): void {
   const threadKey = scopedThreadKey(ref.environmentId, ref.threadId);
   // Its own object, so an older reply for an equal pick cannot release this one.
   const modelSelection = { ...value };
   updateComposerDraftSettings(threadKey, { modelSelection });
+  if (options.hold === true) return; // KODO: mode-models-send
   const thread = appAtomRegistry.get(environmentThreadShells.threadShellAtom(ref));
   // Another instance replaces the live session, which may hold an open question; that pick
   // still waits for a sent message.

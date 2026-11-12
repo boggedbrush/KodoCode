@@ -18,18 +18,9 @@ import {
 } from "../kodo/interactionMode.ts"; // KODO: mode-session-restart
 import { kodoRunModeSnapshot } from "../kodo/interactionMode.ts"; // KODO: run-mode-snapshot
 import { kodoMaySteerIntoRun } from "../kodo/interactionMode.ts"; // KODO: mode-steer-guard
-import { resolveKodoModeModel } from "../kodo/modeModel.ts"; // KODO: mode-models-turn
-import {
-  DEFAULT_KODO_MODE_MODELS,
-  type KodoRunModel,
-  type KodoThreadModeModel,
-} from "@t3tools/contracts"; // KODO: mode-models-turn
-import {
-  kodoAvailabilityFromProviders,
-  kodoOwnModelAfterQueue,
-  kodoRunModelFor,
-  kodoThreadModeModelFor,
-} from "@t3tools/shared/kodoModeModel"; // KODO: mode-models-turn
+import { makeKodoModeModelTurn } from "../kodo/modeModelTurn.ts"; // KODO: mode-models-turn
+import type { KodoThreadModeModel } from "@t3tools/contracts"; // KODO: mode-models-turn
+import { kodoThreadModeModelFor } from "@t3tools/shared/kodoModeModel"; // KODO: mode-models-turn
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts"; // KODO: mode-models-turn
 import { threadPullRequestsOf } from "../sourceControl/threadPullRequests.ts";
 import {
@@ -931,6 +922,18 @@ function queueTailModelSelection(
   );
 }
 
+// KODO: mode-models-turn
+function kodoQueueTailRun(
+  projection: Pick<OrchestrationV2ThreadProjection, "runs" | "messages">,
+): OrchestrationV2Run | undefined {
+  return queuedRunsInDeliveryOrder(projection).findLast(
+    (run) =>
+      !followsCurrentConversation(
+        projection.messages.find((message) => message.id === run.userMessageId),
+      ),
+  );
+}
+
 function usageLimitHoldsQueue(
   projection: Pick<OrchestrationV2ThreadProjection, "runs" | "turnItems" | "providerSessions">,
   providerInstanceId: ModelSelection["instanceId"],
@@ -1217,7 +1220,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
   const providerSessions = yield* ProviderSessionManagerV2;
   const providerSwitchService = yield* ProviderSwitchServiceV2;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
-  // KODO: mode-models-turn - optional so layers without a provider catalogue keep working.
+  // KODO: mode-models-turn - optional so layers that never configure a mode default need no catalogue;
+  // checking a default without one is a defect (see modeModelTurn.ts), never a silent skip.
   const kodoProviderRegistry = yield* Effect.serviceOption(ProviderRegistry.ProviderRegistry);
   const runtimePolicy = yield* RuntimePolicyV2;
   const threadForkService = yield* ThreadForkServiceV2;
@@ -1366,62 +1370,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     return false;
   });
 
-  // Runs in every command transaction; avoid reading thousands of finished leaf nodes.
-  // KODO: mode-models-turn - why a mode's configured model cannot run this turn (null: it can). A
-  // turn must never fail because of a default, so every check the dispatch would later refuse on
-  // is made here and falls back to the thread's own model instead.
-  const kodoModeModelUnavailableReason = Effect.fn("Orchestrator.kodoModeModelUnavailableReason")(
-    function* (
-      projection: OrchestrationV2ThreadProjection,
-      configured: ModelSelection,
-      activeProviderThread: OrchestrationV2ProviderThread | undefined,
-    ) {
-      if (Option.isSome(kodoProviderRegistry)) {
-        const providers = yield* kodoProviderRegistry.value.getProviders;
-        const reason = kodoAvailabilityFromProviders(providers)(configured);
-        if (reason !== null) return `${configured.model} is unavailable: ${reason}.`;
-      }
-      // A selection the provider will not switch to is a failed plan; its cause says why.
-      const planned = yield* providerSwitchService
-        .plan({ projection, targetModelSelection: configured })
-        .pipe(Effect.result);
-      if (planned._tag === "Failure") {
-        const cause = planned.failure.cause;
-        return typeof cause === "string" ? cause : `${configured.model} is unavailable.`;
-      }
-      const plan = { value: planned.success };
-      if (plan.value.transition.type === "reject") return plan.value.transition.reason;
-      const crossesProvider =
-        activeProviderThread !== undefined &&
-        activeProviderThread.nativeThreadRef !== null &&
-        activeProviderThread.providerInstanceId !== configured.instanceId;
-      if (!crossesProvider) return null;
-      const liveSession = projection.providerSessions.findLast(
-        (session) =>
-          session.providerInstanceId === activeProviderThread.providerInstanceId &&
-          session.status !== "stopped" &&
-          session.status !== "error",
-      );
-      if (
-        liveSession !== undefined &&
-        !liveSession.capabilities.sessions.supportsProviderSwitchingViaHandoff
-      ) {
-        return "this thread's provider cannot hand its conversation to another provider.";
-      }
-      for (const releasing of projection.providerSessions.filter(
-        (session) =>
-          plan.value.releaseProviderSessionIds.includes(session.id) &&
-          session.status !== "stopped" &&
-          session.status !== "error",
-      )) {
-        if (yield* sessionHasBackgroundWork(releasing, projection.providerThreads)) {
-          return "background work is still running in the thread's current provider.";
-        }
-      }
-      return null;
-    },
-  );
+  // KODO: mode-models-turn - the model of the mode each turn is created in, kept out of this file
+  const kodoModeModelTurn = makeKodoModeModelTurn({
+    serverSettings,
+    providerRegistry: Option.getOrUndefined(kodoProviderRegistry),
+    providerSwitchService,
+    sessionHasBackgroundWork,
+  });
 
+  // Runs in every command transaction; avoid reading thousands of finished leaf nodes.
   const readCommandProjection = (threadId: ThreadId) =>
     projectionStore
       .getThreadRecords(
@@ -2034,11 +1991,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         (candidate) => candidate.id === storedQueuedRun.userMessageId,
       );
       const modelSelection = queuedRunModelSelection(projection, storedQueuedRun);
-      const queuedRun = {
-        ...storedQueuedRun,
-        modelSelection,
-        providerInstanceId: modelSelection.instanceId,
-      };
+      // KODO: mode-models-turn - a queued default that can no longer run falls back to the thread's own model
+      const kodoQueuedStart = yield* kodoModeModelTurn.reconcileQueuedStart({
+        projection,
+        run: {
+          ...storedQueuedRun,
+          modelSelection,
+          providerInstanceId: modelSelection.instanceId,
+        },
+        activeProviderThread: projection.providerThreads.find(
+          (candidate) => candidate.id === projection.thread.activeProviderThreadId,
+        ),
+        providerThreadFor: (instanceId) =>
+          rootProviderThreadsForProvider(projection, instanceId)[0],
+      });
+      const queuedRun = kodoQueuedStart.run;
       // A limited provider would fail and consume every waiting message.
       if (usageLimitHoldsQueue(projection, queuedRun.providerInstanceId)) {
         return;
@@ -2169,16 +2136,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const followsLatestContext =
         !freshContext &&
         (followsCurrent || providerThreadPredatesBoundary(storedProviderThread, contextBoundary));
-      const targetProviderThread = followsLatestContext
-        ? activeProviderThread?.providerInstanceId === queuedRun.providerInstanceId &&
-          !providerThreadPredatesBoundary(activeProviderThread, contextBoundary)
-          ? activeProviderThread
-          : rootProviderThreadsForProvider(projection, queuedRun.providerInstanceId)[0]
-        : freshContext &&
-            (storedProviderThread.firstRunOrdinal !== null ||
-              storedProviderThread.nativeThreadRef !== null)
-          ? undefined
-          : storedProviderThread;
+      const targetProviderThread = kodoQueuedStart.fallbackProviderThread // KODO: mode-models-turn
+        ? kodoQueuedStart.fallbackProviderThread
+        : followsLatestContext
+          ? activeProviderThread?.providerInstanceId === queuedRun.providerInstanceId &&
+            !providerThreadPredatesBoundary(activeProviderThread, contextBoundary)
+            ? activeProviderThread
+            : rootProviderThreadsForProvider(projection, queuedRun.providerInstanceId)[0]
+          : freshContext &&
+              (storedProviderThread.firstRunOrdinal !== null ||
+                storedProviderThread.nativeThreadRef !== null)
+            ? undefined
+            : storedProviderThread;
       const queuedProviderThread: OrchestrationV2ProviderThread = targetProviderThread ?? {
         id: idAllocator.derive.providerThread({
           driver: targetAdapter.driver,
@@ -6610,58 +6579,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     ) {
       modelSelection = queueTailModelSelection(projection);
     }
-    // KODO: mode-models-turn - the turn runs on the model of the mode it is created in: an explicit
-    // pick, else the mode's configured model, else the thread's own model. Continuations, restarts
-    // and wakes of the current conversation keep the selection they carry.
-    let kodoRunModel: KodoRunModel | undefined;
-    if (
-      command.restartContinuationOfRunId === undefined &&
-      command.usageLimitContinuationOfRunId === undefined &&
-      command.manualContinuationOfRunId === undefined &&
-      !followsCurrentConversation(incomingMessage) &&
-      !isBufferedProviderNotification(incomingMessage)
-    ) {
-      // An unreadable settings file means no mode defaults, never a failed turn.
-      const modeModelSelections = yield* serverSettings.getSettings.pipe(
-        Effect.map((settings) => settings.modeModelSelections),
-        Effect.orElseSucceed(() => DEFAULT_KODO_MODE_MODELS),
-      );
-      const queueTail = shouldQueue
-        ? queuedRunsInDeliveryOrder(projection).findLast(
-            (run) =>
-              !followsCurrentConversation(
-                projection.messages.find((message) => message.id === run.userMessageId),
-              ),
-          )
-        : undefined;
-      const resolveInput = {
-        mode: projection.thread.interactionMode,
-        thread: projection.thread,
-        settings: { modeModelSelections },
-        requested: command.modelSelection,
-        explicitPick: command.explicitModelSelection,
-        own: kodoOwnModelAfterQueue(projection.thread, queueTail),
-      };
-      let resolved = resolveKodoModeModel(resolveInput);
-      if (resolved.source === "mode-default") {
-        const reason = yield* kodoModeModelUnavailableReason(
-          projection,
-          resolved.selection,
-          activeProviderThread,
-        );
-        if (reason !== null) {
-          resolved = resolveKodoModeModel({ ...resolveInput, availability: () => reason });
-        }
-      }
-      if (
-        resolved.source === "mode-default" ||
-        resolved.unavailable !== null ||
-        projection.thread.kodoModeModel !== undefined
-      ) {
-        modelSelection = resolved.selection;
-        kodoRunModel = kodoRunModelFor(resolved);
-      }
-    }
+    // KODO: mode-models-turn - the model of the mode the turn is created in (see kodo/modeModelTurn.ts)
+    const kodoTurn = yield* kodoModeModelTurn.selectForDispatch({
+      projection,
+      command,
+      modelSelection,
+      followsCurrentConversation:
+        followsCurrentConversation(incomingMessage) ||
+        isBufferedProviderNotification(incomingMessage),
+      // A goal command that stops the active run goes first, so nothing queued is ahead of it.
+      queueTail:
+        shouldQueue && queuedRunStop === undefined ? kodoQueueTailRun(projection) : undefined,
+      activeProviderThread,
+    });
+    modelSelection = kodoTurn.modelSelection;
+    const kodoRunModel = kodoTurn.kodoRunModel;
     yield* ensureGoalCommandSupported(command, command, modelSelection.instanceId);
     // Client messages resume held queues; server continuations and scheduled tasks do not.
     // Provider failure or usage limits re-hold the queue.
@@ -8714,6 +8646,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         text: command.task,
         attachments: [],
         modelSelection: command.modelSelection,
+        // KODO: mode-models-send
+        ...(command.explicitModelSelection === undefined
+          ? {}
+          : { explicitModelSelection: command.explicitModelSelection }),
         dispatchMode:
           command.workspaceStrategy === undefined
             ? { type: "start_immediately" }

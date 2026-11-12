@@ -2721,7 +2721,7 @@ export function handoffRunsSignature(runs: ReadonlyArray<HandoffTimelineRun>): s
   return runs
     .map(
       (run) =>
-        `${run.id}\0${run.providerInstanceId}\0${run.ordinal}\0${run.modelSelection.instanceId}\0${run.modelSelection.model}`,
+        `${run.id}\0${run.providerInstanceId}\0${run.ordinal}\0${run.modelSelection.instanceId}\0${run.modelSelection.model}\0${run.kodoModel?.unavailable?.reason ?? ""}`, // KODO: mode-models-notice
     )
     .join("\n");
 }
