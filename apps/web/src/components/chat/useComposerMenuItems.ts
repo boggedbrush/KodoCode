@@ -28,6 +28,11 @@ import {
   isKodoModeSlashCommand,
   kodoModeSlashMatchesQuery,
 } from "../../kodo/interactionModes.logic";
+// KODO: usage-slash-items
+import {
+  KODO_USAGE_SLASH_COMMAND_ITEM,
+  isKodoUsageSlashCommand,
+} from "../../kodo/usageMeter.logic";
 import type { DraftId } from "../../composerDraftStore";
 import { basenameOfPath } from "../../pierre-icons";
 import {
@@ -244,6 +249,8 @@ export function useComposerMenuItems({
           label: "/model",
           description: "Switch response model for this thread",
         },
+        // KODO: usage-slash-items - opens the Usage page; a bare /usage is never sent to the provider
+        { id: "slash:usage", type: "slash-command" as const, ...KODO_USAGE_SLASH_COMMAND_ITEM },
         // KODO: mode-slash-items
         ...KODO_MODE_SLASH_COMMAND_ITEMS.map((item) => ({
           id: `slash:mode:${item.command}`,
@@ -313,7 +320,9 @@ export function useComposerMenuItems({
           (item.command.name !== "compact" || compactSlashCommandAvailable) &&
           (item.command.name !== "clear" || !freshSessionAvailable) &&
           // KODO: mode-slash-items (a mode command wins over a provider command of the same name)
-          !isKodoModeSlashCommand(item.command.name),
+          !isKodoModeSlashCommand(item.command.name) &&
+          // KODO: usage-slash-items (Kodo's /usage wins over a provider command of the same name)
+          !isKodoUsageSlashCommand(item.command.name),
       );
       const slashCommandItems = slashCommandItemsForPromptPosition(
         [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],

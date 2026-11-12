@@ -59,6 +59,9 @@ import {
 import { type ChatMessage } from "../../types";
 // KODO: send-mode
 import { parseKodoModeSlashCommand } from "../../kodo/interactionModes.logic";
+// KODO: usage-slash-send
+import { parseKodoUsageSlashCommand } from "../../kodo/usageMeter.logic";
+import { openKodoUsageLimits } from "../../kodo/usageOpen";
 import { recordPromptSent } from "../GitHubStarPrompt";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { newMessageId, newThreadId } from "~/lib/utils";
@@ -396,6 +399,19 @@ export function useComposerSend(input: ComposerSendInput) {
         setComposerDraftPrompt(composerDraftTarget, "");
         composerRef.current?.resetCursorState();
       }
+      return;
+    }
+
+    // KODO: usage-slash-send (a bare /usage opens the Usage page and is never sent)
+    if (
+      !directAnnotation &&
+      !draftHasNonPromptContent(composerDraftTarget) &&
+      parseKodoUsageSlashCommand(promptAtSend)
+    ) {
+      promptRef.current = "";
+      setComposerDraftPrompt(composerDraftTarget, "");
+      composerRef.current?.resetCursorState();
+      openKodoUsageLimits(navigate);
       return;
     }
 

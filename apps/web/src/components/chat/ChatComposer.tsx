@@ -39,6 +39,10 @@ import type {
 } from "@t3tools/contracts";
 // KODO: composer-mode-props
 import { isKodoModeSlashCommand } from "../../kodo/interactionModes.logic";
+// KODO: usage-slash-select
+import { isKodoUsageSlashCommand } from "../../kodo/usageMeter.logic";
+import { openKodoUsageLimits } from "../../kodo/usageOpen";
+import { useNavigate } from "@tanstack/react-router";
 import {
   EnvironmentRequestInvalidError,
   AuthOrchestrationOperateScope,
@@ -1866,6 +1870,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   };
 
   const { onUsageLimitsCommand } = props;
+  // KODO: usage-slash-select
+  const navigate = useNavigate();
   const onSelectComposerItem = (item: ComposerCommandItem) => {
     if (composerSelectLockRef.current) return;
     composerSelectLockRef.current = true;
@@ -1899,6 +1905,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (applied) {
           setComposerHighlightedItemId(null);
           handleInteractionModeChange(item.command);
+        }
+        return;
+      }
+      // KODO: usage-slash-select
+      if (isKodoUsageSlashCommand(item.command)) {
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          focusEditorAfterReplace: false,
+        });
+        if (applied) {
+          setComposerHighlightedItemId(null);
+          openKodoUsageLimits(navigate);
         }
         return;
       }

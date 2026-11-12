@@ -89,6 +89,8 @@ import {
   speedCostSegments,
   tokenTypeSegments,
 } from "./usageBreakdown";
+// KODO: usage-open-limits
+import { useKodoUsageLimitsRequest } from "../../kodo/usageOpen";
 import {
   METRIC_OPTIONS,
   WINDOW_OPTIONS,
@@ -247,6 +249,8 @@ export function UsagePage() {
     if (nextMetric === "limits") setLimitsNow(Date.now());
     updatePreferences({ metric: nextMetric });
   };
+  // KODO: usage-open-limits - `/usage`, the palette and the sidebar meter open this page on Limits
+  useKodoUsageLimitsRequest(() => selectMetric("limits"));
   const refreshLimits = (automatic = false) =>
     // Settled so the timestamp still advances when a refresh throws.
     settlePromise(() =>

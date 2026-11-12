@@ -38,6 +38,8 @@ import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
 import { providerClients } from "../settings/providerDriverMeta";
 import { RedactedSensitiveText } from "../settings/RedactedSensitiveText";
 import { Button } from "../ui/button";
+// KODO: usage-no-limit-data
+import { KodoNoLimitProviders } from "../../kodo/KodoNoLimitProviders";
 import { OpenAI } from "../Icons";
 import { Alert, AlertTitle } from "../ui/alert";
 import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "../ui/popover";
@@ -677,6 +679,8 @@ export function UsageLimitsPooled({
         </section>
       ))}
       <LimitNotices notices={notices} />
+      {/* KODO: usage-no-limit-data - name the providers that report no limits */}
+      <KodoNoLimitProviders presentations={presentations} />
     </div>
   );
 }

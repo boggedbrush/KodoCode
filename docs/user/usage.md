@@ -171,6 +171,29 @@ Until then it shows no limits. Readings are not kept across a server restart.
 API-key accounts may not report subscription limits. This also applies to Claude connections
 using a proxy through `ANTHROPIC_AUTH_TOKEN`.
 
+## See limits at a glance
+
+When a provider is close to a limit, a small meter appears above the sidebar's Settings and
+Usage buttons. It shows the provider, its tightest window, how much is left, and a bar. Hover it
+for when the window resets, in your time zone, and how many accounts are pooled behind the
+number. Select it to open **Usage → Limits**. It stays hidden until a window has 20% or less
+left (amber), turns red at 10% or less, and reads **Out** when the limit is reached. At most two
+providers show; the rest are summed up as "more near their limit". A window whose reset time has
+passed is ignored until the provider reports a new reading.
+
+Type `/usage` in the composer, or choose **Open usage limits** in the command palette, to open
+the same view directly. `/usage` replaces a provider's own `/usage` command; `/usage-limits`
+still shows the current provider's windows above the composer.
+
+In the model picker, a provider whose limit is almost used up or reached gets a small dot on its
+icon; hover the icon to see which window and when it resets.
+
+Limits show only for providers that report them: Claude Code, Codex, Cursor, Grok, OpenCode Go,
+Antigravity, and Muse Code, each with the sign-in conditions above. Kiro, fx, Pi, and ACP
+registry agents do not report subscription limits, so the bottom of **Limits** lists them
+instead of leaving a gap. Readings come from the provider status refresh and from turns that
+finish, so a reading older than 30 minutes is marked as possibly out of date.
+
 ## Connect a CLIProxyAPI hub
 
 To see pooled accounts, open **Settings → Providers → Usage providers → Add hub**. Choose the

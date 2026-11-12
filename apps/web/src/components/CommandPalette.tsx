@@ -267,6 +267,8 @@ import { buildSidebarProjectPickerEntries } from "../sidebarProjectGrouping";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
 import { readPullRequestListPreferences } from "~/components/pullRequest/pullRequestListPreferences";
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
+// KODO: usage-palette-action
+import { openKodoUsageLimits } from "../kodo/usageOpen";
 import { threadRecentUse } from "@t3tools/shared/paletteSearch";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
@@ -1644,6 +1646,18 @@ function OpenCommandPaletteDialog(props: {
     shortcutCommand: "usage.open",
     run: async () => {
       await navigate({ to: "/usage" });
+    },
+  });
+
+  // KODO: usage-palette-action - jumps straight to the subscription limits view
+  actionItems.push({
+    kind: "action",
+    value: "action:usage-limits",
+    searchTerms: ["usage", "limits", "quota", "subscription", "remaining", "reset", "/usage"],
+    title: "Open usage limits",
+    icon: <ChartNoAxesColumnIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      openKodoUsageLimits(navigate);
     },
   });
 

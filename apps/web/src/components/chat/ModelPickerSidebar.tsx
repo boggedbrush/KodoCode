@@ -5,6 +5,9 @@ import { StarIcon } from "lucide-react";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
+// KODO: usage-picker-hint
+import { useNowMinute } from "../../hooks/useNowMinute";
+import { kodoPickerUsageHint } from "../../kodo/usageMeter.logic";
 import {
   isProviderInstancePickerReady,
   shouldShowInstanceBadge,
@@ -39,6 +42,9 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
   selectableUnavailableInstanceIds?: ReadonlySet<ProviderInstanceId>;
   getDisabledInstanceTooltip?: (entry: ProviderInstanceEntry) => string;
 }) {
+  // KODO: usage-picker-hint
+  const nowMinute = useNowMinute();
+  const usageNow = Date.parse(`${nowMinute}:00Z`);
   const handleSelect = (instanceId: ProviderInstanceId | "favorites") => {
     props.onSelectInstance(instanceId);
   };
@@ -139,6 +145,9 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
               : isContextDisabled
                 ? (props.getDisabledInstanceTooltip?.(entry) ?? entry.displayName)
                 : entry.displayName;
+            // KODO: usage-picker-hint - exhausted or nearly exhausted providers say so
+            const usageHint = kodoPickerUsageHint(entry.snapshot.usageLimits, usageNow);
+            const hintedTooltip = usageHint ? `${tooltip}. ${usageHint.text}` : tooltip;
 
             const button = (
               <Toolbar.Button
@@ -160,7 +169,13 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                 focusableWhenDisabled={!isDisabled}
                 aria-pressed={isSelected}
                 type="button"
-                aria-label={isUnavailable || isContextDisabled ? tooltip : entry.displayName}
+                aria-label={
+                  isUnavailable || isContextDisabled
+                    ? tooltip
+                    : usageHint
+                      ? hintedTooltip
+                      : entry.displayName
+                }
               >
                 <ProviderInstanceIcon
                   driverKind={entry.driverKind}
@@ -180,6 +195,17 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                   }
                   {...(entry.accentColor ? { badgeClassName: "h-3 min-w-3 px-0.5 text-5xs" } : {})}
                 />
+                {/* KODO: usage-picker-hint */}
+                {usageHint ? (
+                  <span
+                    aria-hidden
+                    data-kodo-usage-hint={usageHint.level}
+                    className={cn(
+                      "absolute end-1 top-1 z-40 size-2 rounded-full ring-2 ring-background",
+                      usageHint.level === "exhausted" ? "bg-destructive" : "bg-warning",
+                    )}
+                  />
+                ) : null}
               </Toolbar.Button>
             );
 
@@ -202,7 +228,7 @@ export const ModelPickerSidebar = memo(function ModelPickerSidebar(props: {
                     sideOffset={PICKER_TOOLTIP_SIDE_OFFSET}
                     align="center"
                   >
-                    {tooltip}
+                    {hintedTooltip}
                   </TooltipPopup>
                 </Tooltip>
               </div>

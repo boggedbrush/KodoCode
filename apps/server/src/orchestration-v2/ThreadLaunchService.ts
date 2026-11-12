@@ -86,6 +86,7 @@ export interface ThreadLaunchInput {
   readonly title: string;
   readonly generateTitle?: boolean;
   readonly modelSelection: ModelSelection;
+  readonly explicitModelSelection?: boolean; // KODO: mode-models-send
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ThreadInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
@@ -997,6 +998,10 @@ const make = Effect.gen(function* () {
               ...(input.initialMessage.context ? { context: input.initialMessage.context } : {}),
               ...(input.generateTitle === true ? { titleSeed: input.title } : {}),
               modelSelection: input.modelSelection,
+              // KODO: mode-models-send
+              ...(input.explicitModelSelection === undefined
+                ? {}
+                : { explicitModelSelection: input.explicitModelSelection }),
               dispatchMode: { type: "defer_start", workspaceStrategy },
               createdBy: input.createdBy,
               creationSource: input.creationSource,

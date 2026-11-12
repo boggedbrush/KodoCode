@@ -1632,6 +1632,10 @@ export function threadShellFromProjection(
     modelSelection: projection.thread.modelSelection,
     runtimeMode: projection.thread.runtimeMode,
     interactionMode: projection.thread.interactionMode,
+    // KODO: mode-models-state
+    ...(projection.thread.kodoModeModel === undefined
+      ? {}
+      : { kodoModeModel: projection.thread.kodoModeModel }),
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
     pullRequests: threadPullRequestsOf(projection.thread),
@@ -1935,6 +1939,10 @@ function shellFromState(input: {
     modelSelection: input.state.thread.modelSelection,
     runtimeMode: input.state.thread.runtimeMode,
     interactionMode: input.state.thread.interactionMode,
+    // KODO: mode-models-state
+    ...(input.state.thread.kodoModeModel === undefined
+      ? {}
+      : { kodoModeModel: input.state.thread.kodoModeModel }),
     branch: input.state.thread.branch,
     worktreePath: input.state.thread.worktreePath,
     pullRequests: threadPullRequestsOf(input.state.thread),

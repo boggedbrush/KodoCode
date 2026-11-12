@@ -178,6 +178,8 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
     readonly idleCompaction?: import("@t3tools/contracts").OrchestrationV2IdleCompaction;
   };
   readonly modelSelection?: ModelSelection;
+  /** KODO: mode-models-send - the user picked `modelSelection` for this message, so a mode default must not replace it. */
+  readonly explicitModelSelection?: boolean;
   readonly titleSeed?: string;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ThreadInteractionMode;
@@ -721,6 +723,10 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       title: input.titleSeed ?? thread.title,
       generateTitle: input.titleSeed !== undefined,
       modelSelection: input.modelSelection ?? thread.modelSelection,
+      // KODO: mode-models-send
+      ...(input.explicitModelSelection === undefined
+        ? {}
+        : { explicitModelSelection: input.explicitModelSelection }),
       runtimeMode: input.runtimeMode,
       interactionMode: input.interactionMode,
       workspaceStrategy,
@@ -752,6 +758,10 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
         : { idleCompaction: input.message.idleCompaction }),
       attachments,
       ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
+      // KODO: mode-models-send
+      ...(input.explicitModelSelection === undefined
+        ? {}
+        : { explicitModelSelection: input.explicitModelSelection }),
       ...(input.sourceProposedPlan === undefined
         ? {}
         : { sourcePlanRef: input.sourceProposedPlan }),
@@ -779,6 +789,10 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
     attachments,
     ...(input.titleSeed === undefined ? {} : { titleSeed: input.titleSeed }),
     ...(input.modelSelection === undefined ? {} : { modelSelection: input.modelSelection }),
+    // KODO: mode-models-send
+    ...(input.explicitModelSelection === undefined
+      ? {}
+      : { explicitModelSelection: input.explicitModelSelection }),
     ...(input.sourceProposedPlan === undefined ? {} : { sourcePlanRef: input.sourceProposedPlan }),
     ...(input.freshContext ? { freshContext: true } : {}),
     ...(requestedMode !== "queue" ? { deliveryIntent: requestedMode } : {}),

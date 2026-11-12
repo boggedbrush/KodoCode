@@ -76,6 +76,7 @@ import {
   RuntimeMode,
 } from "./providerPolicy.ts";
 import { ThreadInteractionMode } from "./kodoInteractionMode.ts"; // KODO: thread-mode-type
+import { KodoRunModel, KodoThreadModeModel } from "./kodoModeModels.ts"; // KODO: mode-models-state
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 import {
@@ -451,6 +452,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ThreadInteractionMode,
+  /** KODO: mode-models-state - set while a mode default stands in for the thread's own model. */
+  kodoModeModel: Schema.optional(KodoThreadModeModel),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -721,6 +724,8 @@ export const OrchestrationV2Run = Schema.Struct({
    * with more write access than this; absent on runs from before it existed.
    */
   interactionMode: Schema.optional(ThreadInteractionMode),
+  /** KODO: mode-models-state - where this run's model came from; absent on runs from before it existed. */
+  kodoModel: Schema.optional(KodoRunModel),
 });
 export type OrchestrationV2Run = typeof OrchestrationV2Run.Type;
 
@@ -2112,6 +2117,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   modelSelection: ModelSelection,
   runtimeMode: RuntimeMode,
   interactionMode: ThreadInteractionMode,
+  kodoModeModel: Schema.optional(KodoThreadModeModel), // KODO: mode-models-state
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -3207,6 +3213,8 @@ export const OrchestrationV2Command = Schema.Union([
     attachments: Schema.Array(ChatAttachment),
     titleSeed: Schema.optional(TrimmedNonEmptyString),
     modelSelection: Schema.optional(ModelSelection),
+    /** KODO: mode-models-send - true when `modelSelection` is a pick the user made for this message, so a mode default does not replace it; false when it is only the composer's carried model. Absent: inferred from the selection. */
+    explicitModelSelection: Schema.optional(Schema.Boolean),
     sourcePlanRef: Schema.optional(Schema.Struct({ threadId: ThreadId, planId: PlanId })),
     restartContinuationOfRunId: Schema.optional(RunId),
     usageLimitContinuationOfRunId: Schema.optional(RunId),
@@ -3699,6 +3707,8 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   title: TrimmedNonEmptyString,
   generateTitle: Schema.optional(Schema.Boolean),
   modelSelection: ModelSelection,
+  /** KODO: mode-models-send - see message.dispatch. */
+  explicitModelSelection: Schema.optional(Schema.Boolean),
   runtimeMode: RuntimeMode,
   interactionMode: ThreadInteractionMode,
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,

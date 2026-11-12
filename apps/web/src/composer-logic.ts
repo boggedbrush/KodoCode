@@ -17,11 +17,18 @@ import {
 
 // KODO: mode-slash-type
 import type { KodoModeSlashCommand } from "./kodo/interactionModes.logic";
+import type { KodoUsageSlashCommand } from "./kodo/usageMeter.logic";
 import { resolveShortcutCommand, type ShortcutEventLike } from "./keybindings";
 
 export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
 // KODO: mode-slash-type
-export type ComposerSlashCommand = "model" | "side" | "btw" | "clear" | KodoModeSlashCommand;
+export type ComposerSlashCommand =
+  | "model"
+  | "side"
+  | "btw"
+  | "clear"
+  | KodoModeSlashCommand
+  | KodoUsageSlashCommand;
 export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
 export interface ComposerTrigger {

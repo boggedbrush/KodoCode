@@ -406,6 +406,8 @@ export function applyServerSettingsPatch(
     usageModelAliases: usageModelAliasesPatch,
     // Entry replacement: deepMerge would keep keys the client meant to clear.
     projectSettingsOverrides: projectSettingsOverridesPatch,
+    // KODO: mode-models-setting - replaced per slot, never deep-merged into a stale selection.
+    modeModelSelections: modeModelSelectionsPatch,
     projectAgentBrowserAccessOverrides: _legacyBrowserAccess,
     projectAutoPullOverrides: _legacyAutoPull,
     projectScriptOverrides: _legacyScripts,
@@ -596,6 +598,10 @@ export function applyServerSettingsPatch(
             ).filter(([, entry]) => Object.keys(entry).length > 0),
           ),
         }
+      : {}),
+    // KODO: mode-models-setting
+    ...(modeModelSelectionsPatch !== undefined
+      ? { modeModelSelections: { ...current.modeModelSelections, ...modeModelSelectionsPatch } }
       : {}),
     ...(patch.defaultModelSelection !== undefined
       ? { defaultModelSelection: patch.defaultModelSelection }
