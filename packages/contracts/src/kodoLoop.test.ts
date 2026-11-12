@@ -16,6 +16,7 @@ import { ServerSettings } from "./settings.ts";
 
 const decode = Schema.decodeUnknownSync(KodoLoopSetting);
 const decodeLoop = Schema.decodeUnknownSync(KodoLoop);
+const decodeShell = Schema.decodeSync(KodoLoopShellStatus);
 const decodeControl = Schema.decodeUnknownSync(KodoLoopControl);
 const decodeSettings = Schema.decodeSync(ServerSettings);
 const encodeSettings = Schema.encodeSync(ServerSettings);
@@ -200,6 +201,6 @@ describe("the loop status a thread shell carries", () => {
     });
     const status = kodoLoopShellStatus(loop);
     expect(status.stopDetail).toHaveLength(KODO_LOOP_SHELL_DETAIL_MAX_CHARS);
-    expect(() => Schema.decodeUnknownSync(KodoLoopShellStatus)(status)).not.toThrow();
+    expect(() => decodeShell(status)).not.toThrow();
   });
 });

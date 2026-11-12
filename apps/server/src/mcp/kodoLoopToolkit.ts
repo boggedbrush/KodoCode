@@ -137,7 +137,7 @@ const standing = (loop: {
   ...(loop.stopReason === undefined ? {} : { stopReason: loop.stopReason }),
 });
 
-export const handlers = {
+const handlers = {
   t3_loop_start: McpToolAccess.writesThreads(
     (input) => [input.threadId],
     (input) =>

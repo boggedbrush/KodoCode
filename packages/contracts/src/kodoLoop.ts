@@ -122,7 +122,7 @@ export const KodoReviewResult = Schema.Struct({
 export type KodoReviewResult = typeof KodoReviewResult.Type;
 
 export const KODO_LOOP_USAGE_MODELS_MAX = 4;
-export const KODO_LOOP_LIMIT_WINDOWS_MAX = 6;
+const KODO_LOOP_LIMIT_WINDOWS_MAX = 6;
 
 /**
  * Tokens a stage used, in the ledger's terms. A stage whose provider reported nothing has no usage

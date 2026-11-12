@@ -56,7 +56,7 @@ export const priceStageUsage = Effect.fn("KodoLoopSpend.priceStageUsage")(functi
 });
 
 /** The ids a stage ran on: what the provider reported, else the model it was asked to run. */
-export const stageModelIds = (record: KodoLoopStageRecord): ReadonlyArray<string> =>
+const stageModelIds = (record: KodoLoopStageRecord): ReadonlyArray<string> =>
   record.usage?.models !== undefined && record.usage.models.length > 0
     ? record.usage.models
     : record.model === null
@@ -111,11 +111,9 @@ export function loopTotals(stages: ReadonlyArray<KodoLoopStageRecord>): LoopTota
 }
 
 /**
- * The estimate: for each stage that ran on a cheaper model (Code, and Plan when its model is not the
- * reference), the same tokens at the reference model's rates minus the cost where they ran. Stages
- * on the reference model itself are counted apart, since there is nothing to compare, and stages with
- * no price on either side are listed, never counted as free. Undefined when there is no reference or
- * no such stage.
+ * The savings estimate for Code, and Plan when it ran off the reference model: the same tokens at the
+ * reference's rates minus their cost. Same-model stages are counted apart; unpriced ones are listed,
+ * never counted as free. Undefined without a reference or such a stage.
  */
 export function computeLoopSavings(
   stages: ReadonlyArray<KodoLoopStageRecord>,

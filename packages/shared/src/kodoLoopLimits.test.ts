@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import type { ServerProviderUsageLimits } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 
 import {
   fullestKodoLimitWindow,
@@ -7,9 +8,10 @@ import {
   readKodoLimitWindows,
 } from "./kodoLoopLimits.ts";
 
-const NOW = Date.parse("2026-06-01T12:00:00.000Z");
-const minutesAgo = (mins: number) => new Date(NOW - mins * 60_000).toISOString();
-const inMinutes = (mins: number) => new Date(NOW + mins * 60_000).toISOString();
+const NOW = DateTime.toEpochMillis(DateTime.makeUnsafe("2026-06-01T12:00:00.000Z"));
+const at = (ms: number) => DateTime.formatIso(DateTime.makeUnsafe(ms));
+const minutesAgo = (mins: number) => at(NOW - mins * 60_000);
+const inMinutes = (mins: number) => at(NOW + mins * 60_000);
 
 const limits = (over: Partial<ServerProviderUsageLimits> = {}): ServerProviderUsageLimits => ({
   checkedAt: minutesAgo(2),

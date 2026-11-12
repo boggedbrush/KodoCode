@@ -240,7 +240,7 @@ create the thread first and send `/loop` in it.
 Settings → Threads → **Loop** sets the defaults (rounds, plan approval, budget). `/loop 5 …`
 overrides only the rounds.
 
-- **Plan approval.** *Ask me first* holds the loop after the plan. The card says the plan
+- **Plan approval.** _Ask me first_ holds the loop after the plan. The card says the plan
   is ready; **Approve plan** starts coding and **Stop** ends the loop. A message you send
   also ends it. The hold survives a reload and a server restart. On mobile, a banner above the
   composer shows "Loop · Round 2 of 3 · Review", **Stop** and **Approve plan**, and

@@ -370,7 +370,10 @@ export default {
   // are stable kebab-case hook names; the text after the name is free.
   // `kodo:check` warns about files with a marker that is not listed here.
   hooks: [
-    { file: "apps/web/src/components/settings/settingsSearch.ts", hooks: ["mode-models-search", "loop-settings-search"] },
+    {
+      file: "apps/web/src/components/settings/settingsSearch.ts",
+      hooks: ["mode-models-search", "loop-settings-search"],
+    },
     { file: "apps/web/src/components/chat/useComposerSelection.ts", hooks: ["mode-models-send"] },
     {
       file: "apps/web/src/components/chat/useComposerProviderModel.ts",

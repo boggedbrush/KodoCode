@@ -50,7 +50,7 @@ export function kodoLoopStageStrip(
 }
 
 /** "Round 2 of 3 · Review". */
-export const kodoLoopPlace = (loop: KodoLoopHeadline): string =>
+const kodoLoopPlace = (loop: KodoLoopHeadline): string =>
   `Round ${loop.round} of ${loop.maxRounds} · ${KODO_LOOP_STAGE_LABEL[loop.stage]}`;
 
 /** The card's heading: where a running loop is, or how a finished one ended. */
@@ -194,8 +194,6 @@ export function kodoLoopBanner(
   };
 }
 
-// --- The summary a finished loop shows ------------------------------------------------------------
-
 const stageName = (round: number, stage: KodoLoopStage) =>
   `round ${round} ${KODO_LOOP_STAGE_LABEL[stage].toLowerCase()}`;
 
@@ -218,7 +216,11 @@ export function kodoLoopStageLine(record: KodoLoopStageRecord): string {
   const failed = record.status === "failed";
   switch (record.stage) {
     case "plan":
-      return failed ? "No plan was produced." : (said ?? "Plan ready.");
+      return failed
+        ? "No plan was produced."
+        : said === undefined || said.toLowerCase() === "plan"
+          ? "Plan ready."
+          : said;
     case "code":
       return failed ? "The coding stage failed." : (said ?? "Coding finished.");
     case "review": {
@@ -353,7 +355,7 @@ function savingsView(loop: KodoLoop): KodoLoopSavingsView {
 /** The summary of a loop that has run at least one stage; works on a running loop too. */
 export function summarizeKodoLoop(loop: KodoLoop): KodoLoopSummary {
   const records = loop.stages.filter((record) => record.runId !== null);
-  const roundNumbers = [...new Set(loop.stages.map((record) => record.round))].toSorted(
+  const roundNumbers = [...new Set(loop.stages.map((record) => record.round))].sort(
     (a, b) => a - b,
   );
   const rounds = roundNumbers.map((round): KodoLoopSummaryRound => ({
@@ -425,7 +427,7 @@ export function summarizeKodoLoop(loop: KodoLoop): KodoLoopSummary {
         tokens: count,
         sharePct: tokens === 0 ? 0 : (count / tokens) * 100,
       }))
-      .toSorted((a, b) => b.tokens - a.tokens),
+      .sort((a, b) => b.tokens - a.tokens),
     costUsd: priced === 0 ? null : costUsd,
     unpricedStages,
     unreportedStages,

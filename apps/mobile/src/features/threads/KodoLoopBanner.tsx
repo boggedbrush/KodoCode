@@ -85,12 +85,7 @@ export function KodoLoopBanner(props: {
             />
           ) : null}
           {banner.stop ? (
-            <Button
-              label="Stop"
-              size="compact"
-              disabled={busy}
-              onPress={() => void send("stop")}
-            />
+            <Button label="Stop" size="compact" disabled={busy} onPress={() => void send("stop")} />
           ) : null}
         </View>
       ) : null}

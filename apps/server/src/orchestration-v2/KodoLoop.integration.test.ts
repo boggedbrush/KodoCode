@@ -1581,10 +1581,12 @@ it.live(
     ),
 );
 
-// --- Spend: usage per stage, pricing, savings, the budget gate, and plan approval ---------------------
-
 /** What the server would give the loop: the limit windows of the test provider and a price list per million tokens. */
-const RATES_PER_MILLION: Record<string, number> = { "base-model": 2, "cheap-model": 1, "big-model": 10 };
+const RATES_PER_MILLION: Record<string, number> = {
+  "base-model": 2,
+  "cheap-model": 1,
+  "big-model": 10,
+};
 
 const priceFromList: LoopSpendDeps["price"] = (model, totals) =>
   Effect.succeed(
@@ -1617,7 +1619,9 @@ const providerWithWindow = (usedPercent: number, checkedAt: string): ServerProvi
   }) as unknown as ServerProvider;
 
 const spendWith = (input: {
-  readonly modeModels?: LoopSpendDeps["modeModels"] extends Effect.Effect<infer A> ? Partial<A> : never;
+  readonly modeModels?: LoopSpendDeps["modeModels"] extends Effect.Effect<infer A>
+    ? Partial<A>
+    : never;
   readonly providers: LoopSpendDeps["providers"];
 }): LoopSpendDeps => ({
   providers: input.providers,
@@ -1633,7 +1637,9 @@ const spendWith = (input: {
   price: priceFromList,
 });
 
-const usage = (input: Partial<TurnTokenUsage> & { readonly inputTokens: number; readonly outputTokens: number }) =>
+const usage = (
+  input: Partial<TurnTokenUsage> & { readonly inputTokens: number; readonly outputTokens: number },
+) =>
   ({
     usageScope: "main_agent",
     usageStatus: "complete",
@@ -1645,7 +1651,9 @@ const usage = (input: Partial<TurnTokenUsage> & { readonly inputTokens: number; 
 const serviceWith = (ctx: Ctx, loop: Partial<typeof DEFAULT_KODO_LOOP_SETTINGS>) =>
   makeKodoLoopService({
     orchestrator: ctx.orchestrator,
-    serverSettings: { getSettings: Effect.succeed({ loop: { ...DEFAULT_KODO_LOOP_SETTINGS, ...loop } }) },
+    serverSettings: {
+      getSettings: Effect.succeed({ loop: { ...DEFAULT_KODO_LOOP_SETTINGS, ...loop } }),
+    },
   });
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -1705,7 +1713,10 @@ it.live(
             referenceCostUsd: 5.5,
           });
           assert.equal(review?.usage?.costUsd, 0.85, "the review ran on the reference model");
-          assert.isUndefined(judge?.usage, "a provider that reported nothing has no usage, not zero");
+          assert.isUndefined(
+            judge?.usage,
+            "a provider that reported nothing has no usage, not zero",
+          );
           assert.equal(code?.model?.model, "cheap-model");
           // Plan (on the thread's model) and Code ran below the reference, so both are compared.
           assert.deepEqual(loop.savings?.unpricedStages, []);
@@ -1733,7 +1744,10 @@ it.live(
         Effect.gen(function* () {
           yield* startLoop(ctx, "Do it.", 1);
           const stepper = yield* ctx.newStepper(
-            spendWith({ modeModels: { review: selection("big-model") }, providers: Effect.succeed([]) }),
+            spendWith({
+              modeModels: { review: selection("big-model") },
+              providers: Effect.succeed([]),
+            }),
           );
           const started = yield* watchTurnStart(ctx);
           yield* settle(ctx, stepper);
@@ -1752,7 +1766,11 @@ it.live(
                 occurredAt: DateTime.makeUnsafe(Date.UTC(2026, 0, 1)),
                 payload: {
                   ...firstTurn,
-                  turnTokenUsage: usage({ inputTokens: 70_000, outputTokens: 7_000, usageStatus: "partial" }),
+                  turnTokenUsage: usage({
+                    inputTokens: 70_000,
+                    outputTokens: 7_000,
+                    usageStatus: "partial",
+                  }),
                 },
               },
               {
@@ -1794,11 +1812,10 @@ it.live(
     ),
 );
 
-it.live("a budget limit stops the loop between stages, naming the window; the stage in flight finishes", () =>
-  withLoopHarness(
-    "kodo-loop-budget-limit",
-    { replies: [REPLIES.plan, REPLIES.code] },
-    (ctx) =>
+it.live(
+  "a budget limit stops the loop between stages, naming the window; the stage in flight finishes",
+  () =>
+    withLoopHarness("kodo-loop-budget-limit", { replies: [REPLIES.plan, REPLIES.code] }, (ctx) =>
       Effect.gen(function* () {
         const percent = yield* Ref.make(50);
         const checkedAt = yield* nowIso;
@@ -1830,7 +1847,7 @@ it.live("a budget limit stops the loop between stages, naming the window; the st
         );
         assert.equal((yield* Ref.get(ctx.state)).started.length, 1);
       }),
-  ),
+    ),
 );
 
 it.live("a token cap stops the loop after the stage that reached it", () =>
@@ -1879,22 +1896,21 @@ it.live("a gate that cannot be read stops the loop before anything is sent", () 
   ),
 );
 
-it.live("a provider that reports no limit windows does not stop the loop, and the loop says so", () =>
-  withLoopHarness(
-    "kodo-loop-budget-missing",
-    { replies: [REPLIES.plan, REPLIES.code, REPLIES.review, REPLIES.complete] },
-    (ctx) =>
-      Effect.gen(function* () {
-        yield* startLoop(ctx, "Do it.", 1);
-        yield* runToEnd(
-          ctx,
-          yield* ctx.newStepper(spendWith({ providers: Effect.succeed([]) })),
-        );
-        const loop = yield* requireLoop(ctx);
-        assert.equal(loop.status, "done");
-        assert.deepEqual(loop.limitCheck, { state: "missing", provider: providerInstanceId });
-      }),
-  ),
+it.live(
+  "a provider that reports no limit windows does not stop the loop, and the loop says so",
+  () =>
+    withLoopHarness(
+      "kodo-loop-budget-missing",
+      { replies: [REPLIES.plan, REPLIES.code, REPLIES.review, REPLIES.complete] },
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* startLoop(ctx, "Do it.", 1);
+          yield* runToEnd(ctx, yield* ctx.newStepper(spendWith({ providers: Effect.succeed([]) })));
+          const loop = yield* requireLoop(ctx);
+          assert.equal(loop.status, "done");
+          assert.deepEqual(loop.limitCheck, { state: "missing", provider: providerInstanceId });
+        }),
+    ),
 );
 
 it.live(
@@ -1943,52 +1959,58 @@ it.live(
           const coding = yield* watchTurnStart(ctx);
           yield* settle(ctx, restarted);
           yield* Fiber.join(coding);
-          assert.equal((yield* Ref.get(ctx.state)).started.length, 2, "approving started the Code stage");
+          assert.equal(
+            (yield* Ref.get(ctx.state)).started.length,
+            2,
+            "approving started the Code stage",
+          );
           assert.equal((yield* projectionOf(ctx)).runs[1]?.interactionMode, "code");
         }),
     ),
 );
 
-it.live("a message sent while the plan waits for approval stops the loop and runs as the person's turn", () =>
-  withLoopHarness(
-    "kodo-loop-approval-message",
-    { startMode: "ask", replies: [REPLIES.plan, "Sure."] },
-    (ctx) =>
-      Effect.gen(function* () {
-        const service = serviceWith(ctx, { planApproval: "ask" });
-        yield* service.start({
-          threadId: ctx.threadId,
-          commandId: CommandId.make("command:kodo-loop-approval-message:start"),
-          requestMessageId: MessageId.make("message:kodo-loop-approval-message:start"),
-          request: "Do it.",
-          maxRounds: 2,
-        });
-        const stepper = yield* ctx.newStepper();
-        const started = yield* watchTurnStart(ctx);
-        yield* settle(ctx, stepper);
-        yield* Fiber.join(started);
-        yield* endTurn(ctx);
-        yield* settle(ctx, stepper);
-        assert.equal((yield* requireLoop(ctx)).hold, "plan_approval");
-        const reply = yield* watchTurnStart(ctx);
-        yield* ctx.orchestrator.dispatch({
-          type: "message.dispatch",
-          createdBy: "user",
-          creationSource: "web",
-          commandId: CommandId.make("command:kodo-loop-approval-message:reply"),
-          threadId: ctx.threadId,
-          messageId: MessageId.make("message:kodo-loop-approval-message:reply"),
-          text: "Actually, do it differently.",
-          attachments: [],
-          dispatchMode: { type: "start_immediately" },
-        });
-        yield* ctx.worker.drain();
-        yield* Fiber.join(reply);
-        const loop = yield* requireLoop(ctx);
-        assert.equal(loop.status, "stopped");
-        assert.equal(loop.stopReason, "user_message");
-      }),
-  ),
+it.live(
+  "a message sent while the plan waits for approval stops the loop and runs as the person's turn",
+  () =>
+    withLoopHarness(
+      "kodo-loop-approval-message",
+      { startMode: "ask", replies: [REPLIES.plan, "Sure."] },
+      (ctx) =>
+        Effect.gen(function* () {
+          const service = serviceWith(ctx, { planApproval: "ask" });
+          yield* service.start({
+            threadId: ctx.threadId,
+            commandId: CommandId.make("command:kodo-loop-approval-message:start"),
+            requestMessageId: MessageId.make("message:kodo-loop-approval-message:start"),
+            request: "Do it.",
+            maxRounds: 2,
+          });
+          const stepper = yield* ctx.newStepper();
+          const started = yield* watchTurnStart(ctx);
+          yield* settle(ctx, stepper);
+          yield* Fiber.join(started);
+          yield* endTurn(ctx);
+          yield* settle(ctx, stepper);
+          assert.equal((yield* requireLoop(ctx)).hold, "plan_approval");
+          const reply = yield* watchTurnStart(ctx);
+          yield* ctx.orchestrator.dispatch({
+            type: "message.dispatch",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make("command:kodo-loop-approval-message:reply"),
+            threadId: ctx.threadId,
+            messageId: MessageId.make("message:kodo-loop-approval-message:reply"),
+            text: "Actually, do it differently.",
+            attachments: [],
+            dispatchMode: { type: "start_immediately" },
+          });
+          yield* ctx.worker.drain();
+          yield* Fiber.join(reply);
+          const loop = yield* requireLoop(ctx);
+          assert.equal(loop.status, "stopped");
+          assert.equal(loop.stopReason, "user_message");
+        }),
+    ),
 );
 
 export type { KodoLoop };

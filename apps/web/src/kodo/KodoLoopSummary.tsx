@@ -27,8 +27,11 @@ export function KodoLoopSummary(props: { readonly loop: KodoLoop }) {
           <details key={round.round} open={round.round === latest} className="group">
             <summary className="cursor-pointer text-muted-foreground">Round {round.round}</summary>
             <ul role="list" className="mt-0.5 grid gap-0.5 ps-3">
-              {round.stages.map((entry, index) => (
-                <li key={`${entry.stage}-${index}`} className="wrap-anywhere text-muted-foreground">
+              {round.stages.map((entry) => (
+                <li
+                  key={`${entry.stage}-${entry.line}`}
+                  className="wrap-anywhere text-muted-foreground"
+                >
                   <span className="text-foreground">{entry.label}</span>{" "}
                   <KodoInlineText text={entry.line} />
                 </li>
