@@ -1,15 +1,75 @@
-import * as NFS from "node:fs";
-import * as Net from "node:net";
-import * as readline from "node:readline";
-import type { Readable } from "node:stream";
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from "node:fs";
+import * as NodeNet from "node:net";
+import * as NodeReadline from "node:readline";
+import type * as NodeStream from "node:stream";
 
-import { Data, Effect, Option, Predicate, Result, Schema } from "effect";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import { decodeJsonResult } from "@t3tools/shared/schemaJson";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 
-class BootstrapError extends Data.TaggedError("BootstrapError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class BootstrapFdStatError extends Schema.TaggedError<BootstrapFdStatError>()(
+  "BootstrapFdStatError",
+  {
+    fd: Schema.Number,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to stat bootstrap file descriptor ${this.fd}.`;
+  }
+}
+
+export class BootstrapInputStreamOpenError extends Schema.TaggedError<BootstrapInputStreamOpenError>()(
+  "BootstrapInputStreamOpenError",
+  {
+    fd: Schema.Number,
+    platform: Schema.String,
+    fdPath: Schema.optional(Schema.String),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    const path = this.fdPath === undefined ? "" : ` via '${this.fdPath}'`;
+    return `Failed to open bootstrap input stream for file descriptor ${this.fd}${path} on '${this.platform}'.`;
+  }
+}
+
+export class BootstrapEnvelopeReadError extends Schema.TaggedError<BootstrapEnvelopeReadError>()(
+  "BootstrapEnvelopeReadError",
+  {
+    fd: Schema.Number,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to read bootstrap envelope from file descriptor ${this.fd}.`;
+  }
+}
+
+export class BootstrapEnvelopeDecodeError extends Schema.TaggedError<BootstrapEnvelopeDecodeError>()(
+  "BootstrapEnvelopeDecodeError",
+  {
+    fd: Schema.Number,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to decode bootstrap envelope from file descriptor ${this.fd}.`;
+  }
+}
+
+export const BootstrapError = Schema.Union([
+  BootstrapFdStatError,
+  BootstrapInputStreamOpenError,
+  BootstrapEnvelopeReadError,
+  BootstrapEnvelopeDecodeError,
+]);
+export type BootstrapError = typeof BootstrapError.Type;
 
 export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function* <A, I>(
   schema: Schema.Codec<A, I>,
@@ -25,8 +85,11 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
 
   const timeoutMs = options?.timeoutMs ?? 1000;
 
-  return yield* Effect.callback<Option.Option<A>, BootstrapError>((resume) => {
-    const input = readline.createInterface({
+  return yield* Effect.callback<
+    Option.Option<A>,
+    BootstrapEnvelopeReadError | BootstrapEnvelopeDecodeError
+  >((resume) => {
+    const input = NodeReadline.createInterface({
       input: stream,
       crlfDelay: Infinity,
     });
@@ -46,8 +109,8 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
       }
       resume(
         Effect.fail(
-          new BootstrapError({
-            message: "Failed to read bootstrap envelope.",
+          new BootstrapEnvelopeReadError({
+            fd,
             cause: error,
           }),
         ),
@@ -61,8 +124,8 @@ export const readBootstrapEnvelope = Effect.fn("readBootstrapEnvelope")(function
       } else {
         resume(
           Effect.fail(
-            new BootstrapError({
-              message: "Failed to decode bootstrap envelope.",
+            new BootstrapEnvelopeDecodeError({
+              fd,
               cause: parsed.failure,
             }),
           ),
@@ -89,32 +152,35 @@ const isUnavailableBootstrapFdError = Predicate.compose(
 
 const isFdReady = (fd: number) =>
   Effect.try({
-    try: () => NFS.fstatSync(fd),
+    try: () => NodeFS.fstatSync(fd),
     catch: (error) =>
-      new BootstrapError({
-        message: "Failed to stat bootstrap fd.",
+      new BootstrapFdStatError({
+        fd,
         cause: error,
       }),
   }).pipe(
     Effect.as(true),
-    Effect.catchIf(
-      (error) => isUnavailableBootstrapFdError(error.cause),
-      () => Effect.succeed(false),
-    ),
+    Effect.catchTags({
+      BootstrapFdStatError: (error) =>
+        isUnavailableBootstrapFdError(error.cause) ? Effect.succeed(false) : Effect.fail(error),
+    }),
   );
 
-const makeBootstrapInputStream = (fd: number) =>
-  Effect.try<Readable, BootstrapError>({
+const makeBootstrapInputStream = Effect.fn("bootstrap.makeBootstrapInputStream")(function* (
+  fd: number,
+) {
+  const platform = yield* HostProcess.Platform;
+  const fdPath = resolveFdPath(fd, platform);
+  return yield* Effect.try<NodeStream.Readable, BootstrapInputStreamOpenError>({
     try: () => {
-      const fdPath = resolveFdPath(fd);
       if (fdPath === undefined) {
         return makeDirectBootstrapStream(fd);
       }
 
       let streamFd: number | undefined;
       try {
-        streamFd = NFS.openSync(fdPath, "r");
-        return NFS.createReadStream("", {
+        streamFd = NodeFS.openSync(fdPath, "r");
+        return NodeFS.createReadStream("", {
           fd: streamFd,
           encoding: "utf8",
           autoClose: true,
@@ -122,7 +188,7 @@ const makeBootstrapInputStream = (fd: number) =>
       } catch (error) {
         if (isBootstrapFdPathDuplicationError(error)) {
           if (streamFd !== undefined) {
-            NFS.closeSync(streamFd);
+            NodeFS.closeSync(streamFd);
           }
           return makeDirectBootstrapStream(fd);
         }
@@ -130,21 +196,24 @@ const makeBootstrapInputStream = (fd: number) =>
       }
     },
     catch: (error) =>
-      new BootstrapError({
-        message: "Failed to duplicate bootstrap fd.",
+      new BootstrapInputStreamOpenError({
+        fd,
+        platform,
+        ...(fdPath === undefined ? {} : { fdPath }),
         cause: error,
       }),
   });
+});
 
-const makeDirectBootstrapStream = (fd: number): Readable => {
+const makeDirectBootstrapStream = (fd: number): NodeStream.Readable => {
   try {
-    return NFS.createReadStream("", {
+    return NodeFS.createReadStream("", {
       fd,
       encoding: "utf8",
       autoClose: true,
     });
   } catch {
-    const stream = new Net.Socket({
+    const stream = new NodeNet.Socket({
       fd,
       readable: true,
       writable: false,
@@ -154,15 +223,14 @@ const makeDirectBootstrapStream = (fd: number): Readable => {
   }
 };
 
+// WSL-inherited stdin pipes cannot be reopened via /proc/self/fd/0 (EACCES),
+// so they must be read directly.
 const isBootstrapFdPathDuplicationError = Predicate.compose(
   Predicate.hasProperty("code"),
-  (_) => _.code === "ENXIO" || _.code === "EINVAL" || _.code === "EPERM",
+  (_) => _.code === "ENXIO" || _.code === "EINVAL" || _.code === "EPERM" || _.code === "EACCES",
 );
 
-export function resolveFdPath(
-  fd: number,
-  platform: NodeJS.Platform = process.platform,
-): string | undefined {
+function resolveFdPath(fd: number, platform: NodeJS.Platform): string | undefined {
   if (platform === "linux") {
     return `/proc/self/fd/${fd}`;
   }

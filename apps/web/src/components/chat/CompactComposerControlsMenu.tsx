@@ -1,90 +1,52 @@
-import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
-import { memo, type ReactNode } from "react";
-import { EllipsisIcon, ListTodoIcon } from "lucide-react";
-import { Button } from "../ui/button";
-import {
-  Menu,
-  MenuItem,
-  MenuPopup,
-  MenuRadioGroup,
-  MenuRadioItem,
-  MenuSeparator as MenuDivider,
-  MenuTrigger,
-} from "../ui/menu";
-import { SWARM_ACTIVE_HELP } from "./swarmCopy";
+import type { RuntimeMode } from "@t3tools/contracts";
+import { memo, useRef } from "react";
+import { EllipsisIcon } from "lucide-react";
+import { Menu, MenuPopup, MenuTrigger } from "../ui/menu";
+import { ComposerControl, ComposerControlIcon } from "./ComposerControl";
+import { focusRequestedPermission, useComposerMenuProps } from "./composerEventScope";
+import { useComposerMenuState } from "./useComposerMenuState";
+import { ComposerPermissionsSection, type RuntimeModeOption } from "./ComposerFooterControls";
 
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
-  activePlan: boolean;
-  interactionMode: ProviderInteractionMode;
-  planSidebarOpen: boolean;
   runtimeMode: RuntimeMode;
-  traitsMenuContent?: ReactNode;
-  onSetInteractionMode: (mode: ProviderInteractionMode) => void;
-  onTogglePlanSidebar: () => void;
-  onToggleRuntimeMode: () => void;
+  runtimeModeOptions: ReadonlyArray<RuntimeModeOption>;
+  showPermissions: boolean;
+  size?: "sm" | "xs";
+  /** Close the portaled popup when its trigger hides. */
+  hidden?: boolean;
+  onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
-  const selectedInteractionMode =
-    props.interactionMode === "default" ? "code" : props.interactionMode;
-  const swarmEnabled = selectedInteractionMode === "swarm";
+  const composerFloatingLayerProps = useComposerMenuProps();
+  const size = props.size ?? "sm";
+  const [open, setOpen] = useComposerMenuState(props.hidden);
+  const triggerRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <Menu>
+    <Menu
+      open={open}
+      onOpenChange={setOpen}
+      onOpenChangeComplete={(isOpen) => focusRequestedPermission(isOpen, triggerRef.current)}
+    >
       <MenuTrigger
         render={
-          <Button
-            size="sm"
-            variant="ghost"
-            className="shrink-0 px-2 text-muted-foreground/70 hover:text-foreground/80"
+          <ComposerControl
+            ref={triggerRef}
+            size={size}
+            className="shrink-0"
             aria-label="More composer controls"
+            data-composer-shortcut={props.showPermissions ? "composer.mode" : undefined}
           />
         }
       >
-        <EllipsisIcon aria-hidden="true" className="size-4" />
+        <ComposerControlIcon icon={EllipsisIcon} size={size} />
       </MenuTrigger>
-      <MenuPopup align="start">
-        {props.traitsMenuContent ? (
-          <>
-            {props.traitsMenuContent}
-            <MenuDivider />
-          </>
-        ) : null}
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
-        {swarmEnabled ? (
-          <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">{SWARM_ACTIVE_HELP}</div>
-        ) : (
-          <MenuRadioGroup
-            value={selectedInteractionMode}
-            onValueChange={(value) => {
-              if (!value || value === selectedInteractionMode) return;
-              props.onSetInteractionMode(value as ProviderInteractionMode);
-            }}
-          >
-            <MenuRadioItem value="ask">Ask</MenuRadioItem>
-            <MenuRadioItem value="plan">Plan</MenuRadioItem>
-            <MenuRadioItem value="code">Code</MenuRadioItem>
-            <MenuRadioItem value="review">Review</MenuRadioItem>
-          </MenuRadioGroup>
-        )}
-        <MenuDivider />
-        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
-        <MenuRadioGroup
-          value={props.runtimeMode}
-          onValueChange={(value) => {
-            if (!value || value === props.runtimeMode) return;
-            props.onToggleRuntimeMode();
-          }}
-        >
-          <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
-          <MenuRadioItem value="full-access">Full access</MenuRadioItem>
-        </MenuRadioGroup>
-        {props.activePlan ? (
-          <>
-            <MenuDivider />
-            <MenuItem onClick={props.onTogglePlanSidebar}>
-              <ListTodoIcon className="size-4 shrink-0" />
-              {props.planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
-            </MenuItem>
-          </>
+      <MenuPopup align="start" {...composerFloatingLayerProps}>
+        {props.showPermissions ? (
+          <ComposerPermissionsSection
+            runtimeMode={props.runtimeMode}
+            runtimeModeOptions={props.runtimeModeOptions}
+            onRuntimeModeChange={props.onRuntimeModeChange}
+          />
         ) : null}
       </MenuPopup>
     </Menu>

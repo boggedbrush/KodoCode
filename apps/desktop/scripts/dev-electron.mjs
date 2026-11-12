@@ -1,37 +1,78 @@
-import { spawn, spawnSync } from "node:child_process";
-import { watch } from "node:fs";
-import { join } from "node:path";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
-import { desktopDir, resolveElectronPath } from "./electron-launcher.mjs";
+import {
+  desktopDir,
+  resolveDevProtocolClient,
+  resolveElectronLaunchCommand,
+} from "./electron-launcher.mjs";
 import { waitForResources } from "./wait-for-resources.mjs";
 
-const port = Number(process.env.ELECTRON_RENDERER_PORT ?? 5733);
-const devServerUrl = `http://localhost:${port}`;
+const devServerUrl = process.env.VITE_DEV_SERVER_URL?.trim();
+if (!devServerUrl) {
+  throw new Error("VITE_DEV_SERVER_URL is required for desktop development.");
+}
+
+const devServer = new URL(devServerUrl);
+const port = Number.parseInt(devServer.port, 10);
+if (!Number.isInteger(port) || port <= 0) {
+  throw new Error(`VITE_DEV_SERVER_URL must include an explicit port: ${devServerUrl}`);
+}
+
 const requiredFiles = [
-  "dist-electron/main.js",
-  "dist-electron/preload.js",
+  "dist-electron/main.cjs",
+  "dist-electron/electron/WindowsForegroundFocusWorker.cjs",
+  "dist-electron/preload.cjs",
+  "dist-electron/snapShot/GlobalShiftShortcutWorker.cjs",
+  "dist-electron/snapShot/RegionSnapShotWorker.cjs",
+  "dist-electron/snapShot/SnapShotAccessibilityWorker.cjs",
   "../server/dist/bin.mjs",
 ];
 const watchedDirectories = [
-  { directory: "dist-electron", files: new Set(["main.js", "preload.js"]) },
+  { directory: "dist-electron", files: new Set(["main.cjs", "preload.cjs"]) },
+  {
+    directory: "dist-electron/electron",
+    files: new Set(["WindowsForegroundFocusWorker.cjs"]),
+  },
+  {
+    directory: "dist-electron/snapShot",
+    files: new Set([
+      "GlobalShiftShortcutWorker.cjs",
+      "RegionSnapShotWorker.cjs",
+      "SnapShotAccessibilityWorker.cjs",
+    ]),
+  },
   { directory: "../server/dist", files: new Set(["bin.mjs"]) },
 ];
 const forcedShutdownTimeoutMs = 1_500;
 const restartDebounceMs = 120;
 const childTreeGracePeriodMs = 1_200;
-const DEVTOOLS_ARG = "--devtools";
-const DEV_RUNNER_PID_ENV = "KODOCODE_DEV_RUNNER_PID";
-const DEV_RUNNER_SHUTDOWN_SIGNAL_ENV = "KODOCODE_DEV_SHUTDOWN_SIGNAL";
-const forwardDevtools = process.argv.includes(DEVTOOLS_ARG);
+const remoteDebuggingPort = process.env.T3CODE_DESKTOP_REMOTE_DEBUGGING_PORT?.trim();
+// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone dev script has no Effect runtime.
+const hostPlatform = NodeOS.platform();
+
+NodeChildProcess.execFileSync(
+  process.execPath,
+  [NodePath.join(desktopDir, "scripts/build-browser-secret.mjs")],
+  { stdio: "inherit" },
+);
 
 await waitForResources({
   baseDir: desktopDir,
   files: requiredFiles,
+  tcpHost: devServer.hostname,
   tcpPort: port,
 });
 
 const childEnv = { ...process.env };
 delete childEnv.ELECTRON_RUN_AS_NODE;
+const devProtocolClient = resolveDevProtocolClient();
+if (devProtocolClient) {
+  childEnv.T3CODE_DESKTOP_APP_USER_MODEL_ID = devProtocolClient.appBundleId;
+  childEnv.T3CODE_DESKTOP_PROTOCOL_REGISTRATION_MANAGED = "1";
+}
 
 let shuttingDown = false;
 let restartTimer = null;
@@ -40,47 +81,27 @@ let restartQueue = Promise.resolve();
 const expectedExits = new WeakSet();
 const watchers = [];
 
-function terminatePidTree(pid, signal) {
-  if (typeof pid !== "number") {
+function killChildTreeByPid(pid, signal) {
+  if (hostPlatform === "win32" || typeof pid !== "number") {
     return;
   }
 
-  if (process.platform === "win32") {
-    const taskkillArgs = ["/PID", String(pid), "/T"];
-    if (signal === "KILL") {
-      taskkillArgs.push("/F");
-    }
-
-    spawnSync("taskkill", taskkillArgs, { stdio: "ignore", windowsHide: true });
-    return;
-  }
-
-  spawnSync("pkill", [`-${signal}`, "-P", String(pid)], { stdio: "ignore" });
+  NodeChildProcess.spawnSync("pkill", [`-${signal}`, "-P", String(pid)], { stdio: "ignore" });
 }
 
 function cleanupStaleDevApps() {
-  if (process.platform === "win32") {
+  if (hostPlatform === "win32") {
     return;
   }
 
-  spawnSync("pkill", ["-f", "--", `--kodo-code-dev-root=${desktopDir}`], { stdio: "ignore" });
-}
-
-function requestRootDevRunnerShutdown() {
-  const runnerPid = Number(process.env[DEV_RUNNER_PID_ENV]);
-  if (!Number.isInteger(runnerPid) || runnerPid <= 0 || runnerPid === process.pid) {
-    return;
-  }
-
-  const signal =
-    process.env[DEV_RUNNER_SHUTDOWN_SIGNAL_ENV] ??
-    (process.platform === "win32" ? "SIGTERM" : "SIGUSR2");
-
-  try {
-    process.kill(runnerPid, signal);
-  } catch {
-    // Best-effort handoff. The parent may already be exiting.
-  }
+  const escapedDesktopDir = desktopDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  NodeChildProcess.spawnSync(
+    "pkill",
+    ["-f", "--", `(^| )--t3code-dev-root=${escapedDesktopDir}( |$)`],
+    {
+      stdio: "ignore",
+    },
+  );
 }
 
 function startApp() {
@@ -88,22 +109,18 @@ function startApp() {
     return;
   }
 
-  const app = spawn(
-    resolveElectronPath(),
-    [
-      `--kodo-code-dev-root=${desktopDir}`,
-      "dist-electron/main.js",
-      ...(forwardDevtools ? [DEVTOOLS_ARG] : []),
-    ],
-    {
-      cwd: desktopDir,
-      env: {
-        ...childEnv,
-        VITE_DEV_SERVER_URL: devServerUrl,
-      },
-      stdio: "inherit",
-    },
-  );
+  const electronArgs = remoteDebuggingPort
+    ? [`--remote-debugging-port=${remoteDebuggingPort}`]
+    : [];
+  const launchArgs = devProtocolClient
+    ? electronArgs
+    : [...electronArgs, `--t3code-dev-root=${desktopDir}`, "dist-electron/main.cjs"];
+  const electronCommand = resolveElectronLaunchCommand(launchArgs);
+  const app = NodeChildProcess.spawn(electronCommand.electronPath, electronCommand.args, {
+    cwd: desktopDir,
+    env: childEnv,
+    stdio: "inherit",
+  });
 
   currentApp = app;
 
@@ -122,17 +139,9 @@ function startApp() {
       currentApp = null;
     }
 
-    const wasExpected = expectedExits.has(app);
-    const exitedCleanly = signal === null && code === 0;
     const exitedAbnormally = signal !== null || code !== 0;
-    if (!shuttingDown && !wasExpected && exitedAbnormally) {
+    if (!shuttingDown && !expectedExits.has(app) && exitedAbnormally) {
       scheduleRestart();
-      return;
-    }
-
-    if (!shuttingDown && !wasExpected && exitedCleanly) {
-      requestRootDevRunnerShutdown();
-      void shutdown(0);
     }
   });
 }
@@ -160,7 +169,8 @@ async function stopApp() {
 
     app.once("exit", finish);
     app.kill("SIGTERM");
-    terminatePidTree(app.pid, "TERM");
+    killChildTreeByPid(app.pid, "TERM");
+    cleanupStaleDevApps();
 
     setTimeout(() => {
       if (settled) {
@@ -168,7 +178,8 @@ async function stopApp() {
       }
 
       app.kill("SIGKILL");
-      terminatePidTree(app.pid, "KILL");
+      killChildTreeByPid(app.pid, "KILL");
+      cleanupStaleDevApps();
       finish();
     }, forcedShutdownTimeoutMs).unref();
   });
@@ -198,8 +209,8 @@ function scheduleRestart() {
 
 function startWatchers() {
   for (const { directory, files } of watchedDirectories) {
-    const watcher = watch(
-      join(desktopDir, directory),
+    const watcher = NodeFS.watch(
+      NodePath.join(desktopDir, directory),
       { persistent: true },
       (_eventType, filename) => {
         if (typeof filename !== "string" || !files.has(filename)) {
@@ -215,12 +226,13 @@ function startWatchers() {
 }
 
 function killChildTree(signal) {
-  if (process.platform === "win32") {
+  if (hostPlatform === "win32") {
     return;
   }
 
-  // Kill direct children as a final fallback in case normal shutdown leaves stragglers.
-  spawnSync("pkill", [`-${signal}`, "-P", String(process.pid)], { stdio: "ignore" });
+  NodeChildProcess.spawnSync("pkill", [`-${signal}`, "-P", String(process.pid)], {
+    stdio: "ignore",
+  });
 }
 
 async function shutdown(exitCode) {

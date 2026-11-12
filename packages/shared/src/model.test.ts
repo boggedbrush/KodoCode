@@ -1,413 +1,229 @@
-import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_MODEL_BY_PROVIDER,
-  type ModelCapabilities,
-  type ServerProvider,
-} from "@t3tools/contracts";
+import { describe, expect, it } from "vite-plus/test";
+import { ProviderInstanceId, type ModelCapabilities } from "@t3tools/contracts";
 
 import {
   applyClaudePromptEffortPrefix,
-  CODEX_SPARK_MODEL,
-  getDefaultContextWindow,
-  getDefaultUtilityModelSelection,
-  getDefaultEffort,
-  hasContextWindowOption,
-  hasEffortLevel,
-  isClaudeUltrathinkPrompt,
-  normalizeClaudeModelOptionsWithCapabilities,
-  normalizeCodexModelOptionsWithCapabilities,
-  normalizeModelSlug,
-  resolveApiModelId,
-  resolveContextWindow,
-  resolveEffort,
-  resolveModelSelectionDefault,
-  resolveModelSlug,
-  resolveModelSlugForProvider,
-  resolveSelectableModel,
-  resolveUtilityModelSelectionDefault,
-  trimOrNull,
-} from "./model";
+  buildExplicitProviderOptionSelectionsFromDescriptors,
+  buildProviderOptionSelectionsFromDescriptors,
+  createModelCapabilities,
+  createModelSelection,
+  getProviderOptionCurrentLabel,
+  getProviderOptionDescriptors,
+  readCustomModelEntries,
+  modelSelectionsEqual,
+} from "./model.ts";
 
-const codexCaps: ModelCapabilities = {
-  reasoningEffortLevels: [
-    { value: "xhigh", label: "Extra High" },
-    { value: "high", label: "High", isDefault: true },
+const codexCaps: ModelCapabilities = createModelCapabilities({
+  optionDescriptors: [
+    {
+      id: "reasoningEffort",
+      label: "Reasoning",
+      type: "select",
+      options: [
+        { id: "xhigh", label: "Extra High" },
+        { id: "high", label: "High", isDefault: true },
+      ],
+      currentValue: "high",
+    },
+    {
+      id: "fastMode",
+      label: "Fast Mode",
+      type: "boolean",
+    },
   ],
-  supportsFastMode: true,
-  supportsThinkingToggle: false,
-  contextWindowOptions: [],
-  promptInjectedEffortLevels: [],
-};
+});
 
-const claudeCaps: ModelCapabilities = {
-  reasoningEffortLevels: [
-    { value: "medium", label: "Medium" },
-    { value: "high", label: "High", isDefault: true },
-    { value: "ultrathink", label: "Ultrathink" },
-  ],
-  supportsFastMode: false,
-  supportsThinkingToggle: false,
-  contextWindowOptions: [
-    { value: "200k", label: "200k" },
-    { value: "1m", label: "1M", isDefault: true },
-  ],
-  promptInjectedEffortLevels: ["ultrathink"],
-};
+describe("descriptor helpers", () => {
+  it("builds dispatch options only from explicit selections", () => {
+    const descriptors = getProviderOptionDescriptors({
+      caps: codexCaps,
+      selections: [{ id: "fastMode", value: true }],
+    });
 
-const providersWithSpark: ReadonlyArray<ServerProvider> = [
-  {
-    provider: "codex",
-    enabled: true,
-    status: "ready",
-    installed: true,
-    version: "0.0.0",
-    checkedAt: "2026-04-10T00:00:00.000Z",
-    models: [
-      { slug: "gpt-5.4-mini", name: "GPT-5.4 Mini", isCustom: false, capabilities: codexCaps },
+    expect(buildExplicitProviderOptionSelectionsFromDescriptors(descriptors, undefined)).toBe(
+      undefined,
+    );
+    expect(
+      buildExplicitProviderOptionSelectionsFromDescriptors(descriptors, [
+        { id: "fastMode", value: true },
+      ]),
+    ).toEqual([{ id: "fastMode", value: true }]);
+  });
+
+  it("dispatches an old Ultracode effort as Extra High with the Ultracode toggle", () => {
+    const legacy = [{ id: "effort", value: "ultracode" }];
+    const descriptors = getProviderOptionDescriptors({
+      caps: createModelCapabilities({
+        optionDescriptors: [
+          {
+            id: "effort",
+            label: "Reasoning",
+            type: "select",
+            options: [
+              { id: "high", label: "High", isDefault: true },
+              { id: "xhigh", label: "Extra High" },
+            ],
+          },
+          { id: "ultracode", label: "Ultracode", type: "boolean" },
+        ],
+      }),
+      selections: legacy,
+    });
+
+    expect(buildExplicitProviderOptionSelectionsFromDescriptors(descriptors, legacy)).toEqual([
+      { id: "effort", value: "xhigh" },
+      { id: "ultracode", value: true },
+    ]);
+  });
+
+  it("compares complete model selections independent of option ordering", () => {
+    const left = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.4", [
+      { id: "reasoningEffort", value: "high" },
+      { id: "fastMode", value: true },
+    ]);
+    const reordered = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.4", [
+      { id: "fastMode", value: true },
+      { id: "reasoningEffort", value: "high" },
+    ]);
+
+    expect(modelSelectionsEqual(left, reordered)).toBe(true);
+    expect(
+      modelSelectionsEqual(left, {
+        ...reordered,
+        options: [
+          { id: "fastMode", value: true },
+          { id: "reasoningEffort", value: "medium" },
+        ],
+      }),
+    ).toBe(false);
+    expect(modelSelectionsEqual(left, { ...reordered, model: "gpt-5.5" })).toBe(false);
+  });
+});
+
+describe("applyClaudePromptEffortPrefix", () => {
+  it("keeps slash commands intact when ultrathink is selected", () => {
+    expect(applyClaudePromptEffortPrefix("/compact", "ultrathink")).toBe("/compact");
+    expect(applyClaudePromptEffortPrefix(" /compact keep recent errors ", "ultrathink")).toBe(
+      "/compact keep recent errors",
+    );
+    expect(applyClaudePromptEffortPrefix(" /review src/model.ts ", "ultrathink")).toBe(
+      "/review src/model.ts",
+    );
+    expect(applyClaudePromptEffortPrefix("/security-review", "ultrathink")).toBe(
+      "/security-review",
+    );
+    expect(applyClaudePromptEffortPrefix("/plugin:skill run", "ultrathink")).toBe(
+      "/plugin:skill run",
+    );
+    expect(applyClaudePromptEffortPrefix("/deploy.prod to staging", "ultrathink")).toBe(
+      "/deploy.prod to staging",
+    );
+  });
+
+  it("still adds the ultrathink prefix to ordinary prompts", () => {
+    expect(applyClaudePromptEffortPrefix("Investigate this failure", "ultrathink")).toBe(
+      "Ultrathink:\nInvestigate this failure",
+    );
+    expect(applyClaudePromptEffortPrefix("/home/theo/app.ts crashed on load", "ultrathink")).toBe(
+      "Ultrathink:\n/home/theo/app.ts crashed on load",
+    );
+  });
+});
+
+describe("readCustomModelEntries", () => {
+  const capabilities: ModelCapabilities = {
+    optionDescriptors: [
       {
-        slug: CODEX_SPARK_MODEL,
-        name: "GPT-5.3 Codex Spark",
-        isCustom: false,
-        capabilities: codexCaps,
+        id: "effort",
+        label: "Reasoning",
+        type: "select",
+        options: [{ id: "high", label: "High", isDefault: true }],
+        currentValue: "high",
       },
     ],
-    auth: { status: "authenticated" },
-  },
-];
+  };
 
-const providersWithoutSpark: ReadonlyArray<ServerProvider> = [
-  {
-    provider: "codex",
-    enabled: true,
-    status: "ready",
-    installed: true,
-    version: "0.0.0",
-    checkedAt: "2026-04-10T00:00:00.000Z",
-    models: [
-      { slug: "gpt-5.4-mini", name: "GPT-5.4 Mini", isCustom: false, capabilities: codexCaps },
+  it("resolves bare slugs and entries, trimming and deduplicating on slug", () => {
+    expect(
+      readCustomModelEntries([
+        " bare ",
+        { slug: "named", name: " Named ", capabilities },
+        "bare",
+        { slug: "named", name: "Second" },
+        "",
+        { name: "no slug" },
+        42,
+      ]),
+    ).toEqual([
+      { slug: "bare", name: "bare", capabilities: null },
+      { slug: "named", name: "Named", capabilities },
+    ]);
+  });
+
+  it("drops unparseable capabilities but keeps the entry", () => {
+    expect(
+      readCustomModelEntries([{ slug: "x", capabilities: { optionDescriptors: "nope" } }]),
+    ).toEqual([{ slug: "x", name: "x", capabilities: null }]);
+    expect(readCustomModelEntries("not a list")).toEqual([]);
+  });
+});
+
+describe("provider-reported option display", () => {
+  const selection = createModelSelection(ProviderInstanceId.make("opencode"), "ling");
+  const reported = { ...selection, options: [{ id: "variant", value: "default" }] };
+  const descriptor = {
+    id: "variant",
+    label: "Reasoning",
+    type: "select" as const,
+    options: [
+      { id: "none", label: "None" },
+      { id: "thinking", label: "Thinking" },
     ],
-    auth: { status: "authenticated" },
-  },
-];
+  };
 
-describe("normalizeModelSlug", () => {
-  it("maps known aliases to canonical slugs", () => {
-    expect(normalizeModelSlug("5.5")).toBe("gpt-5.5");
-    expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
-    expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-4-6");
-    expect(normalizeModelSlug("opus", "claudeAgent")).toBe("claude-opus-4-7");
-    expect(normalizeModelSlug("opus-4.6", "claudeAgent")).toBe("claude-opus-4-6");
-  });
-
-  it("normalizes auto model selection case-insensitively", () => {
-    expect(normalizeModelSlug("Auto")).toBe("auto");
-    expect(normalizeModelSlug("AUTO")).toBe("auto");
-  });
-
-  it("returns null for empty or missing values", () => {
-    expect(normalizeModelSlug("")).toBeNull();
-    expect(normalizeModelSlug("   ")).toBeNull();
-    expect(normalizeModelSlug(null)).toBeNull();
-    expect(normalizeModelSlug(undefined)).toBeNull();
-  });
-});
-
-describe("resolveModelSlug", () => {
-  it("returns defaults when the model is missing", () => {
-    expect(resolveModelSlug(undefined, "codex")).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
-
-    expect(resolveModelSlugForProvider("claudeAgent", undefined)).toBe(
-      DEFAULT_MODEL_BY_PROVIDER.claudeAgent,
-    );
-  });
-
-  it("preserves normalized unknown models", () => {
-    expect(resolveModelSlug("custom/internal-model", "codex")).toBe("custom/internal-model");
-  });
-});
-
-describe("resolveSelectableModel", () => {
-  it("resolves exact slugs, labels, and aliases", () => {
-    const options = [
-      { slug: "gpt-5.3-codex", name: "GPT-5.3 Codex" },
-      { slug: "claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
-    ];
-    expect(resolveSelectableModel("codex", "gpt-5.3-codex", options)).toBe("gpt-5.3-codex");
-    expect(resolveSelectableModel("codex", "gpt-5.3 codex", options)).toBe("gpt-5.3-codex");
-    expect(resolveSelectableModel("claudeAgent", "sonnet", options)).toBe("claude-sonnet-4-6");
-  });
-});
-
-describe("utility model defaults", () => {
-  it("prefers spark at low effort when spark is available", () => {
-    expect(getDefaultUtilityModelSelection(providersWithSpark)).toEqual({
-      provider: "codex",
-      model: CODEX_SPARK_MODEL,
-      options: { reasoningEffort: "low" },
-    });
-  });
-
-  it("keeps the legacy codex mini default when spark is unavailable", () => {
-    expect(getDefaultUtilityModelSelection(providersWithoutSpark)).toEqual({
-      provider: "codex",
-      model: "gpt-5.4-mini",
-    });
-  });
-
-  it("upgrades untouched legacy defaults to spark when available", () => {
+  it("shows explicit reports without adding a choice or a dispatch option", () => {
+    expect(getProviderOptionCurrentLabel(descriptor, selection, reported)).toBe("Default");
     expect(
-      resolveUtilityModelSelectionDefault(
-        { provider: "codex", model: "gpt-5.4-mini" },
-        providersWithSpark,
-      ),
-    ).toEqual({
-      provider: "codex",
-      model: CODEX_SPARK_MODEL,
-      options: { reasoningEffort: "low" },
-    });
-  });
-
-  it("preserves explicit selections", () => {
-    expect(
-      resolveUtilityModelSelectionDefault(
-        { provider: "codex", model: "gpt-5.4-mini", options: { reasoningEffort: "high" } },
-        providersWithSpark,
-      ),
-    ).toEqual({
-      provider: "codex",
-      model: "gpt-5.4-mini",
-      options: { reasoningEffort: "high" },
-    });
-  });
-});
-
-describe("capability helpers", () => {
-  it("reads default efforts", () => {
-    expect(getDefaultEffort(codexCaps)).toBe("high");
-    expect(getDefaultEffort(claudeCaps)).toBe("high");
-  });
-
-  it("checks effort support", () => {
-    expect(hasEffortLevel(codexCaps, "xhigh")).toBe(true);
-    expect(hasEffortLevel(codexCaps, "max")).toBe(false);
-  });
-});
-
-describe("resolveEffort", () => {
-  it("returns the explicit value when supported and not prompt-injected", () => {
-    expect(resolveEffort(codexCaps, "xhigh")).toBe("xhigh");
-    expect(resolveEffort(codexCaps, "high")).toBe("high");
-    expect(resolveEffort(claudeCaps, "medium")).toBe("medium");
-  });
-
-  it("falls back to default when value is unsupported", () => {
-    expect(resolveEffort(codexCaps, "bogus")).toBe("high");
-    expect(resolveEffort(claudeCaps, "bogus")).toBe("high");
-  });
-
-  it("returns the default when no value is provided", () => {
-    expect(resolveEffort(codexCaps, undefined)).toBe("high");
-    expect(resolveEffort(codexCaps, null)).toBe("high");
-    expect(resolveEffort(codexCaps, "")).toBe("high");
-    expect(resolveEffort(codexCaps, "  ")).toBe("high");
-  });
-
-  it("excludes prompt-injected efforts and falls back to default", () => {
-    expect(resolveEffort(claudeCaps, "ultrathink")).toBe("high");
-  });
-
-  it("returns undefined for models with no effort levels", () => {
-    const noCaps: ModelCapabilities = {
-      reasoningEffortLevels: [],
-      supportsFastMode: false,
-      supportsThinkingToggle: false,
-      contextWindowOptions: [],
-      promptInjectedEffortLevels: [],
-    };
-    expect(resolveEffort(noCaps, undefined)).toBeUndefined();
-    expect(resolveEffort(noCaps, "high")).toBeUndefined();
-  });
-});
-
-describe("misc helpers", () => {
-  it("detects ultrathink prompts", () => {
-    expect(isClaudeUltrathinkPrompt("Ultrathink:\nInvestigate")).toBe(true);
-    expect(isClaudeUltrathinkPrompt("Investigate")).toBe(false);
-  });
-
-  it("prefixes ultrathink prompts once", () => {
-    expect(applyClaudePromptEffortPrefix("Investigate", "ultrathink")).toBe(
-      "Ultrathink:\nInvestigate",
-    );
-    expect(applyClaudePromptEffortPrefix("Ultrathink:\nInvestigate", "ultrathink")).toBe(
-      "Ultrathink:\nInvestigate",
-    );
-  });
-
-  it("trims strings to null", () => {
-    expect(trimOrNull("  hi  ")).toBe("hi");
-    expect(trimOrNull("   ")).toBeNull();
-  });
-});
-
-describe("context window helpers", () => {
-  it("reads default context window", () => {
-    expect(getDefaultContextWindow(claudeCaps)).toBe("1m");
-  });
-
-  it("returns null for models without context window options", () => {
-    expect(getDefaultContextWindow(codexCaps)).toBeNull();
-  });
-
-  it("checks context window support", () => {
-    expect(hasContextWindowOption(claudeCaps, "1m")).toBe(true);
-    expect(hasContextWindowOption(claudeCaps, "200k")).toBe(true);
-    expect(hasContextWindowOption(claudeCaps, "bogus")).toBe(false);
-    expect(hasContextWindowOption(codexCaps, "1m")).toBe(false);
-  });
-});
-
-describe("resolveContextWindow", () => {
-  it("returns the explicit value when supported", () => {
-    expect(resolveContextWindow(claudeCaps, "200k")).toBe("200k");
-    expect(resolveContextWindow(claudeCaps, "1m")).toBe("1m");
-  });
-
-  it("falls back to default when value is unsupported", () => {
-    expect(resolveContextWindow(claudeCaps, "bogus")).toBe("1m");
-  });
-
-  it("returns the default when no value is provided", () => {
-    expect(resolveContextWindow(claudeCaps, undefined)).toBe("1m");
-    expect(resolveContextWindow(claudeCaps, null)).toBe("1m");
-    expect(resolveContextWindow(claudeCaps, "")).toBe("1m");
-  });
-
-  it("returns undefined for models with no context window options", () => {
-    expect(resolveContextWindow(codexCaps, undefined)).toBeUndefined();
-    expect(resolveContextWindow(codexCaps, "1m")).toBeUndefined();
-  });
-});
-
-describe("resolveApiModelId", () => {
-  it("resolves codex auto to the provider default model", () => {
-    expect(
-      resolveModelSelectionDefault({
-        provider: "codex",
-        model: "Auto",
-      }).model,
-    ).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
-  });
-
-  it("resolves claude auto to the provider default model", () => {
-    expect(
-      resolveModelSelectionDefault({
-        provider: "claudeAgent",
-        model: "AUTO",
-      }).model,
-    ).toBe(DEFAULT_MODEL_BY_PROVIDER.claudeAgent);
-  });
-
-  it("maps claude auto with 1m context window to default model plus suffix", () => {
-    expect(
-      resolveApiModelId({
-        provider: "claudeAgent",
-        model: "Auto",
-        options: { contextWindow: "1m" },
+      getProviderOptionCurrentLabel(descriptor, selection, {
+        ...reported,
+        options: [{ id: "variant", value: "thinking" }],
       }),
-    ).toBe(`${DEFAULT_MODEL_BY_PROVIDER.claudeAgent}[1m]`);
-  });
-
-  it("appends [1m] suffix for 1m context window", () => {
+    ).toBe("Thinking");
     expect(
-      resolveApiModelId({
-        provider: "claudeAgent",
-        model: "claude-opus-4-7",
-        options: { contextWindow: "1m" },
-      }),
-    ).toBe("claude-opus-4-7[1m]");
-  });
-
-  it("returns the model as-is for 200k context window", () => {
-    expect(
-      resolveApiModelId({
-        provider: "claudeAgent",
-        model: "claude-opus-4-7",
-        options: { contextWindow: "200k" },
-      }),
-    ).toBe("claude-opus-4-7");
-  });
-
-  it("returns the model as-is when no context window is set", () => {
-    expect(resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-7" })).toBe(
-      "claude-opus-4-7",
-    );
-    expect(
-      resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-7", options: {} }),
-    ).toBe("claude-opus-4-7");
-  });
-
-  it("returns the model as-is for Codex selections", () => {
-    expect(resolveApiModelId({ provider: "codex", model: "gpt-5.5" })).toBe("gpt-5.5");
-  });
-
-  it("resolves codex auto for API model ids", () => {
-    expect(resolveApiModelId({ provider: "codex", model: "auto" })).toBe(
-      DEFAULT_MODEL_BY_PROVIDER.codex,
-    );
-  });
-});
-
-describe("normalize*ModelOptionsWithCapabilities", () => {
-  it("preserves explicit false codex fast mode", () => {
-    expect(
-      normalizeCodexModelOptionsWithCapabilities(codexCaps, {
-        reasoningEffort: "high",
-        fastMode: false,
-      }),
-    ).toEqual({
-      reasoningEffort: "high",
-      fastMode: false,
-    });
-  });
-
-  it("preserves the default Claude context window explicitly", () => {
-    expect(
-      normalizeClaudeModelOptionsWithCapabilities(
-        {
-          ...claudeCaps,
-          contextWindowOptions: [
-            { value: "200k", label: "200k", isDefault: true },
-            { value: "1m", label: "1M" },
-          ],
-        },
-        {
-          effort: "high",
-          contextWindow: "200k",
-        },
+      getProviderOptionCurrentLabel(
+        { ...descriptor, currentValue: "none" },
+        { ...selection, options: [{ id: "variant", value: "none" }] },
+        reported,
       ),
-    ).toEqual({
-      effort: "high",
-      contextWindow: "200k",
-    });
+    ).toBe("None");
+    expect(descriptor.options.map((option) => option.id)).toEqual(["none", "thinking"]);
+    expect(buildProviderOptionSelectionsFromDescriptors([descriptor])).toBeUndefined();
+    expect(getProviderOptionCurrentLabel(descriptor, selection)).toBe("Unknown");
+    const effortDescriptor = { ...descriptor, id: "effort", currentValue: "default" };
+    expect(getProviderOptionCurrentLabel(effortDescriptor, selection)).toBeUndefined();
+    expect(
+      getProviderOptionCurrentLabel(effortDescriptor, selection, {
+        ...reported,
+        model: "other",
+        options: [{ id: "effort", value: "default" }],
+      }),
+    ).toBeUndefined();
+    expect(
+      getProviderOptionCurrentLabel(effortDescriptor, selection, {
+        ...reported,
+        options: [{ id: "effort", value: "default" }],
+      }),
+    ).toBe("Default");
+    expect(
+      getProviderOptionCurrentLabel({ ...descriptor, currentValue: "thinking" }, selection),
+    ).toBe("Unknown");
   });
 
-  it("omits unsupported Claude context window options", () => {
-    expect(
-      normalizeClaudeModelOptionsWithCapabilities(
-        {
-          ...claudeCaps,
-          reasoningEffortLevels: [],
-          supportsThinkingToggle: true,
-          contextWindowOptions: [],
-        },
-        {
-          thinking: true,
-          contextWindow: "1m",
-        },
-      ),
-    ).toEqual({
-      thinking: true,
-    });
+  it.each([
+    { ...selection, model: "other" },
+    { ...selection, instanceId: ProviderInstanceId.make("other") },
+    { ...selection, options: [{ id: "variant", value: "none" }] },
+  ])("ignores reports after changing the model, instance, or option: %j", (selected) => {
+    expect(getProviderOptionCurrentLabel(descriptor, selected, reported)).toBe("Unknown");
   });
 });

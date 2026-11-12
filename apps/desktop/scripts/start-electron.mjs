@@ -1,14 +1,19 @@
-import { spawn } from "node:child_process";
+import * as NodeChildProcess from "node:child_process";
+import * as NodePath from "node:path";
 
-import { desktopDir, resolveElectronPath } from "./electron-launcher.mjs";
+import { desktopDir, resolveElectronLaunchCommand } from "./electron-launcher.mjs";
+
+NodeChildProcess.execFileSync(
+  process.execPath,
+  [NodePath.join(desktopDir, "scripts/build-browser-secret.mjs")],
+  { stdio: "inherit" },
+);
 
 const childEnv = { ...process.env };
 delete childEnv.ELECTRON_RUN_AS_NODE;
-const DEVTOOLS_ARG = "--devtools";
-const forwardDevtools = process.argv.includes(DEVTOOLS_ARG);
-const electronArgs = ["dist-electron/main.js", ...(forwardDevtools ? [DEVTOOLS_ARG] : [])];
 
-const child = spawn(resolveElectronPath(), electronArgs, {
+const electronCommand = resolveElectronLaunchCommand(["dist-electron/main.cjs"]);
+const child = NodeChildProcess.spawn(electronCommand.electronPath, electronCommand.args, {
   stdio: "inherit",
   cwd: desktopDir,
   env: childEnv,

@@ -4,7 +4,53 @@ import {
   type KeybindingCommand,
   type ProjectScript,
 } from "@t3tools/contracts";
-import { Schema } from "effect";
+import * as Schema from "effect/Schema";
+const isScriptRunCommand = Schema.is(SCRIPT_RUN_COMMAND_PATTERN);
+
+export interface ProjectScriptInput {
+  readonly name: ProjectScript["name"];
+  readonly command: ProjectScript["command"];
+  readonly icon: ProjectScript["icon"];
+  readonly runOnWorktreeCreate: ProjectScript["runOnWorktreeCreate"];
+  readonly waitForSetup: boolean;
+  readonly runOnSettle: boolean;
+  readonly stopOnSettle?: boolean;
+  readonly previewUrl: Exclude<ProjectScript["previewUrl"], undefined> | null;
+  readonly autoOpenPreview: boolean;
+}
+
+export function buildProjectScript(id: string, input: ProjectScriptInput): ProjectScript {
+  return {
+    id,
+    name: input.name,
+    command: input.command,
+    icon: input.icon,
+    runOnWorktreeCreate: input.runOnWorktreeCreate,
+    ...(input.runOnWorktreeCreate && input.waitForSetup ? { async: false } : {}),
+    ...(input.runOnSettle ? { runOnSettle: true } : {}),
+    ...(input.stopOnSettle ? { stopOnSettle: true } : {}),
+    ...(input.previewUrl === null
+      ? {}
+      : {
+          previewUrl: input.previewUrl,
+          autoOpenPreview: input.autoOpenPreview,
+        }),
+  };
+}
+
+export function releaseClaimedRoles(
+  script: ProjectScript,
+  saved: ProjectScriptInput,
+): ProjectScript {
+  const releaseSetup = saved.runOnWorktreeCreate && script.runOnWorktreeCreate;
+  const releaseSettle = saved.runOnSettle && script.runOnSettle === true;
+  if (!releaseSetup && !releaseSettle) return script;
+  return {
+    ...script,
+    ...(releaseSetup ? { runOnWorktreeCreate: false } : {}),
+    ...(releaseSettle ? { runOnSettle: false } : {}),
+  };
+}
 
 function normalizeScriptId(value: string): string {
   const cleaned = value
@@ -21,12 +67,14 @@ function normalizeScriptId(value: string): string {
   return cleaned.slice(0, MAX_SCRIPT_ID_LENGTH).replace(/-+$/g, "") || "script";
 }
 
-export const commandForProjectScript = (scriptId: string): KeybindingCommand =>
-  SCRIPT_RUN_COMMAND_PATTERN.makeUnsafe(`script.${scriptId}.run`);
+export function commandForProjectScript(scriptId: string): KeybindingCommand | null {
+  const command = `script.${scriptId}.run`;
+  return isScriptRunCommand(command) ? command : null;
+}
 
 export function projectScriptIdFromCommand(command: string): string | null {
   const trimmed = command.trim();
-  if (!Schema.is(SCRIPT_RUN_COMMAND_PATTERN)(trimmed)) {
+  if (!isScriptRunCommand(trimmed)) {
     return null;
   }
   const [prefix, , suffix] = SCRIPT_RUN_COMMAND_PATTERN.parts;
@@ -51,11 +99,10 @@ export function nextProjectScriptId(name: string, existingIds: Iterable<string>)
     suffix += 1;
   }
 
-  // This last-resort fallback only triggers after exhausting thousands of suffixes.
   return `${baseId}-${Date.now()}`.slice(0, MAX_SCRIPT_ID_LENGTH);
 }
 
-export function primaryProjectScript(scripts: ProjectScript[]): ProjectScript | null {
-  const regular = scripts.find((script) => !script.runOnWorktreeCreate);
-  return regular ?? scripts[0] ?? null;
+export function primaryProjectScript(scripts: ReadonlyArray<ProjectScript>): ProjectScript | null {
+  const regular = scripts.find((script) => !script.runOnWorktreeCreate && !script.runOnSettle);
+  return regular ?? scripts.find((script) => !script.runOnSettle) ?? null;
 }

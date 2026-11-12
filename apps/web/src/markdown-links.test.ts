@@ -1,63 +1,157 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
-import { resolveMarkdownFileLinkTarget, rewriteMarkdownFileUriHref } from "./markdown-links";
+import {
+  isLocalEditorFileHref,
+  resolveInlineCodeFileLinkMeta,
+  resolveMarkdownFileLinkMeta,
+  rewriteMarkdownFileUriHref,
+} from "./markdown-links";
+import {
+  markdownFileCopyPaths,
+  markdownFileEditorTarget,
+  resolveMarkdownFileHostPath,
+} from "./markdownFileHostPath";
 
-describe("rewriteMarkdownFileUriHref", () => {
-  it("rewrites file uri hrefs into direct path hrefs", () => {
-    expect(rewriteMarkdownFileUriHref("file:///Users/julius/project/src/main.ts#L42")).toBe(
-      "/Users/julius/project/src/main.ts#L42",
-    );
+describe("isLocalEditorFileHref", () => {
+  it("accepts absolute file deep links of known editors", () => {
+    for (const href of [
+      "cursor://file/Users/me/repo/file.md:186",
+      "vscode://file/Users/me/repo/file.md:3:7",
+      "vscode-insiders://file/Users/me/repo/file.md",
+      "VSCODE://file/C:/Users/me/repo/file.md:3",
+    ]) {
+      expect(isLocalEditorFileHref(href), href).toBe(true);
+    }
   });
 
+  it("rejects other hosts, userinfo, relative paths, and unknown schemes", () => {
+    for (const href of [
+      "cursor://anysphere.cursor-deeplink/prompt?text=hi",
+      "vscode://user@file/Users/me/repo/file.md",
+      "vscode://file:8080/Users/me/repo/file.md",
+      "vscode://vscode-remote/ssh-remote+example.com/home/user/project",
+      "cursor://file",
+      "cursor:file/Users/me/repo/file.md",
+      "foo://file/Users/me/repo/file.md",
+      "zed://file/Users/me/repo/file.md",
+      "javascript:alert(1)",
+      "./file.md",
+      "",
+    ]) {
+      expect(isLocalEditorFileHref(href), href).toBe(false);
+    }
+  });
+});
+
+describe("rewriteMarkdownFileUriHref", () => {
   it("preserves encoded octets so file paths are decoded only once later", () => {
     expect(rewriteMarkdownFileUriHref("file:///Users/julius/project/file%2520name.md")).toBe(
       "/Users/julius/project/file%2520name.md",
     );
   });
+
+  it("normalizes file uri hrefs for windows drive paths", () => {
+    expect(
+      rewriteMarkdownFileUriHref(
+        "file:///D:/Programme/t3code/apps/web/src/components/chat/OpenInPicker.tsx#L69",
+      ),
+    ).toBe("D:/Programme/t3code/apps/web/src/components/chat/OpenInPicker.tsx#L69");
+  });
+
+  it("preserves file uri authorities as windows UNC paths", () => {
+    expect(rewriteMarkdownFileUriHref("file://server/share/workspace-image.svg")).toBe(
+      "\\\\server\\share\\workspace-image.svg",
+    );
+  });
+
+  // regression: #6433 workspace images in chat markdown did not render
+  it("treats a localhost file uri as a local path", () => {
+    expect(rewriteMarkdownFileUriHref("file://localhost/home/me/notes.md")).toBe(
+      "/home/me/notes.md",
+    );
+  });
 });
 
-describe("resolveMarkdownFileLinkTarget", () => {
-  it("resolves absolute posix file paths", () => {
-    expect(resolveMarkdownFileLinkTarget("/Users/julius/project/AGENTS.md")).toBe(
-      "/Users/julius/project/AGENTS.md",
+describe("relative links inside a rendered host file", () => {
+  it("anchor to the file's directory while workspace membership follows cwd", () => {
+    const meta = resolveMarkdownFileLinkMeta("appendix.md", "/repo", "/tmp/report");
+    expect(meta).toMatchObject({
+      filePath: "/tmp/report/appendix.md",
+      workspaceRelativePath: null,
+    });
+    const inline = resolveInlineCodeFileLinkMeta("Makefile:12", "/repo", "/tmp/report");
+    expect(inline).toMatchObject({ filePath: "/tmp/report/Makefile", line: 12 });
+    expect(resolveMarkdownFileLinkMeta("src/main.ts", "/repo", "/repo/docs")).toMatchObject({
+      filePath: "/repo/docs/src/main.ts",
+      workspaceRelativePath: "docs/src/main.ts",
+    });
+  });
+});
+
+describe("resolveInlineCodeFileLinkMeta", () => {
+  it("links bare filenames only when a line suffix marks them as file references", () => {
+    expect(resolveInlineCodeFileLinkMeta("script.ts:10", "/Users/julius/project")).toMatchObject({
+      targetPath: "/Users/julius/project/script.ts:10",
+      line: 10,
+    });
+    expect(resolveInlineCodeFileLinkMeta("AGENTS.md", "/Users/julius/project")).toBeNull();
+  });
+
+  it("opens a line range at its first line and keeps the range for the label", () => {
+    expect(resolveInlineCodeFileLinkMeta("src/http.ts:42-64", "/repo")).toMatchObject({
+      targetPath: "/repo/src/http.ts:42",
+      line: 42,
+      endLine: 64,
+    });
+  });
+
+  it("does not treat arbitrary name:digits shapes as files", () => {
+    expect(resolveInlineCodeFileLinkMeta("error:1", "/Users/julius/project")).toBeNull();
+    expect(resolveInlineCodeFileLinkMeta("TODO:12", "/Users/julius/project")).toBeNull();
+    expect(resolveInlineCodeFileLinkMeta("exit:0", "/Users/julius/project")).toBeNull();
+    expect(resolveInlineCodeFileLinkMeta("port:3000", "/Users/julius/project")).toBeNull();
+    expect(resolveInlineCodeFileLinkMeta("port:3000-3010", "/Users/julius/project")).toBeNull();
+    expect(
+      resolveInlineCodeFileLinkMeta("localhost:3000-3010", "/Users/julius/project"),
+    ).toBeNull();
+    expect(resolveInlineCodeFileLinkMeta("http:80", "/Users/julius/project")).toBeNull();
+  });
+
+  it("ignores hosts, ports, and versions", () => {
+    expect(resolveInlineCodeFileLinkMeta("127.0.0.1:3000", "/Users/julius/project")).toBeNull();
+    expect(resolveInlineCodeFileLinkMeta("localhost:3000", "/Users/julius/project")).toBeNull();
+    expect(
+      resolveInlineCodeFileLinkMeta("example.com/index.html", "/Users/julius/project"),
+    ).toBeNull();
+    expect(resolveInlineCodeFileLinkMeta("example.com:8080", "/Users/julius/project")).toBeNull();
+    expect(resolveInlineCodeFileLinkMeta("10.0.0.1:80:1", "/Users/julius/project")).toBeNull();
+    expect(
+      resolveInlineCodeFileLinkMeta("localhost/index.html", "/Users/julius/project"),
+    ).toBeNull();
+    expect(
+      resolveInlineCodeFileLinkMeta("example.uk/index.html", "/Users/julius/project"),
+    ).toBeNull();
+  });
+});
+
+describe("chat file chip paths", () => {
+  const cwd = String.raw`C:\Users\alice\project`;
+
+  it("opens and copies the indexed file for a bare filename, preserving its line and column", async () => {
+    const meta = resolveMarkdownFileLinkMeta("user.ts:261:7", cwd);
+    if (!meta) throw new Error("Expected a file link");
+    const hostPath = await resolveMarkdownFileHostPath({
+      meta,
+      cwd,
+      findWorkspaceMatch: async () => "src/discord/events/user.ts",
+    });
+
+    expect(markdownFileEditorTarget(meta, hostPath)).toBe(
+      String.raw`C:\Users\alice\project\src\discord\events\user.ts:261:7`,
     );
-  });
-
-  it("resolves relative file paths against cwd", () => {
-    expect(resolveMarkdownFileLinkTarget("src/processRunner.ts:71", "/Users/julius/project")).toBe(
-      "/Users/julius/project/src/processRunner.ts:71",
-    );
-  });
-
-  it("does not treat filename line references as external schemes", () => {
-    expect(resolveMarkdownFileLinkTarget("script.ts:10", "/Users/julius/project")).toBe(
-      "/Users/julius/project/script.ts:10",
-    );
-  });
-
-  it("resolves bare file names against cwd", () => {
-    expect(resolveMarkdownFileLinkTarget("AGENTS.md", "/Users/julius/project")).toBe(
-      "/Users/julius/project/AGENTS.md",
-    );
-  });
-
-  it("maps #L line anchors to editor line suffixes", () => {
-    expect(resolveMarkdownFileLinkTarget("/Users/julius/project/src/main.ts#L42C7")).toBe(
-      "/Users/julius/project/src/main.ts:42:7",
-    );
-  });
-
-  it("ignores external urls", () => {
-    expect(resolveMarkdownFileLinkTarget("https://example.com/docs")).toBeNull();
-  });
-
-  it("does not double-decode file URLs", () => {
-    expect(resolveMarkdownFileLinkTarget("file:///Users/julius/project/file%2520name.md")).toBe(
-      "/Users/julius/project/file%20name.md",
-    );
-  });
-
-  it("does not treat app routes as file links", () => {
-    expect(resolveMarkdownFileLinkTarget("/chat/settings")).toBeNull();
+    expect(markdownFileCopyPaths(meta, hostPath, cwd)).toEqual({
+      fullPath: String.raw`C:\Users\alice\project\src\discord\events\user.ts:261:7`,
+      relativePath: "src/discord/events/user.ts:261:7",
+    });
   });
 });

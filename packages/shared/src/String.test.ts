@@ -1,17 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
-import { truncate } from "./String";
+import { truncate } from "./String.ts";
 
 describe("truncate", () => {
-  it("trims surrounding whitespace", () => {
-    expect(truncate("   hello world   ")).toBe("hello world");
+  it("cuts by Unicode code point so emoji stay whole", () => {
+    expect(truncate("👍👍👍", 5)).toBe("👍👍👍");
+    expect(truncate("👍👍👍👍", 3)).toBe("👍👍👍...");
   });
 
-  it("returns shorter strings unchanged", () => {
-    expect(truncate("alpha", 10)).toBe("alpha");
-  });
-
-  it("truncates long strings and appends an ellipsis", () => {
-    expect(truncate("abcdefghij", 5)).toBe("abcde...");
+  it("trims before measuring", () => {
+    expect(truncate("  hello  ", 5)).toBe("hello");
   });
 });

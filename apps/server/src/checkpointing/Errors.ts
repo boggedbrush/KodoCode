@@ -1,43 +1,89 @@
-import { Schema } from "effect";
+import { NonNegativeInt, ThreadId, type VcsError } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+
 import type { ProjectionRepositoryError } from "../persistence/Errors.ts";
-import { GitCommandError } from "@t3tools/contracts";
 
-/**
- * CheckpointUnavailableError - Expected checkpoint does not exist.
- */
-export class CheckpointUnavailableError extends Schema.TaggedErrorClass<CheckpointUnavailableError>()(
-  "CheckpointUnavailableError",
+export const CheckpointDiffOperation = Schema.Literals([
+  "CheckpointDiffQuery.getTurnDiff",
+  "CheckpointDiffQuery.getFullThreadDiff",
+]);
+export type CheckpointDiffOperation = typeof CheckpointDiffOperation.Type;
+
+export class CheckpointDiffResultInvalidError extends Schema.TaggedError<CheckpointDiffResultInvalidError>()(
+  "CheckpointDiffResultInvalidError",
   {
-    threadId: Schema.String,
-    turnCount: Schema.Number,
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    operation: CheckpointDiffOperation,
+    threadId: ThreadId,
   },
 ) {
   override get message(): string {
-    return `Checkpoint unavailable for thread ${this.threadId} turn ${this.turnCount}: ${this.detail}`;
+    const result =
+      this.operation === "CheckpointDiffQuery.getTurnDiff" ? "turn diff" : "full thread diff";
+    return `Checkpoint invariant violation in ${this.operation}: Computed ${result} result does not satisfy contract schema.`;
   }
 }
 
-/**
- * CheckpointInvariantError - Inconsistent provider/filesystem/catalog state.
- */
-export class CheckpointInvariantError extends Schema.TaggedErrorClass<CheckpointInvariantError>()(
-  "CheckpointInvariantError",
+export class CheckpointThreadNotFoundError extends Schema.TaggedError<CheckpointThreadNotFoundError>()(
+  "CheckpointThreadNotFoundError",
   {
-    operation: Schema.String,
-    detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    operation: CheckpointDiffOperation,
+    threadId: ThreadId,
   },
 ) {
   override get message(): string {
-    return `Checkpoint invariant violation in ${this.operation}: ${this.detail}`;
+    return `Checkpoint invariant violation in ${this.operation}: Thread '${this.threadId}' not found.`;
   }
 }
 
-export type CheckpointStoreError =
-  | GitCommandError
-  | CheckpointInvariantError
-  | CheckpointUnavailableError;
+export class CheckpointWorkspacePathMissingError extends Schema.TaggedError<CheckpointWorkspacePathMissingError>()(
+  "CheckpointWorkspacePathMissingError",
+  {
+    operation: CheckpointDiffOperation,
+    threadId: ThreadId,
+  },
+) {
+  override get message(): string {
+    const diff =
+      this.operation === "CheckpointDiffQuery.getTurnDiff" ? "turn diff" : "full thread diff";
+    return `Checkpoint invariant violation in ${this.operation}: Workspace path missing for thread '${this.threadId}' when computing ${diff}.`;
+  }
+}
 
-export type CheckpointServiceError = CheckpointStoreError | ProjectionRepositoryError;
+export class CheckpointTurnRangeUnavailableError extends Schema.TaggedError<CheckpointTurnRangeUnavailableError>()(
+  "CheckpointTurnRangeUnavailableError",
+  {
+    operation: CheckpointDiffOperation,
+    threadId: ThreadId,
+    requestedTurnCount: NonNegativeInt,
+    availableTurnCount: NonNegativeInt,
+  },
+) {
+  override get message(): string {
+    return `Checkpoint unavailable for thread ${this.threadId} turn ${this.requestedTurnCount}: Turn diff range exceeds current turn count: requested ${this.requestedTurnCount}, current ${this.availableTurnCount}.`;
+  }
+}
+
+export class CheckpointRefUnavailableError extends Schema.TaggedError<CheckpointRefUnavailableError>()(
+  "CheckpointRefUnavailableError",
+  {
+    operation: CheckpointDiffOperation,
+    threadId: ThreadId,
+    turnCount: NonNegativeInt,
+    checkpoint: Schema.Literals(["from", "to"]),
+  },
+) {
+  override get message(): string {
+    return `Checkpoint unavailable for thread ${this.threadId} turn ${this.turnCount}: Checkpoint ref is unavailable for turn ${this.turnCount}.`;
+  }
+}
+
+export type CheckpointStoreError = VcsError;
+
+export type CheckpointServiceError =
+  | CheckpointStoreError
+  | ProjectionRepositoryError
+  | CheckpointDiffResultInvalidError
+  | CheckpointThreadNotFoundError
+  | CheckpointWorkspacePathMissingError
+  | CheckpointTurnRangeUnavailableError
+  | CheckpointRefUnavailableError;

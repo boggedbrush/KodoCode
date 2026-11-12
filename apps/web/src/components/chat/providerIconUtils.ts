@@ -1,56 +1,44 @@
-import { type ProviderKind, PROVIDER_DISPLAY_NAMES } from "@t3tools/contracts";
-import { ClaudeAI, CursorIcon, type Icon, OpenAI } from "../Icons";
-import { PROVIDER_OPTIONS } from "../../session-logic";
-
-export const PROVIDER_ICON_BY_PROVIDER: Record<ProviderKind | "cursor", Icon> = {
-  codex: OpenAI,
-  claudeAgent: ClaudeAI,
-  cursor: CursorIcon,
-};
-
-export const PROVIDER_TINT_CLASS_BY_PROVIDER: Record<ProviderKind | "cursor", string> = {
-  codex: "text-neutral-900 dark:text-white",
-  claudeAgent: "text-[#CC7C5E]",
-  cursor: "text-violet-500 dark:text-violet-400",
-};
-
-function isAvailableProviderOption(option: (typeof PROVIDER_OPTIONS)[number]): option is {
-  value: ProviderKind;
-  label: string;
-  available: true;
-} {
-  return option.available;
-}
-
-export const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
+import type { ProviderDriverKind } from "@t3tools/contracts";
+import { resolveModelShortName } from "@t3tools/client-runtime/provider-clients";
 
 export type ModelEsque = {
   slug: string;
   name: string;
-  shortName?: string;
-  subProvider?: string;
+  shortName?: string | undefined;
+  subProvider?: string | undefined;
+  aliases?: ReadonlyArray<string> | undefined;
+  isDefault?: boolean | undefined;
+  badge?: "new" | undefined;
+  isLegacy?: boolean | undefined;
+  isUnavailable?: boolean | undefined;
 };
 
-export function getProviderLabel(provider: ProviderKind, model: ModelEsque): string {
-  const providerLabel = PROVIDER_DISPLAY_NAMES[provider];
-  return model.subProvider ? `${providerLabel} · ${model.subProvider}` : providerLabel;
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function stripLeadingQualifier(value: string, qualifier: string | null | undefined): string {
+  const trimmedQualifier = qualifier?.trim();
+  if (!trimmedQualifier) {
+    return value;
+  }
+
+  const pattern = new RegExp(`^${escapeRegExp(trimmedQualifier)}(?:\\s*[.:/-]\\s*|\\s+)`, "iu");
+  return value.replace(pattern, "").trim() || value;
 }
 
 export function getDisplayModelName(
   model: ModelEsque,
   options?: { preferShortName?: boolean },
 ): string {
-  if (options?.preferShortName && model.shortName) {
-    return model.shortName;
-  }
-  return model.name;
+  const name = options?.preferShortName && model.shortName ? model.shortName : model.name;
+  return stripLeadingQualifier(name, model.subProvider);
 }
 
-export function getTriggerDisplayModelName(model: ModelEsque): string {
-  return getDisplayModelName(model, { preferShortName: true });
-}
-
-export function getTriggerDisplayModelLabel(model: ModelEsque): string {
-  const title = getTriggerDisplayModelName(model);
-  return model.subProvider ? `${model.subProvider} · ${title}` : title;
+export function getTriggerDisplayModelName(
+  model: ModelEsque,
+  driverKind: ProviderDriverKind | null | undefined,
+): string {
+  const shortName = resolveModelShortName(model, driverKind);
+  return getDisplayModelName({ ...model, shortName }, { preferShortName: true });
 }

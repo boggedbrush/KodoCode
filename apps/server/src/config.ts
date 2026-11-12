@@ -1,147 +1,176 @@
-/**
- * ServerConfig - Runtime configuration services.
- *
- * Defines process-level server configuration and networking helpers used by
- * startup and runtime layers.
- *
- * @module ServerConfig
- */
-import { Effect, FileSystem, Layer, LogLevel, Path, Schema, ServiceMap } from "effect";
+import * as Context from "effect/Context";
+import * as Clock from "effect/Clock";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as LogLevel from "effect/LogLevel";
+import * as Path from "effect/Path";
+import type * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
+
+import type { OtlpEndpointSource } from "@t3tools/contracts";
+import { sweepStalePendingAttachments } from "./attachmentStore.ts";
+import {
+  DEFAULT_SIGNAL_EXPORT,
+  nodeProcessRuntimeAttributes,
+  processServiceInstanceId,
+  type SignalExport,
+} from "@t3tools/shared/observability";
+import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
+import { type ReleaseChannel, releaseResourceAttributes } from "@t3tools/shared/releaseResource";
+import packageJson from "../package.json" with { type: "json" };
+
+// Official release workflows set this telemetry channel; other builds report dev.
+// Unlike __T3CODE_BUILD_CHANNEL__, this is not the sign-in page's latest/nightly channel.
+declare const __T3CODE_TELEMETRY_CHANNEL__: ReleaseChannel | undefined;
+export const telemetryChannel: ReleaseChannel =
+  typeof __T3CODE_TELEMETRY_CHANNEL__ === "undefined" ? "dev" : __T3CODE_TELEMETRY_CHANNEL__;
 
 export const DEFAULT_PORT = 3773;
 
 export const RuntimeMode = Schema.Literals(["web", "desktop"]);
 export type RuntimeMode = typeof RuntimeMode.Type;
 
-/**
- * ServerDerivedPaths - Derived paths from the base directory.
- */
+export const StartupPresentation = Schema.Literals(["browser", "headless"]);
+export type StartupPresentation = typeof StartupPresentation.Type;
+
 export interface ServerDerivedPaths {
   readonly stateDir: string;
   readonly dbPath: string;
-  readonly authStateDir: string;
-  readonly authDbPath: string;
   readonly keybindingsConfigPath: string;
   readonly settingsPath: string;
+  readonly environmentThemesDir: string;
+  readonly providerStatusCacheDir: string;
   readonly worktreesDir: string;
+  readonly worktreeCheckoutCacheDir: string;
   readonly attachmentsDir: string;
+  readonly browserArtifactsDir: string;
   readonly logsDir: string;
-  readonly serverLogPath: string;
   readonly serverTracePath: string;
   readonly providerLogsDir: string;
   readonly providerEventLogPath: string;
   readonly terminalLogsDir: string;
   readonly anonymousIdPath: string;
   readonly environmentIdPath: string;
+  readonly serverRuntimeStatePath: string;
   readonly secretsDir: string;
 }
 
-/**
- * ServerConfigShape - Process/runtime configuration required by the server.
- */
-export interface ServerConfigShape extends ServerDerivedPaths {
-  readonly logLevel: LogLevel.LogLevel;
-  readonly traceMinLevel: LogLevel.LogLevel;
-  readonly traceTimingEnabled: boolean;
-  readonly traceBatchWindowMs: number;
-  readonly traceMaxBytes: number;
-  readonly traceMaxFiles: number;
-  readonly otlpTracesUrl: string | undefined;
-  readonly otlpMetricsUrl: string | undefined;
-  readonly otlpExportIntervalMs: number;
-  readonly otlpServiceName: string;
-  readonly mode: RuntimeMode;
-  readonly port: number;
-  readonly host: string | undefined;
-  readonly cwd: string;
-  readonly baseDir: string;
-  readonly staticDir: string | undefined;
-  readonly devUrl: URL | undefined;
-  readonly noBrowser: boolean;
-  readonly authToken: string | undefined;
-  readonly autoBootstrapProjectFromCwd: boolean;
-  readonly logWebSocketEvents: boolean;
+export interface DeriveServerPathsOptions {
+  readonly baseDirIsExplicit?: boolean;
 }
 
-export interface ServerAuthStateScope {
-  readonly mode: RuntimeMode;
-  readonly host: string | undefined;
-}
-
-const LOOPBACK_AUTH_STATE_SCOPE_KEY = "loopback";
-
-const sanitizeAuthStateScopeSegment = (value: string) => {
-  const normalized = value
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-");
-  return normalized.replace(/^-+|-+$/g, "") || "default";
-};
-
-function normalizeAuthStateScopeHost(host: string | undefined): string {
-  const normalizedHost = host?.trim().toLowerCase();
-  if (!normalizedHost) {
-    return LOOPBACK_AUTH_STATE_SCOPE_KEY;
+export class ServerConfig extends Context.Service<
+  ServerConfig,
+  ServerDerivedPaths & {
+    readonly logLevel: LogLevel.LogLevel;
+    readonly traceMinLevel: LogLevel.LogLevel;
+    readonly traceTimingEnabled: boolean;
+    readonly traceBatchWindowMs: number;
+    readonly traceMaxBytes: number;
+    readonly traceMaxFiles: number;
+    readonly otlpTracesUrl: string | undefined;
+    readonly otlpMetricsUrl: string | undefined;
+    readonly otlpLogsUrl: string | undefined;
+    readonly otlpTracesExport: SignalExport;
+    readonly otlpMetricsExport: SignalExport;
+    readonly otlpLogsExport: SignalExport;
+    readonly otlpTracesSource?: OtlpEndpointSource;
+    readonly otlpTracesVariable?: string;
+    readonly otlpMetricsSource?: OtlpEndpointSource;
+    readonly otlpMetricsVariable?: string;
+    readonly otlpLogsSource?: OtlpEndpointSource;
+    readonly otlpLogsVariable?: string;
+    readonly otelEnvironment: OtelEnvironment.OtelEnvironment;
+    readonly mode: RuntimeMode;
+    readonly port: number;
+    readonly host: string | undefined;
+    /** Set when the host was defaulted to a private-network listener for the service. */
+    readonly privateNetworkOnly?: boolean | undefined;
+    readonly cwd: string;
+    readonly baseDir: string;
+    readonly staticDir: string | undefined;
+    readonly devUrl: URL | undefined;
+    readonly devAuthToken?: Redacted.Redacted<string> | undefined;
+    readonly devAllowedOrigins: ReadonlyArray<string>;
+    readonly noBrowser: boolean;
+    readonly startupPresentation: StartupPresentation;
+    readonly desktopBootstrapToken: string | undefined;
+    readonly desktopBootstrapSecret?: string | undefined;
+    readonly shellEnvironmentPrepared?: boolean | undefined;
+    readonly desktopTelemetryFd?: number | undefined;
+    readonly desktopTelemetryControlFd?: number | undefined;
+    readonly desktopBrowserFd?: number | undefined;
+    readonly desktopBrowserControlFd?: number | undefined;
+    readonly resourceMonitorPath?: string | undefined;
+    readonly autoBootstrapProjectFromCwd: boolean;
+    readonly logWebSocketEvents: boolean;
+    readonly tailscaleServeEnabled: boolean;
+    readonly tailscaleServePort: number;
   }
-
-  if (
-    normalizedHost === "localhost" ||
-    normalizedHost === "127.0.0.1" ||
-    normalizedHost === "::1" ||
-    normalizedHost === "[::1]"
-  ) {
-    // These are all equivalent local-only launch modes for the standalone server, so
-    // they need to share one persisted auth identity and cookie namespace.
-    return LOOPBACK_AUTH_STATE_SCOPE_KEY;
-  }
-
-  return normalizedHost;
+>()("t3/config/ServerConfig") {
+  static readonly layerTest = (
+    cwd: string,
+    baseDirOrPrefix: string | { readonly prefix: string },
+  ) => layerTest(cwd, baseDirOrPrefix);
 }
 
-const deriveAuthStateScopeKey = (scope: ServerAuthStateScope) =>
-  [
-    sanitizeAuthStateScopeSegment(scope.mode),
-    sanitizeAuthStateScopeSegment(normalizeAuthStateScopeHost(scope.host)),
-  ].join("-");
+export const make = (config: ServerConfig["Service"]) => ServerConfig.of(config);
+
+export const otlpResource = (
+  config: Pick<ServerConfig["Service"], "mode" | "otelEnvironment">,
+  hostName: string,
+) => ({
+  serviceName: "t3code-server",
+  serviceVersion: packageJson.version,
+  attributes: {
+    "service.namespace": "t3code",
+    "service.runtime": "t3-server",
+    "t3code.server.managed_by": config.mode === "desktop" ? "desktop" : "standalone",
+    "service.instance.id": processServiceInstanceId(config.otelEnvironment.resourceAttributes),
+    ...releaseResourceAttributes(telemetryChannel, config.otelEnvironment.resourceAttributes),
+    "host.name": config.otelEnvironment.resourceAttributes["host.name"] || hostName,
+    ...nodeProcessRuntimeAttributes(),
+  },
+});
+
+export const layer = (config: ServerConfig["Service"]) => Layer.succeed(ServerConfig, make(config));
 
 export const deriveServerPaths = Effect.fn(function* (
-  baseDir: ServerConfigShape["baseDir"],
-  devUrl: ServerConfigShape["devUrl"],
-  authStateScope: ServerAuthStateScope = {
-    mode: "web",
-    host: undefined,
-  },
+  baseDir: ServerConfig["Service"]["baseDir"],
+  devUrl: ServerConfig["Service"]["devUrl"],
+  options: DeriveServerPathsOptions = {},
 ): Effect.fn.Return<ServerDerivedPaths, never, Path.Path> {
   const { join } = yield* Path.Path;
-  const stateDir = join(baseDir, devUrl !== undefined ? "dev" : "userdata");
-  const dbPath = join(stateDir, "state.sqlite");
-  // Keep the main runtime database stable, but scope auth artifacts to the
-  // stable server identity. The bound port is intentionally excluded here
-  // because desktop/web can rebind to the next free port on restart, and
-  // auth/session history must survive that transport-level move.
-  const authStateDir = join(stateDir, "auth", deriveAuthStateScopeKey(authStateScope));
-  const authDbPath = join(authStateDir, "state.sqlite");
+  const stateDir = join(
+    baseDir,
+    devUrl !== undefined && !options.baseDirIsExplicit ? "dev" : "userdata",
+  );
+  const dbPath = join(stateDir, "statev2.sqlite");
   const attachmentsDir = join(stateDir, "attachments");
   const logsDir = join(stateDir, "logs");
   const providerLogsDir = join(logsDir, "provider");
+  const providerStatusCacheDir = join(baseDir, "caches");
   return {
     stateDir,
     dbPath,
-    authStateDir,
-    authDbPath,
     keybindingsConfigPath: join(stateDir, "keybindings.json"),
     settingsPath: join(stateDir, "settings.json"),
+    environmentThemesDir: join(stateDir, "themes"),
+    providerStatusCacheDir,
     worktreesDir: join(baseDir, "worktrees"),
+    worktreeCheckoutCacheDir: join(providerStatusCacheDir, "worktree-checkouts"),
     attachmentsDir,
+    browserArtifactsDir: join(stateDir, "browser-artifacts"),
     logsDir,
-    serverLogPath: join(logsDir, "server.log"),
     serverTracePath: join(logsDir, "server.trace.ndjson"),
     providerLogsDir,
     providerEventLogPath: join(providerLogsDir, "events.log"),
     terminalLogsDir: join(logsDir, "terminals"),
     anonymousIdPath: join(stateDir, "anonymous-id"),
-    environmentIdPath: join(authStateDir, "environment-id"),
-    secretsDir: join(authStateDir, "secrets"),
+    environmentIdPath: join(stateDir, "environment-id"),
+    serverRuntimeStatePath: join(stateDir, "server-runtime.json"),
+    secretsDir: join(stateDir, "secrets"),
   };
 });
 
@@ -156,68 +185,88 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
       fs.makeDirectory(derivedPaths.providerLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.terminalLogsDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.attachmentsDir, { recursive: true }),
-      fs.makeDirectory(derivedPaths.authStateDir, { recursive: true }),
       fs.makeDirectory(derivedPaths.worktreesDir, { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.keybindingsConfigPath), { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.settingsPath), { recursive: true }),
+      fs.makeDirectory(derivedPaths.providerStatusCacheDir, { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.anonymousIdPath), { recursive: true }),
-      fs.makeDirectory(path.dirname(derivedPaths.environmentIdPath), { recursive: true }),
-      fs.makeDirectory(derivedPaths.secretsDir, { recursive: true }),
+      fs.makeDirectory(path.dirname(derivedPaths.serverRuntimeStatePath), { recursive: true }),
     ],
     { concurrency: "unbounded" },
   );
+  // Logs, traces and the database are written with the process umask; keep them owner-only.
+  yield* fs
+    .chmod(derivedPaths.stateDir, 0o700)
+    .pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not restrict state directory permissions.", { cause }),
+      ),
+    );
+
+  const swept = sweepStalePendingAttachments({
+    attachmentsDir: derivedPaths.attachmentsDir,
+    nowMs: yield* Clock.currentTimeMillis,
+  });
+  if (swept.deleted > 0) {
+    yield* Effect.logInfo("Removed expired attachment uploads.", { deleted: swept.deleted });
+  }
 });
 
-/**
- * ServerConfig - Service tag for server runtime configuration.
- */
-export class ServerConfig extends ServiceMap.Service<ServerConfig, ServerConfigShape>()(
-  "t3/config/ServerConfig",
+const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
+  cwd: string,
+  baseDirOrPrefix: string | { readonly prefix: string },
 ) {
-  static readonly layerTest = (cwd: string, baseDirOrPrefix: string | { prefix: string }) =>
-    Layer.effect(
-      ServerConfig,
-      Effect.gen(function* () {
-        const devUrl = undefined;
+  const devUrl = undefined;
+  const fs = yield* FileSystem.FileSystem;
+  const baseDir =
+    typeof baseDirOrPrefix === "string"
+      ? baseDirOrPrefix
+      : // macOS temp dirs live under the /var -> /private/var symlink; storage cleanup's
+        // symlink guards compare resolved paths, so generated test dirs must be real paths.
+        yield* fs.realPath(yield* fs.makeTempDirectoryScoped({ prefix: baseDirOrPrefix.prefix }));
+  const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
+  yield* ensureServerDirectories(derivedPaths);
 
-        const fs = yield* FileSystem.FileSystem;
-        const baseDir =
-          typeof baseDirOrPrefix === "string"
-            ? baseDirOrPrefix
-            : yield* fs.makeTempDirectoryScoped({ prefix: baseDirOrPrefix.prefix });
-        const derivedPaths = yield* deriveServerPaths(baseDir, devUrl, {
-          mode: "web",
-          host: undefined,
-        });
-        yield* ensureServerDirectories(derivedPaths);
+  return ServerConfig.of({
+    logLevel: "Error",
+    traceMinLevel: "Info",
+    traceTimingEnabled: true,
+    traceBatchWindowMs: 200,
+    traceMaxBytes: 10 * 1024 * 1024,
+    traceMaxFiles: 10,
+    otlpTracesUrl: undefined,
+    otlpMetricsUrl: undefined,
+    otlpLogsUrl: undefined,
+    otlpTracesExport: DEFAULT_SIGNAL_EXPORT,
+    otlpMetricsExport: DEFAULT_SIGNAL_EXPORT,
+    otlpLogsExport: DEFAULT_SIGNAL_EXPORT,
+    otelEnvironment: OtelEnvironment.none,
+    cwd,
+    baseDir,
+    ...derivedPaths,
+    mode: "web",
+    autoBootstrapProjectFromCwd: false,
+    logWebSocketEvents: false,
+    tailscaleServeEnabled: false,
+    tailscaleServePort: 443,
+    port: 0,
+    host: undefined,
+    desktopBootstrapToken: undefined,
+    desktopTelemetryFd: undefined,
+    desktopTelemetryControlFd: undefined,
+    desktopBrowserFd: undefined,
+    desktopBrowserControlFd: undefined,
+    resourceMonitorPath: undefined,
+    staticDir: undefined,
+    devUrl,
+    devAllowedOrigins: [],
+    noBrowser: false,
+    startupPresentation: "browser",
+  });
+});
 
-        return {
-          logLevel: "Error",
-          traceMinLevel: "Info",
-          traceTimingEnabled: true,
-          traceBatchWindowMs: 200,
-          traceMaxBytes: 10 * 1024 * 1024,
-          traceMaxFiles: 10,
-          otlpTracesUrl: undefined,
-          otlpMetricsUrl: undefined,
-          otlpExportIntervalMs: 10_000,
-          otlpServiceName: "kodo-server",
-          cwd,
-          baseDir,
-          ...derivedPaths,
-          mode: "web",
-          autoBootstrapProjectFromCwd: false,
-          logWebSocketEvents: false,
-          port: 0,
-          host: undefined,
-          authToken: undefined,
-          staticDir: undefined,
-          devUrl,
-          noBrowser: false,
-        } satisfies ServerConfigShape;
-      }),
-    );
-}
+export const layerTest = (cwd: string, baseDirOrPrefix: string | { readonly prefix: string }) =>
+  Layer.effect(ServerConfig, makeTest(cwd, baseDirOrPrefix));
 
 export const resolveStaticDir = Effect.fn(function* () {
   const { join, resolve } = yield* Path.Path;

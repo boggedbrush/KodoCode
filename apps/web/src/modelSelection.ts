@@ -1,147 +1,253 @@
 import {
-  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-  DEFAULT_MODEL_SELECTION_PRESET_ID,
+  ANTIGRAVITY_DEFAULT_MODEL,
+  DEFAULT_TEXT_GENERATION_MODEL,
+  DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  defaultInstanceIdForDriver,
   type ModelSelection,
-  type ModelSelectionPreset,
-  type ProviderInteractionMode,
-  type ProviderKind,
+  type ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
   type ServerProvider,
+  type ServerSettings,
 } from "@t3tools/contracts";
 import {
-  normalizeModelSlug,
+  type CustomModelDefinition,
+  createModelSelection,
+  normalizeCustomModelSlug,
+  readCustomModelEntries,
   resolveSelectableModel,
-  resolveUtilityModelSelectionDefault,
 } from "@t3tools/shared/model";
-import { getComposerProviderState } from "./components/chat/composerProviderRegistry";
-import { UnifiedSettings } from "@t3tools/contracts/settings";
+import { getComposerProviderState } from "./components/chat/composerProviderState";
+import { type ClientSettings, UnifiedSettings } from "@t3tools/contracts/settings";
+import { resolveModelPreferences } from "@t3tools/shared/serverSettings";
+import * as Arr from "effect/Array";
+import * as Equal from "effect/Equal";
+import * as Result from "effect/Result";
 import {
   getDefaultServerModel,
   getProviderModels,
   resolveSelectableProvider,
 } from "./providerModels";
+import { ModelEsque } from "./components/chat/providerIconUtils";
+import {
+  type ProviderInstanceEntry,
+  deriveProviderInstanceEntries,
+  NO_PROVIDER_MODEL_SELECTION,
+  resolveDefaultProviderModelSelection,
+  resolveProjectDefaultProviderModelSelection,
+} from "./providerInstances";
+import { sortModelsForProviderInstance } from "./modelOrdering";
+import { resolveModelShortName } from "@t3tools/client-runtime/provider-clients";
 
-const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
-const PRESET_PROVIDER_ORDER: readonly ProviderKind[] = ["codex", "claudeAgent"];
+const DEFAULT_TEXT_GENERATION_INSTANCE_ID = ProviderInstanceId.make("codex");
 
-export type ProviderCustomModelConfig = {
-  provider: ProviderKind;
-  title: string;
-  description: string;
-  placeholder: string;
-  example: string;
-};
+// Legacy per-driver buckets would leak custom-instance models into stock instances.
+export function readInstanceCustomModels(
+  settings: UnifiedSettings,
+  instanceId: ProviderInstanceId,
+  driverKind: ProviderDriverKind,
+): ReadonlyArray<CustomModelDefinition> {
+  if (driverKind === "antigravity") return [];
+  const instance = settings.providerInstances?.[instanceId];
+  const config = instance?.config;
+  if (config !== null && typeof config === "object") {
+    const value = (config as Record<string, unknown>).customModels;
+    if (Array.isArray(value)) {
+      return readCustomModelEntries(value);
+    }
+  }
+  return [];
+}
 
 export interface AppModelOption {
   slug: string;
   name: string;
+  shortName?: string;
+  subProvider?: string;
+  aliases?: ReadonlyArray<string>;
+  badge?: "new";
   isCustom: boolean;
+  isDefault?: boolean;
+  isLegacy?: boolean;
+  isUnavailable?: boolean;
 }
 
-const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConfig> = {
-  codex: {
-    provider: "codex",
-    title: "Codex",
-    description: "Save additional Codex model slugs for the picker and `/model` command.",
-    placeholder: "your-codex-model-slug",
-    example: "gpt-6.7-codex-ultra-preview",
-  },
-  claudeAgent: {
-    provider: "claudeAgent",
-    title: "Claude",
-    description: "Save additional Claude model slugs for the picker and `/model` command.",
-    placeholder: "your-claude-model-slug",
-    example: "claude-sonnet-5-0",
-  },
-};
+function appendUnavailableDynamicModelSelection(
+  options: AppModelOption[],
+  rawModels: ReadonlyArray<ServerProvider["models"][number]>,
+  provider: ProviderDriverKind,
+  selectedModel: string | null | undefined,
+  hiddenModels: ReadonlyArray<string>,
+): AppModelOption[] {
+  if (provider !== "opencode" && provider !== "antigravity") return options;
+  const slug = normalizeCustomModelSlug(selectedModel);
+  if (!slug) return options;
+  if (provider === "antigravity" && slug === ANTIGRAVITY_DEFAULT_MODEL) return options;
 
-export const MODEL_PROVIDER_SETTINGS = Object.values(PROVIDER_CUSTOM_MODEL_CONFIG);
+  if (resolveSelectableModel(provider, slug, rawModels) !== null) return options;
+  if (hiddenModels.includes(slug)) return options;
+  if (options.some((option) => option.slug === slug)) return options;
 
-export function normalizeCustomModelSlugs(
-  models: Iterable<string | null | undefined>,
+  return [...options, { slug, name: slug, isCustom: false, isUnavailable: true }];
+}
+
+function toAppModelOption(
+  model: ServerProvider["models"][number],
+  driverKind: ProviderDriverKind,
+): AppModelOption {
+  const option: AppModelOption = {
+    slug: model.slug,
+    name: model.name,
+    isCustom: model.isCustom,
+  };
+  const shortName = resolveModelShortName(model, driverKind);
+  if (shortName) option.shortName = shortName;
+  if (model.subProvider) option.subProvider = model.subProvider;
+  if (model.aliases) option.aliases = model.aliases;
+  if (model.badge) option.badge = model.badge;
+  if (model.isDefault) option.isDefault = true;
+  if (model.isLegacy) option.isLegacy = true;
+  return option;
+}
+
+function readInstanceModelPreferences(
+  settings: UnifiedSettings,
+  instanceId: ProviderInstanceId,
+): { readonly hiddenModels: ReadonlyArray<string>; readonly modelOrder: ReadonlyArray<string> } {
+  return (
+    settings.providerModelPreferences?.[instanceId] ?? {
+      hiddenModels: [],
+      modelOrder: [],
+    }
+  );
+}
+
+function applyInstanceModelPreferences(
+  options: ReadonlyArray<AppModelOption>,
+  preferences: {
+    readonly hiddenModels: ReadonlyArray<string>;
+    readonly modelOrder: ReadonlyArray<string>;
+  },
+): AppModelOption[] {
+  const hiddenModels = new Set(preferences.hiddenModels);
+  return sortModelsForProviderInstance(
+    options.filter((option) => option.isCustom || !hiddenModels.has(option.slug)),
+    { modelOrder: preferences.modelOrder },
+  );
+}
+
+function normalizeCustomModelEntries(
+  models: ReadonlyArray<CustomModelDefinition>,
   builtInModelSlugs: ReadonlySet<string>,
-  provider: ProviderKind = "codex",
-): string[] {
-  const normalizedModels: string[] = [];
+): CustomModelDefinition[] {
+  const normalizedModels: CustomModelDefinition[] = [];
   const seen = new Set<string>();
 
   for (const candidate of models) {
-    const normalized = normalizeModelSlug(candidate, provider);
     if (
-      !normalized ||
-      normalized.length > MAX_CUSTOM_MODEL_LENGTH ||
-      builtInModelSlugs.has(normalized) ||
-      seen.has(normalized)
+      candidate.slug.length > MAX_CUSTOM_MODEL_LENGTH ||
+      builtInModelSlugs.has(candidate.slug) ||
+      seen.has(candidate.slug)
     ) {
       continue;
     }
 
-    seen.add(normalized);
-    normalizedModels.push(normalized);
-    if (normalizedModels.length >= MAX_CUSTOM_MODEL_COUNT) {
-      break;
-    }
+    seen.add(candidate.slug);
+    normalizedModels.push(candidate);
   }
 
   return normalizedModels;
 }
 
-export function getAppModelOptions(
+function getAppModelOptions(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
   selectedModel?: string | null,
 ): AppModelOption[] {
-  const options: AppModelOption[] = getProviderModels(providers, provider).map(
-    ({ slug, name, isCustom }) => ({
-      slug,
-      name,
-      isCustom,
-    }),
-  );
+  const rawModels = getProviderModels(providers, provider);
+  // Server custom-model snapshots can lag removals; rebuild custom rows from settings.
+  const options: AppModelOption[] = rawModels
+    .filter((model) => !model.isCustom)
+    .map((model) => toAppModelOption(model, provider));
   const seen = new Set(options.map((option) => option.slug));
-  const trimmedSelectedModel = selectedModel?.trim().toLowerCase();
   const builtInModelSlugs = new Set(
-    getProviderModels(providers, provider)
-      .filter((model) => !model.isCustom)
-      .map((model) => model.slug),
+    Arr.filterMap(getProviderModels(providers, provider), (model) =>
+      model.isCustom ? Result.failVoid : Result.succeed(model.slug),
+    ),
   );
 
-  const customModels = settings.providers[provider].customModels;
-  for (const slug of normalizeCustomModelSlugs(customModels, builtInModelSlugs, provider)) {
-    if (seen.has(slug)) {
+  const defaultInstanceId = defaultInstanceIdForDriver(provider);
+  const customModels = readInstanceCustomModels(settings, defaultInstanceId, provider);
+  for (const entry of normalizeCustomModelEntries(customModels, builtInModelSlugs)) {
+    if (seen.has(entry.slug)) {
       continue;
     }
 
-    seen.add(slug);
+    seen.add(entry.slug);
+    const shortName = resolveModelShortName(entry, provider);
     options.push({
-      slug,
-      name: slug,
+      slug: entry.slug,
+      name: entry.name,
       isCustom: true,
+      ...(shortName ? { shortName } : {}),
     });
   }
 
-  const normalizedSelectedModel = normalizeModelSlug(selectedModel, provider);
-  const selectedModelMatchesExistingName =
-    typeof trimmedSelectedModel === "string" &&
-    options.some((option) => option.name.toLowerCase() === trimmedSelectedModel);
-  if (
-    normalizedSelectedModel &&
-    !seen.has(normalizedSelectedModel) &&
-    !selectedModelMatchesExistingName
-  ) {
+  const preferences = readInstanceModelPreferences(settings, defaultInstanceId);
+  return appendUnavailableDynamicModelSelection(
+    applyInstanceModelPreferences(options, preferences),
+    rawModels,
+    provider,
+    selectedModel,
+    preferences.hiddenModels,
+  );
+}
+
+export function getAppModelOptionsForInstance(
+  settings: UnifiedSettings,
+  entry: ProviderInstanceEntry,
+  selectedModel?: string | null,
+): AppModelOption[] {
+  const options: AppModelOption[] = entry.models
+    .filter((model) => !model.isCustom)
+    .map((model) => toAppModelOption(model, entry.driverKind));
+  const seen = new Set(options.map((option) => option.slug));
+  const builtInModelSlugs = new Set(
+    Arr.filterMap(entry.models, (model) =>
+      model.isCustom ? Result.failVoid : Result.succeed(model.slug),
+    ),
+  );
+
+  const customModels = readInstanceCustomModels(settings, entry.instanceId, entry.driverKind);
+  for (const custom of normalizeCustomModelEntries(customModels, builtInModelSlugs)) {
+    if (seen.has(custom.slug)) {
+      continue;
+    }
+
+    seen.add(custom.slug);
+    const shortName = resolveModelShortName(custom, entry.driverKind);
     options.push({
-      slug: normalizedSelectedModel,
-      name: normalizedSelectedModel,
+      slug: custom.slug,
+      name: custom.name,
       isCustom: true,
+      ...(shortName ? { shortName } : {}),
     });
   }
 
-  return options;
+  const preferences = readInstanceModelPreferences(settings, entry.instanceId);
+  return appendUnavailableDynamicModelSelection(
+    applyInstanceModelPreferences(options, preferences),
+    entry.models,
+    entry.driverKind,
+    selectedModel,
+    preferences.hiddenModels,
+  );
 }
 
 export function resolveAppModelSelection(
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
   selectedModel: string | null | undefined,
@@ -154,302 +260,166 @@ export function resolveAppModelSelection(
   );
 }
 
-function isAutoModelSelectionValue(value: string | null | undefined): boolean {
-  return typeof value === "string" && value.trim().toLowerCase() === "auto";
-}
-
-export function resolveProviderScopedModelSelectionState(
-  provider: ProviderKind,
-  rawSelection: Omit<ModelSelection, "provider"> & { provider?: ProviderKind },
+export function resolveAppModelSelectionForInstance(
+  instanceId: ProviderInstanceId,
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
-): ModelSelection {
-  if (isAutoModelSelectionValue(rawSelection.model)) {
-    return {
-      provider,
-      model: "auto",
-      ...(rawSelection.options ? { options: rawSelection.options } : {}),
-    };
+  selectedModel: string | null | undefined,
+  resolutionOptions?: { readonly preserveUnavailableSelection?: boolean },
+): string | null {
+  const entry = deriveProviderInstanceEntries(providers).find(
+    (candidate) => candidate.instanceId === instanceId,
+  );
+  if (!entry) return null;
+  const options = getAppModelOptionsForInstance(
+    settings,
+    entry,
+    resolutionOptions?.preserveUnavailableSelection ? selectedModel : null,
+  );
+  const resolvedSelection = resolveSelectableModel(entry.driverKind, selectedModel, options);
+  if (resolvedSelection) {
+    return resolvedSelection;
   }
-
-  const model =
-    resolveSelectableModel(
-      provider,
-      rawSelection.model,
-      getAppModelOptions(settings, providers, provider, rawSelection.model),
-    ) ?? getDefaultServerModel(providers, provider);
-  const { modelOptionsForDispatch } = getComposerProviderState({
-    provider,
-    model,
-    models: getProviderModels(providers, provider),
-    prompt: "",
-    modelOptions: {
-      [provider]: rawSelection.options,
-    },
-  });
-
-  return {
-    provider,
-    model,
-    ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
-  };
+  if (
+    resolutionOptions?.preserveUnavailableSelection &&
+    (entry.driverKind === "opencode" || entry.driverKind === "antigravity")
+  ) {
+    const unavailableSelection = normalizeCustomModelSlug(selectedModel);
+    const hiddenModels = readInstanceModelPreferences(settings, entry.instanceId).hiddenModels;
+    if (
+      unavailableSelection &&
+      !hiddenModels.includes(unavailableSelection) &&
+      resolveSelectableModel(entry.driverKind, selectedModel, entry.models) === null &&
+      (entry.driverKind !== "antigravity" || unavailableSelection !== ANTIGRAVITY_DEFAULT_MODEL)
+    ) {
+      return unavailableSelection;
+    }
+  }
+  return options.find((option) => option.isDefault)?.slug ?? options[0]?.slug ?? null;
 }
 
-export function getCustomModelOptionsByProvider(
+// New drafts carry the stored selection; capabilities resolve its raw options later.
+export function resolveEffectiveDefaultModelSelection(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
-  selectedProvider?: ProviderKind | null,
+  selection: ModelSelection,
+): ModelSelection {
+  const model = resolveAppModelSelectionForInstance(
+    selection.instanceId,
+    settings,
+    providers,
+    selection.model,
+    { preserveUnavailableSelection: true },
+  );
+  return model === null || model === selection.model ? selection : { ...selection, model };
+}
+
+export function defaultModelSelectionsAreMixed(
+  clientSettings: ClientSettings,
+  targets: ReadonlyArray<{
+    projectId: ProjectId | null;
+    settings: ServerSettings;
+    providers: ReadonlyArray<ServerProvider>;
+  }>,
+): boolean {
+  const selections = targets.map(({ projectId, settings, providers }) => {
+    const stored = settings.defaultModelSelection;
+    const selection =
+      stored === null
+        ? resolveProjectDefaultProviderModelSelection(providers, settings, projectId)
+        : resolveDefaultProviderModelSelection(providers, stored);
+    return {
+      stored,
+      effective: selection
+        ? resolveEffectiveDefaultModelSelection(
+            {
+              ...clientSettings,
+              ...settings,
+              ...resolveModelPreferences(settings, clientSettings),
+            },
+            providers,
+            selection,
+          )
+        : null,
+    };
+  });
+  return selections.some((selection) => !Equal.equals(selection, selections[0]));
+}
+
+export function getCustomModelOptionsByInstance(
+  settings: UnifiedSettings,
+  providers: ReadonlyArray<ServerProvider>,
+  selectedInstanceId?: ProviderInstanceId | null,
   selectedModel?: string | null,
-): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
-  return {
-    codex: getAppModelOptions(
-      settings,
-      providers,
-      "codex",
-      selectedProvider === "codex" ? selectedModel : undefined,
-    ),
-    claudeAgent: getAppModelOptions(
-      settings,
-      providers,
-      "claudeAgent",
-      selectedProvider === "claudeAgent" ? selectedModel : undefined,
-    ),
-  };
+): ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>> {
+  const out = new Map<ProviderInstanceId, ReadonlyArray<ModelEsque>>();
+  for (const entry of deriveProviderInstanceEntries(providers)) {
+    out.set(
+      entry.instanceId,
+      getAppModelOptionsForInstance(
+        settings,
+        entry,
+        entry.instanceId === selectedInstanceId ? selectedModel : null,
+      ),
+    );
+  }
+  return out;
+}
+
+export function selectsPlanAgent(options: ModelSelection["options"]): boolean {
+  return options?.some((option) => option.id === "agent" && option.value === "plan") ?? false;
 }
 
 export function resolveAppModelSelectionState(
   settings: UnifiedSettings,
   providers: ReadonlyArray<ServerProvider>,
-  selection: ModelSelection | null | undefined = settings.textGenerationModelSelection,
 ): ModelSelection {
-  const resolvedSelection = resolveUtilityModelSelectionDefault(selection, providers);
-  const provider = resolveSelectableProvider(providers, resolvedSelection.provider);
-
-  // When the provider changed due to fallback (e.g. selected provider was disabled),
-  // don't carry over the old provider's model — use the fallback provider's default.
-  const selectedModel = provider === resolvedSelection.provider ? resolvedSelection.model : null;
-  const model = resolveAppModelSelection(provider, settings, providers, selectedModel);
-  const { modelOptionsForDispatch } = getComposerProviderState({
-    provider,
-    model,
-    models: getProviderModels(providers, provider),
-    prompt: "",
-    modelOptions: {
-      [provider]: provider === resolvedSelection.provider ? resolvedSelection.options : undefined,
-    },
-  });
-
-  return {
-    provider,
-    model,
-    ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
+  const selection = settings.textGenerationModelSelection ?? {
+    instanceId: DEFAULT_TEXT_GENERATION_INSTANCE_ID,
+    model: DEFAULT_TEXT_GENERATION_MODEL,
   };
-}
-
-// ── Kodo: mode-aware model resolution ─────────────────────────────
-
-export function getModeModelSelectionKey(
-  mode: ProviderInteractionMode,
-): keyof Pick<
-  UnifiedSettings,
-  "askModelSelection" | "planModelSelection" | "codeModelSelection" | "reviewModelSelection"
-> {
-  return mode === "ask"
-    ? "askModelSelection"
-    : mode === "plan"
-      ? "planModelSelection"
-      : mode === "review"
-        ? "reviewModelSelection"
-        : mode === "swarm"
-          ? "codeModelSelection"
-          : "codeModelSelection";
-}
-
-export type WorkflowPresetModeSelectionKey = ReturnType<typeof getModeModelSelectionKey>;
-export type WorkflowPresetModeSelections = Record<WorkflowPresetModeSelectionKey, ModelSelection>;
-export type ProviderScopedModelSelection<P extends ProviderKind> = Extract<
-  ModelSelection,
-  { provider: P }
->;
-export type WorkflowPresetModeSelectionsByProvider<P extends ProviderKind> = Record<
-  WorkflowPresetModeSelectionKey,
-  ProviderScopedModelSelection<P>
->;
-const WORKFLOW_PRESET_MODES: readonly ProviderInteractionMode[] = ["ask", "plan", "code", "review"];
-
-export function createModelSelectionPresetId(name: string): string {
-  const slug = name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48);
-  const suffix = crypto.randomUUID().slice(0, 8);
-  return `${slug || "preset"}-${suffix}`;
-}
-
-export function getBaseModeModelSelection(
-  mode: ProviderInteractionMode,
-  settings: UnifiedSettings,
-): ModelSelection | null {
-  const selectionKey = getModeModelSelectionKey(mode);
-  return settings[selectionKey];
-}
-
-export function getActiveModelSelectionPreset(
-  settings: UnifiedSettings,
-  preferredProvider?: ProviderKind | null,
-): ModelSelectionPreset | null {
-  if (preferredProvider) {
-    const presetId = settings.activeModelSelectionPresetByProvider[preferredProvider];
-    if (!presetId || presetId === DEFAULT_MODEL_SELECTION_PRESET_ID) {
-      return null;
-    }
-
-    return settings.modelSelectionPresets[preferredProvider][presetId] ?? null;
-  }
-
-  const providerOrder = [...PRESET_PROVIDER_ORDER];
-
-  for (const provider of providerOrder) {
-    const presetId = settings.activeModelSelectionPresetByProvider[provider];
-    if (!presetId || presetId === DEFAULT_MODEL_SELECTION_PRESET_ID) {
-      continue;
-    }
-
-    const preset = settings.modelSelectionPresets[provider][presetId];
-    if (preset) {
-      return preset;
-    }
-  }
-
-  return null;
-}
-
-export function getModeModelSelectionSource(
-  mode: ProviderInteractionMode,
-  settings: UnifiedSettings,
-  preferredProvider?: ProviderKind | null,
-): ModelSelection | null {
-  const baseSelection = getBaseModeModelSelection(mode, settings);
-  const scopedBaseSelection =
-    preferredProvider && baseSelection?.provider !== preferredProvider ? null : baseSelection;
-  const preset = getActiveModelSelectionPreset(
-    settings,
-    preferredProvider ?? baseSelection?.provider,
+  const supportedProviders = providers.filter(
+    (provider) => provider.supportsTextGeneration !== false,
   );
-  if (!preset) {
-    return scopedBaseSelection;
-  }
-
-  return preset[getModeModelSelectionKey(mode)];
-}
-
-export function buildWorkflowPresetModeSelectionsForProvider<P extends ProviderKind>(input: {
-  provider: P;
-  settings: UnifiedSettings;
-  providers: ReadonlyArray<ServerProvider>;
-}): WorkflowPresetModeSelectionsByProvider<P> {
-  const { provider, settings, providers } = input;
-  return Object.fromEntries(
-    WORKFLOW_PRESET_MODES.map((mode) => {
-      const key = getModeModelSelectionKey(mode);
-      const sourceSelection = getModeModelSelectionSource(mode, settings, provider);
-      const providerSelection =
-        sourceSelection?.provider === provider
-          ? sourceSelection
-          : {
-              provider,
-              model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER[provider],
-            };
-      return [
-        key,
-        resolveProviderScopedModelSelectionState(provider, providerSelection, settings, providers),
-      ];
-    }),
-  ) as WorkflowPresetModeSelectionsByProvider<P>;
-}
-
-/**
- * Resolve the ModelSelection that should be active for a given interaction
- * mode based on the Kodo ask/plan/code model settings.
- *
- * Returns `null` when no mode-specific override is configured, signalling
- * the caller should keep using the existing default model selection.
- */
-export function resolveModeModelSelection(
-  mode: ProviderInteractionMode,
-  settings: UnifiedSettings,
-  providers: ReadonlyArray<ServerProvider>,
-): ModelSelection | null {
-  const modeSelection = getModeModelSelectionSource(mode, settings);
-  if (!modeSelection) {
-    return null;
-  }
-
-  const provider = resolveSelectableProvider(providers, modeSelection.provider);
-
-  // If the configured provider became unavailable, fall back gracefully
-  if (isAutoModelSelectionValue(modeSelection.model)) {
-    return {
+  const entries = deriveProviderInstanceEntries(supportedProviders);
+  const selectedEntry = entries.find(
+    (entry) => entry.instanceId === selection.instanceId && entry.enabled && entry.isAvailable,
+  );
+  const entry =
+    selectedEntry ?? entries.find((candidate) => candidate.enabled && candidate.isAvailable);
+  if (entry) {
+    const selectedModel = selectedEntry ? selection.model : null;
+    // Use the cheap generation default; the catalog default is the expensive chat flagship.
+    const options = getAppModelOptionsForInstance(settings, entry);
+    const model =
+      resolveSelectableModel(entry.driverKind, selectedModel, options) ??
+      resolveSelectableModel(
+        entry.driverKind,
+        DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[entry.driverKind],
+        options,
+      ) ??
+      resolveAppModelSelectionForInstance(
+        entry.instanceId,
+        settings,
+        supportedProviders,
+        selectedModel,
+      ) ??
+      entry.models[0]?.slug ??
+      DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[entry.driverKind];
+    if (!model) {
+      return createModelSelection(entry.instanceId, "", []);
+    }
+    const provider = entry.driverKind;
+    const { modelOptionsForDispatch } = getComposerProviderState({
       provider,
-      model: "auto",
-      ...(modeSelection.options ? { options: modeSelection.options } : {}),
-    };
+      model,
+      models: entry.models,
+      modelOptions: selectedEntry ? selection.options : undefined,
+      includePlanAgent: selectsPlanAgent(selection.options),
+    });
+
+    return createModelSelection(entry.instanceId, model, modelOptionsForDispatch);
   }
 
-  const selectedModel = provider === modeSelection.provider ? modeSelection.model : null;
-  const model = resolveAppModelSelection(provider, settings, providers, selectedModel);
-  const { modelOptionsForDispatch } = getComposerProviderState({
-    provider,
-    model,
-    models: getProviderModels(providers, provider),
-    prompt: "",
-    modelOptions: {
-      [provider]: provider === modeSelection.provider ? modeSelection.options : undefined,
-    },
-  });
-
-  return {
-    provider,
-    model,
-    ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
-  };
-}
-
-/**
- * Build a mode-specific ModelSelection suitable for persisting to server
- * settings.  Takes a raw selection (from the UI picker) and resolves it
- * against available providers/models so the stored value is valid.
- */
-export function resolveModeModelSelectionState(
-  rawSelection: ModelSelection,
-  settings: UnifiedSettings,
-  providers: ReadonlyArray<ServerProvider>,
-): ModelSelection {
-  const provider = resolveSelectableProvider(providers, rawSelection.provider);
-  if (isAutoModelSelectionValue(rawSelection.model)) {
-    return {
-      provider,
-      model: "auto",
-      ...(rawSelection.options ? { options: rawSelection.options } : {}),
-    };
-  }
-  const selectedModel = provider === rawSelection.provider ? rawSelection.model : null;
-  const model = resolveAppModelSelection(provider, settings, providers, selectedModel);
-  const { modelOptionsForDispatch } = getComposerProviderState({
-    provider,
-    model,
-    models: getProviderModels(providers, provider),
-    prompt: "",
-    modelOptions: {
-      [provider]: provider === rawSelection.provider ? rawSelection.options : undefined,
-    },
-  });
-
-  return {
-    provider,
-    model,
-    ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
-  };
+  return NO_PROVIDER_MODEL_SELECTION;
 }

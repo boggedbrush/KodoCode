@@ -1,234 +1,51 @@
-import { Schema } from "effect";
-import { describe, expect, it } from "vitest";
+import * as Schema from "effect/Schema";
+import { describe, expect, it } from "vite-plus/test";
 
 import {
   DEFAULT_TERMINAL_ID,
-  TerminalClearInput,
-  TerminalCloseInput,
-  TerminalEvent,
+  TerminalError,
   TerminalOpenInput,
-  TerminalResizeInput,
-  TerminalSessionSnapshot,
-  TerminalThreadInput,
-  TerminalWriteInput,
-} from "./terminal";
+  TerminalProviderEnvironmentError,
+} from "./terminal.ts";
+import { ProviderInstanceId } from "./providerInstance.ts";
+
+const encodeTerminalError = Schema.encodeUnknownSync(TerminalError);
+const decodeTerminalError = Schema.decodeUnknownSync(TerminalError);
 
 function decodeSync<S extends Schema.Top>(schema: S, input: unknown): Schema.Schema.Type<S> {
   return Schema.decodeUnknownSync(schema as never)(input) as Schema.Schema.Type<S>;
 }
 
-function decodes<S extends Schema.Top>(schema: S, input: unknown): boolean {
-  try {
-    Schema.decodeUnknownSync(schema as never)(input);
-    return true;
-  } catch {
-    return false;
-  }
-}
+describe("TerminalProviderEnvironmentError", () => {
+  it("round-trips its required cause without exposing it in the message", () => {
+    const cause = { operation: "read-secret", detail: "secret backend unavailable" };
+    const error = new TerminalProviderEnvironmentError({
+      providerInstanceId: ProviderInstanceId.make("codex_work"),
+      cause,
+    });
+    const encoded = encodeTerminalError(error);
+    const decoded = decodeTerminalError(encoded);
+
+    expect(decoded).toMatchObject({
+      _tag: "TerminalProviderEnvironmentError",
+      providerInstanceId: "codex_work",
+      cause,
+    });
+    expect(decoded.message).toBe(
+      "Could not prepare the terminal environment for provider instance: codex_work",
+    );
+    expect(decoded.message).not.toContain("secret backend unavailable");
+  });
+});
 
 describe("TerminalOpenInput", () => {
-  it("accepts valid open input", () => {
-    expect(
-      decodes(TerminalOpenInput, {
-        threadId: "thread-1",
-        cwd: "/tmp/project",
-        cols: 120,
-        rows: 40,
-      }),
-    ).toBe(true);
-  });
-
-  it("rejects invalid bounds", () => {
-    expect(
-      decodes(TerminalOpenInput, {
-        threadId: "thread-1",
-        cwd: "/tmp/project",
-        cols: 10,
-        rows: 2,
-      }),
-    ).toBe(false);
-  });
-
-  it("defaults terminalId when missing", () => {
+  it("drops invalid env keys while retaining valid overrides", () => {
     const parsed = decodeSync(TerminalOpenInput, {
       threadId: "thread-1",
+      terminalId: DEFAULT_TERMINAL_ID,
       cwd: "/tmp/project",
-      cols: 100,
-      rows: 24,
+      env: { "bad-key": "1", GOOD_KEY: "2" },
     });
-    expect(parsed.terminalId).toBe(DEFAULT_TERMINAL_ID);
-  });
-
-  it("accepts optional env overrides", () => {
-    const parsed = decodeSync(TerminalOpenInput, {
-      threadId: "thread-1",
-      cwd: "/tmp/project",
-      worktreePath: "/tmp/project/.t3/worktrees/feature-a",
-      cols: 100,
-      rows: 24,
-      env: {
-        T3CODE_PROJECT_ROOT: "/tmp/project",
-        CUSTOM_FLAG: "1",
-      },
-    });
-    expect(parsed.env).toMatchObject({
-      T3CODE_PROJECT_ROOT: "/tmp/project",
-      CUSTOM_FLAG: "1",
-    });
-    expect(parsed.worktreePath).toBe("/tmp/project/.t3/worktrees/feature-a");
-  });
-
-  it("rejects invalid env keys", () => {
-    expect(
-      decodes(TerminalOpenInput, {
-        threadId: "thread-1",
-        cwd: "/tmp/project",
-        cols: 100,
-        rows: 24,
-        env: {
-          "bad-key": "1",
-        },
-      }),
-    ).toBe(false);
-  });
-});
-
-describe("TerminalWriteInput", () => {
-  it("accepts non-empty data", () => {
-    expect(
-      decodes(TerminalWriteInput, {
-        threadId: "thread-1",
-        data: "echo hello\n",
-      }),
-    ).toBe(true);
-  });
-
-  it("rejects empty data", () => {
-    expect(
-      decodes(TerminalWriteInput, {
-        threadId: "thread-1",
-        data: "",
-      }),
-    ).toBe(false);
-  });
-});
-
-describe("TerminalThreadInput", () => {
-  it("trims thread ids", () => {
-    const parsed = decodeSync(TerminalThreadInput, { threadId: " thread-1 " });
-    expect(parsed.threadId).toBe("thread-1");
-  });
-});
-
-describe("TerminalResizeInput", () => {
-  it("accepts valid size", () => {
-    expect(
-      decodes(TerminalResizeInput, {
-        threadId: "thread-1",
-        cols: 80,
-        rows: 24,
-      }),
-    ).toBe(true);
-  });
-});
-
-describe("TerminalClearInput", () => {
-  it("defaults terminal id", () => {
-    const parsed = decodeSync(TerminalClearInput, {
-      threadId: "thread-1",
-    });
-    expect(parsed.terminalId).toBe(DEFAULT_TERMINAL_ID);
-  });
-});
-
-describe("TerminalCloseInput", () => {
-  it("accepts optional deleteHistory", () => {
-    expect(
-      decodes(TerminalCloseInput, {
-        threadId: "thread-1",
-        deleteHistory: true,
-      }),
-    ).toBe(true);
-  });
-});
-
-describe("TerminalSessionSnapshot", () => {
-  it("accepts running snapshots", () => {
-    expect(
-      decodes(TerminalSessionSnapshot, {
-        threadId: "thread-1",
-        terminalId: DEFAULT_TERMINAL_ID,
-        cwd: "/tmp/project",
-        worktreePath: null,
-        status: "running",
-        pid: 1234,
-        history: "hello\n",
-        exitCode: null,
-        exitSignal: null,
-        updatedAt: new Date().toISOString(),
-      }),
-    ).toBe(true);
-  });
-});
-
-describe("TerminalEvent", () => {
-  it("accepts output events", () => {
-    expect(
-      decodes(TerminalEvent, {
-        type: "output",
-        threadId: "thread-1",
-        terminalId: DEFAULT_TERMINAL_ID,
-        createdAt: new Date().toISOString(),
-        data: "line\n",
-      }),
-    ).toBe(true);
-  });
-
-  it("accepts exited events", () => {
-    expect(
-      decodes(TerminalEvent, {
-        type: "exited",
-        threadId: "thread-1",
-        terminalId: DEFAULT_TERMINAL_ID,
-        createdAt: new Date().toISOString(),
-        exitCode: 0,
-        exitSignal: null,
-      }),
-    ).toBe(true);
-  });
-
-  it("accepts activity events", () => {
-    expect(
-      decodes(TerminalEvent, {
-        type: "activity",
-        threadId: "thread-1",
-        terminalId: DEFAULT_TERMINAL_ID,
-        createdAt: new Date().toISOString(),
-        hasRunningSubprocess: true,
-      }),
-    ).toBe(true);
-  });
-
-  it("accepts started events with snapshot worktree metadata", () => {
-    expect(
-      decodes(TerminalEvent, {
-        type: "started",
-        threadId: "thread-1",
-        terminalId: DEFAULT_TERMINAL_ID,
-        createdAt: new Date().toISOString(),
-        snapshot: {
-          threadId: "thread-1",
-          terminalId: DEFAULT_TERMINAL_ID,
-          cwd: "/tmp/project/.t3/worktrees/feature-a",
-          worktreePath: "/tmp/project/.t3/worktrees/feature-a",
-          status: "running",
-          pid: 1234,
-          history: "",
-          exitCode: null,
-          exitSignal: null,
-          updatedAt: new Date().toISOString(),
-        },
-      }),
-    ).toBe(true);
+    expect(parsed.env).toEqual({ GOOD_KEY: "2" });
   });
 });

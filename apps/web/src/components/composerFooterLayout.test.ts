@@ -1,154 +1,96 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
+import { resolveContextStripLabelsCompact } from "./BranchToolbar.logic";
 import {
-  COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX,
-  COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX,
-  COMPOSER_PRIMARY_ACTIONS_COMPACT_BREAKPOINT_PX,
-  measureComposerFooterOverflowPx,
-  resolveComposerFooterContentWidth,
-  shouldForceCompactComposerFooterForFit,
-  shouldUseCompactComposerPrimaryActions,
-  shouldUseCompactComposerFooter,
+  resolveRestingComposerControlsLayout,
+  resolveRestingComposerControlsNaturalWidth,
 } from "./composerFooterLayout";
 
-describe("shouldUseCompactComposerFooter", () => {
-  it("stays expanded without a measured width", () => {
-    expect(shouldUseCompactComposerFooter(null)).toBe(false);
-  });
+describe("context strip labels and resting composer controls", () => {
+  const stripWidth = 724;
+  const labelWidth = 327;
+  const chromeWidth = 125;
+  const measurement = {
+    gap: 4,
+    naturalFixedWidth: 96.3828125 + 5 + 4,
+    minimumFixedWidth: 52 + 5 + 4,
+    blockWidths: [130.6953125, 119.671875],
+    overflowWidth: 28,
+  };
+  const naturalWidth = resolveRestingComposerControlsNaturalWidth(measurement);
 
-  it("switches to compact mode below the breakpoint", () => {
-    expect(shouldUseCompactComposerFooter(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX - 1)).toBe(true);
-  });
+  function hostWidth(compact: boolean): number {
+    return stripWidth - chromeWidth - (compact ? 0 : labelWidth);
+  }
 
-  it("stays expanded at and above the breakpoint", () => {
-    expect(shouldUseCompactComposerFooter(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX)).toBe(false);
-    expect(shouldUseCompactComposerFooter(COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX + 48)).toBe(false);
-  });
+  it("keeps the labels compact when the full controls only fit beside compact labels", () => {
+    const layout = resolveRestingComposerControlsLayout({
+      ...measurement,
+      hostWidth: hostWidth(true),
+    });
+    expect(layout).toEqual({ hiddenCount: 0, visible: true });
 
-  it("uses a higher breakpoint for wide action states", () => {
-    expect(
-      shouldUseCompactComposerFooter(COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX - 1, {
-        hasWideActions: true,
-      }),
-    ).toBe(true);
-    expect(
-      shouldUseCompactComposerFooter(COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX, {
-        hasWideActions: true,
-      }),
-    ).toBe(false);
-  });
-});
+    const compact = resolveContextStripLabelsCompact({
+      compact: true,
+      neededWidth: chromeWidth + labelWidth + naturalWidth,
+      availableWidth: stripWidth,
+    });
+    expect(compact).toBe(true);
 
-describe("shouldUseCompactComposerPrimaryActions", () => {
-  it("matches the wide footer breakpoint", () => {
-    expect(COMPOSER_PRIMARY_ACTIONS_COMPACT_BREAKPOINT_PX).toBe(
-      COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX,
-    );
     expect(
-      shouldUseCompactComposerPrimaryActions(COMPOSER_PRIMARY_ACTIONS_COMPACT_BREAKPOINT_PX - 1, {
-        hasWideActions: true,
-      }),
-    ).toBe(true);
-    expect(
-      shouldUseCompactComposerPrimaryActions(COMPOSER_PRIMARY_ACTIONS_COMPACT_BREAKPOINT_PX, {
-        hasWideActions: true,
-      }),
-    ).toBe(false);
+      resolveRestingComposerControlsLayout({ ...measurement, hostWidth: hostWidth(compact) }),
+    ).toEqual(layout);
   });
 });
 
-describe("measureComposerFooterOverflowPx", () => {
-  it("returns the overflow amount when content exceeds the footer width", () => {
-    expect(
-      measureComposerFooterOverflowPx({
-        footerContentWidth: 500,
-        leadingContentWidth: 340,
-        actionsWidth: 180,
-      }),
-    ).toBe(28);
-  });
+describe("resolveRestingComposerControlsLayout hysteresis", () => {
+  const base = {
+    gap: 4,
+    naturalFixedWidth: 149,
+    minimumFixedWidth: 105,
+    blockWidths: [60, 140],
+    overflowWidth: 24,
+  };
 
-  it("returns zero when content fits", () => {
-    expect(
-      measureComposerFooterOverflowPx({
-        footerContentWidth: 500,
-        leadingContentWidth: 320,
-        actionsWidth: 160,
-      }),
-    ).toBe(0);
-  });
-});
-
-describe("shouldForceCompactComposerFooterForFit", () => {
-  it("stays expanded when content widths fit within the footer", () => {
-    expect(
-      shouldForceCompactComposerFooterForFit({
-        footerContentWidth: 500,
-        leadingContentWidth: 320,
-        actionsWidth: 160,
-      }),
-    ).toBe(false);
-  });
-
-  it("stays expanded when minor overflow can be recovered by compacting primary actions", () => {
-    expect(
-      shouldForceCompactComposerFooterForFit({
-        footerContentWidth: 500,
-        leadingContentWidth: 340,
-        actionsWidth: 180,
-      }),
-    ).toBe(false);
-  });
-
-  it("forces footer compact mode when action compaction would not recover enough space", () => {
-    expect(
-      shouldForceCompactComposerFooterForFit({
-        footerContentWidth: 500,
-        leadingContentWidth: 420,
-        actionsWidth: 220,
-      }),
-    ).toBe(true);
-  });
-
-  it("ignores incomplete measurements", () => {
-    expect(
-      shouldForceCompactComposerFooterForFit({
-        footerContentWidth: null,
-        leadingContentWidth: 340,
-        actionsWidth: 180,
-      }),
-    ).toBe(false);
+  it("settles when the measured picker width jitters below a pixel", () => {
+    let layout = { hiddenCount: 0, visible: true };
+    const settled: string[] = [];
+    for (let index = 0; index < 10; index += 1) {
+      layout = resolveRestingComposerControlsLayout({
+        ...base,
+        naturalFixedWidth: index % 2 === 0 ? 149 : 149.5,
+        hostWidth: 357,
+        previous: layout,
+      });
+      if (index >= 2) settled.push(`${layout.hiddenCount}:${layout.visible}`);
+    }
+    expect(new Set(settled).size).toBe(1);
   });
 });
 
-describe("resolveComposerFooterContentWidth", () => {
-  it("subtracts horizontal padding from the measured footer width", () => {
-    expect(
-      resolveComposerFooterContentWidth({
-        footerWidth: 500,
-        paddingLeft: 10,
-        paddingRight: 10,
-      }),
-    ).toBe(480);
-  });
+describe("progressive composer controls", () => {
+  const measurement = {
+    gap: 4,
+    naturalFixedWidth: 140,
+    minimumFixedWidth: 80,
+    blockWidths: [80, 140],
+    iconOnlyBlockWidths: [40, 60],
+    overflowWidth: 24,
+  };
 
-  it("clamps negative widths to zero", () => {
-    expect(
-      resolveComposerFooterContentWidth({
-        footerWidth: 10,
-        paddingLeft: 8,
-        paddingRight: 8,
-      }),
-    ).toBe(0);
-  });
-
-  it("returns null when measurements are incomplete", () => {
-    expect(
-      resolveComposerFooterContentWidth({
-        footerWidth: null,
-        paddingLeft: 8,
-        paddingRight: 8,
-      }),
-    ).toBeNull();
+  it("settles through fractional label-width changes at each threshold", () => {
+    for (const hostWidth of [368, 288, 248]) {
+      let previous = resolveRestingComposerControlsLayout({ ...measurement, hostWidth });
+      for (let index = 0; index < 10; index += 1) {
+        const next = resolveRestingComposerControlsLayout({
+          ...measurement,
+          hostWidth,
+          previous,
+          naturalFixedWidth: 140 + (index % 2) * 0.5,
+        });
+        if (index > 1) expect(next).toEqual(previous);
+        previous = next;
+      }
+    }
   });
 });

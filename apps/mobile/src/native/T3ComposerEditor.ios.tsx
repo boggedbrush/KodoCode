@@ -1,0 +1,434 @@
+import { PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES } from "@t3tools/client-runtime/text-paste";
+import { PROVIDER_SEND_TURN_MAX_INPUT_CHARS } from "@t3tools/contracts";
+import { collectComposerInlineTokens } from "@t3tools/shared/composerInlineTokens";
+import { composerContextEditorTokens, composerSkillLabels } from "../lib/composerContext";
+import { useComposerModelTokens } from "./useComposerModelTokens";
+import { requireNativeView } from "expo";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
+import type { NativeSyntheticEvent, StyleProp, ViewProps, ViewStyle } from "react-native";
+import { StyleSheet } from "react-native";
+
+import {
+  composerChipSizeSuffix,
+  contextChipIcon,
+  contextChipAccent,
+  contextChipPresentation,
+  contextRecordFileName,
+} from "../lib/composerChipPresentation";
+import { contextChipIconUri, modelChipIcon, modelChipIconUri } from "../lib/contextChipIconSource";
+import { useUniwindTheme } from "../lib/useUniwindTheme";
+import { createNativeComposerTheme } from "../lib/nativeComposerTheme";
+import { FONT_FAMILIES } from "../lib/fontFamilies";
+import { useScaledTextRole } from "../features/settings/appearance/useScaledTextRole";
+import {
+  acknowledgeComposerNativeEvent,
+  assumeComposerControlledState,
+  isComposerNativeEcho,
+  pruneAcknowledgedComposerNativeEvents,
+  resolveComposerControlledEventCount,
+  type ComposerNativeEventSnapshot,
+} from "./composerEditorRevision";
+import { DEFAULT_COMPOSER_ENTER_BEHAVIOR } from "../lib/composerEnterBehavior";
+import type { ComposerEditorProps, ComposerEditorSelection } from "./T3ComposerEditor.types";
+
+const NATIVE_MODULE_NAME = "T3ComposerEditor";
+const EMPTY_SKILLS: NonNullable<ComposerEditorProps["skills"]> = [];
+const EMPTY_MODELS: NonNullable<ComposerEditorProps["models"]> = [];
+const NO_RESET = () => 0;
+
+type NativeEditorEvent = NativeSyntheticEvent<{
+  readonly value: string;
+  readonly selection: ComposerEditorSelection;
+  readonly eventCount: number;
+  readonly resetGeneration: number;
+}>;
+
+type NativeSelectionEvent = NativeSyntheticEvent<{
+  readonly value: string;
+  readonly selection: ComposerEditorSelection;
+  readonly eventCount: number;
+  readonly resetGeneration: number;
+}>;
+
+type NativePasteImagesEvent = NativeSyntheticEvent<{
+  readonly uris: ReadonlyArray<string>;
+}>;
+
+type NativePasteTextEvent = NativeSyntheticEvent<{
+  readonly value: string;
+  readonly eventCount: number;
+  readonly resetGeneration: number;
+  readonly text: string;
+  readonly selection: ComposerEditorSelection;
+}>;
+
+interface NativeComposerEditorRef {
+  focus: () => Promise<void>;
+  blur: () => Promise<void>;
+  setSelection: (start: number, end: number) => Promise<void>;
+  readState: () => Promise<{
+    readonly value: string;
+    readonly selection: ComposerEditorSelection;
+    readonly eventCount: number;
+    readonly resetGeneration: number;
+    readonly pasteEventCount: number;
+  }>;
+}
+
+interface NativeComposerEditorProps extends ViewProps {
+  readonly ref?: Ref<NativeComposerEditorRef>;
+  readonly controlledDocumentJson: string;
+  readonly clipboardFragment: string;
+  readonly themeJson: string;
+  readonly placeholder: string;
+  readonly fontFamily: string;
+  readonly fontSize: number;
+  readonly lineHeight: number;
+  readonly contentInsetVertical: number;
+  readonly editable: boolean;
+  readonly readOnly: boolean;
+  readonly enterBehavior: string;
+  readonly submitTitle: string;
+  readonly alternateSubmitTitle: string;
+  readonly scrollEnabled: boolean;
+  readonly autoFocus: boolean;
+  readonly autoCorrect: boolean;
+  readonly spellCheck: boolean;
+  readonly onComposerChange: (event: NativeEditorEvent) => void;
+  readonly onComposerSelectionChange?: (event: NativeSelectionEvent) => void;
+  readonly onComposerPasteImages?: (event: NativePasteImagesEvent) => void;
+  readonly onComposerContextPress?: (
+    event: NativeSyntheticEvent<{ source: string; start: number; end: number }>,
+  ) => void;
+  readonly onComposerPasteContext?: (
+    event: NativePasteTextEvent & NativeSyntheticEvent<{ fragment: string; html: string }>,
+  ) => void;
+  readonly textPasteThresholdBytes: number;
+  readonly maxInputChars: number;
+  readonly onComposerPasteText?: (event: NativePasteTextEvent) => void;
+  readonly onComposerFocus?: () => void;
+  readonly onComposerBlur?: () => void;
+  readonly onComposerSubmit?: (event: NativeSyntheticEvent<{ alternate: boolean }>) => void;
+  readonly onComposerContentSizeChange?: (
+    event: NativeSyntheticEvent<{ readonly width: number; readonly height: number }>,
+  ) => void;
+}
+
+const NativeView = requireNativeView<NativeComposerEditorProps>(NATIVE_MODULE_NAME);
+
+// A view command rejects with "Unable to find the view" when the composer's native view is
+// unmounted, which can happen while an open question hides the composer slot. There is nothing
+// to act on then.
+function settleViewCommand(command: Promise<void> | undefined): void {
+  command?.catch(() => undefined);
+}
+
+function basename(path: string): string {
+  const separator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return separator >= 0 ? path.slice(separator + 1) : path;
+}
+
+export function ComposerEditor({
+  ref,
+  skills = EMPTY_SKILLS,
+  models = EMPTY_MODELS,
+  selection,
+  style,
+  textStyle,
+  onChangeText,
+  onSelectionChange,
+  onPasteImages,
+  onPasteText,
+  onFocus,
+  onBlur,
+  onSubmit,
+  onContentSizeChange,
+  contentInsetVertical = 0,
+  readResetGeneration = NO_RESET,
+  ...props
+}: ComposerEditorProps) {
+  const nativeRef = useRef<NativeComposerEditorRef>(null);
+  const mostRecentEventCountRef = useRef(0);
+  const [mostRecentEventCount, setMostRecentEventCount] = useState(0);
+  const [, forceNativeEventRender] = useState(0);
+  // Native stamps every event with the reset generation it had applied.
+  const nativeResetGenerationRef = useRef(0);
+  // Start history empty so restored drafts or recycled views receive a non-echo controlled payload.
+  const nativeEventSnapshotsRef = useRef<ComposerNativeEventSnapshot[]>([]);
+  // Tokens advance from the previous committed value; render-phase state keeps
+  // an abandoned render from leaking a trailing token into the next one.
+  const [confirmedTokens, setConfirmedTokens] = useState(() => ({
+    value: props.value,
+    tokens: collectComposerInlineTokens(props.value),
+  }));
+  let tokens = confirmedTokens.tokens;
+  if (confirmedTokens.value !== props.value) {
+    tokens = collectComposerInlineTokens(props.value, {
+      preserveTrailingFrom: confirmedTokens.tokens,
+    });
+    setConfirmedTokens({ value: props.value, tokens });
+  }
+  const bodyText = useScaledTextRole("body");
+  const theme = useUniwindTheme();
+  const fontFamily = FONT_FAMILIES.regular;
+
+  const skillLabels = useMemo(() => composerSkillLabels(skills), [skills]);
+  const { modelsBySource, modelTokens } = useComposerModelTokens(props.value, models);
+  const chipTextColor = createNativeComposerTheme(theme).text;
+  const tokensJson = useMemo(() => {
+    return JSON.stringify(
+      composerContextEditorTokens(props.value, tokens, skillLabels, modelTokens).map((token) => {
+        const model = token.type === "model" ? modelsBySource.get(token.source) : undefined;
+        const record =
+          token.type === "context"
+            ? props.context?.records.find((record) => record.contextId === token.contextId)
+            : undefined;
+        const presentation = contextChipPresentation(
+          token.type === "context" ? token.kind : token.type,
+          record,
+        );
+        const icon = contextChipIcon(
+          presentation,
+          token.type === "mention" ? token.value : contextRecordFileName(record),
+        );
+        return {
+          type: token.type,
+          source: token.source,
+          start: token.start,
+          end: token.end,
+          accent: contextChipAccent(
+            model ? modelChipIcon(model).accent : presentation.accent,
+            theme,
+            chipTextColor,
+          ),
+          label:
+            token.type === "skill"
+              ? (skillLabels.get(token.value) ?? token.value)
+              : model
+                ? model.label
+                : token.type === "context"
+                  ? `${token.label}${props.context?.records.some((record) => record.contextId === token.contextId) ? "" : " · unavailable"}`
+                  : basename(token.value),
+          detail: token.type === "context" ? composerChipSizeSuffix(record) : "",
+          iconUri: model ? modelChipIconUri(model) : contextChipIconUri(icon),
+          tintsIcon: model ? modelChipIcon(model).tintsIcon : icon.kind === "chip",
+        };
+      }),
+    );
+  }, [
+    props.value,
+    tokens,
+    props.context,
+    skillLabels,
+    modelsBySource,
+    modelTokens,
+    theme,
+    chipTextColor,
+  ]);
+  // Every render resolves against the snapshot history, so a render whose
+  // (value, selection) lags the acknowledged native state is stamped behind
+  // the native revision and rejected by the editor instead of re-applying a
+  // stale caret or stale text mid-typing.
+  /* oxlint-disable react/refs -- Native controlled edits must reconcile against the last acknowledged native event before sending the next payload. */
+  const resetGeneration = readResetGeneration();
+  // Native restarts its revision at a reset's stamp, so stamp it at the latest acknowledged event.
+  const controlledEventCount =
+    resetGeneration > nativeResetGenerationRef.current
+      ? mostRecentEventCount
+      : resolveComposerControlledEventCount(
+          props.value,
+          selection ?? null,
+          mostRecentEventCount,
+          nativeEventSnapshotsRef.current,
+        );
+  const acknowledgesLatestNativeEvent = isComposerNativeEcho(
+    props.value,
+    selection ?? null,
+    mostRecentEventCount,
+    nativeEventSnapshotsRef.current,
+  );
+  /* oxlint-enable react/refs */
+  const isNativeEcho =
+    controlledEventCount === mostRecentEventCount && acknowledgesLatestNativeEvent;
+  const controlledDocumentJson = JSON.stringify({
+    value: props.value,
+    selection: isNativeEcho ? null : (selection ?? null),
+    tokensJson,
+    mostRecentEventCount: controlledEventCount,
+    isNativeEcho,
+    resetGeneration,
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- prunes native editor event snapshots once a committed payload acknowledges them
+  useEffect(() => {
+    if (!acknowledgesLatestNativeEvent) return;
+    nativeEventSnapshotsRef.current = pruneAcknowledgedComposerNativeEvents(
+      nativeEventSnapshotsRef.current,
+      mostRecentEventCount,
+    );
+  }, [acknowledgesLatestNativeEvent, mostRecentEventCount, nativeEventSnapshotsRef]);
+  const assumedValue = props.value;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- records the committed controlled payload as the native editor's assumed state
+  useEffect(() => {
+    // Newer native events make this payload stale; do not record it as applied.
+    if (isNativeEcho || controlledEventCount !== mostRecentEventCountRef.current) return;
+    nativeEventSnapshotsRef.current = assumeComposerControlledState(
+      nativeEventSnapshotsRef.current,
+      controlledEventCount,
+      assumedValue,
+    );
+  }, [
+    assumedValue,
+    controlledEventCount,
+    isNativeEcho,
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Every changed native payload, including selection-only changes, must update the assumed native snapshot.
+    controlledDocumentJson,
+    nativeEventSnapshotsRef,
+  ]);
+  const acceptNativeEvent = useCallback(
+    (event: NativeEditorEvent["nativeEvent"]) => {
+      // Read at delivery: a send can clear the draft in the same batch, before this view re-renders.
+      const acknowledgedEventCount = acknowledgeComposerNativeEvent(
+        mostRecentEventCountRef.current,
+        event.eventCount,
+        readResetGeneration(),
+        event.resetGeneration,
+      );
+      if (acknowledgedEventCount === null) {
+        return false;
+      }
+      mostRecentEventCountRef.current = acknowledgedEventCount;
+      nativeResetGenerationRef.current = event.resetGeneration;
+      nativeEventSnapshotsRef.current.push({
+        eventCount: acknowledgedEventCount,
+        value: event.value,
+        selection: event.selection,
+      });
+      return acknowledgedEventCount;
+    },
+    [nativeEventSnapshotsRef, readResetGeneration],
+  );
+  const applyNativeChange = (event: NativeEditorEvent["nativeEvent"]) => {
+    const acknowledgedEventCount = acceptNativeEvent(event);
+    if (acknowledgedEventCount === false) return;
+    onChangeText(event.value);
+    onSelectionChange?.(event.selection);
+    setMostRecentEventCount(acknowledgedEventCount);
+    forceNativeEventRender((sequence) => sequence + 1);
+  };
+  useImperativeHandle(ref, () => ({
+    focus: () => settleViewCommand(nativeRef.current?.focus()),
+    blur: () => settleViewCommand(nativeRef.current?.blur()),
+    setSelection: (nextSelection) =>
+      settleViewCommand(nativeRef.current?.setSelection(nextSelection.start, nextSelection.end)),
+    // Tapping outside the editor makes iOS accept a pending autocorrection, and that edit's
+    // event can reach JS after the tap's handler has already read the draft.
+    flushPendingInput: async () => {
+      const state = await Promise.resolve()
+        .then(() => nativeRef.current?.readState())
+        .catch(() => undefined);
+      // Acknowledging past a paste JS has not received yet would get the paste rejected.
+      if (state && state.pasteEventCount <= mostRecentEventCountRef.current) {
+        applyNativeChange(state);
+      }
+    },
+  }));
+  const themeJson = JSON.stringify(createNativeComposerTheme(theme));
+  const resolvedTextStyle = StyleSheet.flatten(textStyle) ?? {};
+  return (
+    <NativeView
+      ref={nativeRef}
+      controlledDocumentJson={controlledDocumentJson}
+      clipboardFragment={props.clipboardFragment ?? ""}
+      themeJson={themeJson}
+      placeholder={props.placeholder ?? ""}
+      fontFamily={
+        typeof resolvedTextStyle.fontFamily === "string" ? resolvedTextStyle.fontFamily : fontFamily
+      }
+      fontSize={
+        typeof resolvedTextStyle.fontSize === "number"
+          ? resolvedTextStyle.fontSize
+          : bodyText.fontSize
+      }
+      lineHeight={
+        typeof resolvedTextStyle.lineHeight === "number"
+          ? resolvedTextStyle.lineHeight
+          : bodyText.lineHeight
+      }
+      contentInsetVertical={contentInsetVertical}
+      editable={props.editable ?? true}
+      readOnly={props.readOnly ?? false}
+      enterBehavior={props.enterBehavior ?? DEFAULT_COMPOSER_ENTER_BEHAVIOR}
+      submitTitle={props.submitTitle ?? "Send Message"}
+      alternateSubmitTitle={props.alternateSubmitTitle ?? props.submitTitle ?? "Send Message"}
+      scrollEnabled={props.scrollEnabled ?? true}
+      autoFocus={props.autoFocus ?? false}
+      autoCorrect={props.autoCorrect ?? true}
+      spellCheck={props.spellCheck ?? true}
+      textPasteThresholdBytes={onPasteText ? PASTED_TEXT_ATTACHMENT_THRESHOLD_BYTES : 0}
+      maxInputChars={PROVIDER_SEND_TURN_MAX_INPUT_CHARS}
+      style={style as StyleProp<ViewStyle>}
+      onComposerChange={(event) => applyNativeChange(event.nativeEvent)}
+      onComposerSelectionChange={(event) => {
+        const acknowledgedEventCount = acceptNativeEvent(event.nativeEvent);
+        if (acknowledgedEventCount === false) return;
+        // Selection events may carry post-edit text; publish it with its revision or stale drafts can overwrite native text.
+        if (event.nativeEvent.value !== props.value) {
+          onChangeText(event.nativeEvent.value);
+        }
+        onSelectionChange?.(event.nativeEvent.selection);
+        setMostRecentEventCount(acknowledgedEventCount);
+        forceNativeEventRender((sequence) => sequence + 1);
+      }}
+      onComposerPasteImages={(event) => onPasteImages?.(event.nativeEvent.uris)}
+      onComposerContextPress={(event) => props.onContextPress?.(event.nativeEvent)}
+      onComposerPasteContext={(event) => {
+        const paste = event.nativeEvent;
+        const acknowledgedEventCount = acceptNativeEvent(paste);
+        if (acknowledgedEventCount === false) return;
+        onChangeText(paste.value);
+        onSelectionChange?.(paste.selection);
+        props.onPasteContext?.(paste);
+        setMostRecentEventCount(acknowledgedEventCount);
+        forceNativeEventRender((sequence) => sequence + 1);
+      }}
+      onComposerPasteText={(event) => {
+        const paste = event.nativeEvent;
+        const acknowledgedEventCount = acceptNativeEvent(paste);
+        if (acknowledgedEventCount === false) return;
+        // Sync before capturing async paste targets; props may lag the last native keystroke.
+        onChangeText(paste.value);
+        onSelectionChange?.(paste.selection);
+        onPasteText?.(paste);
+        setMostRecentEventCount(acknowledgedEventCount);
+        forceNativeEventRender((sequence) => sequence + 1);
+      }}
+      onComposerFocus={onFocus}
+      onComposerBlur={onBlur}
+      onComposerContentSizeChange={
+        onContentSizeChange === undefined
+          ? undefined
+          : (event) => onContentSizeChange(event.nativeEvent)
+      }
+      onComposerSubmit={
+        onSubmit === undefined
+          ? undefined
+          : (event) => onSubmit(event.nativeEvent.alternate === true)
+      }
+    />
+  );
+}
+
+export type {
+  ComposerEditorHandle,
+  ComposerEditorProps,
+  ComposerEditorSelection,
+  ComposerTextPaste,
+} from "./T3ComposerEditor.types";

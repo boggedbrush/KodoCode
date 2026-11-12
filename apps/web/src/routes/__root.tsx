@@ -1,150 +1,275 @@
-import {
-  OrchestrationEvent,
-  type ServerLifecycleWelcomePayload,
-  type ThreadId,
-} from "@t3tools/contracts";
-import type { UnifiedSettings } from "@t3tools/contracts/settings";
+import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
+import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
 import {
   Outlet,
-  createRootRouteWithContext,
+  Link,
+  redirect,
+  createRootRoute,
   type ErrorComponentProps,
-  useNavigate,
   useLocation,
+  useNavigate,
+  useRouter,
 } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef } from "react";
-import { QueryClient, useQueryClient } from "@tanstack/react-query";
-import { Throttler } from "@tanstack/react-pacer";
-import { Equal } from "effect";
-import { resolveUtilityModelSelectionDefault } from "@t3tools/shared/model";
+import { CheckIcon, CopyIcon } from "lucide-react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 
-import { APP_DISPLAY_NAME } from "../branding";
+import { APP_DISPLAY_NAME, APP_VERSION } from "../branding";
 import { AppSidebarLayout } from "../components/AppSidebarLayout";
-import { AppStartupScreen } from "../components/AppStartupScreen";
-import { DesktopWindowFrame } from "../components/DesktopWindowFrame";
-import {
-  SlowRpcAckToastCoordinator,
-  WebSocketConnectionCoordinator,
-  WebSocketConnectionSurface,
-} from "../components/WebSocketConnectionSurface";
+import { CommandPalette } from "../components/CommandPalette";
+import { CustomSnoozeDialogHost } from "../components/CustomSnoozeDialog";
+import { GuestShareDialogHost } from "../components/chat/GuestShareControls";
+import { UseInAnotherAppDialogHost } from "../components/mcp/UseInAnotherAppDialog";
+import { AddProjectToMachineDialogHost } from "../components/AddProjectToMachineDialog";
+import { ConfirmDialogHost } from "../components/ConfirmDialogHost";
+import { DevReplayHost } from "../components/DevReplayHost";
+import { FirstRunGate } from "../components/onboarding/FirstRunGate";
+import { ConnectOnboardingDialog } from "../components/cloud/ConnectOnboardingDialog";
+import { RelayClientInstallDialog } from "../components/cloud/RelayClientInstallDialog";
+import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
+import { SnapShotCoordinator } from "../components/desktop/SnapShotCoordinator";
+import { DesktopAppActivationCoordinator } from "../components/desktop/DesktopAppActivationCoordinator";
+import { DesktopWebLinkCoordinator } from "../components/desktop/DesktopWebLinkCoordinator";
+import { RunningThreadKeepAlive } from "../components/desktop/RunningThreadKeepAlive";
+import { ReopenClosedViewShortcut } from "../components/ReopenClosedViewShortcut";
+import { ProjectCloneToastCoordinator } from "../components/ProjectCloneToastCoordinator";
+import { ChatGptWelcomeCoordinator } from "../components/settings/ChatGptWelcomeCoordinator";
+import { ThemeEditorHost } from "../components/settings/ThemeEditorHost";
+import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { Button } from "../components/ui/button";
-import { AnchoredToastProvider, ToastProvider, toastManager } from "../components/ui/toast";
-import { resolveAndPersistPreferredEditor } from "../editorPreferences";
-import { readNativeApi } from "../nativeApi";
-import { resolveShortcutCommand } from "../keybindings";
+import { StandalonePage, StandalonePageHeader } from "../components/ui/standalone-page";
+import { AnchoredToastProvider, ToastProvider } from "../components/ui/toast";
+import { isElectron } from "../env";
+import { useClientSettings } from "../hooks/useSettings";
 import {
-  getServerConfigUpdatedNotification,
-  ServerConfigUpdatedNotification,
-  startServerStateSync,
-  useServerConfig,
-  useServerConfigUpdatedSubscription,
-  useServerProviders,
-  useServerWelcomeSubscription,
-} from "../rpc/serverState";
-import { startProviderUsageSync } from "../rpc/providerUsageState";
-import {
-  clearPromotedDraftThread,
-  clearPromotedDraftThreads,
-  useComposerDraftStore,
-} from "../composerDraftStore";
-import { useStore } from "../store";
+  deriveLogicalProjectKeyFromSettings,
+  derivePhysicalProjectKeyFromPath,
+  selectProjectGroupingSettings,
+} from "@t3tools/client-runtime/state/project-grouping";
 import { useUiStateStore } from "../uiStateStore";
-import { useTerminalStateStore } from "../terminalStateStore";
-import { migrateLocalSettingsToServer } from "../hooks/useSettings";
-import { useSettings, useUpdateSettings } from "../hooks/useSettings";
-import { providerQueryKeys } from "../lib/providerReactQuery";
-import { projectQueryKeys } from "../lib/projectReactQuery";
-import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
-import { deriveOrchestrationBatchEffects } from "../orchestrationEventEffects";
-import { createOrchestrationRecoveryCoordinator } from "../orchestrationRecovery";
-import { deriveReplayRetryDecision } from "../orchestrationRecovery";
-import { scheduleStartupWarmup } from "../startupWarmup";
-import { getWsRpcClient } from "~/wsRpcClient";
-import { useServerKeybindings } from "~/rpc/serverState";
+import { configureClientTracing } from "../observability/clientTracing";
+import { resolveInitialServerAuthGateState } from "../environments/primary";
+import { GUEST_PAGE_PATH } from "../guestPage";
+import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
+import { useHostedPromptLinkLanding } from "../components/promptLinks/HostedPromptLinkLanding";
+import { isLocalEnvironmentDisabled } from "../localEnvironment";
+import { useAtomValue } from "@effect/atom-react";
+import { primaryServerConfigAtom, primaryServerWelcomeAtom } from "../state/server";
+import { readProject } from "../state/entities";
 
-export const Route = createRootRouteWithContext<{
-  queryClient: QueryClient;
-}>()({
+import { getDesktopSnapShotBridge } from "../lib/desktopSnapShot";
+import { shouldResumeSnapShotSetupOnStartup } from "../lib/snapShotSetupResume";
+
+export const Route = createRootRoute({
+  beforeLoad: async ({ location }) => {
+    // Guest links open on the owner's tunnel host in a browser with no T3 session, and must
+    // not trigger pairing or an environment connection.
+    if (location.pathname === GUEST_PAGE_PATH) {
+      return {
+        authGateState: {
+          status: "guest",
+        } as const,
+      };
+    }
+
+    if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
+      return {
+        authGateState: {
+          status: "hosted-pairing",
+        } as const,
+      };
+    }
+
+    if (isLocalEnvironmentDisabled() || isHostedStaticApp(new URL(window.location.href))) {
+      return {
+        authGateState: {
+          status: "hosted-static",
+        } as const,
+      };
+    }
+
+    const authGateState = await resolveInitialServerAuthGateState();
+    if (authGateState.status === "authenticated") {
+      // Idempotent, so every navigation can ask for it.
+      void configureClientTracing();
+    }
+    if (
+      authGateState.status === "authenticated" &&
+      getDesktopSnapShotBridge() &&
+      shouldResumeSnapShotSetupOnStartup() &&
+      location.pathname !== "/settings/snap-shot"
+    ) {
+      throw redirect({ to: "/settings/snap-shot", replace: true });
+    }
+    return {
+      authGateState,
+    };
+  },
   component: RootRouteView,
   errorComponent: RootRouteErrorView,
+  notFoundComponent: RootRouteNotFoundView,
   head: () => ({
     meta: [{ name: "title", content: APP_DISPLAY_NAME }],
   }),
 });
 
-function RootRouteView() {
-  if (!readNativeApi()) {
-    return (
-      <DesktopWindowFrame>
-        <AppStartupScreen />
-      </DesktopWindowFrame>
-    );
-  }
-
+function RootRouteNotFoundView() {
   return (
-    <DesktopWindowFrame>
-      <ToastProvider>
-        <AnchoredToastProvider>
-          <ServerStateBootstrap />
-          <StartupWarmupBootstrap />
-          <ProviderUsageStateBootstrap />
-          <UtilityModelDefaultBootstrap />
-          <GlobalAppShortcuts />
-          <EventRouter />
-          <WebSocketConnectionCoordinator />
-          <SlowRpcAckToastCoordinator />
-          <WebSocketConnectionSurface>
-            <AppSidebarLayout>
-              <Outlet />
-            </AppSidebarLayout>
-          </WebSocketConnectionSurface>
-        </AnchoredToastProvider>
-      </ToastProvider>
-    </DesktopWindowFrame>
+    <main className="flex min-h-0 min-w-0 flex-1 items-center justify-center p-6">
+      <div className="flex max-w-sm flex-col items-center gap-4 text-center">
+        <h1 className="text-lg font-medium text-foreground">Page not found</h1>
+        <p className="text-sm text-muted-foreground">
+          This link doesn't point to a page in {APP_DISPLAY_NAME}. Go home to choose a project or
+          start a thread.
+        </p>
+        <Button render={<Link to="/" replace />}>Go home</Button>
+      </div>
+    </main>
   );
 }
 
-function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
-  const message = errorMessage(error);
-  const details = errorDetails(error);
+function RootRouteView() {
+  // Above every branch: app services raise toasts for the whole page, so the surface they write to
+  // must not unmount when the root switches branches (for example /welcome to the app shell).
+  return (
+    <ToastProvider>
+      <AnchoredToastProvider>
+        <RootRouteBranch />
+      </AnchoredToastProvider>
+    </ToastProvider>
+  );
+}
+
+function RootRouteBranch() {
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const { authGateState } = Route.useRouteContext();
+  const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
+  // A sync IPC read; the setting only changes across a relaunch.
+  const [localEnvironmentDisabled] = useState(isLocalEnvironmentDisabled);
+  // Once true, stays true: a visit to /welcome means the bootstrap already chose a route.
+  const [returningFromWelcome, setReturningFromWelcome] = useState(pathname === "/welcome");
+  if (pathname === "/welcome" && !returningFromWelcome) setReturningFromWelcome(true);
+  const hostedPromptLinkLanding = useHostedPromptLinkLanding(
+    authGateState.status === "hosted-static",
+  );
+
+  if (pathname === GUEST_PAGE_PATH) return <Outlet />;
+
+  if (
+    pathname === "/pair" ||
+    pathname === "/connect" ||
+    pathname === "/connect-agent" ||
+    pathname === "/approve-agent"
+  ) {
+    return <Outlet />;
+  }
+
+  // Handle links before onboarding redirects lose them.
+  if (hostedPromptLinkLanding !== null) {
+    return hostedPromptLinkLanding;
+  }
+
+  const isWelcome = pathname === "/welcome";
+  if (authGateState.status !== "authenticated" && authGateState.status !== "hosted-static") {
+    return <Outlet />;
+  }
+
+  // Settings can reopen /welcome mid-session, so it mounts everything the app does except the
+  // first-run gate and the event router, whose first navigation would leave the page.
+  const appHosts = (
+    <>
+      {primaryEnvironmentAuthenticated ? <DesktopAppActivationCoordinator /> : null}
+      {primaryEnvironmentAuthenticated || localEnvironmentDisabled ? (
+        <DesktopWebLinkCoordinator />
+      ) : null}
+      {isElectron ? <RunningThreadKeepAlive /> : null}
+      <RelayClientInstallDialog />
+      <ConnectOnboardingDialog />
+      <SshPasswordPromptDialog />
+      <SnapShotCoordinator />
+      <ReopenClosedViewShortcut />
+      <ConfirmDialogHost />
+      <CustomSnoozeDialogHost />
+      <GuestShareDialogHost />
+      <ProjectCloneToastCoordinator />
+      <AddProjectToMachineDialogHost />
+      <UseInAnotherAppDialogHost />
+      {import.meta.env.DEV && primaryEnvironmentAuthenticated ? <DevReplayHost /> : null}
+    </>
+  );
+  const appShell = (
+    <CommandPalette>
+      {/* Setup starts with an empty workspace, so the Welcome page has no thread list. */}
+      <AppSidebarLayout showSidebar={!isWelcome}>
+        <Outlet />
+      </AppSidebarLayout>
+    </CommandPalette>
+  );
 
   return (
-    <DesktopWindowFrame>
-      <div className="relative flex min-h-screen w-full items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
-        <div className="pointer-events-none absolute inset-0 opacity-80">
-          <div className="absolute inset-x-0 top-0 h-44 bg-[radial-gradient(44rem_16rem_at_top,color-mix(in_srgb,var(--color-red-500)_16%,transparent),transparent)]" />
-          <div className="absolute inset-0 bg-[linear-gradient(145deg,color-mix(in_srgb,var(--background)_90%,var(--color-black))_0%,var(--background)_55%)]" />
-        </div>
+    <>
+      <ChatGptWelcomeCoordinator />
+      {isWelcome ? (
+        <>
+          {appHosts}
+          {appShell}
+        </>
+      ) : (
+        <FirstRunGate
+          enabled={primaryEnvironmentAuthenticated}
+          hostedStatic={authGateState.status === "hosted-static"}
+        >
+          {appHosts}
+          {primaryEnvironmentAuthenticated ? (
+            <EventRouter skipInitialBootstrapNavigation={returningFromWelcome} />
+          ) : null}
+          {appShell}
+        </FirstRunGate>
+      )}
+      {/* Above both shells and the router, so drafts survive navigation, including to /welcome. */}
+      <ThemeEditorHost />
+    </>
+  );
+}
 
-        <section className="relative mx-auto w-full max-w-xl rounded-2xl border border-border/80 bg-card/90 p-6 shadow-2xl shadow-black/20 backdrop-blur-md sm:p-8">
-          <p className="text-[11px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">
-            {APP_DISPLAY_NAME}
-          </p>
-          <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
-            Something went wrong.
-          </h1>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{message}</p>
+function RootRouteErrorView({ error }: ErrorComponentProps) {
+  const router = useRouter();
+  const message = errorMessage(error);
+  // Router pathname rather than window.location: desktop uses hash history, where the window path is always "/".
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const report = errorReport(error, pathname);
 
-          <div className="mt-5 flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => reset()}>
-              Try again
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
-              Reload app
-            </Button>
-          </div>
+  return (
+    <StandalonePage>
+      <StandalonePageHeader title="Something went wrong." description={message} />
 
-          <details className="group mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
-            <summary className="cursor-pointer list-none px-3 py-2 text-xs font-medium text-muted-foreground">
-              <span className="group-open:hidden">Show error details</span>
-              <span className="hidden group-open:inline">Hide error details</span>
-            </summary>
-            <pre className="max-h-56 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs text-foreground/85">
-              {details}
-            </pre>
-          </details>
-        </section>
+      <div className="mt-5 flex flex-wrap gap-2">
+        <Button size="sm" onClick={() => void router.invalidate()}>
+          Try again
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => window.location.reload()}>
+          Reload app
+        </Button>
+        <CopyErrorButton report={report} />
       </div>
-    </DesktopWindowFrame>
+
+      <div className="mt-5 overflow-hidden rounded-lg border border-border/70 bg-background/55">
+        <p className="px-3 py-1.5 text-xs font-medium text-muted-foreground">Error report</p>
+        <pre className="max-h-64 overflow-auto border-t border-border/70 bg-background/80 px-3 py-2 text-xs whitespace-pre-wrap text-foreground/85">
+          {report}
+        </pre>
+      </div>
+    </StandalonePage>
+  );
+}
+
+function CopyErrorButton({ report }: { report: string }) {
+  const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "error-report" });
+
+  return (
+    <Button size="sm" variant="outline" onClick={() => copyToClipboard(report)}>
+      {isCopied ? <CheckIcon className="text-success" /> : <CopyIcon />}
+      {isCopied ? "Copied" : "Copy error"}
+    </Button>
   );
 }
 
@@ -176,544 +301,88 @@ function errorDetails(error: unknown): string {
   }
 }
 
-function coalesceOrchestrationUiEvents(
-  events: ReadonlyArray<OrchestrationEvent>,
-): OrchestrationEvent[] {
-  if (events.length < 2) {
-    return [...events];
+const MAX_ERROR_CAUSE_DEPTH = 5;
+
+// Use only pathname to keep query tokens off the clipboard.
+function errorReport(error: unknown, pathname: string): string {
+  const lines = [
+    `${APP_DISPLAY_NAME} ${APP_VERSION}`,
+    `Path: ${pathname}`,
+    `Time: ${new Date().toISOString()}`,
+    "",
+    errorDetails(error),
+  ];
+  let cause = error instanceof Error ? error.cause : undefined;
+  for (let depth = 0; cause !== undefined && depth < MAX_ERROR_CAUSE_DEPTH; depth += 1) {
+    lines.push("", "Caused by:", errorDetails(cause));
+    cause = cause instanceof Error ? cause.cause : undefined;
   }
-
-  const coalesced: OrchestrationEvent[] = [];
-  for (const event of events) {
-    const previous = coalesced.at(-1);
-    if (
-      previous?.type === "thread.message-sent" &&
-      event.type === "thread.message-sent" &&
-      previous.payload.threadId === event.payload.threadId &&
-      previous.payload.messageId === event.payload.messageId
-    ) {
-      coalesced[coalesced.length - 1] = {
-        ...event,
-        payload: {
-          ...event.payload,
-          attachments: event.payload.attachments ?? previous.payload.attachments,
-          createdAt: previous.payload.createdAt,
-          text:
-            !event.payload.streaming && event.payload.text.length > 0
-              ? event.payload.text
-              : previous.payload.text + event.payload.text,
-        },
-      };
-      continue;
-    }
-
-    coalesced.push(event);
-  }
-
-  return coalesced;
+  return lines.join("\n");
 }
 
-const REPLAY_RECOVERY_RETRY_DELAY_MS = 100;
-const MAX_NO_PROGRESS_REPLAY_RETRIES = 3;
-
-const selectTextGenerationModelSelection = (settings: UnifiedSettings) =>
-  settings.textGenerationModelSelection;
-const selectPromptEnhanceModelSelection = (settings: UnifiedSettings) =>
-  settings.promptEnhanceModelSelection;
-
-function ServerStateBootstrap() {
-  useEffect(() => startServerStateSync(getWsRpcClient().server), []);
-
-  return null;
-}
-
-function ProviderUsageStateBootstrap() {
-  useEffect(() => startProviderUsageSync(getWsRpcClient().server), []);
-
-  return null;
-}
-
-function StartupWarmupBootstrap() {
-  const serverConfig = useServerConfig();
-
-  useEffect(() => {
-    if (serverConfig === null) {
-      return;
-    }
-
-    scheduleStartupWarmup();
-  }, [serverConfig]);
-
-  return null;
-}
-
-function UtilityModelDefaultBootstrap() {
-  const currentTextGenerationModelSelection = useSettings(selectTextGenerationModelSelection);
-  const currentPromptEnhanceModelSelection = useSettings(selectPromptEnhanceModelSelection);
-  const { updateSettings } = useUpdateSettings();
-  const providers = useServerProviders();
-
-  useEffect(() => {
-    const textGenerationModelSelection = resolveUtilityModelSelectionDefault(
-      currentTextGenerationModelSelection,
-      providers,
-    );
-    const promptEnhanceModelSelection = resolveUtilityModelSelectionDefault(
-      currentPromptEnhanceModelSelection,
-      providers,
-    );
-
-    if (
-      Equal.equals(textGenerationModelSelection, currentTextGenerationModelSelection) &&
-      Equal.equals(promptEnhanceModelSelection, currentPromptEnhanceModelSelection)
-    ) {
-      return;
-    }
-
-    updateSettings({
-      ...(Equal.equals(textGenerationModelSelection, currentTextGenerationModelSelection)
-        ? {}
-        : { textGenerationModelSelection }),
-      ...(Equal.equals(promptEnhanceModelSelection, currentPromptEnhanceModelSelection)
-        ? {}
-        : { promptEnhanceModelSelection }),
-    });
-  }, [
-    currentPromptEnhanceModelSelection,
-    currentTextGenerationModelSelection,
-    providers,
-    updateSettings,
-  ]);
-
-  return null;
-}
-
-function GlobalAppShortcuts() {
-  const keybindings = useServerKeybindings();
-
-  useEffect(() => {
-    const onWindowKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-
-      const command = resolveShortcutCommand(event, keybindings);
-      const isBrowserHardRefreshChord =
-        (event.key.toLowerCase() === "r" || event.code === "KeyR") &&
-        event.shiftKey &&
-        !event.altKey &&
-        (event.metaKey || event.ctrlKey);
-
-      if (command !== "app.reload" && !(isBrowserHardRefreshChord && command === null)) {
-        return;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      if (command === "app.reload") {
-        window.location.reload();
-      }
-    };
-
-    window.addEventListener("keydown", onWindowKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onWindowKeyDown);
-    };
-  }, [keybindings]);
-
-  return null;
-}
-
-function EventRouter() {
-  const applyOrchestrationEvents = useStore((store) => store.applyOrchestrationEvents);
-  const syncServerReadModel = useStore((store) => store.syncServerReadModel);
-  const setProjectExpanded = useUiStateStore((store) => store.setProjectExpanded);
-  const syncProjects = useUiStateStore((store) => store.syncProjects);
-  const syncThreads = useUiStateStore((store) => store.syncThreads);
-  const clearThreadUi = useUiStateStore((store) => store.clearThreadUi);
-  const removeTerminalState = useTerminalStateStore((store) => store.removeTerminalState);
-  const removeOrphanedTerminalStates = useTerminalStateStore(
-    (store) => store.removeOrphanedTerminalStates,
-  );
-  const applyTerminalEvent = useTerminalStateStore((store) => store.applyTerminalEvent);
-  const queryClient = useQueryClient();
+function EventRouter({
+  skipInitialBootstrapNavigation,
+}: {
+  readonly skipInitialBootstrapNavigation: boolean;
+}) {
   const navigate = useNavigate();
   const pathname = useLocation({ select: (loc) => loc.pathname });
+  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
+  const serverConfig = useAtomValue(primaryServerConfigAtom);
+  const serverWelcome = useAtomValue(primaryServerWelcomeAtom);
   const readPathname = useEffectEvent(() => pathname);
   const handledBootstrapThreadIdRef = useRef<string | null>(null);
-  const seenServerConfigUpdateIdRef = useRef(getServerConfigUpdatedNotification()?.id ?? 0);
-  const disposedRef = useRef(false);
-  const bootstrapFromSnapshotRef = useRef<() => Promise<void>>(async () => undefined);
-  const serverConfig = useServerConfig();
+  const skipInitialBootstrapNavigationRef = useRef(skipInitialBootstrapNavigation);
 
   const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
     if (!payload) return;
 
-    migrateLocalSettingsToServer();
     void (async () => {
-      await bootstrapFromSnapshotRef.current();
-      if (disposedRef.current) {
-        return;
-      }
-
       if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
         return;
       }
-      setProjectExpanded(payload.bootstrapProjectId, true);
+      const bootstrapProject = readProject(
+        scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
+      );
+      const bootstrapProjectKey =
+        (bootstrapProject
+          ? deriveLogicalProjectKeyFromSettings(bootstrapProject, projectGroupingSettings)
+          : null) ??
+        (serverConfig?.cwd
+          ? derivePhysicalProjectKeyFromPath(payload.environment.environmentId, serverConfig.cwd)
+          : null) ??
+        scopedProjectKey(
+          scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
+        );
+      useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true);
 
       if (readPathname() !== "/") {
+        return;
+      }
+      if (skipInitialBootstrapNavigationRef.current) {
+        skipInitialBootstrapNavigationRef.current = false;
+        handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
         return;
       }
       if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
         return;
       }
       await navigate({
-        to: "/$threadId",
-        params: { threadId: payload.bootstrapThreadId },
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId: payload.environment.environmentId,
+          threadId: payload.bootstrapThreadId,
+        },
         replace: true,
       });
       handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
     })().catch(() => undefined);
   });
 
-  const handleServerConfigUpdated = useEffectEvent(
-    (notification: ServerConfigUpdatedNotification | null) => {
-      if (!notification) return;
-
-      const { id, payload, source } = notification;
-      if (id <= seenServerConfigUpdateIdRef.current) {
-        return;
-      }
-      seenServerConfigUpdateIdRef.current = id;
-      if (source !== "keybindingsUpdated") {
-        return;
-      }
-
-      const issue = payload.issues.find((entry) => entry.kind.startsWith("keybindings."));
-      if (!issue) {
-        toastManager.add({
-          type: "success",
-          title: "Keybindings updated",
-          description: "Keybindings configuration reloaded successfully.",
-        });
-        return;
-      }
-
-      toastManager.add({
-        type: "warning",
-        title: "Invalid keybindings configuration",
-        description: issue.message,
-        actionProps: {
-          children: "Open keybindings.json",
-          onClick: () => {
-            const api = readNativeApi();
-            if (!api) {
-              return;
-            }
-
-            void Promise.resolve(serverConfig ?? api.server.getConfig())
-              .then((config) => {
-                const editor = resolveAndPersistPreferredEditor(config.availableEditors);
-                if (!editor) {
-                  throw new Error("No available editors found.");
-                }
-                return api.shell.openInEditor(config.keybindingsConfigPath, editor);
-              })
-              .catch((error) => {
-                toastManager.add({
-                  type: "error",
-                  title: "Unable to open keybindings file",
-                  description:
-                    error instanceof Error ? error.message : "Unknown error opening file.",
-                });
-              });
-          },
-        },
-      });
-    },
-  );
-
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- expands the bootstrap project in the UI store and navigates the router on a server welcome
   useEffect(() => {
-    const api = readNativeApi();
-    if (!api) return;
-    let disposed = false;
-    disposedRef.current = false;
-    const recovery = createOrchestrationRecoveryCoordinator();
-    let replayRetryTracker: import("../orchestrationRecovery").ReplayRetryTracker | null = null;
-    let needsProviderInvalidation = false;
-    const pendingDomainEvents: OrchestrationEvent[] = [];
-    let flushPendingDomainEventsScheduled = false;
-
-    const reconcileSnapshotDerivedState = () => {
-      const threads = useStore.getState().threads;
-      const projects = useStore.getState().projects;
-      syncProjects(projects.map((project) => ({ id: project.id, cwd: project.cwd })));
-      syncThreads(
-        threads.map((thread) => ({
-          id: thread.id,
-          seedVisitedAt: thread.updatedAt ?? thread.createdAt,
-        })),
-      );
-      clearPromotedDraftThreads(threads.map((thread) => thread.id));
-      const draftThreadIds = Object.keys(
-        useComposerDraftStore.getState().draftThreadsByThreadId,
-      ) as ThreadId[];
-      const activeThreadIds = collectActiveTerminalThreadIds({
-        snapshotThreads: threads.map((thread) => ({
-          id: thread.id,
-          deletedAt: null,
-          archivedAt: thread.archivedAt,
-        })),
-        draftThreadIds,
-      });
-      removeOrphanedTerminalStates(activeThreadIds);
-    };
-
-    const queryInvalidationThrottler = new Throttler(
-      () => {
-        if (!needsProviderInvalidation) {
-          return;
-        }
-        needsProviderInvalidation = false;
-        void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
-        // Invalidate workspace entry queries so the @-mention file picker
-        // reflects files created, deleted, or restored during this turn.
-        void queryClient.invalidateQueries({ queryKey: projectQueryKeys.all });
-      },
-      {
-        wait: 100,
-        leading: false,
-        trailing: true,
-      },
-    );
-
-    const applyEventBatch = (events: ReadonlyArray<OrchestrationEvent>) => {
-      const nextEvents = recovery.markEventBatchApplied(events);
-      if (nextEvents.length === 0) {
-        return;
-      }
-
-      const batchEffects = deriveOrchestrationBatchEffects(nextEvents);
-      const uiEvents = coalesceOrchestrationUiEvents(nextEvents);
-      const needsProjectUiSync = nextEvents.some(
-        (event) =>
-          event.type === "project.created" ||
-          event.type === "project.meta-updated" ||
-          event.type === "project.deleted",
-      );
-
-      if (batchEffects.needsProviderInvalidation) {
-        needsProviderInvalidation = true;
-        void queryInvalidationThrottler.maybeExecute();
-      }
-
-      applyOrchestrationEvents(uiEvents);
-      if (needsProjectUiSync) {
-        const projects = useStore.getState().projects;
-        syncProjects(projects.map((project) => ({ id: project.id, cwd: project.cwd })));
-      }
-      const needsThreadUiSync = nextEvents.some(
-        (event) => event.type === "thread.created" || event.type === "thread.deleted",
-      );
-      if (needsThreadUiSync) {
-        const threads = useStore.getState().threads;
-        syncThreads(
-          threads.map((thread) => ({
-            id: thread.id,
-            seedVisitedAt: thread.updatedAt ?? thread.createdAt,
-          })),
-        );
-      }
-      const draftStore = useComposerDraftStore.getState();
-      for (const threadId of batchEffects.clearPromotedDraftThreadIds) {
-        clearPromotedDraftThread(threadId);
-      }
-      for (const threadId of batchEffects.clearDeletedThreadIds) {
-        draftStore.clearDraftThread(threadId);
-        clearThreadUi(threadId);
-      }
-      for (const threadId of batchEffects.removeTerminalStateThreadIds) {
-        removeTerminalState(threadId);
-      }
-    };
-    const flushPendingDomainEvents = () => {
-      flushPendingDomainEventsScheduled = false;
-      if (disposed || pendingDomainEvents.length === 0) {
-        return;
-      }
-
-      const events = pendingDomainEvents.splice(0, pendingDomainEvents.length);
-      applyEventBatch(events);
-    };
-    const schedulePendingDomainEventFlush = () => {
-      if (flushPendingDomainEventsScheduled) {
-        return;
-      }
-
-      flushPendingDomainEventsScheduled = true;
-      queueMicrotask(flushPendingDomainEvents);
-    };
-
-    const runReplayRecovery = async (reason: "sequence-gap" | "resubscribe"): Promise<void> => {
-      if (!recovery.beginReplayRecovery(reason)) {
-        return;
-      }
-
-      const fromSequenceExclusive = recovery.getState().latestSequence;
-      try {
-        const events = await api.orchestration.replayEvents(fromSequenceExclusive);
-        if (!disposed) {
-          applyEventBatch(events);
-        }
-      } catch {
-        replayRetryTracker = null;
-        recovery.failReplayRecovery();
-        void fallbackToSnapshotRecovery();
-        return;
-      }
-
-      if (!disposed) {
-        const replayCompletion = recovery.completeReplayRecovery();
-        const retryDecision = deriveReplayRetryDecision({
-          previousTracker: replayRetryTracker,
-          completion: replayCompletion,
-          recoveryState: recovery.getState(),
-          baseDelayMs: REPLAY_RECOVERY_RETRY_DELAY_MS,
-          maxNoProgressRetries: MAX_NO_PROGRESS_REPLAY_RETRIES,
-        });
-        replayRetryTracker = retryDecision.tracker;
-
-        if (retryDecision.shouldRetry) {
-          if (retryDecision.delayMs > 0) {
-            await new Promise<void>((resolve) => {
-              setTimeout(resolve, retryDecision.delayMs);
-            });
-            if (disposed) {
-              return;
-            }
-          }
-          void runReplayRecovery(reason);
-        } else if (replayCompletion.shouldReplay && import.meta.env.MODE !== "test") {
-          console.warn(
-            "[orchestration-recovery]",
-            "Stopping replay recovery after no-progress retries.",
-            {
-              state: recovery.getState(),
-            },
-          );
-        }
-      }
-    };
-
-    const runSnapshotRecovery = async (reason: "bootstrap" | "replay-failed"): Promise<void> => {
-      const started = recovery.beginSnapshotRecovery(reason);
-      if (import.meta.env.MODE !== "test") {
-        const state = recovery.getState();
-        console.info("[orchestration-recovery]", "Snapshot recovery requested.", {
-          reason,
-          skipped: !started,
-          ...(started
-            ? {}
-            : {
-                blockedBy: state.inFlight?.kind ?? null,
-                blockedByReason: state.inFlight?.reason ?? null,
-              }),
-          state,
-        });
-      }
-      if (!started) {
-        return;
-      }
-
-      try {
-        const snapshot = await api.orchestration.getSnapshot();
-        if (!disposed) {
-          syncServerReadModel(snapshot);
-          reconcileSnapshotDerivedState();
-          if (recovery.completeSnapshotRecovery(snapshot.snapshotSequence)) {
-            void runReplayRecovery("sequence-gap");
-          }
-        }
-      } catch {
-        // Keep prior state and wait for welcome or a later replay attempt.
-        recovery.failSnapshotRecovery();
-      }
-    };
-
-    let bootstrapSnapshotPromise: Promise<void> | null = null;
-    const bootstrapFromSnapshot = async (): Promise<void> => {
-      bootstrapSnapshotPromise ??= runSnapshotRecovery("bootstrap").finally(() => {
-        bootstrapSnapshotPromise = null;
-      });
-      await bootstrapSnapshotPromise;
-    };
-    bootstrapFromSnapshotRef.current = bootstrapFromSnapshot;
-
-    const fallbackToSnapshotRecovery = async (): Promise<void> => {
-      await runSnapshotRecovery("replay-failed");
-    };
-    const unsubDomainEvent = api.orchestration.onDomainEvent(
-      (event) => {
-        const action = recovery.classifyDomainEvent(event.sequence);
-        if (action === "apply") {
-          pendingDomainEvents.push(event);
-          schedulePendingDomainEventFlush();
-          return;
-        }
-        if (action === "recover") {
-          flushPendingDomainEvents();
-          void runReplayRecovery("sequence-gap");
-        }
-      },
-      {
-        onResubscribe: () => {
-          if (disposed) {
-            return;
-          }
-          flushPendingDomainEvents();
-          void runReplayRecovery("resubscribe");
-        },
-      },
-    );
-    const unsubTerminalEvent = api.terminal.onEvent((event) => {
-      const thread = useStore.getState().threads.find((entry) => entry.id === event.threadId);
-      if (thread && thread.archivedAt !== null) {
-        return;
-      }
-      applyTerminalEvent(event);
-    });
-    return () => {
-      disposed = true;
-      disposedRef.current = true;
-      needsProviderInvalidation = false;
-      flushPendingDomainEventsScheduled = false;
-      pendingDomainEvents.length = 0;
-      queryInvalidationThrottler.cancel();
-      unsubDomainEvent();
-      unsubTerminalEvent();
-    };
-  }, [
-    applyOrchestrationEvents,
-    navigate,
-    queryClient,
-    removeTerminalState,
-    removeOrphanedTerminalStates,
-    applyTerminalEvent,
-    clearThreadUi,
-    setProjectExpanded,
-    syncProjects,
-    syncServerReadModel,
-    syncThreads,
-  ]);
-
-  useEffect(() => {
-    if (serverConfig === null) {
-      return;
-    }
-
-    void bootstrapFromSnapshotRef.current();
-  }, [serverConfig]);
-
-  useServerWelcomeSubscription(handleWelcome);
-  useServerConfigUpdatedSubscription(handleServerConfigUpdated);
+    handleWelcome(serverWelcome);
+  }, [serverWelcome]);
 
   return null;
 }

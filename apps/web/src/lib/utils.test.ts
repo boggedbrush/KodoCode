@@ -1,15 +1,11 @@
-import { assert, describe, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
-import { isWindowsPlatform } from "./utils";
+import { cn } from "./utils";
 
-describe("isWindowsPlatform", () => {
-  it("matches Windows platform identifiers", () => {
-    assert.isTrue(isWindowsPlatform("Win32"));
-    assert.isTrue(isWindowsPlatform("Windows"));
-    assert.isTrue(isWindowsPlatform("windows_nt"));
-  });
-
-  it("does not match darwin", () => {
-    assert.isFalse(isWindowsPlatform("darwin"));
+describe("cn", () => {
+  it("keeps a background color next to a composer seam background image", () => {
+    expect(cn("dark:before:bg-transparent dark:before:bg-composer-seam-below")).toBe(
+      "dark:before:bg-transparent dark:before:bg-composer-seam-below",
+    );
   });
 });

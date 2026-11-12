@@ -1,211 +1,462 @@
 import {
-  DEFAULT_MODEL_BY_PROVIDER,
-  DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  type CustomModelSetting,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
-  type ClaudeCodeEffort,
-  type ClaudeModelOptions,
-  type CodexModelOptions,
-  type ModelCapabilities,
+  ModelCapabilities,
   type ModelSelection,
-  type ProviderKind,
-  type ServerProvider,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ProviderOptionDescriptor,
+  type ProviderOptionSelection,
 } from "@t3tools/contracts";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import { copySorted } from "./Array.ts";
+
+const DEFAULT_PROVIDER_DRIVER_KIND = ProviderDriverKind.make("codex");
+
+export function modelSelectionCommandType(
+  currentInstanceId: ProviderInstanceId,
+  selection: ModelSelection,
+) {
+  return currentInstanceId === selection.instanceId
+    ? ("thread.model-selection.set" as const)
+    : ("provider.switch" as const);
+}
 
 export interface SelectableModelOption {
   slug: string;
   name: string;
+  aliases?: ReadonlyArray<string> | undefined;
 }
 
-export const CODEX_SPARK_MODEL = "gpt-5.3-codex-spark";
+export function createModelCapabilities(input: {
+  optionDescriptors: ReadonlyArray<ProviderOptionDescriptor>;
+}): ModelCapabilities {
+  return {
+    optionDescriptors: input.optionDescriptors.map(cloneDescriptor),
+  };
+}
 
-function hasServerModel(
-  providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
-  slug: string,
-): boolean {
-  return (
-    providers
-      .find((candidate) => candidate.provider === provider)
-      ?.models.some((model) => model.slug === slug) ?? false
+function getRawSelectionValueById(
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+  id: string,
+): string | boolean | undefined {
+  const selection = selections?.find((candidate) => candidate.id === id);
+  return selection?.value;
+}
+
+function getProviderOptionSelectionValue(
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+  id: string,
+): string | boolean | undefined {
+  return getRawSelectionValueById(selections, id);
+}
+
+function getProviderOptionStringSelectionValue(
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+  id: string,
+): string | undefined {
+  const value = getProviderOptionSelectionValue(selections, id);
+  return typeof value === "string" ? value : undefined;
+}
+
+function getProviderOptionBooleanSelectionValue(
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+  id: string,
+): boolean | undefined {
+  const value = getProviderOptionSelectionValue(selections, id);
+  return typeof value === "boolean" ? value : undefined;
+}
+
+export function getModelSelectionStringOptionValue(
+  modelSelection: ModelSelection | null | undefined,
+  id: string,
+): string | undefined {
+  return getProviderOptionStringSelectionValue(modelSelection?.options, id);
+}
+
+export function getModelSelectionBooleanOptionValue(
+  modelSelection: ModelSelection | null | undefined,
+  id: string,
+): boolean | undefined {
+  return getProviderOptionBooleanSelectionValue(modelSelection?.options, id);
+}
+
+function canonicalModelSelectionOptions(
+  modelSelection: ModelSelection,
+): ReadonlyArray<readonly [id: string, value: string | boolean]> {
+  return copySorted(
+    (modelSelection.options ?? []).map(
+      (selection): readonly [id: string, value: string | boolean] => [
+        selection.id,
+        selection.value,
+      ],
+    ),
+    (
+      [leftId, leftValue]: readonly [id: string, value: string | boolean],
+      [rightId, rightValue]: readonly [id: string, value: string | boolean],
+    ) => {
+      const idOrder = leftId.localeCompare(rightId);
+      return idOrder !== 0 ? idOrder : String(leftValue).localeCompare(String(rightValue));
+    },
   );
 }
 
-function isEmptyCodexModelOptions(options: CodexModelOptions | undefined): boolean {
-  return options?.reasoningEffort === undefined && options?.fastMode === undefined;
-}
-
-export function getDefaultUtilityModelSelection(
-  providers: ReadonlyArray<ServerProvider>,
-): ModelSelection {
-  if (hasServerModel(providers, "codex", CODEX_SPARK_MODEL)) {
-    return {
-      provider: "codex",
-      model: CODEX_SPARK_MODEL,
-      options: { reasoningEffort: "low" },
-    };
+export function modelSelectionsEqual(left: ModelSelection, right: ModelSelection): boolean {
+  if (left.instanceId !== right.instanceId || left.model !== right.model) {
+    return false;
   }
-
-  return {
-    provider: "codex",
-    model: DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex,
-  };
-}
-
-export function resolveUtilityModelSelectionDefault(
-  selection: ModelSelection | null | undefined,
-  providers: ReadonlyArray<ServerProvider>,
-): ModelSelection {
-  const fallback = getDefaultUtilityModelSelection(providers);
-  if (!selection) {
-    return fallback;
-  }
-
-  if (
-    selection.provider === "codex" &&
-    selection.model === DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER.codex &&
-    isEmptyCodexModelOptions(selection.options)
-  ) {
-    return fallback;
-  }
-
-  return selection;
-}
-
-// ── Effort helpers ────────────────────────────────────────────────────
-
-/** Check whether a capabilities object includes a given effort value. */
-export function hasEffortLevel(caps: ModelCapabilities, value: string): boolean {
-  return caps.reasoningEffortLevels.some((l) => l.value === value);
-}
-
-/** Return the default effort value for a capabilities object, or null if none. */
-export function getDefaultEffort(caps: ModelCapabilities): string | null {
-  return caps.reasoningEffortLevels.find((l) => l.isDefault)?.value ?? null;
+  const leftOptions = canonicalModelSelectionOptions(left);
+  const rightOptions = canonicalModelSelectionOptions(right);
+  return (
+    leftOptions.length === rightOptions.length &&
+    leftOptions.every(
+      ([id, value], index) => id === rightOptions[index]?.[0] && value === rightOptions[index]?.[1],
+    )
+  );
 }
 
 /**
- * Resolve a raw effort option against capabilities.
- *
- * Returns the effective effort value — the explicit value if supported and not
- * prompt-injected, otherwise the model's default. Returns `undefined` only
- * when the model has no effort levels at all.
- *
- * Prompt-injected efforts (e.g. "ultrathink") are excluded because they are
- * applied via prompt text, not the effort API parameter.
+ * Whether a composer's draft model pick is what the thread already runs. Web sends
+ * `fastMode: false` for models with a fast toggle while mobile omits it, so off counts as unset.
  */
-export function resolveEffort(
-  caps: ModelCapabilities,
+export function draftModelPickMatchesThread(pick: ModelSelection, thread: ModelSelection): boolean {
+  const withoutFastModeOff = (selection: ModelSelection) =>
+    createModelSelection(
+      selection.instanceId,
+      selection.model,
+      selection.options?.filter((option) => option.id !== "fastMode" || option.value !== false),
+    );
+  return modelSelectionsEqual(withoutFastModeOff(pick), withoutFastModeOff(thread));
+}
+
+function resolveDescriptorChoiceValue(
+  descriptor: Extract<ProviderOptionDescriptor, { type: "select" }>,
   raw: string | null | undefined,
 ): string | undefined {
-  const defaultValue = getDefaultEffort(caps);
-  const trimmed = typeof raw === "string" ? raw.trim() : null;
-  if (
-    trimmed &&
-    !caps.promptInjectedEffortLevels.includes(trimmed) &&
-    hasEffortLevel(caps, trimmed)
-  ) {
+  const trimmed = trimOrNull(raw);
+  if (!trimmed) {
+    return descriptor.currentValue ?? descriptor.options.find((option) => option.isDefault)?.id;
+  }
+  if (descriptor.options.length === 0) {
     return trimmed;
   }
-  return defaultValue ?? undefined;
+  if (
+    descriptor.promptInjectedValues?.includes(trimmed) &&
+    descriptor.options.some((option) => option.id === trimmed)
+  ) {
+    return descriptor.options.find((option) => option.isDefault)?.id;
+  }
+  if (descriptor.options.some((option) => option.id === trimmed)) {
+    return trimmed;
+  }
+  return descriptor.currentValue ?? descriptor.options.find((option) => option.isDefault)?.id;
 }
 
-// ── Context window helpers ───────────────────────────────────────────
-
-/** Check whether a capabilities object includes a given context window value. */
-export function hasContextWindowOption(caps: ModelCapabilities, value: string): boolean {
-  return caps.contextWindowOptions.some((o) => o.value === value);
+function cloneDescriptor(descriptor: ProviderOptionDescriptor): ProviderOptionDescriptor {
+  return descriptor.type === "select"
+    ? {
+        ...descriptor,
+        options: [...descriptor.options],
+        ...(descriptor.promptInjectedValues
+          ? { promptInjectedValues: [...descriptor.promptInjectedValues] }
+          : {}),
+      }
+    : { ...descriptor };
 }
 
-/** Return the default context window value, or `null` if none is defined. */
-export function getDefaultContextWindow(caps: ModelCapabilities): string | null {
-  return caps.contextWindowOptions.find((o) => o.isDefault)?.value ?? null;
+function cloneSelection(selection: ProviderOptionSelection): ProviderOptionSelection {
+  return { ...selection };
 }
 
-/**
- * Resolve a raw `contextWindow` option against capabilities.
- *
- * Returns the effective context window value — the explicit value if supported,
- * otherwise the model's default. Returns `undefined` only when the model has
- * no context window options at all.
- *
- * Unlike effort levels (where the API has matching defaults), the context
- * window requires an explicit API suffix (e.g. `[1m]`), so we always preserve
- * the resolved value to avoid ambiguity between "user chose the default" and
- * "not specified".
- */
-export function resolveContextWindow(
-  caps: ModelCapabilities,
-  raw: string | null | undefined,
+function withDescriptorCurrentValue(
+  descriptor: ProviderOptionDescriptor,
+  rawCurrentValue: string | boolean | undefined,
+): ProviderOptionDescriptor {
+  if (descriptor.type === "boolean") {
+    if (typeof rawCurrentValue === "boolean") {
+      return {
+        ...descriptor,
+        currentValue: rawCurrentValue,
+      };
+    }
+    return descriptor;
+  }
+  const currentValue =
+    typeof rawCurrentValue === "string"
+      ? resolveDescriptorChoiceValue(descriptor, rawCurrentValue)
+      : resolveDescriptorChoiceValue(descriptor, descriptor.currentValue);
+  if (!currentValue) {
+    const { currentValue: _unusedCurrentValue, ...rest } = descriptor;
+    return rest;
+  }
+  return {
+    ...descriptor,
+    currentValue,
+  };
+}
+
+// Ultracode was a Claude effort level before it became its own toggle; that level ran at xhigh.
+export function withLegacyUltracodeEffort<
+  Selections extends ReadonlyArray<ProviderOptionSelection> | null | undefined,
+>(
+  descriptors: ReadonlyArray<ProviderOptionDescriptor> | null | undefined,
+  selections: Selections,
+): Selections | Array<ProviderOptionSelection> {
+  if (
+    getRawSelectionValueById(selections, "effort") !== "ultracode" ||
+    !descriptors?.some(
+      (descriptor) => descriptor.id === "ultracode" && descriptor.type === "boolean",
+    )
+  ) {
+    return selections;
+  }
+  return [
+    ...(selections ?? []).map((selection) =>
+      selection.id === "effort" && selection.value === "ultracode"
+        ? { id: "effort", value: "xhigh" }
+        : selection,
+    ),
+    ...(getRawSelectionValueById(selections, "ultracode") === undefined
+      ? [{ id: "ultracode", value: true }]
+      : []),
+  ];
+}
+
+export function getProviderOptionDescriptors(input: {
+  caps: ModelCapabilities;
+  selections?: ReadonlyArray<ProviderOptionSelection> | null | undefined;
+}): ReadonlyArray<ProviderOptionDescriptor> {
+  const { caps } = input;
+  const baseDescriptors = (caps.optionDescriptors ?? []).map(cloneDescriptor);
+  const selections = withLegacyUltracodeEffort(baseDescriptors, input.selections);
+
+  return baseDescriptors.map((descriptor) =>
+    withDescriptorCurrentValue(
+      descriptor,
+      getRawSelectionValueById(selections, descriptor.id) ?? descriptor.currentValue,
+    ),
+  );
+}
+
+function getReportedOptionValue(
+  id: string,
+  selection?: ModelSelection | null,
+  reportedSelection?: ModelSelection | null,
+) {
+  if (
+    !selection ||
+    !reportedSelection ||
+    selection.instanceId !== reportedSelection.instanceId ||
+    selection.model !== reportedSelection.model ||
+    selection.options?.some((option) => option.id === id)
+  )
+    return undefined;
+  return getRawSelectionValueById(reportedSelection.options, id);
+}
+
+export function getProviderOptionStatedValue(
+  id: string,
+  selection?: ModelSelection | null,
+  reportedSelection?: ModelSelection | null,
+) {
+  return (
+    getRawSelectionValueById(selection?.options, id) ??
+    getReportedOptionValue(id, selection, reportedSelection)
+  );
+}
+
+export function getProviderOptionCurrentValue(
+  descriptor: ProviderOptionDescriptor | null | undefined,
+  selection?: ModelSelection | null,
+  reportedSelection?: ModelSelection | null,
+): string | boolean | undefined {
+  if (!descriptor) {
+    return undefined;
+  }
+  const hasExplicitOption = selection?.options?.some((option) => option.id === descriptor.id);
+  // Reported values are display-only; callers that build dispatch options omit this context.
+  const reportedValue = getReportedOptionValue(descriptor.id, selection, reportedSelection);
+  if (reportedValue !== undefined) return reportedValue;
+  if (descriptor.id === "variant" && selection && !hasExplicitOption) return undefined;
+  if (descriptor.type === "boolean") {
+    return descriptor.currentValue;
+  }
+  if (descriptor.currentValue) {
+    return descriptor.currentValue;
+  }
+  return descriptor.options.find((option) => option.isDefault)?.id;
+}
+
+export function getProviderOptionCurrentLabel(
+  descriptor: ProviderOptionDescriptor | null | undefined,
+  selection?: ModelSelection | null,
+  reportedSelection?: ModelSelection | null,
 ): string | undefined {
-  const defaultValue = getDefaultContextWindow(caps);
-  if (!raw) return defaultValue ?? undefined;
-  return hasContextWindowOption(caps, raw) ? raw : (defaultValue ?? undefined);
+  if (!descriptor) {
+    return undefined;
+  }
+  if (descriptor.type === "boolean") {
+    return typeof descriptor.currentValue === "boolean"
+      ? descriptor.currentValue
+        ? "On"
+        : "Off"
+      : undefined;
+  }
+  const currentValue = getProviderOptionCurrentValue(descriptor, selection, reportedSelection);
+  return (
+    descriptor.options.find((option) => option.id === currentValue)?.label ??
+    (getReportedOptionValue(descriptor.id, selection, reportedSelection) === "default"
+      ? "Default"
+      : descriptor.id === "variant"
+        ? "Unknown"
+        : undefined)
+  );
 }
 
-export function normalizeCodexModelOptionsWithCapabilities(
-  caps: ModelCapabilities,
-  modelOptions: CodexModelOptions | null | undefined,
-): CodexModelOptions | undefined {
-  const reasoningEffort = resolveEffort(caps, modelOptions?.reasoningEffort);
-  const fastMode = caps.supportsFastMode ? modelOptions?.fastMode : undefined;
-  const nextOptions: CodexModelOptions = {
-    ...(reasoningEffort
-      ? { reasoningEffort: reasoningEffort as CodexModelOptions["reasoningEffort"] }
-      : {}),
-    ...(fastMode !== undefined ? { fastMode } : {}),
-  };
-  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+export function buildProviderOptionSelectionsFromDescriptors(
+  descriptors: ReadonlyArray<ProviderOptionDescriptor> | null | undefined,
+): Array<ProviderOptionSelection> | undefined {
+  if (!descriptors || descriptors.length === 0) {
+    return undefined;
+  }
+
+  const nextSelections: Array<ProviderOptionSelection> = [];
+
+  for (const descriptor of descriptors) {
+    const value = getProviderOptionCurrentValue(descriptor);
+    if (typeof value === "string" || typeof value === "boolean") {
+      nextSelections.push({ id: descriptor.id, value });
+    }
+  }
+
+  return nextSelections.length > 0 ? nextSelections : undefined;
 }
 
-export function normalizeClaudeModelOptionsWithCapabilities(
-  caps: ModelCapabilities,
-  modelOptions: ClaudeModelOptions | null | undefined,
-): ClaudeModelOptions | undefined {
-  const effort = resolveEffort(caps, modelOptions?.effort);
-  const thinking = caps.supportsThinkingToggle ? modelOptions?.thinking : undefined;
-  const fastMode = caps.supportsFastMode ? modelOptions?.fastMode : undefined;
-  const contextWindow = resolveContextWindow(caps, modelOptions?.contextWindow);
-  const nextOptions: ClaudeModelOptions = {
-    ...(thinking !== undefined ? { thinking } : {}),
-    ...(effort ? { effort: effort as ClaudeModelOptions["effort"] } : {}),
-    ...(fastMode !== undefined ? { fastMode } : {}),
-    ...(contextWindow !== undefined ? { contextWindow } : {}),
-  };
-  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+export function buildExplicitProviderOptionSelectionsFromDescriptors(
+  descriptors: ReadonlyArray<ProviderOptionDescriptor> | null | undefined,
+  selections: ReadonlyArray<ProviderOptionSelection> | null | undefined,
+): Array<ProviderOptionSelection> | undefined {
+  if (!selections || selections.length === 0) {
+    return undefined;
+  }
+  const explicitIds = new Set(
+    withLegacyUltracodeEffort(descriptors, selections).map(({ id }) => id),
+  );
+  const normalized = buildProviderOptionSelectionsFromDescriptors(descriptors)?.filter(
+    (selection) => explicitIds.has(selection.id),
+  );
+  return normalized && normalized.length > 0 ? normalized : undefined;
 }
 
 export function isClaudeUltrathinkPrompt(text: string | null | undefined): boolean {
   return typeof text === "string" && /\bultrathink\b/i.test(text);
 }
 
+export function codexModelFamily(slug: string): string {
+  return slug.startsWith("openai.gpt-") ? slug.slice("openai.".length) : slug;
+}
+
+export function formatCodexModelName(name: string): string {
+  return name.replace(/^gpt/i, "GPT").replace(/-([a-z])/g, (_, c) => "-" + c.toUpperCase());
+}
+
+export function formatModelSlugName(slug: string): string {
+  const separator = slug.lastIndexOf("/") + 1;
+  const prefix = slug.slice(0, separator);
+  const name = slug.slice(separator);
+  if (/^gpt-\d/i.test(name)) return prefix + formatCodexModelName(name);
+  if (!/^(claude-(opus|sonnet|haiku|fable)|gemini|grok|composer)-\d/i.test(name)) return slug;
+  return (
+    prefix +
+    name
+      .replace(/^(claude-[a-z]+-\d+)-(\d{1,2})(?=-|\[|$)/i, "$1.$2")
+      .split("-")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ")
+  );
+}
+
 export function normalizeModelSlug(
   model: string | null | undefined,
-  provider: ProviderKind = "codex",
+  provider: ProviderDriverKind = DEFAULT_PROVIDER_DRIVER_KIND,
 ): string | null {
-  if (typeof model !== "string") {
-    return null;
-  }
-
-  const trimmed = model.trim();
+  const trimmed = normalizeCustomModelSlug(model);
   if (!trimmed) {
     return null;
   }
 
-  const normalized = trimmed.toLowerCase();
-  const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, string>;
-  const aliased = Object.prototype.hasOwnProperty.call(aliases, normalized)
-    ? aliases[normalized]
+  const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] ?? {};
+  const aliased = Object.prototype.hasOwnProperty.call(aliases, trimmed)
+    ? aliases[trimmed]
     : undefined;
-
-  if (!aliased && normalized === "auto") {
-    return "auto";
-  }
-
   return typeof aliased === "string" ? aliased : trimmed;
 }
 
+/** Custom model identifiers are provider-owned, so only trim them; never expand aliases. */
+export function normalizeCustomModelSlug(model: string | null | undefined): string | null {
+  if (typeof model !== "string") {
+    return null;
+  }
+
+  return model.trim() || null;
+}
+
+export interface CustomModelDefinition {
+  readonly slug: string;
+  readonly name: string;
+  readonly capabilities: ModelCapabilities | null;
+}
+
+const decodeCustomModelCapabilities = Schema.decodeUnknownOption(ModelCapabilities);
+
+export function readCustomModelEntries(value: unknown): CustomModelDefinition[] {
+  if (!Array.isArray(value)) return [];
+  const entries: CustomModelDefinition[] = [];
+  const seen = new Set<string>();
+  for (const raw of value) {
+    const record =
+      typeof raw === "string"
+        ? { slug: raw }
+        : raw !== null && typeof raw === "object"
+          ? (raw as { slug?: unknown; name?: unknown; capabilities?: unknown })
+          : null;
+    if (!record) continue;
+    const slug = normalizeCustomModelSlug(typeof record.slug === "string" ? record.slug : null);
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    const name =
+      (typeof record.name === "string" ? normalizeCustomModelSlug(record.name) : null) ?? slug;
+    const capabilities =
+      record.capabilities === undefined || record.capabilities === null
+        ? null
+        : Option.getOrNull(decodeCustomModelCapabilities(record.capabilities));
+    entries.push({
+      slug,
+      name,
+      capabilities: capabilities
+        ? createModelCapabilities({ optionDescriptors: capabilities.optionDescriptors ?? [] })
+        : null,
+    });
+  }
+  return entries;
+}
+
+export function toCustomModelSetting(entry: CustomModelDefinition): CustomModelSetting {
+  const descriptors = entry.capabilities?.optionDescriptors ?? [];
+  const name = entry.name !== entry.slug ? entry.name : undefined;
+  if (!name && descriptors.length === 0) return entry.slug;
+  return {
+    slug: entry.slug,
+    ...(name ? { name } : {}),
+    ...(descriptors.length > 0
+      ? { capabilities: createModelCapabilities({ optionDescriptors: descriptors }) }
+      : {}),
+  };
+}
+
 export function resolveSelectableModel(
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
   value: string | null | undefined,
   options: ReadonlyArray<SelectableModelOption>,
 ): string | null {
@@ -228,6 +479,13 @@ export function resolveSelectableModel(
     return byName.slug;
   }
 
+  const byAlias = options.find((option) =>
+    option.aliases?.some((alias) => alias.toLowerCase() === trimmed.toLowerCase()),
+  );
+  if (byAlias) {
+    return byAlias.slug;
+  }
+
   const normalized = normalizeModelSlug(trimmed, provider);
   if (!normalized) {
     return null;
@@ -237,77 +495,56 @@ export function resolveSelectableModel(
   return resolved ? resolved.slug : null;
 }
 
-export function resolveModelSlug(model: string | null | undefined, provider: ProviderKind): string {
-  const normalized = normalizeModelSlug(model, provider);
-  if (!normalized) {
-    return DEFAULT_MODEL_BY_PROVIDER[provider];
-  }
-  return normalized;
-}
-
-export function resolveModelSlugForProvider(
-  provider: ProviderKind,
-  model: string | null | undefined,
-): string {
-  return resolveModelSlug(model, provider);
-}
-
-/** Trim a string, returning null for empty/missing values. */
-export function trimOrNull<T extends string>(value: T | null | undefined): T | null {
+function trimOrNull<T extends string>(value: T | null | undefined): T | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim() as T;
   return trimmed || null;
 }
 
-export function resolveModelSelectionDefault(modelSelection: ModelSelection): ModelSelection {
-  // `auto` is a UI sentinel; execution layers require a concrete provider model id.
-  if (modelSelection.model.trim().toLowerCase() === "auto") {
-    return {
-      ...modelSelection,
-      model: DEFAULT_MODEL_BY_PROVIDER[modelSelection.provider],
-    };
-  }
-  return modelSelection;
+function cloneSelections(
+  selections: ReadonlyArray<ProviderOptionSelection>,
+): Array<ProviderOptionSelection> {
+  return selections.map(cloneSelection);
 }
 
-/**
- * Resolve the actual API model identifier from a model selection.
- *
- * Provider-aware: each provider can map `contextWindow` (or other options)
- * to whatever the API requires — a model-id suffix, a separate parameter, etc.
- * The canonical slug stored in the selection stays unchanged so the
- * capabilities system keeps working.
- *
- * Expects `contextWindow` to already be resolved (via `resolveContextWindow`)
- * to the effective value, not stripped to `undefined` for defaults.
- */
-export function resolveApiModelId(modelSelection: ModelSelection): string {
-  const normalizedModelSelection = resolveModelSelectionDefault(modelSelection);
+export function createModelSelection(
+  instanceId: ProviderInstanceId,
+  model: string,
+  options?: ReadonlyArray<ProviderOptionSelection> | null,
+): ModelSelection {
+  const selections = options ? cloneSelections(options) : [];
+  const base: ModelSelection = {
+    instanceId,
+    model,
+  };
+  return selections.length > 0 ? { ...base, options: selections } : base;
+}
 
-  switch (normalizedModelSelection.provider) {
-    case "claudeAgent": {
-      switch (normalizedModelSelection.options?.contextWindow) {
-        case "1m":
-          return `${normalizedModelSelection.model}[1m]`;
-        default:
-          return normalizedModelSelection.model;
-      }
-    }
-    default: {
-      return normalizedModelSelection.model;
+export function resolvePromptInjectedEffort(
+  caps: ModelCapabilities,
+  rawEffort: string | null | undefined,
+): string | null {
+  const trimmed = trimOrNull(rawEffort);
+  if (!trimmed) return null;
+  const descriptors = getProviderOptionDescriptors({ caps });
+  for (const descriptor of descriptors) {
+    if (descriptor.type === "select" && descriptor.promptInjectedValues?.includes(trimmed)) {
+      return trimmed;
     }
   }
+  return null;
 }
 
 export function applyClaudePromptEffortPrefix(
   text: string,
-  effort: ClaudeCodeEffort | null | undefined,
+  effort: string | null | undefined,
 ): string {
   const trimmed = text.trim();
   if (!trimmed) {
     return trimmed;
   }
-  if (effort !== "ultrathink") {
+  // Prefixing slash commands prevents Claude invocation; command names allow any token without a second slash.
+  if (effort !== "ultrathink" || /^\/[^\s/]+(?:\s|$)/u.test(trimmed)) {
     return trimmed;
   }
   if (trimmed.startsWith("Ultrathink:")) {

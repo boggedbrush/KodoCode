@@ -1,30 +1,21 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vite-plus/test";
 
-import { getTimestampFormatOptions } from "./timestampFormat";
+import { formatDayAwareTimestamp, formatUpcomingTimestamp } from "./timestampFormat";
 
-describe("getTimestampFormatOptions", () => {
-  it("omits hour12 when locale formatting is requested", () => {
-    expect(getTimestampFormatOptions("locale", true)).toEqual({
-      hour: "numeric",
-      minute: "2-digit",
-      second: "2-digit",
-    });
-  });
+describe("timestamps in an explicit time zone", () => {
+  // 23:00 UTC on July 1 is 7 PM on July 1 in New York, whatever the host zone.
+  const now = Date.parse("2026-07-01T23:00:00.000Z");
+  const zone = "America/New_York";
 
-  it("builds a 12-hour formatter with seconds when requested", () => {
-    expect(getTimestampFormatOptions("12-hour", true)).toEqual({
-      hour: "numeric",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: true,
-    });
-  });
-
-  it("builds a 24-hour formatter without seconds when requested", () => {
-    expect(getTimestampFormatOptions("24-hour", false)).toEqual({
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: false,
-    });
+  it("picks relative days from the calendar in that zone", () => {
+    expect(formatUpcomingTimestamp("2026-07-02T00:30:00.000Z", "12-hour", now, zone)).not.toMatch(
+      /tomorrow/,
+    );
+    expect(formatUpcomingTimestamp("2026-07-02T05:30:00.000Z", "12-hour", now, zone)).toMatch(
+      /^tomorrow at /,
+    );
+    expect(formatDayAwareTimestamp("2026-07-01T03:30:00.000Z", "12-hour", now, zone)).toMatch(
+      /^yesterday at /,
+    );
   });
 });

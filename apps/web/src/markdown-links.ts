@@ -1,145 +1,110 @@
-import { resolvePathLinkTarget } from "./terminal-links";
+import { isLocalEditorFileUrl } from "@t3tools/contracts";
+import { fileBasename, isAbsolutePath, workspaceRelativeFilePath } from "@t3tools/shared/path";
+import {
+  inlineCodeFilePathCandidate,
+  isRelativeFilePath,
+  normalizeMarkdownLinkDestination,
+  parseMarkdownFileLink,
+  resolveMarkdownFileLinkTarget,
+} from "@t3tools/shared/markdownLinks";
+import { parseFileUrlHref, splitFilePathPosition } from "@t3tools/shared/fileLinks";
 
-const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
-const WINDOWS_UNC_PATH_PATTERN = /^\\\\/;
-const EXTERNAL_SCHEME_PATTERN = /^([A-Za-z][A-Za-z0-9+.-]*):(.*)$/;
-const RELATIVE_PATH_PREFIX_PATTERN = /^(~\/|\.{1,2}\/)/;
-const RELATIVE_FILE_PATH_PATTERN = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+(?::\d+){0,2}$/;
-const RELATIVE_FILE_NAME_PATTERN = /^[A-Za-z0-9._-]+\.[A-Za-z0-9_-]+(?::\d+){0,2}$/;
-const POSITION_SUFFIX_PATTERN = /:\d+(?::\d+)?$/;
-const POSITION_ONLY_PATTERN = /^\d+(?::\d+)?$/;
-const POSIX_FILE_ROOT_PREFIXES = [
-  "/Users/",
-  "/home/",
-  "/tmp/",
-  "/var/",
-  "/etc/",
-  "/opt/",
-  "/mnt/",
-  "/Volumes/",
-  "/private/",
-  "/root/",
-] as const;
+import { formatWorkspaceRelativePath } from "./filePathDisplay";
+import { isTerminalLinkActivation } from "./terminal-links";
 
-function safeDecode(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
+export interface MarkdownFileLinkMeta {
+  filePath: string;
+  workspaceLookupPath: string | null;
+  targetPath: string;
+  displayPath: string;
+  workspaceRelativePath: string | null;
+  basename: string;
+  line?: number;
+  column?: number;
+  endLine?: number;
 }
 
-function stripSearchAndHash(value: string): { path: string; hash: string } {
-  const hashIndex = value.indexOf("#");
-  const pathWithSearch = hashIndex >= 0 ? value.slice(0, hashIndex) : value;
-  const rawHash = hashIndex >= 0 ? value.slice(hashIndex) : "";
-  const queryIndex = pathWithSearch.indexOf("?");
-  const path = queryIndex >= 0 ? pathWithSearch.slice(0, queryIndex) : pathWithSearch;
-  return { path, hash: rawHash };
+export function shouldOpenMarkdownFileLinkInEditor(
+  event: Pick<MouseEvent, "metaKey" | "ctrlKey">,
+  platform?: string,
+): boolean {
+  return isTerminalLinkActivation(event, platform);
 }
 
-function parseFileUrlHref(
-  href: string,
-  options?: { readonly decodePath?: boolean },
-): { path: string; hash: string } | null {
-  try {
-    const parsed = new URL(href);
-    if (parsed.protocol.toLowerCase() !== "file:") return null;
-
-    const rawPath = parsed.pathname;
-    if (rawPath.length === 0) return null;
-
-    // Browser URL parser encodes "C:/foo" as "/C:/foo" for file URLs.
-    const normalizedPath = /^\/[A-Za-z]:[\\/]/.test(rawPath) ? rawPath.slice(1) : rawPath;
-
-    return {
-      path: options?.decodePath === false ? normalizedPath : safeDecode(normalizedPath),
-      hash: parsed.hash,
-    };
-  } catch {
-    return null;
-  }
+export function shouldOpenMarkdownFileLinkInBrowserByDefault(path: string): boolean {
+  return /\.pdf$/i.test(path.split(/[?#]/, 1)[0] ?? "");
 }
 
 export function rewriteMarkdownFileUriHref(href: string | undefined): string | null {
   if (!href) return null;
-  const target = parseFileUrlHref(href.trim(), { decodePath: false });
-  if (!target) return null;
-  return `${target.path}${target.hash}`;
+  const target = parseFileUrlHref(normalizeMarkdownLinkDestination(href));
+  return target ? `${target.path}${target.hash}` : null;
 }
 
-function looksLikePosixFilesystemPath(path: string): boolean {
-  if (!path.startsWith("/")) return false;
-  if (POSIX_FILE_ROOT_PREFIXES.some((prefix) => path.startsWith(prefix))) return true;
-  if (POSITION_SUFFIX_PATTERN.test(path)) return true;
-  const basename = path.slice(path.lastIndexOf("/") + 1);
-  return /\.[A-Za-z0-9_-]+$/.test(basename);
+export function isLocalEditorFileHref(href: string): boolean {
+  try {
+    return isLocalEditorFileUrl(new URL(href));
+  } catch {
+    return false;
+  }
 }
 
-function appendLineColumnFromHash(path: string, hash: string): string {
-  if (!hash || POSITION_SUFFIX_PATTERN.test(path)) return path;
-  const match = hash.match(/^#L(\d+)(?:C(\d+))?$/i);
-  if (!match?.[1]) return path;
-  const line = match[1];
-  const column = match[2];
-  return `${path}:${line}${column ? `:${column}` : ""}`;
-}
+export function resolveInlineCodeFileLinkMeta(
+  codeText: string,
+  cwd?: string,
+  baseDir: string | undefined = cwd,
+): MarkdownFileLinkMeta | null {
+  const candidate = inlineCodeFilePathCandidate(codeText);
+  if (candidate === null) return null;
 
-function isLikelyPathCandidate(path: string): boolean {
-  if (WINDOWS_DRIVE_PATH_PATTERN.test(path) || WINDOWS_UNC_PATH_PATTERN.test(path)) return true;
-  if (RELATIVE_PATH_PREFIX_PATTERN.test(path)) return true;
-  if (path.startsWith("/")) return looksLikePosixFilesystemPath(path);
-  return RELATIVE_FILE_PATH_PATTERN.test(path) || RELATIVE_FILE_NAME_PATTERN.test(path);
-}
-
-function isRelativePath(path: string): boolean {
-  return (
-    RELATIVE_PATH_PREFIX_PATTERN.test(path) ||
-    (!path.startsWith("/") &&
-      !WINDOWS_DRIVE_PATH_PATTERN.test(path) &&
-      !WINDOWS_UNC_PATH_PATTERN.test(path))
+  return resolveMarkdownFileLinkMeta(
+    candidate,
+    cwd,
+    inlineCodePathNamesFromWorkspaceRoot(candidate, cwd, baseDir) ? cwd : baseDir,
   );
 }
 
-function hasExternalScheme(path: string): boolean {
-  const match = path.match(EXTERNAL_SCHEME_PATTERN);
-  if (!match) return false;
-  const rest = match[2] ?? "";
-  if (rest.startsWith("//")) return true;
-  return !POSITION_ONLY_PATTERN.test(rest);
+function inlineCodePathNamesFromWorkspaceRoot(
+  candidate: string,
+  cwd: string | undefined,
+  baseDir: string | undefined,
+): boolean {
+  if (!cwd || !baseDir || !isRelativeFilePath(candidate)) return false;
+  if (/^(?:~|\.{1,2})\//.test(candidate)) return false;
+  if (!splitFilePathPosition(candidate).path.includes("/")) return false;
+  return workspaceRelativeFilePath(baseDir, cwd) !== null;
 }
 
-export function resolveMarkdownFileLinkTarget(
+export function resolveMarkdownFileLinkMeta(
   href: string | undefined,
   cwd?: string,
-): string | null {
-  if (!href) return null;
-  const rawHref = href.trim();
-  if (rawHref.length === 0 || rawHref.startsWith("#")) return null;
+  baseDir: string | undefined = cwd,
+): MarkdownFileLinkMeta | null {
+  const targetPath = resolveMarkdownFileLinkTarget(href, cwd, baseDir);
+  if (!targetPath) return null;
+  const source = href ? parseMarkdownFileLink(href) : null;
+  return {
+    ...buildFileLinkMetaFromTarget(targetPath, cwd),
+    ...(source?.endLine !== undefined ? { endLine: source.endLine } : {}),
+    workspaceLookupPath:
+      source !== null &&
+      !isAbsolutePath(source.path) &&
+      baseDir !== undefined &&
+      workspaceRelativeFilePath(baseDir, cwd) === "."
+        ? source.path
+        : null,
+  };
+}
 
-  const fileUrlTarget = rawHref.toLowerCase().startsWith("file:")
-    ? parseFileUrlHref(rawHref)
-    : null;
-  const source = fileUrlTarget ?? stripSearchAndHash(rawHref);
-  const decodedPath = fileUrlTarget ? source.path.trim() : safeDecode(source.path.trim());
-  const decodedHash = safeDecode(source.hash.trim());
-
-  if (decodedPath.length === 0) return null;
-  if (
-    !WINDOWS_DRIVE_PATH_PATTERN.test(decodedPath) &&
-    !WINDOWS_UNC_PATH_PATTERN.test(decodedPath) &&
-    hasExternalScheme(decodedPath)
-  ) {
-    return null;
-  }
-
-  if (!isLikelyPathCandidate(decodedPath)) return null;
-
-  const pathWithPosition = appendLineColumnFromHash(decodedPath, decodedHash);
-  if (!isRelativePath(pathWithPosition)) {
-    return pathWithPosition;
-  }
-
-  if (!cwd) return null;
-  return resolvePathLinkTarget(pathWithPosition, cwd);
+function buildFileLinkMetaFromTarget(targetPath: string, cwd?: string) {
+  const { path, line, column } = splitFilePathPosition(targetPath);
+  return {
+    filePath: path,
+    targetPath,
+    displayPath: formatWorkspaceRelativePath(targetPath, cwd),
+    workspaceRelativePath: workspaceRelativeFilePath(path, cwd),
+    basename: fileBasename(path),
+    ...(line !== undefined ? { line } : {}),
+    ...(column !== undefined ? { column } : {}),
+  };
 }

@@ -1,14 +1,17 @@
-import { ProjectId, ThreadId } from "@t3tools/contracts";
-import { describe, expect, it } from "vitest";
+import { ThreadId } from "@t3tools/contracts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
-  clearThreadUi,
+  legacyProjectCwdPreferenceKey,
   markThreadUnread,
+  markThreadVisited,
+  parsePersistedState,
+  PERSISTED_STATE_KEY,
+  type PersistedUiState,
+  persistState,
   reorderProjects,
+  resolveProjectExpanded,
   setProjectExpanded,
-  setThreadChangedFilesExpanded,
-  syncProjects,
-  syncThreads,
   type UiState,
 } from "./uiStateStore";
 
@@ -16,226 +19,258 @@ function makeUiState(overrides: Partial<UiState> = {}): UiState {
   return {
     projectExpandedById: {},
     projectOrder: [],
+    sidebarProjectScopeKeys: [],
     threadLastVisitedAtById: {},
     threadChangedFilesExpandedById: {},
+    defaultAdvertisedEndpointKey: null,
+    pullRequestMergeMethod: "merge",
     ...overrides,
   };
 }
 
 describe("uiStateStore pure functions", () => {
-  it("markThreadUnread moves lastVisitedAt before completion for a completed thread", () => {
-    const threadId = ThreadId.makeUnsafe("thread-1");
-    const latestTurnCompletedAt = "2026-02-25T12:30:00.000Z";
+  it("stores server timestamps without moving visit state backwards", () => {
+    const threadId = ThreadId.make("thread-1");
+    const initialState = makeUiState();
+    const visited = markThreadVisited(initialState, threadId, "2026-02-25T12:30:00.700Z");
+
+    expect(visited.threadLastVisitedAtById[threadId]).toBe("2026-02-25T12:30:00.700Z");
+    expect(markThreadVisited(visited, threadId, "2026-02-25T12:30:00.000Z")).toBe(visited);
+    expect(markThreadVisited(visited, threadId, "not-a-date")).toBe(visited);
+  });
+
+  it("marks a completed thread unread using the server completion timestamp", () => {
+    const threadId = ThreadId.make("thread-1");
     const initialState = makeUiState({
       threadLastVisitedAtById: {
         [threadId]: "2026-02-25T12:35:00.000Z",
       },
     });
 
-    const next = markThreadUnread(initialState, threadId, latestTurnCompletedAt);
+    const next = markThreadUnread(initialState, threadId, "2026-02-25T12:30:00.000Z");
 
     expect(next.threadLastVisitedAtById[threadId]).toBe("2026-02-25T12:29:59.999Z");
+    expect(markThreadUnread(next, threadId, null)).toBe(next);
   });
 
-  it("markThreadUnread does not change a thread without a completed turn", () => {
-    const threadId = ThreadId.makeUnsafe("thread-1");
-    const initialState = makeUiState({
-      threadLastVisitedAtById: {
-        [threadId]: "2026-02-25T12:35:00.000Z",
-      },
-    });
+  it("resolves project expansion from logical, physical, and legacy preference keys", () => {
+    const physicalKey = "environment:/repo/project";
+    const legacyKey = legacyProjectCwdPreferenceKey("/repo/project");
 
-    const next = markThreadUnread(initialState, threadId, null);
-
-    expect(next).toBe(initialState);
-  });
-
-  it("reorderProjects moves a project to a target index", () => {
-    const project1 = ProjectId.makeUnsafe("project-1");
-    const project2 = ProjectId.makeUnsafe("project-2");
-    const project3 = ProjectId.makeUnsafe("project-3");
-    const initialState = makeUiState({
-      projectOrder: [project1, project2, project3],
-    });
-
-    const next = reorderProjects(initialState, project1, project3);
-
-    expect(next.projectOrder).toEqual([project2, project3, project1]);
-  });
-
-  it("syncProjects preserves current project order during snapshot recovery", () => {
-    const project1 = ProjectId.makeUnsafe("project-1");
-    const project2 = ProjectId.makeUnsafe("project-2");
-    const project3 = ProjectId.makeUnsafe("project-3");
-    const initialState = makeUiState({
-      projectExpandedById: {
-        [project1]: true,
-        [project2]: false,
-      },
-      projectOrder: [project2, project1],
-    });
-
-    const next = syncProjects(initialState, [
-      { id: project1, cwd: "/tmp/project-1" },
-      { id: project2, cwd: "/tmp/project-2" },
-      { id: project3, cwd: "/tmp/project-3" },
-    ]);
-
-    expect(next.projectOrder).toEqual([project2, project1, project3]);
-    expect(next.projectExpandedById[project2]).toBe(false);
-  });
-
-  it("syncProjects preserves manual order when a project is recreated with the same cwd", () => {
-    const oldProject1 = ProjectId.makeUnsafe("project-1");
-    const oldProject2 = ProjectId.makeUnsafe("project-2");
-    const recreatedProject2 = ProjectId.makeUnsafe("project-2b");
-    const initialState = syncProjects(
-      makeUiState({
-        projectExpandedById: {
-          [oldProject1]: true,
-          [oldProject2]: false,
-        },
-        projectOrder: [oldProject2, oldProject1],
-      }),
-      [
-        { id: oldProject1, cwd: "/tmp/project-1" },
-        { id: oldProject2, cwd: "/tmp/project-2" },
-      ],
+    expect(resolveProjectExpanded({ logical: false, [physicalKey]: true }, ["logical"])).toBe(
+      false,
     );
-
-    const next = syncProjects(initialState, [
-      { id: oldProject1, cwd: "/tmp/project-1" },
-      { id: recreatedProject2, cwd: "/tmp/project-2" },
-    ]);
-
-    expect(next.projectOrder).toEqual([recreatedProject2, oldProject1]);
-    expect(next.projectExpandedById[recreatedProject2]).toBe(false);
-  });
-
-  it("syncProjects returns a new state when only project cwd changes", () => {
-    const project1 = ProjectId.makeUnsafe("project-1");
-    const initialState = syncProjects(
-      makeUiState({
-        projectExpandedById: {
-          [project1]: false,
-        },
-        projectOrder: [project1],
-      }),
-      [{ id: project1, cwd: "/tmp/project-1" }],
+    expect(resolveProjectExpanded({ [physicalKey]: false }, ["new-logical", physicalKey])).toBe(
+      false,
     );
-
-    const next = syncProjects(initialState, [{ id: project1, cwd: "/tmp/project-1-renamed" }]);
-
-    expect(next).not.toBe(initialState);
-    expect(next.projectOrder).toEqual([project1]);
-    expect(next.projectExpandedById[project1]).toBe(false);
+    expect(resolveProjectExpanded({ [legacyKey]: false }, ["new-logical", legacyKey])).toBe(false);
+    expect(resolveProjectExpanded({}, ["new-logical"])).toBe(true);
   });
 
-  it("syncThreads prunes missing thread UI state", () => {
-    const thread1 = ThreadId.makeUnsafe("thread-1");
-    const thread2 = ThreadId.makeUnsafe("thread-2");
-    const initialState = makeUiState({
-      threadLastVisitedAtById: {
-        [thread1]: "2026-02-25T12:35:00.000Z",
-        [thread2]: "2026-02-25T12:36:00.000Z",
-      },
-      threadChangedFilesExpandedById: {
-        [thread1]: {
-          "turn-1": false,
-        },
-        [thread2]: {
-          "turn-2": false,
-        },
-      },
-    });
-
-    const next = syncThreads(initialState, [{ id: thread1 }]);
-
-    expect(next.threadLastVisitedAtById).toEqual({
-      [thread1]: "2026-02-25T12:35:00.000Z",
-    });
-    expect(next.threadChangedFilesExpandedById).toEqual({
-      [thread1]: {
-        "turn-1": false,
-      },
-    });
-  });
-
-  it("syncThreads seeds visit state for unseen snapshot threads", () => {
-    const thread1 = ThreadId.makeUnsafe("thread-1");
+  it("sets expansion for every stable key belonging to a logical project", () => {
     const initialState = makeUiState();
+    const keys = ["logical", "environment-a:/repo", "environment-b:/repo"];
 
-    const next = syncThreads(initialState, [
-      {
-        id: thread1,
-        seedVisitedAt: "2026-02-25T12:35:00.000Z",
-      },
-    ]);
+    const next = setProjectExpanded(initialState, keys, false);
 
-    expect(next.threadLastVisitedAtById).toEqual({
-      [thread1]: "2026-02-25T12:35:00.000Z",
+    expect(next.projectExpandedById).toEqual({
+      logical: false,
+      "environment-a:/repo": false,
+      "environment-b:/repo": false,
     });
+    expect(setProjectExpanded(next, keys, false)).toBe(next);
   });
 
-  it("setProjectExpanded updates expansion without touching order", () => {
-    const project1 = ProjectId.makeUnsafe("project-1");
-    const initialState = makeUiState({
+  it("moves grouped project members together", () => {
+    const keyALocal = "env-local:proj-a";
+    const keyARemote = "env-remote:proj-a";
+    const keyB = "env-local:proj-b";
+    const keyC = "env-local:proj-c";
+    const currentOrder = [keyALocal, keyARemote, keyB, keyC];
+
+    const next = reorderProjects(makeUiState(), currentOrder, [keyALocal, keyARemote], [keyC]);
+
+    expect(next.projectOrder).toEqual([keyB, keyC, keyALocal, keyARemote]);
+  });
+});
+
+describe("parsePersistedState", () => {
+  it("hydrates raw UI-owned state without server entities", () => {
+    const parsed = parsePersistedState({
       projectExpandedById: {
-        [project1]: true,
+        logical: false,
+        invalid: "no" as unknown as boolean,
       },
-      projectOrder: [project1],
-    });
-
-    const next = setProjectExpanded(initialState, project1, false);
-
-    expect(next.projectExpandedById[project1]).toBe(false);
-    expect(next.projectOrder).toEqual([project1]);
-  });
-
-  it("clearThreadUi removes visit state for deleted threads", () => {
-    const thread1 = ThreadId.makeUnsafe("thread-1");
-    const initialState = makeUiState({
+      projectOrder: ["physical-b", "", "physical-a", "physical-b"],
       threadLastVisitedAtById: {
-        [thread1]: "2026-02-25T12:35:00.000Z",
+        "environment:thread-1": "2026-02-25T12:35:00.000Z",
+        invalid: "not-a-date",
       },
+      defaultAdvertisedEndpointKey: "desktop-core:lan:http",
+      threadChangedFilesExpansionVersion: 2,
       threadChangedFilesExpandedById: {
-        [thread1]: {
+        "environment:thread-1": {
+          "turn-1": false,
+          "turn-2": true,
+        },
+      },
+    });
+
+    expect(parsed).toEqual({
+      projectExpandedById: {
+        logical: false,
+      },
+      projectOrder: ["physical-b", "physical-a"],
+      threadLastVisitedAtById: {
+        "environment:thread-1": "2026-02-25T12:35:00.000Z",
+      },
+      defaultAdvertisedEndpointKey: "desktop-core:lan:http",
+      sidebarProjectScopeKeys: [],
+      pullRequestMergeMethod: "merge",
+      threadChangedFilesExpandedById: {
+        "environment:thread-1": {
+          "turn-1": false,
+          "turn-2": true,
+        },
+      },
+    });
+  });
+
+  it.each([undefined, 1])("ignores changed-file expansion version %s", (version) => {
+    const parsed = parsePersistedState({
+      ...(version === undefined ? {} : { threadChangedFilesExpansionVersion: version }),
+      threadChangedFilesExpandedById: {
+        "environment:thread-1": {
           "turn-1": false,
         },
       },
     });
 
-    const next = clearThreadUi(initialState, thread1);
-
-    expect(next.threadLastVisitedAtById).toEqual({});
-    expect(next.threadChangedFilesExpandedById).toEqual({});
+    expect(parsed.threadChangedFilesExpandedById).toEqual({});
   });
 
-  it("setThreadChangedFilesExpanded stores collapsed turns per thread", () => {
-    const thread1 = ThreadId.makeUnsafe("thread-1");
-    const initialState = makeUiState();
-
-    const next = setThreadChangedFilesExpanded(initialState, thread1, "turn-1", false);
-
-    expect(next.threadChangedFilesExpandedById).toEqual({
-      [thread1]: {
-        "turn-1": false,
-      },
+  it("migrates legacy CWD project preferences into local alias keys", () => {
+    const parsed = parsePersistedState({
+      collapsedProjectCwds: ["/repo/b"],
+      expandedProjectCwds: ["/repo/a"],
+      projectOrderCwds: ["/repo/b", "/repo/a"],
     });
+    const projectAKey = legacyProjectCwdPreferenceKey("/repo/a");
+    const projectBKey = legacyProjectCwdPreferenceKey("/repo/b");
+
+    expect(parsed.projectOrder).toEqual([projectBKey, projectAKey]);
+    expect(resolveProjectExpanded(parsed.projectExpandedById, [projectAKey])).toBe(true);
+    expect(resolveProjectExpanded(parsed.projectExpandedById, [projectBKey])).toBe(false);
+    expect(resolveProjectExpanded(parsed.projectExpandedById, ["unknown"])).toBe(true);
+  });
+});
+
+function createLocalStorageStub(): Storage {
+  const store = new Map<string, string>();
+  return {
+    clear: () => {
+      store.clear();
+    },
+    getItem: (key) => store.get(key) ?? null,
+    key: (index) => [...store.keys()][index] ?? null,
+    get length() {
+      return store.size;
+    },
+    removeItem: (key) => {
+      store.delete(key);
+    },
+    setItem: (key, value) => {
+      store.set(key, value);
+    },
+  };
+}
+
+describe("uiStateStore persistence", () => {
+  let localStorageStub: Storage;
+
+  beforeEach(() => {
+    localStorageStub = createLocalStorageStub();
+    vi.stubGlobal("window", { localStorage: localStorageStub });
+    vi.stubGlobal("localStorage", localStorageStub);
   });
 
-  it("setThreadChangedFilesExpanded removes thread overrides when expanded again", () => {
-    const thread1 = ThreadId.makeUnsafe("thread-1");
-    const initialState = makeUiState({
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("persists raw UI preferences including thread visit markers", () => {
+    const state = makeUiState({
+      projectExpandedById: {
+        logical: false,
+      },
+      projectOrder: ["physical-b", "physical-a"],
+      threadLastVisitedAtById: {
+        "environment:thread-1": "2026-02-25T12:35:00.000Z",
+      },
       threadChangedFilesExpandedById: {
-        [thread1]: {
+        "environment:thread-1": {
           "turn-1": false,
+          "turn-2": true,
         },
       },
+      defaultAdvertisedEndpointKey: "desktop-core:lan:http",
     });
 
-    const next = setThreadChangedFilesExpanded(initialState, thread1, "turn-1", true);
+    persistState(state);
 
-    expect(next.threadChangedFilesExpandedById).toEqual({});
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+    expect(persisted).toEqual({
+      projectExpandedById: {
+        logical: false,
+      },
+      projectOrder: ["physical-b", "physical-a"],
+      threadLastVisitedAtById: {
+        "environment:thread-1": "2026-02-25T12:35:00.000Z",
+      },
+      defaultAdvertisedEndpointKey: "desktop-core:lan:http",
+      sidebarProjectScopeKeys: [],
+      sidebarProjectScopeKey: null,
+      threadChangedFilesExpansionVersion: 2,
+      threadChangedFilesExpandedById: {
+        "environment:thread-1": {
+          "turn-1": false,
+          "turn-2": true,
+        },
+      },
+      pullRequestMergeMethod: "merge",
+    });
+    expect(parsePersistedState(persisted)).toEqual({
+      ...state,
+    });
+  });
+
+  it("restores the sidebar project scope across reloads", () => {
+    const keys = ["github.com/pingdotgg/t3code", "github.com/pingdotgg/uploadthing"];
+    persistState(makeUiState({ sidebarProjectScopeKeys: keys }));
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+
+    expect(parsePersistedState(persisted).sidebarProjectScopeKeys).toEqual(keys);
+  });
+
+  it("keeps a single-project scope readable by older clients", () => {
+    persistState(makeUiState({ sidebarProjectScopeKeys: ["github.com/pingdotgg/t3code"] }));
+
+    const persisted = JSON.parse(
+      localStorageStub.getItem(PERSISTED_STATE_KEY) ?? "{}",
+    ) as PersistedUiState;
+
+    expect(persisted.sidebarProjectScopeKey).toBe("github.com/pingdotgg/t3code");
+  });
+
+  it("restores a single-project scope saved before multi-project filtering", () => {
+    expect(
+      parsePersistedState({ sidebarProjectScopeKey: "github.com/pingdotgg/t3code" })
+        .sidebarProjectScopeKeys,
+    ).toEqual(["github.com/pingdotgg/t3code"]);
   });
 });

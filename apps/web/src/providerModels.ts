@@ -1,81 +1,99 @@
 import {
+  DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
+  defaultInstanceIdForDriver,
+  ProviderDriverKind,
   type ModelCapabilities,
-  type ProviderKind,
+  type ProviderInstanceId,
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+import { createModelCapabilities, resolveSelectableModel } from "@t3tools/shared/model";
 
-const EMPTY_CAPABILITIES: ModelCapabilities = {
-  reasoningEffortLevels: [],
-  supportsFastMode: false,
-  supportsThinkingToggle: false,
-  contextWindowOptions: [],
-  promptInjectedEffortLevels: [],
-};
+const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
+  optionDescriptors: [],
+});
+const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
+
+export function formatProviderDriverKindLabel(provider: ProviderDriverKind): string {
+  return provider
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[_-]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
 
 export function getProviderModels(
   providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
 ): ReadonlyArray<ServerProviderModel> {
-  return providers.find((candidate) => candidate.provider === provider)?.models ?? [];
+  return getProviderSnapshot(providers, provider)?.models ?? [];
 }
 
-export function getProviderSnapshot(
+function getProviderSnapshot(
   providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
 ): ServerProvider | undefined {
-  return providers.find((candidate) => candidate.provider === provider);
-}
-
-export function isProviderEnabled(
-  providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
-): boolean {
-  return getProviderSnapshot(providers, provider)?.enabled ?? true;
+  const defaultInstanceId = defaultInstanceIdForDriver(provider);
+  return providers.find((candidate) => candidate.instanceId === defaultInstanceId);
 }
 
 export function resolveSelectableProvider(
   providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind | null | undefined,
-): ProviderKind {
-  const requested = provider ?? "codex";
-  if (isProviderEnabled(providers, requested)) {
-    return requested;
+  provider: ProviderDriverKind | ProviderInstanceId | null | undefined,
+): ProviderDriverKind {
+  const requestedEntry = providers.find((candidate) => candidate.instanceId === provider);
+  if (requestedEntry?.enabled) {
+    return requestedEntry.driver;
   }
-  return providers.find((candidate) => candidate.enabled)?.provider ?? requested;
+  return providers.find((candidate) => candidate.enabled)?.driver ?? DEFAULT_DRIVER_KIND;
 }
 
 export function getProviderModelCapabilities(
   models: ReadonlyArray<ServerProviderModel>,
   model: string | null | undefined,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
+  includePlanAgent = false,
 ): ModelCapabilities {
-  const slug = normalizeModelSlug(model, provider);
-  const directMatch = models.find((candidate) => candidate.slug === slug)?.capabilities;
-  if (directMatch) {
-    return directMatch;
+  const slug = resolveSelectableModel(provider, model, models);
+  const selectedModel = models.find((candidate) => candidate.slug === slug);
+  const caps = selectedModel?.capabilities ?? EMPTY_CAPABILITIES;
+  if (includePlanAgent) {
+    return caps;
   }
-  if (slug === "auto") {
-    // `auto` is a canonical UI choice, but capabilities still need a concrete model.
-    return (
-      models.find((candidate) => !candidate.isCustom)?.capabilities ??
-      models[0]?.capabilities ??
-      EMPTY_CAPABILITIES
-    );
-  }
-  return EMPTY_CAPABILITIES;
+  return withoutPlanAgentOption(caps);
+}
+
+function withoutPlanAgentOption(caps: ModelCapabilities): ModelCapabilities {
+  return {
+    ...caps,
+    optionDescriptors: (caps.optionDescriptors ?? []).flatMap((descriptor) => {
+      if (descriptor.type !== "select" || descriptor.id !== "agent") {
+        return [descriptor];
+      }
+      const options = descriptor.options.filter((option) => option.id !== "plan");
+      if (options.length === 0) {
+        return [];
+      }
+      const currentValue =
+        descriptor.currentValue && options.some((option) => option.id === descriptor.currentValue)
+          ? descriptor.currentValue
+          : (options.find((option) => option.isDefault)?.id ?? options[0]?.id);
+      return [{ ...descriptor, options, ...(currentValue ? { currentValue } : {}) }];
+    }),
+  };
 }
 
 export function getDefaultServerModel(
   providers: ReadonlyArray<ServerProvider>,
-  provider: ProviderKind,
+  provider: ProviderDriverKind,
 ): string {
   const models = getProviderModels(providers, provider);
   return (
+    models.find((model) => model.isDefault && !model.isCustom)?.slug ??
     models.find((model) => !model.isCustom)?.slug ??
     models[0]?.slug ??
-    DEFAULT_MODEL_BY_PROVIDER[provider]
+    DEFAULT_MODEL_BY_PROVIDER[provider] ??
+    DEFAULT_MODEL
   );
 }

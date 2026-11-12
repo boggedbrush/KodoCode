@@ -1,37 +1,49 @@
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import { Command } from "effect/unstable/cli";
+// @effect-diagnostics nodeBuiltinImport:off -- The service launcher starts before the CLI runtime.
+import * as NodeModule from "node:module";
+import * as NodeSea from "node:sea";
+import * as NodeURL from "node:url";
 
-import { NetService } from "@t3tools/shared/Net";
-import { cli } from "./cli";
-import { version } from "../package.json" with { type: "json" };
+import { isEntrypoint } from "./entrypoint.ts";
 
-const isBunRuntime = typeof Bun !== "undefined";
+// Loads the CLI outside the launcher's module graph. Packaged builds embed it as a raw asset.
+async function loadCliMain(): Promise<typeof import("./binMain.ts")> {
+  if (!NodeSea.isSea()) return import("./binMain.ts");
 
-const main = (Command.run(cli, { version }) as any).pipe(Effect.scoped);
-
-async function bootCli(): Promise<void> {
-  // Keep runtime selection dynamic so the same source can boot under Bun for
-  // local development and Node for packaged builds, without forcing the CJS
-  // build to support top-level await.
-  if (isBunRuntime) {
-    const [BunRuntime, BunServices] = await Promise.all([
-      import("@effect/platform-bun/BunRuntime"),
-      import("@effect/platform-bun/BunServices"),
-    ]);
-    const cliRuntimeLayer = Layer.mergeAll(BunServices.layer, NetService.layer);
-
-    BunRuntime.runMain(main.pipe(Effect.provide(cliRuntimeLayer)));
-    return;
+  // Keep the executable's module URL so the CLI finds the web client and native packages beside it.
+  const require = NodeModule.createRequire(import.meta.url);
+  // require() resolves links in the executable path, such as a Windows junction.
+  const cliUrl = NodeURL.pathToFileURL(require.resolve(process.execPath)).href;
+  const hook = NodeModule.registerHooks({
+    load(url, context, next) {
+      if (url !== cliUrl) return next(url, context);
+      return {
+        format: "module",
+        source: new Uint8Array(NodeSea.getRawAsset("binMain.mjs")),
+        shortCircuit: true,
+      };
+    },
+  });
+  try {
+    return require(process.execPath) as typeof import("./binMain.ts");
+  } finally {
+    hook.deregister();
   }
-
-  const [NodeRuntime, NodeServices] = await Promise.all([
-    import("@effect/platform-node/NodeRuntime"),
-    import("@effect/platform-node/NodeServices"),
-  ]);
-  const cliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
-
-  NodeRuntime.runMain(main.pipe(Effect.provide(cliRuntimeLayer)));
 }
 
-void bootCli();
+if (
+  isEntrypoint({
+    moduleUrl: import.meta.url,
+    entryPath: process.argv[1],
+    runtimeMain: import.meta.main,
+  })
+) {
+  // The launcher owns shutdown until its child exits, so it bypasses the Effect CLI runtime.
+  // The service unit passes no arguments; flags and help go through the full CLI.
+  if (process.argv[2] === "__service-launcher" && process.argv.length === 3) {
+    const { runServiceLauncherCli } = await import("./cli/serviceLauncher.ts");
+    await runServiceLauncherCli();
+  } else {
+    const { runCliCommand } = await loadCliMain();
+    await runCliCommand();
+  }
+}

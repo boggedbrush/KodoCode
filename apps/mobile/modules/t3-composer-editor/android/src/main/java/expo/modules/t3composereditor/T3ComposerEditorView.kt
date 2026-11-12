@@ -1,0 +1,967 @@
+package expo.modules.t3composereditor
+
+import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.graphics.Color
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Typeface
+import android.os.Build
+import android.text.Editable
+import android.text.InputType
+import android.text.InputFilter
+import android.text.Layout
+import android.text.Spanned
+import android.text.TextUtils
+import android.text.TextWatcher
+import android.text.style.ReplacementSpan
+import android.util.TypedValue
+import android.view.DragEvent
+import android.view.Gravity
+import android.view.GestureDetector
+import android.view.InputDevice
+import android.view.MotionEvent
+import android.view.KeyEvent
+import android.view.View
+import android.view.ViewGroup
+import android.view.inputmethod.BaseInputConnection
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
+import android.view.inputmethod.InputConnectionWrapper
+import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.TextAttribute
+import android.widget.EditText
+import androidx.annotation.RequiresApi
+import com.facebook.react.common.assets.ReactFontManager
+import expo.modules.kotlin.AppContext
+import expo.modules.kotlin.viewevent.EventDispatcher
+import expo.modules.kotlin.views.ExpoView
+import org.json.JSONObject
+import kotlin.math.ceil
+import kotlin.math.max
+
+class T3ComposerEditorView(context: Context, appContext: AppContext) : ExpoView(
+  context,
+  appContext
+) {
+  // React Native ignores the editor's requestLayout(), which makes TextView defer caret scrolls.
+  override val shouldUseAndroidLayout = true
+
+  private val editor = SelectionAwareEditText(context) { appContext.currentActivity }
+  private val defaultHighlightColor = editor.highlightColor
+  private val defaultSelectionColor = context.resolveThemeColor(
+    android.R.attr.colorAccent,
+    editor.currentTextColor,
+  )
+  private val onComposerChange by EventDispatcher()
+  private val onComposerSelectionChange by EventDispatcher()
+  private val onComposerFocus by EventDispatcher()
+  private val onComposerBlur by EventDispatcher()
+  private val onComposerSubmit by EventDispatcher()
+  private val onComposerPasteImages by EventDispatcher()
+  private val onComposerContextPress by EventDispatcher()
+  private val onComposerPasteContext by EventDispatcher()
+  private val onComposerPasteText by EventDispatcher()
+  private val onComposerContentSizeChange by EventDispatcher()
+  private var applyingNativeValue = false
+  private var desiredLineHeightPx = 0
+  private var lastContentHeight = 0
+  private var lastContentWidth = 0
+  private var contentInsetVertical = 0
+  private var tokensJson = "[]"
+  private var tokens: List<ComposerToken> = emptyList()
+  private val redrawChipsWithIcon: (String) -> Unit = { uri ->
+    editor.text?.let { editable ->
+      editable.getSpans(0, editable.length, ComposerChipSpan::class.java)
+        .filter { it.iconUri == uri }
+        .forEach {
+          editable.setSpan(
+            it,
+            editable.getSpanStart(it),
+            editable.getSpanEnd(it),
+            editable.getSpanFlags(it)
+          )
+        }
+    }
+  }
+  private var autoCorrect = true
+  private var spellCheck = true
+  private var nativeEventCount = 0
+
+  init {
+    editor.setBackgroundColor(Color.TRANSPARENT)
+    editor.gravity = Gravity.TOP or Gravity.START
+    editor.includeFontPadding = false
+    editor.isSingleLine = false
+    editor.minLines = 1
+    editor.inputType =
+      InputType.TYPE_CLASS_TEXT or
+      InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+      InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+    editor.setTextColor(Color.BLACK)
+    editor.setHintTextColor(Color.GRAY)
+    editor.setPadding(0, 0, 0, 0)
+    editor.filters = arrayOf(
+      InputFilter { _, _, _, dest, start, end ->
+        if (editor.readOnly && !applyingNativeValue) dest.subSequence(start, end) else null
+      }
+    )
+    editor.selectionListener = { start, end ->
+      if (!applyingNativeValue) {
+        emitSelectionChange(start, end)
+      }
+    }
+    editor.pasteImagesListener = { uris ->
+      onComposerPasteImages(mapOf("uris" to uris))
+    }
+    editor.pasteContextListener = { payload ->
+      nativeEventCount += 1
+      onComposerPasteContext(
+        payload + mapOf(
+          "value" to editor.text.toString(),
+          "eventCount" to nativeEventCount,
+          "selection" to currentSelectionPayload(),
+        )
+      )
+    }
+    val contextGestures =
+      GestureDetector(
+        context,
+        object : GestureDetector.SimpleOnGestureListener() {
+          override fun onDown(event: MotionEvent) = true
+          override fun onSingleTapUp(event: MotionEvent): Boolean {
+            val offset = editor.getOffsetForPosition(event.x, event.y)
+            val token =
+              tokens.firstOrNull {
+                (it.type == "context" || it.type == "mention" || it.type == "skill") &&
+                  offset in it.start..it.end &&
+                  it.end <= editor.length() &&
+                  chipContains(it, event.x, event.y)
+              }
+                ?: return false
+            if (token.end <= editor.length() &&
+              editor.text.substring(token.start, token.end) == token.source
+            ) {
+              onComposerContextPress(
+                mapOf(
+                  "source" to token.source,
+                  "start" to token.start,
+                  "end" to token.end
+                )
+              )
+            }
+            return false
+          }
+        }
+      )
+    editor.setOnTouchListener { _, event ->
+      contextGestures.onTouchEvent(event)
+      false
+    }
+    editor.pasteTextListener = { text, start, end ->
+      nativeEventCount += 1
+      onComposerPasteText(
+        mapOf(
+          "value" to editor.text.toString(),
+          "eventCount" to nativeEventCount,
+          "text" to text,
+          "selection" to currentSelectionPayload(start, end),
+        ),
+      )
+    }
+    editor.submitListener = { alternate ->
+      onComposerSubmit(mapOf("alternate" to alternate))
+    }
+    editor.setOnFocusChangeListener { _, hasFocus ->
+      if (hasFocus) {
+        onComposerFocus(emptyMap<String, Any>())
+      } else {
+        onComposerBlur(emptyMap<String, Any>())
+      }
+    }
+    editor.addTextChangedListener(
+      object : TextWatcher {
+        override fun beforeTextChanged(
+          text: CharSequence?,
+          start: Int,
+          count: Int,
+          after: Int
+        ) = Unit
+        override fun onTextChanged(text: CharSequence?, start: Int, before: Int, count: Int) = Unit
+
+        override fun afterTextChanged(editable: Editable?) {
+          if (applyingNativeValue) return
+          val nextValue = editable.toString()
+          val selection = currentSelectionPayload()
+          nativeEventCount += 1
+          onComposerChange(
+            mapOf(
+              "value" to nextValue,
+              "selection" to selection,
+              "eventCount" to nativeEventCount,
+            ),
+          )
+          emitContentSizeIfNeeded()
+        }
+      },
+    )
+    editor.addOnLayoutChangeListener { _, left, _, right, _, oldLeft, _, oldRight, _ ->
+      if (right - left != oldRight - oldLeft) applyTokenSpans()
+      emitContentSizeIfNeeded()
+    }
+    addView(
+      editor,
+      LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT),
+    )
+  }
+
+  @Suppress("ReturnCount")
+  fun setControlledDocumentJson(documentJson: String) {
+    val document = try {
+      JSONObject(documentJson)
+    } catch (_: Exception) {
+      return
+    }
+    val mostRecentEventCount = document.optInt("mostRecentEventCount", -1)
+    if (mostRecentEventCount < nativeEventCount) return
+
+    val value = document.optString("value")
+    if (document.optBoolean("isNativeEcho") && editor.text.toString() != value) return
+
+    val nextTokensJson = document.optString("tokensJson", "[]")
+    val nextTokens = if (nextTokensJson == tokensJson) tokens else parseTokens(nextTokensJson)
+    val requestedSelection = document.optJSONObject("selection")
+    val previousSelectionStart = editor.selectionStart.coerceAtLeast(0)
+    val previousSelectionEnd = editor.selectionEnd.coerceAtLeast(0)
+    val valueChanged = editor.text.toString() != value
+
+    applyingNativeValue = true
+    try {
+      if (valueChanged) {
+        editor.setText(value)
+      }
+      tokensJson = nextTokensJson
+      tokens = nextTokens
+      applyTokenSpans()
+      if (requestedSelection != null) {
+        applySelection(
+          requestedSelection.optInt("start", previousSelectionStart),
+          requestedSelection.optInt("end", previousSelectionEnd),
+        )
+      } else if (valueChanged) {
+        applySelection(previousSelectionStart, previousSelectionEnd)
+      }
+    } finally {
+      applyingNativeValue = false
+    }
+    emitContentSizeIfNeeded()
+  }
+
+  fun setThemeJson(themeJson: String) {
+    try {
+      val theme = JSONObject(themeJson)
+      editor.setTextColor(parseColor(theme.optString("text"), Color.BLACK))
+      editor.setHintTextColor(parseColor(theme.optString("placeholder"), Color.GRAY))
+      if (theme.isNull("selection")) {
+        resetSelectionTheme()
+      } else {
+        applySelectionTheme(parseColor(theme.optString("selection"), editor.currentTextColor))
+      }
+      applyTokenSpans()
+    } catch (_: Exception) {
+    }
+  }
+
+  fun setPlaceholder(placeholder: String) {
+    editor.placeholder = placeholder
+  }
+
+  fun setClipboardFragment(fragment: String) {
+    editor.clipboardFragment = fragment
+  }
+
+  fun setFontFamily(fontFamily: String) {
+    editor.typeface = if (fontFamily.contains("Mono", ignoreCase = true)) {
+      Typeface.MONOSPACE
+    } else {
+      ReactFontManager.getInstance().getTypeface(fontFamily, Typeface.NORMAL, context.assets)
+    }
+    applyLineHeight()
+    editor.applyPlaceholder()
+  }
+
+  fun setFontSize(fontSize: Float) {
+    editor.textSize = fontSize
+    applyLineHeight()
+    applyTokenSpans()
+    editor.applyPlaceholder()
+  }
+
+  fun setLineHeight(lineHeight: Float) {
+    desiredLineHeightPx = (lineHeight * resources.displayMetrics.density).toInt()
+    applyLineHeight()
+  }
+
+  fun setSingleLineCentered(centered: Boolean) {
+    editor.gravity = if (centered) {
+      Gravity.CENTER_VERTICAL or Gravity.START
+    } else {
+      Gravity.TOP or Gravity.START
+    }
+  }
+
+  fun setContentInsetVertical(contentInsetVertical: Int) {
+    this.contentInsetVertical =
+      max(0, (contentInsetVertical * resources.displayMetrics.density).toInt())
+    editor.setPadding(0, this.contentInsetVertical, 0, this.contentInsetVertical)
+    emitContentSizeIfNeeded()
+  }
+
+  fun setEditable(editable: Boolean) {
+    editor.isEnabled = editable
+    editor.isFocusable = editable
+    editor.isFocusableInTouchMode = editable
+    editor.isCursorVisible = editable && !editor.readOnly
+  }
+
+  fun setReadOnly(readOnly: Boolean) {
+    editor.readOnly = readOnly
+    editor.isCursorVisible = editor.isEnabled && !readOnly
+  }
+
+  fun setEnterBehavior(behavior: String) {
+    editor.returnSends = behavior != "newline"
+  }
+
+  fun setSubmitEnabled(enabled: Boolean) {
+    editor.submitEnabled = enabled
+  }
+
+  fun setScrollEnabled(scrollEnabled: Boolean) {
+    editor.isVerticalScrollBarEnabled = scrollEnabled
+  }
+
+  fun setAutoFocus(autoFocus: Boolean) {
+    if (autoFocus) {
+      post { focusEditor() }
+    }
+  }
+
+  fun setAutoCorrect(autoCorrect: Boolean) {
+    this.autoCorrect = autoCorrect
+    updateInputFlags()
+  }
+
+  fun setSpellCheck(spellCheck: Boolean) {
+    this.spellCheck = spellCheck
+    updateInputFlags()
+  }
+
+  fun setTextPasteThresholdBytes(threshold: Int) {
+    editor.textPasteThresholdBytes = threshold
+  }
+
+  fun setMaxInputChars(maxInputChars: Int) {
+    editor.maxInputChars = maxInputChars
+  }
+
+  fun focusEditor() {
+    editor.requestFocus()
+    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+    imm?.showSoftInput(editor, InputMethodManager.SHOW_IMPLICIT)
+  }
+
+  fun blurEditor() {
+    editor.clearFocus()
+    val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+    imm?.hideSoftInputFromWindow(editor.windowToken, 0)
+  }
+
+  fun setSelection(start: Int, end: Int) {
+    applySelection(start, end)
+  }
+
+  private fun applySelection(start: Int, end: Int) {
+    val textLength = editor.text?.length ?: 0
+    val safeStart = start.coerceIn(0, textLength)
+    val safeEnd = end.coerceIn(0, textLength)
+    // Re-applying an unchanged selection resets the keyboard's suggestion
+    // state, so a no-op assignment must be skipped.
+    if (editor.selectionStart == safeStart && editor.selectionEnd == safeEnd) return
+    editor.setSelection(safeStart, safeEnd)
+  }
+
+  private fun updateInputFlags() {
+    var flags =
+      InputType.TYPE_CLASS_TEXT or
+        InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+        InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+    flags = if (autoCorrect && spellCheck) {
+      flags or InputType.TYPE_TEXT_FLAG_AUTO_CORRECT
+    } else {
+      flags or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+    }
+    editor.inputType = flags
+  }
+
+  private fun applyLineHeight() {
+    if (desiredLineHeightPx <= 0) return
+    val fontHeight = editor.paint.fontMetricsInt.descent - editor.paint.fontMetricsInt.ascent
+    editor.setLineSpacing(max(0, desiredLineHeightPx - fontHeight).toFloat(), 1f)
+  }
+
+  private fun applySelectionTheme(color: Int) {
+    editor.highlightColor = color.withAlpha(0x52)
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+
+    editor.textCursorDrawable = editor.textCursorDrawable?.mutate()?.apply { setTint(color) }
+    editor.textSelectHandle?.mutate()?.setTint(color)
+    editor.textSelectHandleLeft?.mutate()?.setTint(color)
+    editor.textSelectHandleRight?.mutate()?.setTint(color)
+  }
+
+  private fun resetSelectionTheme() {
+    applySelectionTheme(defaultSelectionColor)
+    editor.highlightColor = defaultHighlightColor
+  }
+
+  private fun currentSelectionPayload(
+    start: Int = editor.selectionStart,
+    end: Int = editor.selectionEnd
+  ): Map<String, Int> =
+    mapOf(
+      "start" to minOf(start, end).coerceAtLeast(0),
+      "end" to maxOf(start, end).coerceAtLeast(0),
+    )
+
+  private fun emitSelectionChange(start: Int, end: Int) {
+    // Caret moves advance the revision counter like text edits do: a
+    // controlled payload computed before this move is stale and must fail the
+    // revision guard instead of yanking the caret back mid-typing.
+    nativeEventCount += 1
+    onComposerSelectionChange(
+      mapOf(
+        "value" to editor.text.toString(),
+        "selection" to currentSelectionPayload(start, end),
+        "eventCount" to nativeEventCount,
+      ),
+    )
+  }
+
+  private fun emitContentSizeIfNeeded() {
+    // The laid-out text without insets. A one-line draft reports its natural width, so
+    // JS can tell whether it fits a narrower row than the one it is laid out in; past
+    // one line only the height matters. Trailing whitespace hangs past a line without
+    // wrapping it, so getLineMax leaves it out.
+    val layout = editor.layout
+    val contentHeight = layout?.height ?: editor.measuredHeight
+    val contentWidth = singleLineContentWidth(layout)
+    if (contentHeight == lastContentHeight && contentWidth == lastContentWidth) return
+    lastContentHeight = contentHeight
+    lastContentWidth = contentWidth
+    val density = resources.displayMetrics.density
+    onComposerContentSizeChange(
+      mapOf("width" to contentWidth / density, "height" to contentHeight / density),
+    )
+  }
+
+  // A chip is one replacement span, so a tap on its right half reports the offset at its end,
+  // and a tap below the last line clamps to it; only the chip's drawn bounds count.
+  private fun chipContains(token: ComposerToken, viewX: Float, viewY: Float): Boolean {
+    val layout = editor.layout ?: return false
+    val x = viewX - editor.totalPaddingLeft + editor.scrollX
+    val y = viewY - editor.totalPaddingTop + editor.scrollY
+    val line = layout.getLineForOffset(token.start)
+    val left = layout.getPrimaryHorizontal(token.start)
+    val right =
+      if (layout.getLineForOffset(token.end) == line) {
+        layout.getPrimaryHorizontal(token.end)
+      } else {
+        layout.getLineRight(line)
+      }
+    return y >= layout.getLineTop(line) && y <= layout.getLineBottom(line) &&
+      x >= minOf(left, right) && x <= maxOf(left, right)
+  }
+
+  private fun applyTokenSpans() {
+    val editable = editor.text ?: return
+    editable.getSpans(
+      0,
+      editable.length,
+      ComposerChipSpan::class.java
+    ).forEach(editable::removeSpan)
+    tokens.forEach { token ->
+      if (token.start < 0 || token.end <= token.start || token.end > editable.length) return@forEach
+      val expectedSource = editable.substring(token.start, token.end)
+      if (expectedSource != token.source) return@forEach
+      T3ChipIcons.load(context, token.iconUri, redrawChipsWithIcon)
+      editable.setSpan(
+        ComposerChipSpan(
+          T3ContextChip(
+            content = T3ContextChip.Content(
+              label = token.label,
+              detail = token.detail,
+              iconUri = token.iconUri,
+              tintsIcon = token.tintsIcon
+            ),
+            fontSize = editor.textSize,
+            color = T3ContextChip.color(token.accent, editor.currentTextColor),
+            maximumWidth = (
+              editor.width.takeIf {
+                it > 0
+              } ?: resources.displayMetrics.widthPixels
+              ).toFloat(),
+            density = resources.displayMetrics.density,
+          )
+        ),
+        token.start,
+        token.end,
+        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE,
+      )
+    }
+    editor.invalidate()
+  }
+
+  private fun parseColor(value: String, fallback: Int): Int =
+    try {
+      val androidColor = if (value.length == 9 && value.startsWith("#")) {
+        "#${value.takeLast(2)}${value.substring(1, 7)}"
+      } else {
+        value
+      }
+      Color.parseColor(androidColor)
+    } catch (_: Exception) {
+      fallback
+    }
+}
+
+// Round up: a truncated width can match a slot the line overflows, and the composer
+// then flips between its compact and expanded rows.
+internal fun singleLineContentWidth(layout: Layout?): Int =
+  if (layout?.lineCount == 1) ceil(layout.getLineMax(0)).toInt() else 0
+
+private fun Int.withAlpha(alpha: Int): Int = (this and 0x00FFFFFF) or (alpha shl 24)
+
+private fun Context.resolveThemeColor(attribute: Int, fallback: Int): Int {
+  val value = TypedValue()
+  return if (theme.resolveAttribute(attribute, value, true)) value.data else fallback
+}
+
+private data class ComposerToken(
+  val type: String,
+  val source: String,
+  val label: String,
+  val detail: String,
+  val accent: String,
+  val iconUri: String,
+  val tintsIcon: Boolean,
+  val start: Int,
+  val end: Int
+)
+
+private class ComposerChipSpan(
+  private val chip: T3ContextChip
+) : ReplacementSpan() {
+  val iconUri get() = chip.iconUri
+
+  override fun getSize(
+    paint: Paint,
+    text: CharSequence,
+    start: Int,
+    end: Int,
+    fontMetrics: Paint.FontMetricsInt?
+  ): Int {
+    fontMetrics?.let {
+      val base = paint.fontMetricsInt
+      it.top = base.top
+      it.ascent = base.ascent
+      it.descent = base.descent
+      it.bottom = base.bottom
+    }
+    // toInt() truncates; a fractional pixel would leave the span narrower than the chip
+    // draws and clip its right-hand border.
+    return kotlin.math.ceil(chip.width).toInt()
+  }
+
+  override fun draw(
+    canvas: Canvas,
+    text: CharSequence,
+    start: Int,
+    end: Int,
+    x: Float,
+    top: Int,
+    y: Int,
+    bottom: Int,
+    paint: Paint
+  ) {
+    val metrics = paint.fontMetrics
+    chip.draw(canvas, x, y + (metrics.ascent + metrics.descent - chip.height) / 2)
+  }
+}
+
+private fun parseTokens(value: String): List<ComposerToken> = try {
+  val array = org.json.JSONArray(value)
+  List(array.length()) { index ->
+    val token = array.getJSONObject(index)
+    ComposerToken(
+      type = token.optString("type"),
+      source = token.optString("source"),
+      label = token.optString("label"),
+      detail = token.optString("detail"),
+      accent = token.optString("accent"),
+      iconUri = if (token.isNull("iconUri")) "" else token.optString("iconUri"),
+      tintsIcon = token.optBoolean("tintsIcon"),
+      start = token.optInt("start"),
+      end = token.optInt("end"),
+    )
+  }
+} catch (_: Exception) {
+  emptyList()
+}
+
+internal class SelectionAwareEditText(
+  context: Context,
+  private val currentActivity: () -> Activity? = { context as? Activity }
+) : EditText(context) {
+  var readOnly = false
+  var selectionListener: ((Int, Int) -> Unit)? = null
+  var pasteImagesListener: ((List<String>) -> Unit)? = null
+  var pasteContextListener: ((Map<String, String>) -> Unit)? = null
+  var pasteTextListener: ((String, Int, Int) -> Unit)? = null
+  var submitListener: ((Boolean) -> Unit)? = null
+  var submitEnabled = false
+  var returnSends = true
+  var textPasteThresholdBytes = 0
+  var maxInputChars = Int.MAX_VALUE
+  var clipboardFragment = ""
+
+  // Keeps autofill services such as SMS verification codes from writing into the draft.
+  override fun getAutofillType(): Int = View.AUTOFILL_TYPE_NONE
+
+  /**
+   * Editable TextView hints do not ellipsize, so long placeholders wrap and grow the composer.
+   * Truncate the hint to the measured width instead.
+   */
+  var placeholder = ""
+    set(value) {
+      field = value
+      applyPlaceholder()
+    }
+
+  fun applyPlaceholder(availableWidth: Int = width - compoundPaddingLeft - compoundPaddingRight) {
+    val next =
+      if (availableWidth > 0) {
+        TextUtils.ellipsize(placeholder, paint, availableWidth.toFloat(), TextUtils.TruncateAt.END)
+      } else {
+        placeholder
+      }
+    if (hint?.toString() != next.toString()) hint = next
+  }
+
+  override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+    if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+      applyPlaceholder(
+        MeasureSpec.getSize(widthMeasureSpec) - compoundPaddingLeft - compoundPaddingRight
+      )
+    }
+    super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+  }
+
+  private fun deleteChip(backwards: Boolean): Boolean {
+    val content = text
+    val start = minOf(selectionStart, selectionEnd)
+    val end = maxOf(selectionStart, selectionEnd)
+    if (content == null || start < 0 || end < 0) return false
+    val from = if (start == end && backwards) (start - 1).coerceAtLeast(0) else start
+    val to = if (start == end && !backwards) (end + 1).coerceAtMost(content.length) else end
+    val spans = content.getSpans(from, to, ComposerChipSpan::class.java).filter {
+      content.getSpanStart(it) <
+        to &&
+        content.getSpanEnd(it) > from
+    }
+    if (spans.isNotEmpty()) {
+      val first = minOf(from, spans.minOf { content.getSpanStart(it) })
+      val last = maxOf(to, spans.maxOf { content.getSpanEnd(it) })
+      content.delete(first, last)
+      setSelection(first)
+    }
+    return spans.isNotEmpty()
+  }
+
+  // Mirrors the iOS key commands with Ctrl for Command. Returns `alternate`, or null to type Return.
+  // No composing-text guard: some IMEs keep a composing region over the last word while hardware typing.
+  private fun returnSubmission(keyCode: Int, event: KeyEvent): Boolean? {
+    val isReturn = keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER
+    if (!isReturn || !canSubmit() || !isFromPhysicalKeyboard(event)) return null
+    return if (returnSends) {
+      when {
+        event.hasNoModifiers() -> false
+        event.hasModifiers(KeyEvent.META_CTRL_ON) -> true
+        else -> null
+      }
+    } else {
+      when {
+        event.hasModifiers(KeyEvent.META_CTRL_ON) -> false
+        event.hasModifiers(KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON) -> true
+        else -> null
+      }
+    }
+  }
+
+  private fun canSubmit(): Boolean =
+    submitEnabled && submitListener != null && !readOnly && isEnabled
+
+  // IMEs can send Return from device 0 without FLAG_SOFT_KEYBOARD, so only a real alphabetic keyboard counts.
+  private fun isFromPhysicalKeyboard(event: KeyEvent): Boolean {
+    val device = event.device
+    return (event.flags and KeyEvent.FLAG_SOFT_KEYBOARD) == 0 &&
+      device != null &&
+      !device.isVirtual &&
+      device.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC
+  }
+
+  override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+    val alternate = returnSubmission(keyCode, event)
+    if (alternate != null) {
+      // A held Return repeats; send once and swallow the repeats instead of typing newlines.
+      if (event.repeatCount == 0) submitListener?.invoke(alternate)
+      return true
+    }
+    val handled = when (keyCode) {
+      KeyEvent.KEYCODE_DEL -> deleteChip(true)
+      KeyEvent.KEYCODE_FORWARD_DEL -> deleteChip(false)
+      else -> false
+    }
+    return handled || super.onKeyDown(keyCode, event)
+  }
+
+  private fun deleteAdjacentChip(beforeLength: Int, afterLength: Int): Boolean = when {
+    beforeLength == 1 && afterLength == 0 -> deleteChip(true)
+    beforeLength == 0 && afterLength == 1 -> deleteChip(false)
+    else -> false
+  }
+
+  override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+    val connection = super.onCreateInputConnection(outAttrs) ?: return null
+    return object : InputConnectionWrapper(connection, false) {
+      override fun deleteSurroundingText(
+        beforeLength: Int,
+        afterLength: Int
+      ): Boolean = deleteAdjacentChip(beforeLength, afterLength) ||
+        super.deleteSurroundingText(beforeLength, afterLength)
+      override fun deleteSurroundingTextInCodePoints(
+        beforeLength: Int,
+        afterLength: Int
+      ): Boolean = deleteAdjacentChip(beforeLength, afterLength) ||
+        super.deleteSurroundingTextInCodePoints(beforeLength, afterLength)
+      override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean =
+        commitUnlessPasted(text) { super.commitText(text, newCursorPosition) }
+
+      // InputConnectionWrapper sends this overload straight to its target, not through the
+      // two-argument commitText.
+      @RequiresApi(Build.VERSION_CODES.TIRAMISU)
+      override fun commitText(
+        text: CharSequence,
+        newCursorPosition: Int,
+        textAttribute: TextAttribute?
+      ): Boolean = commitUnlessPasted(text) {
+        super.commitText(text, newCursorPosition, textAttribute)
+      }
+
+      private fun commitUnlessPasted(text: CharSequence?, commit: () -> Boolean): Boolean =
+        if (interceptKeyboardPaste(text)) {
+          // The keyboard now treats its composing text as replaced; a span left behind would
+          // let its next word overwrite text the paste did not remove.
+          finishComposingText()
+          true
+        } else {
+          commit()
+        }
+    }
+  }
+
+  // IME clipboard inserts replace the composing range, just like native commitText.
+  private fun interceptKeyboardPaste(text: CharSequence?): Boolean {
+    if (readOnly || textPasteThresholdBytes <= 0 || text == null) return false
+    val value = text.toString()
+    val composingStart = BaseInputConnection.getComposingSpanStart(editableText)
+    val composingEnd = BaseInputConnection.getComposingSpanEnd(editableText)
+    return when {
+      Character.codePointCount(text, 0, text.length) < 2 -> false
+      composingStart < 0 -> interceptPaste(value)
+      else -> {
+        val continuesWord = value.startsWith(editableText.subSequence(composingStart, composingEnd))
+        val exceedsInputLimit =
+          length().toLong() - (composingEnd - composingStart) + value.length > maxInputChars
+        val keepTyping = if (continuesWord && exceedsInputLimit && !shouldFoldText(value)) {
+          val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+          // commitText has no paste flag; inspect the clipboard only for ambiguous overflow commits.
+          clipboard?.primaryClip?.plainText() != value
+        } else {
+          false
+        }
+        !keepTyping && interceptPaste(value, start = composingStart, end = composingEnd)
+      }
+    }
+  }
+
+  override fun onSelectionChanged(selStart: Int, selEnd: Int) {
+    super.onSelectionChanged(selStart, selEnd)
+    selectionListener?.invoke(selStart, selEnd)
+  }
+
+  override fun onDragEvent(event: DragEvent): Boolean = when {
+    readOnly || !isEnabled -> false
+    event.action == DragEvent.ACTION_DROP && event.clipDescription?.hasMimeType(
+      "image/*"
+    ) == true ->
+      dropImages(event)
+    else -> super.onDragEvent(event)
+  }
+
+  private fun dropImages(event: DragEvent): Boolean {
+    val clip = event.clipData
+    val activity = currentActivity()
+    val listener = pasteImagesListener
+    if (clip == null || activity == null || listener == null) return false
+    val imageUris = try {
+      // Keep the activity-scoped grant while JavaScript asynchronously reads the dropped images.
+      activity.requestDragAndDropPermissions(event)
+      (0 until clip.itemCount).mapNotNull { index ->
+        clip.getItemAt(index).uri?.takeIf { uri ->
+          context.contentResolver.getType(uri)?.startsWith("image/") == true
+        }?.toString()
+      }
+    } catch (_: SecurityException) {
+      emptyList()
+    }
+    return if (imageUris.size == clip.itemCount) {
+      listener(imageUris)
+      true
+    } else {
+      false
+    }
+  }
+
+  override fun onTextContextMenuItem(id: Int): Boolean {
+    val pasting = id == android.R.id.paste || id == android.R.id.pasteAsPlainText
+    if (readOnly && (id == android.R.id.cut || pasting)) {
+      return false
+    }
+    val handled = when {
+      id == android.R.id.copy || id == android.R.id.cut -> copyContext(id == android.R.id.cut)
+      id == android.R.id.pasteAsPlainText -> {
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+        pasteInterceptedText(clipboard?.primaryClip, foldLargeText = false)
+      }
+      pasting -> pasteContextOrImages()
+      else -> false
+    }
+    return handled || super.onTextContextMenuItem(id)
+  }
+
+  private fun copyContext(cut: Boolean): Boolean {
+    val start = minOf(selectionStart, selectionEnd).coerceAtLeast(0)
+    val end = maxOf(selectionStart, selectionEnd).coerceAtMost(length())
+    if (end <= start || clipboardFragment.isEmpty()) return false
+    T3ComposerClipboard.write(context, text.substring(start, end), clipboardFragment)
+    if (cut) text.delete(start, end)
+    return true
+  }
+
+  private fun pasteContextOrImages(): Boolean {
+    val payload = T3ComposerClipboard.read(context)
+    return when {
+      payload["html"]?.contains("data-t3-context-fragment=") == true -> pasteContext(payload)
+      pasteImagesOrInterceptedText() -> true
+      isSingleItemClip() && T3ComposerClipboard.hasThreadLink(payload["text"].orEmpty()) ->
+        pasteContext(payload)
+      else -> false
+    }
+  }
+
+  // read() sees only the first item; native paste keeps every item of a longer clip.
+  private fun isSingleItemClip(): Boolean {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    return clipboard?.primaryClip?.itemCount == 1
+  }
+
+  private fun pasteContext(payload: Map<String, String>): Boolean {
+    pasteContextListener?.invoke(payload)
+    return true
+  }
+
+  private fun pasteImagesOrInterceptedText(): Boolean {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+    val clip = clipboard?.primaryClip
+    val imageUris = buildList {
+      if (clip != null) {
+        for (index in 0 until clip.itemCount) {
+          clip.getItemAt(index).uri?.let { uri ->
+            val mimeType = context.contentResolver.getType(uri)
+            if (mimeType?.startsWith("image/") == true) add(uri.toString())
+          }
+        }
+      }
+    }
+    return when {
+      imageUris.isNotEmpty() -> {
+        pasteImagesListener?.invoke(imageUris)
+        true
+      }
+      else -> pasteInterceptedText(clip)
+    }
+  }
+
+  private fun pasteInterceptedText(clip: ClipData?, foldLargeText: Boolean = true): Boolean {
+    val text = if (textPasteThresholdBytes > 0) clip?.plainText() else null
+    if (text.isNullOrEmpty()) return false
+    return interceptPaste(text, foldLargeText)
+  }
+
+  private fun interceptPaste(
+    text: String,
+    foldLargeText: Boolean = true,
+    start: Int = minOf(selectionStart, selectionEnd).coerceIn(0, length()),
+    end: Int = maxOf(selectionStart, selectionEnd).coerceIn(start, length())
+  ): Boolean {
+    val exceedsInputLimit = length().toLong() - (end - start) + text.length > maxInputChars
+    val shouldFold = foldLargeText && shouldFoldText(text)
+    val shouldIntercept = exceedsInputLimit || shouldFold
+    if (shouldIntercept) {
+      pasteTextListener?.invoke(text, start, end)
+    }
+    // Let EditText perform ordinary pastes, retaining its native undo history.
+    return shouldIntercept
+  }
+
+  private fun shouldFoldText(text: String): Boolean =
+    text.length >= textPasteThresholdBytes ||
+      text.toByteArray(Charsets.UTF_8).size >= textPasteThresholdBytes
+
+  // Match native paste's newlines, including empty items.
+  // URI-backed clips stay native: coerceToText can read a provider synchronously.
+  private fun ClipData.plainText(): String? {
+    var joined: StringBuilder? = null
+    for (index in 0 until itemCount) {
+      val item = getItemAt(index)
+      if (item.uri != null) return null
+      val itemText = item.coerceToText(context) ?: continue
+      if (joined == null) {
+        joined = StringBuilder(itemText)
+      } else {
+        joined.append('\n').append(itemText)
+      }
+    }
+    return joined?.toString()?.takeIf(String::isNotEmpty)
+  }
+
+  override fun onKeyShortcut(keyCode: Int, event: KeyEvent): Boolean {
+    if (keyCode == KeyEvent.KEYCODE_V && event.isCtrlPressed && event.isShiftPressed) {
+      return onTextContextMenuItem(android.R.id.pasteAsPlainText)
+    }
+    return super.onKeyShortcut(keyCode, event)
+  }
+}

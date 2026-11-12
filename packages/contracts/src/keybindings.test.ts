@@ -1,13 +1,8 @@
-import { Schema } from "effect";
 import { assert, it } from "@effect/vitest";
-import { Effect } from "effect";
+import * as Schema from "effect/Schema";
+import * as Effect from "effect/Effect";
 
-import {
-  KeybindingsConfig,
-  KeybindingRule,
-  ResolvedKeybindingRule,
-  ResolvedKeybindingsConfig,
-} from "./keybindings";
+import { ResolvedKeybindingsConfig } from "./keybindings.ts";
 
 const decode = <S extends Schema.Top>(
   schema: S,
@@ -19,191 +14,39 @@ const decode = <S extends Schema.Top>(
     never
   >;
 
-const decodeResolvedRule = Schema.decodeUnknownEffect(ResolvedKeybindingRule as never);
+const shortcut = {
+  key: "p",
+  metaKey: false,
+  ctrlKey: false,
+  shiftKey: false,
+  altKey: false,
+  modKey: true,
+};
 
-it.effect("parses keybinding rules", () =>
-  Effect.gen(function* () {
-    const parsed = yield* decode(KeybindingRule, {
-      key: "mod+j",
-      command: "terminal.toggle",
-    });
-    assert.strictEqual(parsed.command, "terminal.toggle");
-
-    const parsedClose = yield* decode(KeybindingRule, {
-      key: "mod+w",
-      command: "terminal.close",
-    });
-    assert.strictEqual(parsedClose.command, "terminal.close");
-
-    const parsedDiffToggle = yield* decode(KeybindingRule, {
-      key: "mod+d",
-      command: "diff.toggle",
-    });
-    assert.strictEqual(parsedDiffToggle.command, "diff.toggle");
-
-    const parsedSidebarToggle = yield* decode(KeybindingRule, {
-      key: "mod+b",
-      command: "sidebar.toggle",
-    });
-    assert.strictEqual(parsedSidebarToggle.command, "sidebar.toggle");
-
-    const parsedLocal = yield* decode(KeybindingRule, {
-      key: "mod+shift+n",
-      command: "chat.newLocal",
-    });
-    assert.strictEqual(parsedLocal.command, "chat.newLocal");
-
-    const parsedReviewMode = yield* decode(KeybindingRule, {
-      key: "mod+shift+r",
-      command: "composer.mode.review",
-    });
-    assert.strictEqual(parsedReviewMode.command, "composer.mode.review");
-
-    const parsedModelPickerToggle = yield* decode(KeybindingRule, {
-      key: "mod+shift+m",
-      command: "modelPicker.toggle",
-    });
-    assert.strictEqual(parsedModelPickerToggle.command, "modelPicker.toggle");
-
-    const parsedModelPickerJump = yield* decode(KeybindingRule, {
-      key: "mod+1",
-      command: "modelPicker.jump.1",
-    });
-    assert.strictEqual(parsedModelPickerJump.command, "modelPicker.jump.1");
-
-    const parsedThreadPrevious = yield* decode(KeybindingRule, {
-      key: "mod+shift+[",
-      command: "thread.previous",
-    });
-    assert.strictEqual(parsedThreadPrevious.command, "thread.previous");
-
-    const parsedReload = yield* decode(KeybindingRule, {
-      key: "f5",
-      command: "app.reload",
-    });
-    assert.strictEqual(parsedReload.command, "app.reload");
-  }),
-);
-
-it.effect("rejects invalid command values", () =>
-  Effect.gen(function* () {
-    const result = yield* Effect.exit(
-      decode(KeybindingRule, {
-        key: "mod+j",
-        command: "script.Test.run",
-      }),
-    );
-    assert.strictEqual(result._tag, "Failure");
-  }),
-);
-
-it.effect("accepts dynamic script run commands", () =>
-  Effect.gen(function* () {
-    const parsed = yield* decode(KeybindingRule, {
-      key: "mod+r",
-      command: "script.setup.run",
-    });
-    assert.strictEqual(parsed.command, "script.setup.run");
-  }),
-);
-
-it.effect("parses keybindings array payload", () =>
-  Effect.gen(function* () {
-    const parsed = yield* decode(KeybindingsConfig, [
-      { key: "mod+j", command: "terminal.toggle" },
-      { key: "mod+d", command: "terminal.split", when: "terminalFocus" },
-    ]);
-    assert.lengthOf(parsed, 2);
-  }),
-);
-
-it.effect("parses resolved keybinding rules", () =>
-  Effect.gen(function* () {
-    const parsed = yield* decode(ResolvedKeybindingRule, {
-      command: "terminal.split",
-      shortcut: {
-        key: "d",
-        metaKey: false,
-        ctrlKey: false,
-        shiftKey: false,
-        altKey: false,
-        modKey: true,
-      },
-      whenAst: {
-        type: "and",
-        left: { type: "identifier", name: "terminalOpen" },
-        right: {
-          type: "not",
-          node: { type: "identifier", name: "terminalFocus" },
-        },
-      },
-    });
-    assert.strictEqual(parsed.shortcut.key, "d");
-  }),
-);
-
-it.effect("parses resolved keybindings arrays", () =>
+it.effect("drops resolved rules with commands this build does not know", () =>
   Effect.gen(function* () {
     const parsed = yield* decode(ResolvedKeybindingsConfig, [
-      {
-        command: "terminal.toggle",
-        shortcut: {
-          key: "j",
-          metaKey: false,
-          ctrlKey: false,
-          shiftKey: false,
-          altKey: false,
-          modKey: true,
-        },
-      },
-      {
-        command: "thread.jump.3",
-        shortcut: {
-          key: "3",
-          metaKey: false,
-          ctrlKey: false,
-          shiftKey: false,
-          altKey: false,
-          modKey: true,
-        },
-      },
-      {
-        command: "modelPicker.jump.3",
-        shortcut: {
-          key: "3",
-          metaKey: false,
-          ctrlKey: false,
-          shiftKey: false,
-          altKey: false,
-          modKey: true,
-        },
-        whenAst: {
-          type: "identifier",
-          name: "modelPickerOpen",
-        },
-      },
+      { command: "terminal.toggle", shortcut },
+      { command: "someFuture.toggle", shortcut },
+      { command: "filePicker.toggle", shortcut },
     ]);
-    assert.lengthOf(parsed, 3);
+    assert.deepEqual(
+      parsed.map((rule) => rule.command),
+      ["terminal.toggle", "filePicker.toggle"],
+    );
   }),
 );
 
-it.effect("drops unknown fields in resolved keybinding rules", () =>
-  decodeResolvedRule({
-    command: "terminal.toggle",
-    shortcut: {
-      key: "j",
-      metaKey: false,
-      ctrlKey: false,
-      shiftKey: false,
-      altKey: false,
-      modKey: true,
-    },
-    key: "mod+j",
-  }).pipe(
-    Effect.map((parsed) => {
-      const view = parsed as Record<string, unknown>;
-      assert.strictEqual("key" in view, false);
-      assert.strictEqual(view.command, "terminal.toggle");
-    }),
-  ),
+it.effect("drops malformed resolved rule entries", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decode(ResolvedKeybindingsConfig, [
+      "garbage",
+      { command: "terminal.toggle", shortcut },
+      null,
+    ]);
+    assert.deepEqual(
+      parsed.map((rule) => rule.command),
+      ["terminal.toggle"],
+    );
+  }),
 );

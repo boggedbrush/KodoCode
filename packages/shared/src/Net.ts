@@ -1,229 +1,179 @@
-import * as Net from "node:net";
+import * as NodeNet from "node:net";
 
-import { Data, Effect, Layer, ServiceMap } from "effect";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Context from "effect/Context";
+import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
 
-export class NetError extends Data.TaggedError("NetError")<{
-  readonly message: string;
-  readonly cause?: unknown;
-}> {}
+export class NetError extends Schema.TaggedError<NetError>()("NetError", {
+  message: Schema.String,
+  cause: Schema.optional(Schema.Defect()),
+}) {}
 
-function isErrnoExceptionWithCode(cause: unknown): cause is {
+const isErrnoExceptionWithCode = (
+  cause: unknown,
+): cause is {
   readonly code: string;
-} {
-  return (
-    typeof cause === "object" &&
-    cause !== null &&
-    "code" in cause &&
-    typeof (cause as { readonly code: unknown }).code === "string"
-  );
-}
+} =>
+  Predicate.isObject(cause) &&
+  Predicate.hasProperty(cause, "code") &&
+  Predicate.isString(cause.code);
 
-const closeServer = (server: Net.Server) => {
+const closeServer = (server: NodeNet.Server) => {
   try {
     server.close();
-  } catch {
-    // Ignore close failures during cleanup.
-  }
+  } catch {}
 };
 
-const tryReservePort = (port: number): Effect.Effect<number, NetError> =>
-  Effect.callback<number, NetError>((resume) => {
-    const server = Net.createServer();
-    let settled = false;
-
-    const settle = (effect: Effect.Effect<number, NetError>) => {
-      if (settled) return;
-      settled = true;
-      resume(effect);
-    };
-
-    server.unref();
-
-    server.once("error", (cause) => {
-      settle(Effect.fail(new NetError({ message: "Could not find an available port.", cause })));
-    });
-
-    server.listen(port, () => {
-      const address = server.address();
-      const resolved = typeof address === "object" && address !== null ? address.port : 0;
-      server.close(() => {
-        if (resolved > 0) {
-          settle(Effect.succeed(resolved));
-          return;
-        }
-        settle(Effect.fail(new NetError({ message: "Could not find an available port." })));
-      });
-    });
-
-    return Effect.sync(() => {
-      closeServer(server);
-    });
-  });
-
 export interface NetServiceShape {
-  /**
-   * Returns true when a TCP server can bind to {host, port}.
-   */
   readonly canListenOnHost: (port: number, host: string) => Effect.Effect<boolean>;
 
-  /**
-   * Checks loopback availability on both IPv4 and IPv6 localhost addresses.
-   */
   readonly isPortAvailableOnLoopback: (port: number) => Effect.Effect<boolean>;
 
-  /**
-   * Reserve an ephemeral loopback port and release it immediately.
-   */
+  readonly hasListenerOnHost: (port: number, host: string) => Effect.Effect<boolean>;
+
   readonly reserveLoopbackPort: (host?: string) => Effect.Effect<number, NetError>;
 
-  /**
-   * Resolve an available listening port, preferring the provided port first.
-   */
   readonly findAvailablePort: (preferred: number) => Effect.Effect<number, NetError>;
 }
 
-/**
- * NetService - Service tag for startup networking helpers.
- */
-export class NetService extends ServiceMap.Service<NetService, NetServiceShape>()(
+export class NetService extends Context.Service<NetService, NetServiceShape>()(
   "@t3tools/shared/Net/NetService",
-) {
-  static readonly layer = Layer.sync(NetService, () => {
-    const canConnectToHost = (port: number, host: string): Effect.Effect<boolean> =>
-      Effect.callback<boolean>((resume) => {
-        const socket = new Net.Socket();
-        let settled = false;
+) {}
 
-        const settle = (value: boolean) => {
-          if (settled) return;
-          settled = true;
-          socket.destroy();
-          resume(Effect.succeed(value));
-        };
+/** @public */
+export const make = () => {
+  const canListenOnHost = (port: number, host: string): Effect.Effect<boolean> =>
+    Effect.callback<boolean>((resume) => {
+      const server = NodeNet.createServer();
+      let settled = false;
 
-        socket.unref();
-        socket.setTimeout(150);
+      const settle = (value: boolean) => {
+        if (settled) return;
+        settled = true;
+        resume(Effect.succeed(value));
+      };
 
-        socket.once("connect", () => {
+      server.unref();
+
+      server.once("error", (cause) => {
+        // Missing IPv6 addresses or kernel support do not mean the port is occupied.
+        if (
+          isErrnoExceptionWithCode(cause) &&
+          (cause.code === "EADDRNOTAVAIL" || cause.code === "EAFNOSUPPORT")
+        ) {
+          settle(true);
+          return;
+        }
+        settle(false);
+      });
+
+      server.once("listening", () => {
+        server.close(() => {
           settle(true);
         });
-        socket.once("timeout", () => {
-          settle(false);
-        });
-        socket.once("error", (cause) => {
-          if (
-            isErrnoExceptionWithCode(cause) &&
-            (cause.code === "ECONNREFUSED" || cause.code === "EADDRNOTAVAIL")
-          ) {
-            settle(false);
-            return;
-          }
-          settle(false);
-        });
-
-        socket.connect({ host, port });
-
-        return Effect.sync(() => {
-          socket.destroy();
-        });
       });
 
-    /**
-     * Returns true when a TCP server can bind to {host, port}.
-     * `EADDRNOTAVAIL` is treated as available so IPv6-absent hosts don't fail
-     * loopback availability checks.
-     */
-    const canListenOnHost = (port: number, host: string): Effect.Effect<boolean> =>
-      Effect.callback<boolean>((resume) => {
-        const server = Net.createServer();
-        let settled = false;
+      server.listen({ host, port });
 
-        const settle = (value: boolean) => {
-          if (settled) return;
-          settled = true;
-          resume(Effect.succeed(value));
-        };
+      return Effect.sync(() => {
+        closeServer(server);
+      });
+    });
 
-        server.unref();
+  const hasListenerOnHost = (port: number, host: string): Effect.Effect<boolean> =>
+    Effect.callback<boolean>((resume) => {
+      const socket = NodeNet.createConnection({ host, port });
+      let settled = false;
 
-        server.once("error", (cause) => {
-          if (isErrnoExceptionWithCode(cause) && cause.code === "EADDRNOTAVAIL") {
-            settle(true);
-            return;
-          }
-          settle(false);
-        });
+      const settle = (value: boolean) => {
+        if (settled) return;
+        settled = true;
+        socket.destroy();
+        resume(Effect.succeed(value));
+      };
 
-        server.once("listening", () => {
-          server.close(() => {
-            settle(true);
-          });
-        });
-
-        server.listen({ host, port });
-
-        return Effect.sync(() => {
-          closeServer(server);
-        });
+      socket.unref();
+      socket.setTimeout(250);
+      socket.once("connect", () => {
+        settle(true);
+      });
+      socket.once("error", () => {
+        settle(false);
+      });
+      socket.once("timeout", () => {
+        settle(false);
       });
 
-    /**
-     * Reserve an ephemeral loopback port and release it immediately.
-     * Returns the reserved port number.
-     */
-    const reserveLoopbackPort = (host = "127.0.0.1"): Effect.Effect<number, NetError> =>
-      Effect.callback<number, NetError>((resume) => {
-        const probe = Net.createServer();
-        let settled = false;
-
-        const settle = (effect: Effect.Effect<number, NetError>) => {
-          if (settled) return;
-          settled = true;
-          resume(effect);
-        };
-
-        probe.once("error", (cause) => {
-          settle(Effect.fail(new NetError({ message: "Failed to reserve loopback port", cause })));
-        });
-
-        probe.listen(0, host, () => {
-          const address = probe.address();
-          const port = typeof address === "object" && address !== null ? address.port : 0;
-          probe.close(() => {
-            if (port > 0) {
-              settle(Effect.succeed(port));
-              return;
-            }
-            settle(Effect.fail(new NetError({ message: "Failed to reserve loopback port" })));
-          });
-        });
-
-        return Effect.sync(() => {
-          closeServer(probe);
-        });
+      return Effect.sync(() => {
+        socket.destroy();
       });
+    });
 
-    return {
-      canListenOnHost,
-      isPortAvailableOnLoopback: (port) =>
-        Effect.gen(function* () {
-          const [ipv4Reachable, ipv6Reachable] = yield* Effect.all([
-            canConnectToHost(port, "127.0.0.1"),
-            canConnectToHost(port, "::1"),
-          ]);
-          if (ipv4Reachable || ipv6Reachable) {
-            return false;
-          }
+  const isPortAvailableOnLoopback = Effect.fn("Net.isPortAvailableOnLoopback")(function* (
+    port: number,
+  ): Effect.fn.Return<boolean> {
+    const hasListener = yield* Effect.zipWith(
+      hasListenerOnHost(port, "127.0.0.1"),
+      hasListenerOnHost(port, "::1"),
+      (ipv4, ipv6) => ipv4 || ipv6,
+    );
+    if (hasListener) {
+      return false;
+    }
 
-          const [ipv4Available, ipv6Available] = yield* Effect.all([
-            canListenOnHost(port, "127.0.0.1"),
-            canListenOnHost(port, "::1"),
-          ]);
-          return ipv4Available && ipv6Available;
-        }),
-      reserveLoopbackPort,
-      findAvailablePort: (preferred) =>
-        Effect.catch(tryReservePort(preferred), () => tryReservePort(0)),
-    } satisfies NetServiceShape;
+    return yield* Effect.zipWith(
+      canListenOnHost(port, "127.0.0.1"),
+      canListenOnHost(port, "::1"),
+      (ipv4, ipv6) => ipv4 && ipv6,
+    );
   });
-}
+
+  const reserveLoopbackPort = (host = "127.0.0.1"): Effect.Effect<number, NetError> =>
+    Effect.callback<number, NetError>((resume) => {
+      const probe = NodeNet.createServer();
+      let settled = false;
+
+      const settle = (effect: Effect.Effect<number, NetError>) => {
+        if (settled) return;
+        settled = true;
+        resume(effect);
+      };
+
+      probe.once("error", (cause) => {
+        settle(Effect.fail(new NetError({ message: "Failed to reserve loopback port", cause })));
+      });
+
+      probe.listen(0, host, () => {
+        const address = probe.address();
+        const port = typeof address === "object" && address !== null ? address.port : 0;
+        probe.close(() => {
+          if (port > 0) {
+            settle(Effect.succeed(port));
+            return;
+          }
+          settle(Effect.fail(new NetError({ message: "Failed to reserve loopback port" })));
+        });
+      });
+
+      return Effect.sync(() => {
+        closeServer(probe);
+      });
+    });
+
+  return {
+    canListenOnHost,
+    isPortAvailableOnLoopback,
+    hasListenerOnHost,
+    reserveLoopbackPort,
+    findAvailablePort: Effect.fn("Net.findAvailablePort")(function* (preferred) {
+      if (preferred > 0 && (yield* isPortAvailableOnLoopback(preferred))) {
+        return preferred;
+      }
+      return yield* reserveLoopbackPort();
+    }),
+  } satisfies NetServiceShape;
+};
+
+export const layer = Layer.sync(NetService, make);

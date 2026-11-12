@@ -1,39 +1,93 @@
-import type { AuthClientMetadata, AuthClientMetadataDeviceType } from "@t3tools/contracts";
-import type * as HttpServerRequest from "effect/unstable/http/HttpServerRequest";
-import * as Crypto from "node:crypto";
+import type {
+  AuthClientMetadata,
+  AuthClientMetadataDeviceType,
+  AuthClientPresentationMetadata,
+} from "@t3tools/contracts";
+import type * as HttpServerRequest from "effect/http/HttpServerRequest";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Effect's Digest is effectful; the cookie name stays a plain function.
+import * as NodeCrypto from "node:crypto";
+import * as NodeNet from "node:net";
+import { normalizeHostname } from "@t3tools/shared/hostClassification";
+import * as Mac from "effect/crypto/Mac";
+import * as Base64Url from "effect/encoding/Base64Url";
+import * as Result from "effect/Result";
 
-const SESSION_COOKIE_NAME_PREFIX = "kodo_session";
+const SESSION_COOKIE_NAME = "t3_session";
 
-export function deriveSessionCookieName(environmentId: string): string {
-  // Browsers scope cookies by scheme + host + path, not by TCP port. Two local Kodo
-  // servers on the same host therefore share one cookie jar, so a fixed cookie name
-  // causes whichever server paired last to overwrite the earlier session. Hashing the
-  // stable environment id keeps the cookie name deterministic for one environment while
-  // preventing different localhost servers from clobbering each other.
-  const suffix = Crypto.createHash("sha256").update(environmentId).digest("hex").slice(0, 12);
-  return `${SESSION_COOKIE_NAME_PREFIX}_${suffix}`;
+/** Cookies span ports; use separate names for servers sharing a hostname. */
+export function resolveSessionCookieName(input: {
+  readonly mode: "web" | "desktop";
+  readonly port: number;
+  readonly host: string | undefined;
+  readonly instanceKey: string;
+  readonly environmentId: string;
+  readonly development: boolean;
+}): string {
+  if (input.mode === "desktop") {
+    return `${SESSION_COOKIE_NAME}_${input.port}`;
+  }
+
+  const instanceHash = NodeCrypto.createHash("sha256")
+    .update(
+      !input.development && isRemoteReachableHost(input.host)
+        ? input.environmentId
+        : input.instanceKey,
+    )
+    .digest("hex")
+    .slice(0, 12);
+
+  if (!input.development && isRemoteReachableHost(input.host)) {
+    return `${SESSION_COOKIE_NAME}_${instanceHash}`;
+  }
+
+  return `${SESSION_COOKIE_NAME}_${input.port}_${instanceHash}`;
 }
 
+export function resolveLegacySessionCookieName(input: {
+  readonly mode: "web" | "desktop";
+  readonly host: string | undefined;
+  readonly development: boolean;
+}): string | undefined {
+  return input.mode === "web" && !input.development && isRemoteReachableHost(input.host)
+    ? SESSION_COOKIE_NAME
+    : undefined;
+}
+
+/**
+ * The loopback address a server given `host` listens on, or undefined when it may listen beyond
+ * this machine. Unset means 127.0.0.1. Only a loopback literal or `localhost` counts: Node listens
+ * on every interface for an empty host, and any other name resolves through DNS.
+ */
+export function loopbackBindAddress(host: string | undefined): string | undefined {
+  if (host === undefined) return "127.0.0.1";
+  const address = normalizeHostname(host);
+  if (address === "localhost") return "127.0.0.1";
+  return (NodeNet.isIPv4(address) && address.startsWith("127.")) || address === "::1"
+    ? address
+    : undefined;
+}
+
+export const isRemoteReachableHost = (host: string | undefined): boolean =>
+  loopbackBindAddress(host) === undefined;
+
 export function base64UrlEncode(input: string | Uint8Array): string {
-  const buffer = typeof input === "string" ? Buffer.from(input, "utf8") : Buffer.from(input);
-  return buffer.toString("base64url");
+  return typeof input === "string"
+    ? Base64Url.encode(new TextEncoder().encode(input))
+    : Base64Url.encode(input);
 }
 
 export function base64UrlDecodeUtf8(input: string): string {
-  return Buffer.from(input, "base64url").toString("utf8");
-}
-
-export function signPayload(payload: string, secret: Uint8Array): string {
-  return Crypto.createHmac("sha256", Buffer.from(secret)).update(payload).digest("base64url");
+  return Result.getOrThrow(Base64Url.decodeString(input));
 }
 
 export function timingSafeEqualBase64Url(left: string, right: string): boolean {
-  const leftBuffer = Buffer.from(left, "base64url");
-  const rightBuffer = Buffer.from(right, "base64url");
-  if (leftBuffer.length !== rightBuffer.length) {
-    return false;
-  }
-  return Crypto.timingSafeEqual(leftBuffer, rightBuffer);
+  const leftBytes = Base64Url.decode(left);
+  const rightBytes = Base64Url.decode(right);
+  return (
+    Result.isSuccess(leftBytes) &&
+    Result.isSuccess(rightBytes) &&
+    Mac.timingSafeEqual(leftBytes.success, rightBytes.success)
+  );
 }
 
 function normalizeNonEmptyString(value: string | null | undefined): string | undefined {
@@ -75,9 +129,9 @@ function inferBrowser(userAgent: string | undefined): string | undefined {
     return undefined;
   }
   const normalized = userAgent.toLowerCase();
-  if (/edg\//.test(normalized)) return "Edge";
-  if (/opr\//.test(normalized)) return "Opera";
-  if (/firefox\//.test(normalized)) return "Firefox";
+  if (/edg(?:e|a|ios)?\//.test(normalized)) return "Edge";
+  if (/opr\/|opios\//.test(normalized)) return "Opera";
+  if (/firefox\/|fxios\//.test(normalized)) return "Firefox";
   if (/electron\//.test(normalized)) return "Electron";
   if (/chrome\//.test(normalized) || /crios\//.test(normalized)) return "Chrome";
   if (/safari\//.test(normalized) && !/chrome\//.test(normalized)) return "Safari";
@@ -114,17 +168,17 @@ function readRemoteAddressFromSource(source: unknown): string | undefined {
 
 export function deriveAuthClientMetadata(input: {
   readonly request: HttpServerRequest.HttpServerRequest;
-  readonly label?: string;
+  readonly presented?: AuthClientPresentationMetadata;
 }): AuthClientMetadata {
   const userAgent = normalizeNonEmptyString(input.request.headers["user-agent"]);
   const ipAddress = readRemoteAddressFromSource(input.request.source);
-  const os = inferOs(userAgent);
+  const os = input.presented?.os ?? inferOs(userAgent);
   const browser = inferBrowser(userAgent);
   return {
-    ...(input.label ? { label: input.label } : {}),
+    ...(input.presented?.label ? { label: input.presented.label } : {}),
     ...(ipAddress ? { ipAddress } : {}),
     ...(userAgent ? { userAgent } : {}),
-    deviceType: inferDeviceType(userAgent),
+    deviceType: input.presented?.deviceType ?? inferDeviceType(userAgent),
     ...(os ? { os } : {}),
     ...(browser ? { browser } : {}),
   };

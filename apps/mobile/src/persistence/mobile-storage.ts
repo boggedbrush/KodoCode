@@ -1,0 +1,201 @@
+import * as Arr from "effect/Array";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import { pipe } from "effect/Function";
+import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
+
+import * as MobileSecureStorage from "./mobile-secure-storage";
+
+const AGENT_AWARENESS_DEVICE_ID_KEY = "t3code.agent-awareness.device-id";
+const AGENT_AWARENESS_REGISTRATION_KEY = "t3code.agent-awareness.registration";
+const RECENT_THREAD_SHORTCUTS_KEY = "t3code.recent-thread-shortcuts";
+const encodeJson = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+
+export class MobileStorageDecodeError extends Schema.TaggedError<MobileStorageDecodeError>()(
+  "MobileStorageDecodeError",
+  {
+    key: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to decode mobile storage value for key ${this.key}.`;
+  }
+}
+
+export class MobileStorageEncodeError extends Schema.TaggedError<MobileStorageEncodeError>()(
+  "MobileStorageEncodeError",
+  {
+    key: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to encode mobile storage value for key ${this.key}.`;
+  }
+}
+
+export class MobileDeviceIdGenerationError extends Schema.TaggedError<MobileDeviceIdGenerationError>()(
+  "MobileDeviceIdGenerationError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to generate the mobile agent-awareness device id.";
+  }
+}
+
+export interface AgentAwarenessRegistrationRecord {
+  readonly identity: string;
+  readonly signature: string;
+  readonly pushToStartToken?: string;
+}
+
+export interface RecentThreadShortcut {
+  readonly environmentId: string;
+  readonly threadId: string;
+  readonly title: string;
+}
+
+export class MobileStorage extends Context.Service<
+  MobileStorage,
+  {
+    readonly loadOrCreateAgentAwarenessDeviceId: Effect.Effect<
+      string,
+      MobileSecureStorage.MobileSecureStorageError | MobileDeviceIdGenerationError
+    >;
+    readonly loadAgentAwarenessDeviceId: Effect.Effect<
+      string | null,
+      MobileSecureStorage.MobileSecureStorageError
+    >;
+    readonly loadAgentAwarenessRegistrationRecord: Effect.Effect<
+      AgentAwarenessRegistrationRecord | null,
+      MobileSecureStorage.MobileSecureStorageError
+    >;
+    readonly saveAgentAwarenessRegistrationRecord: (
+      record: AgentAwarenessRegistrationRecord,
+    ) => Effect.Effect<
+      void,
+      MobileSecureStorage.MobileSecureStorageError | MobileStorageEncodeError
+    >;
+    readonly clearAgentAwarenessRegistrationRecord: Effect.Effect<
+      void,
+      MobileSecureStorage.MobileSecureStorageError
+    >;
+    readonly loadRecentThreadShortcuts: Effect.Effect<
+      ReadonlyArray<RecentThreadShortcut>,
+      MobileSecureStorage.MobileSecureStorageError
+    >;
+    readonly saveRecentThreadShortcuts: (
+      threads: ReadonlyArray<RecentThreadShortcut>,
+    ) => Effect.Effect<
+      void,
+      MobileSecureStorage.MobileSecureStorageError | MobileStorageEncodeError
+    >;
+  }
+>()("@t3tools/mobile/persistence/mobile-storage/MobileStorage") {}
+
+export const make = Effect.fn("MobileStorage.make")(function* () {
+  const secureStorage = yield* MobileSecureStorage.MobileSecureStorage;
+  const deviceIdLock = yield* Semaphore.make(1);
+
+  const parseJson = <A>(key: string, raw: string): A | null => {
+    if (!raw.trim()) return null;
+    try {
+      return JSON.parse(raw) as A;
+    } catch (cause) {
+      console.warn(
+        "[mobile-storage] ignored invalid JSON",
+        new MobileStorageDecodeError({ key, cause }),
+      );
+      return null;
+    }
+  };
+
+  const readJson = Effect.fn("MobileStorage.readJson")(function* <A>(key: string) {
+    const raw = (yield* secureStorage.getItem(key)) ?? "";
+    return parseJson<A>(key, raw);
+  });
+
+  const writeJson = Effect.fn("MobileStorage.writeJson")(function* (key: string, value: unknown) {
+    const encoded = yield* encodeJson(value).pipe(
+      Effect.mapError((cause) => new MobileStorageEncodeError({ key, cause })),
+    );
+    yield* secureStorage.setItem(key, encoded);
+  });
+
+  const loadOrCreateAgentAwarenessDeviceId = Effect.gen(function* () {
+    const existing = yield* secureStorage.getItem(AGENT_AWARENESS_DEVICE_ID_KEY);
+    if (existing?.trim()) return existing;
+    const deviceId = yield* Effect.tryPromise({
+      try: () => import("../lib/uuid").then(({ uuidv4 }) => uuidv4()),
+      catch: (cause) => new MobileDeviceIdGenerationError({ cause }),
+    });
+    yield* secureStorage.setItem(AGENT_AWARENESS_DEVICE_ID_KEY, deviceId);
+    return deviceId;
+  }).pipe(deviceIdLock.withPermits(1));
+
+  const loadAgentAwarenessDeviceId = secureStorage
+    .getItem(AGENT_AWARENESS_DEVICE_ID_KEY)
+    .pipe(Effect.map((existing) => (existing?.trim() ? existing : null)));
+
+  const loadAgentAwarenessRegistrationRecord = readJson<AgentAwarenessRegistrationRecord>(
+    AGENT_AWARENESS_REGISTRATION_KEY,
+  ).pipe(
+    Effect.map((parsed) => {
+      if (
+        !parsed ||
+        typeof parsed !== "object" ||
+        typeof parsed.identity !== "string" ||
+        typeof parsed.signature !== "string"
+      ) {
+        return null;
+      }
+      return {
+        identity: parsed.identity,
+        signature: parsed.signature,
+        ...(typeof parsed.pushToStartToken === "string" && parsed.pushToStartToken
+          ? { pushToStartToken: parsed.pushToStartToken }
+          : {}),
+      };
+    }),
+  );
+
+  const loadRecentThreadShortcuts = readJson<{
+    readonly threads?: ReadonlyArray<RecentThreadShortcut>;
+  }>(RECENT_THREAD_SHORTCUTS_KEY).pipe(
+    Effect.map((parsed) =>
+      pipe(
+        parsed?.threads ?? [],
+        Arr.filter(
+          (thread) =>
+            typeof thread?.environmentId === "string" &&
+            thread.environmentId.length > 0 &&
+            typeof thread.threadId === "string" &&
+            thread.threadId.length > 0 &&
+            typeof thread.title === "string",
+        ),
+      ),
+    ),
+  );
+
+  return MobileStorage.of({
+    loadOrCreateAgentAwarenessDeviceId,
+    loadAgentAwarenessDeviceId,
+    loadAgentAwarenessRegistrationRecord,
+    saveAgentAwarenessRegistrationRecord: Effect.fn(
+      "MobileStorage.saveAgentAwarenessRegistrationRecord",
+    )((record) => writeJson(AGENT_AWARENESS_REGISTRATION_KEY, record)),
+    clearAgentAwarenessRegistrationRecord: secureStorage.setItem(
+      AGENT_AWARENESS_REGISTRATION_KEY,
+      "",
+    ),
+    loadRecentThreadShortcuts,
+    saveRecentThreadShortcuts: Effect.fn("MobileStorage.saveRecentThreadShortcuts")((threads) =>
+      writeJson(RECENT_THREAD_SHORTCUTS_KEY, { threads }),
+    ),
+  });
+});
+
+export const layer = Layer.effect(MobileStorage, make());

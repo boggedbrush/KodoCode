@@ -1,17 +1,58 @@
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
 
-export type DesktopUpdateButtonAction = "download" | "install" | "open-release" | "none";
+export type DesktopUpdateButtonAction = "download" | "install" | "none";
+
+const DEFAULT_DESKTOP_RELEASE_REPOSITORY = "pingdotgg/t3code";
+const GITHUB_REPOSITORY_SEGMENT = /^[A-Za-z0-9._-]+$/u;
+
+function isValidRepositorySegment(value: string | undefined): value is string {
+  return (
+    value !== undefined && value !== "." && value !== ".." && GITHUB_REPOSITORY_SEGMENT.test(value)
+  );
+}
+
+function desktopReleaseRepositoryUrl(repository: string | undefined): string {
+  const configuredRepository = repository?.trim() ?? "";
+  const [owner, name, ...extra] = configuredRepository.split("/");
+  const releaseRepository =
+    isValidRepositorySegment(owner) && isValidRepositorySegment(name) && extra.length === 0
+      ? configuredRepository
+      : DEFAULT_DESKTOP_RELEASE_REPOSITORY;
+  return `https://github.com/${releaseRepository}/releases`;
+}
+
+/** The download RPC can beat the updater's downloadedVersion event; fall back to the requested version. */
+export function getDesktopUpdateDownloadedVersion(state: DesktopUpdateState): string | null {
+  return state.downloadedVersion ?? state.availableVersion;
+}
+
+export function getDesktopUpdateReleaseUrl(
+  version: string | null,
+  repository: string | undefined = import.meta.env.T3CODE_DESKTOP_UPDATE_REPOSITORY,
+): string | null {
+  const normalizedVersion = version?.trim();
+  if (!normalizedVersion) return null;
+  return `${desktopReleaseRepositoryUrl(repository)}/tag/v${encodeURIComponent(normalizedVersion)}`;
+}
+
+export function getDesktopUpdateReleaseHistoryUrl(
+  repository: string | undefined = import.meta.env.T3CODE_DESKTOP_UPDATE_REPOSITORY,
+): string {
+  return desktopReleaseRepositoryUrl(repository);
+}
 
 export function resolveDesktopUpdateButtonAction(
   state: DesktopUpdateState,
 ): DesktopUpdateButtonAction {
-  if (state.downloadedVersion) {
+  if (
+    state.downloadedVersion &&
+    (state.status === "downloaded" ||
+      (state.status === "error" &&
+        (state.errorContext === null || state.errorContext === "install")))
+  ) {
     return "install";
   }
   if (state.status === "available") {
-    if (state.deliveryMethod === "external" && state.releasePageUrl) {
-      return "open-release";
-    }
     return "download";
   }
   if (state.status === "error") {
@@ -20,16 +61,6 @@ export function resolveDesktopUpdateButtonAction(
     }
   }
   return "none";
-}
-
-export function shouldShowDesktopUpdateButton(state: DesktopUpdateState | null): boolean {
-  if (!state || !state.enabled) {
-    return false;
-  }
-  if (state.status === "downloading") {
-    return true;
-  }
-  return resolveDesktopUpdateButtonAction(state) !== "none";
 }
 
 export function shouldShowArm64IntelBuildWarning(state: DesktopUpdateState | null): boolean {
@@ -47,22 +78,23 @@ export function getArm64IntelBuildWarningDescription(state: DesktopUpdateState):
 
   const action = resolveDesktopUpdateButtonAction(state);
   if (action === "download") {
-    return "This Mac has Apple Silicon, but Kodo Code is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.";
-  }
-  if (action === "open-release") {
-    return "This Mac has Apple Silicon, but Kodo Code is still running the Intel build under Rosetta. Open the latest release to download the native Apple Silicon build manually.";
+    return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Download the available update to switch to the native Apple Silicon build.";
   }
   if (action === "install") {
-    return "This Mac has Apple Silicon, but Kodo Code is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
+    return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. Restart to install the downloaded Apple Silicon build.";
   }
-  return "This Mac has Apple Silicon, but Kodo Code is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.";
+  return "This Mac has Apple Silicon, but T3 Code is still running the Intel build under Rosetta. The next app update will replace it with the native Apple Silicon build.";
 }
 
 export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string {
+  if (
+    state.notAppliedVersion !== undefined &&
+    (state.status === "available" || state.status === "downloaded") &&
+    getDesktopUpdateDownloadedVersion(state) === state.notAppliedVersion
+  ) {
+    return `Update ${state.notAppliedVersion} did not apply. Click to retry.`;
+  }
   if (state.status === "available") {
-    if (state.deliveryMethod === "external" && state.releasePageUrl) {
-      return `Update ${state.availableVersion ?? "available"} ready. Click to open the latest GitHub release.`;
-    }
     return `Update ${state.availableVersion ?? "available"} ready to download`;
   }
   if (state.status === "downloading") {
@@ -80,6 +112,9 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
     if (state.errorContext === "install" && state.downloadedVersion) {
       return `Install failed for ${state.downloadedVersion}. Click to retry.`;
     }
+    if (state.downloadedVersion) {
+      return `Update ${state.downloadedVersion} downloaded. Click to restart and install.`;
+    }
     return state.message ?? "Update failed";
   }
   return "Up to date";
@@ -89,7 +124,7 @@ export function getDesktopUpdateInstallConfirmationMessage(
   state: Pick<DesktopUpdateState, "availableVersion" | "downloadedVersion">,
 ): string {
   const version = state.downloadedVersion ?? state.availableVersion;
-  return `Install update${version ? ` ${version}` : ""} and restart Kodo Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.`;
+  return `Install update${version ? ` ${version}` : ""} and restart T3 Code?\n\nAny running tasks will be interrupted. Make sure you're ready before continuing.`;
 }
 
 export function getDesktopUpdateActionError(result: DesktopUpdateActionResult): string | null {
@@ -103,17 +138,29 @@ export function shouldToastDesktopUpdateActionResult(result: DesktopUpdateAction
   return getDesktopUpdateActionError(result) !== null;
 }
 
-export function shouldHighlightDesktopUpdateError(state: DesktopUpdateState | null): boolean {
-  if (!state || state.status !== "error") return false;
-  return state.errorContext === "download" || state.errorContext === "install";
-}
-
 export function canCheckForUpdate(state: DesktopUpdateState | null): boolean {
   if (!state || !state.enabled) return false;
   return (
-    state.status !== "checking" &&
-    state.status !== "downloading" &&
-    state.status !== "downloaded" &&
-    state.status !== "disabled"
+    state.status !== "checking" && state.status !== "downloading" && state.status !== "disabled"
   );
+}
+
+/** `managedDenial` is this machine's policy refusing updates (`managedUpdatesDenial`); it wins. */
+export function getDesktopUpdateDisabledReason(
+  state: Pick<DesktopUpdateState, "enabled" | "status" | "message"> | null,
+  managedDenial?: string,
+): string | null {
+  if (managedDenial !== undefined) return managedDenial;
+  if (!state || (state.enabled && state.status !== "disabled")) return null;
+  return state.message?.trim() || "Automatic updates are not available in this build.";
+}
+
+export function getDesktopUpdateIdleTooltip(
+  state: Pick<DesktopUpdateState, "enabled" | "status" | "message"> | null,
+  managedDenial?: string,
+) {
+  const disabledReason = getDesktopUpdateDisabledReason(state, managedDenial);
+  return disabledReason
+    ? { title: "Updates unavailable", detail: disabledReason }
+    : { title: "Check for updates", detail: null };
 }

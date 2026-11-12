@@ -1,505 +1,462 @@
-import type {
-  ProjectScript,
-  ProjectScriptIcon,
-  ResolvedKeybindingsConfig,
+import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
+import {
+  AuthSettingsWriteScope,
+  type EnvironmentId,
+  type ProjectScript,
+  type T3ProjectFileScript,
 } from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import {
-  BugIcon,
-  ChevronDownIcon,
-  FlaskConicalIcon,
-  HammerIcon,
-  ListChecksIcon,
-  PlayIcon,
-  PlusIcon,
-  SettingsIcon,
-  WrenchIcon,
-} from "lucide-react";
-import React, { type FormEvent, type KeyboardEvent, useCallback, useMemo, useState } from "react";
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import { projectScriptMenuLabel } from "@t3tools/shared/projectScripts";
+import { ChevronDownIcon, DownloadIcon, PlusIcon, SettingsIcon, WrenchIcon } from "lucide-react";
+import React, { useState } from "react";
 
-import {
-  keybindingValueForCommand,
-  decodeProjectScriptKeybindingRule,
-} from "~/lib/projectScriptKeybindings";
-import {
-  commandForProjectScript,
-  nextProjectScriptId,
-  primaryProjectScript,
-} from "~/projectScripts";
+import { commandForProjectScript, primaryProjectScript } from "~/projectScripts";
 import { shortcutLabelForCommand } from "~/keybindings";
-import { isMacPlatform } from "~/lib/utils";
+import { serverEnvironment } from "~/state/server";
+import { readEnvironmentScope } from "~/state/session";
 import {
-  AlertDialog,
-  AlertDialogClose,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogPopup,
-  AlertDialogTitle,
-} from "./ui/alert-dialog";
+  EMPTY_PROJECT_SCRIPT_INPUT,
+  editorRequestForScript,
+  ProjectScriptEditorDialog,
+  ScriptIcon,
+  type NewProjectScriptInput,
+  type ProjectScriptActionResult,
+  type ProjectScriptEditorRequest,
+} from "./projectScriptEditor";
 import { Button } from "./ui/button";
-import {
-  Dialog,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogPanel,
-  DialogPopup,
-  DialogTitle,
-} from "./ui/dialog";
 import { Group, GroupSeparator } from "./ui/group";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
-import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "./ui/menu";
-import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
-import { Switch } from "./ui/switch";
-import { Textarea } from "./ui/textarea";
+import {
+  Menu,
+  MenuGroup,
+  MenuGroupLabel,
+  MenuItem,
+  MenuItemLabel,
+  MenuPopup,
+  MenuSeparator,
+  MenuShortcut,
+  MenuTrigger,
+  MenuSub,
+  MenuSubTrigger,
+  MenuSubPopup,
+} from "./ui/menu";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { cn } from "~/lib/utils";
+import {
+  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
+  THREAD_DETAILS_PANEL_ICON_CLASS,
+  THREAD_DETAILS_PANEL_LABEL_CLASS,
+  THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
+  THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
+} from "./chat/threadDetailsPanelStyles";
 
-const SCRIPT_ICONS: Array<{ id: ProjectScriptIcon; label: string }> = [
-  { id: "play", label: "Play" },
-  { id: "test", label: "Test" },
-  { id: "lint", label: "Lint" },
-  { id: "configure", label: "Configure" },
-  { id: "build", label: "Build" },
-  { id: "debug", label: "Debug" },
-];
+export type { NewProjectScriptInput, ProjectScriptActionResult };
 
-function ScriptIcon({
-  icon,
-  className = "size-3.5",
-}: {
-  icon: ProjectScriptIcon;
-  className?: string;
-}) {
-  if (icon === "test") return <FlaskConicalIcon className={className} />;
-  if (icon === "lint") return <ListChecksIcon className={className} />;
-  if (icon === "configure") return <WrenchIcon className={className} />;
-  if (icon === "build") return <HammerIcon className={className} />;
-  if (icon === "debug") return <BugIcon className={className} />;
-  return <PlayIcon className={className} />;
-}
-
-export interface NewProjectScriptInput {
-  name: string;
-  command: string;
-  icon: ProjectScriptIcon;
-  runOnWorktreeCreate: boolean;
-  keybinding: string | null;
-}
+const NO_FILE_SCRIPTS: ReadonlyArray<T3ProjectFileScript> = [];
 
 interface ProjectScriptsControlProps {
-  scripts: ProjectScript[];
-  keybindings: ResolvedKeybindingsConfig;
+  displayMode?: "toolbar" | "panel";
+  presentation?: "toolbar" | "menu";
+  onRequestMenuClose?: () => void;
+  environmentId: EnvironmentId;
+  scripts: ReadonlyArray<ProjectScript>;
+  fileScripts?: ReadonlyArray<T3ProjectFileScript>;
   preferredScriptId?: string | null;
-  onRunScript: (script: ProjectScript) => void;
-  onAddScript: (input: NewProjectScriptInput) => Promise<void> | void;
-  onUpdateScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void> | void;
-  onDeleteScript: (scriptId: string) => Promise<void> | void;
-}
-
-function normalizeShortcutKeyToken(key: string): string | null {
-  const normalized = key.toLowerCase();
-  if (
-    normalized === "meta" ||
-    normalized === "control" ||
-    normalized === "ctrl" ||
-    normalized === "shift" ||
-    normalized === "alt" ||
-    normalized === "option"
-  ) {
-    return null;
-  }
-  if (normalized === " ") return "space";
-  if (normalized === "escape") return "esc";
-  if (normalized === "arrowup") return "arrowup";
-  if (normalized === "arrowdown") return "arrowdown";
-  if (normalized === "arrowleft") return "arrowleft";
-  if (normalized === "arrowright") return "arrowright";
-  if (normalized.length === 1) return normalized;
-  if (normalized.startsWith("f") && normalized.length <= 3) return normalized;
-  if (normalized === "enter" || normalized === "tab" || normalized === "backspace") {
-    return normalized;
-  }
-  if (normalized === "delete" || normalized === "home" || normalized === "end") {
-    return normalized;
-  }
-  if (normalized === "pageup" || normalized === "pagedown") return normalized;
-  return null;
-}
-
-function keybindingFromEvent(event: KeyboardEvent<HTMLInputElement>): string | null {
-  const keyToken = normalizeShortcutKeyToken(event.key);
-  if (!keyToken) return null;
-
-  const parts: string[] = [];
-  if (isMacPlatform(navigator.platform)) {
-    if (event.metaKey) parts.push("mod");
-    if (event.ctrlKey) parts.push("ctrl");
-  } else {
-    if (event.ctrlKey) parts.push("mod");
-    if (event.metaKey) parts.push("meta");
-  }
-  if (event.altKey) parts.push("alt");
-  if (event.shiftKey) parts.push("shift");
-  if (parts.length === 0) {
-    return null;
-  }
-  parts.push(keyToken);
-  return parts.join("+");
+  onRunScript?: ((script: ProjectScript) => void) | undefined;
+  onAddScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
+  onUpdateScript: (
+    scriptId: string,
+    input: NewProjectScriptInput,
+  ) => Promise<ProjectScriptActionResult>;
+  onDeleteScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
 }
 
 export default function ProjectScriptsControl({
+  displayMode = "toolbar",
+  presentation = "toolbar",
+  onRequestMenuClose,
+  environmentId,
   scripts,
-  keybindings,
+  fileScripts = NO_FILE_SCRIPTS,
   preferredScriptId = null,
   onRunScript,
   onAddScript,
   onUpdateScript,
   onDeleteScript,
 }: ProjectScriptsControlProps) {
-  const addScriptFormId = React.useId();
-  const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [command, setCommand] = useState("");
-  const [icon, setIcon] = useState<ProjectScriptIcon>("play");
-  const [iconPickerOpen, setIconPickerOpen] = useState(false);
-  const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
-  const [keybinding, setKeybinding] = useState("");
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const isPanel = displayMode === "panel";
+  const ActionGroup = isPanel ? "div" : Group;
+  const panelAnchorRef = React.useRef<HTMLDivElement | null>(null);
+  const keybindings =
+    useAtomValue(serverEnvironment.configValueAtom(environmentId))?.keybindings ??
+    DEFAULT_RESOLVED_KEYBINDINGS;
+  const [actionsMenuOpen, setActionsMenuOpen] = useState({
+    presentation,
+    scripts: false,
+    imports: false,
+  });
+  if (actionsMenuOpen.presentation !== presentation) {
+    setActionsMenuOpen({ presentation, scripts: false, imports: false });
+  }
+  const [editorRequest, setEditorRequest] = useState<ProjectScriptEditorRequest | null>(null);
 
-  const primaryScript = useMemo(() => {
-    if (preferredScriptId) {
-      const preferred = scripts.find((script) => script.id === preferredScriptId);
-      if (preferred) return preferred;
-    }
-    return primaryProjectScript(scripts);
-  }, [preferredScriptId, scripts]);
-  const isEditing = editingScriptId !== null;
-  const dropdownItemClassName =
-    "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
-
-  const captureKeybinding = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Tab") return;
-    event.preventDefault();
-    if (event.key === "Backspace" || event.key === "Delete") {
-      setKeybinding("");
-      return;
-    }
-    const next = keybindingFromEvent(event);
-    if (!next) return;
-    setKeybinding(next);
-  };
-
-  const submitAddScript = async (event: FormEvent) => {
-    event.preventDefault();
-    const trimmedName = name.trim();
-    const trimmedCommand = command.trim();
-    if (trimmedName.length === 0) {
-      setValidationError("Name is required.");
-      return;
-    }
-    if (trimmedCommand.length === 0) {
-      setValidationError("Command is required.");
-      return;
-    }
-
-    setValidationError(null);
-    try {
-      const scriptIdForValidation =
-        editingScriptId ??
-        nextProjectScriptId(
-          trimmedName,
-          scripts.map((script) => script.id),
-        );
-      const keybindingRule = decodeProjectScriptKeybindingRule({
-        keybinding,
-        command: commandForProjectScript(scriptIdForValidation),
-      });
-      const payload = {
-        name: trimmedName,
-        command: trimmedCommand,
-        icon,
-        runOnWorktreeCreate,
-        keybinding: keybindingRule?.key ?? null,
-      } satisfies NewProjectScriptInput;
-      if (editingScriptId) {
-        await onUpdateScript(editingScriptId, payload);
-      } else {
-        await onAddScript(payload);
-      }
-      setDialogOpen(false);
-      setIconPickerOpen(false);
-    } catch (error) {
-      setValidationError(error instanceof Error ? error.message : "Failed to save action.");
-    }
-  };
+  const primaryScript =
+    (preferredScriptId ? scripts.find((script) => script.id === preferredScriptId) : undefined) ??
+    primaryProjectScript(scripts);
+  const importableScripts = fileScripts.filter(
+    (fileScript) =>
+      !scripts.some(
+        (script) =>
+          script.command === fileScript.command ||
+          script.name.toLowerCase() === fileScript.name.toLowerCase(),
+      ),
+  );
 
   const openAddDialog = () => {
-    setEditingScriptId(null);
-    setName("");
-    setCommand("");
-    setIcon("play");
-    setIconPickerOpen(false);
-    setRunOnWorktreeCreate(false);
-    setKeybinding("");
-    setValidationError(null);
-    setDialogOpen(true);
+    setEditorRequest({ scriptId: null, initial: EMPTY_PROJECT_SCRIPT_INPUT });
   };
 
   const openEditDialog = (script: ProjectScript) => {
-    setEditingScriptId(script.id);
-    setName(script.name);
-    setCommand(script.command);
-    setIcon(script.icon);
-    setIconPickerOpen(false);
-    setRunOnWorktreeCreate(script.runOnWorktreeCreate);
-    setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
-    setValidationError(null);
-    setDialogOpen(true);
+    onRequestMenuClose?.();
+    setActionsMenuOpen({ presentation, scripts: false, imports: false });
+    setEditorRequest(editorRequestForScript(script, keybindings));
   };
 
-  const confirmDeleteScript = useCallback(() => {
-    if (!editingScriptId) return;
-    setDeleteConfirmOpen(false);
-    setDialogOpen(false);
-    void onDeleteScript(editingScriptId);
-  }, [editingScriptId, onDeleteScript]);
+  const submitScript = (scriptId: string | null, input: NewProjectScriptInput) =>
+    scriptId === null ? onAddScript(input) : onUpdateScript(scriptId, input);
+
+  const importFileScript = async (fileScript: T3ProjectFileScript) => {
+    const payload: NewProjectScriptInput = {
+      name: fileScript.name,
+      command: fileScript.command,
+      icon: fileScript.icon ?? "play",
+      runOnWorktreeCreate: fileScript.runOnWorktreeCreate ?? false,
+      waitForSetup: fileScript.runOnWorktreeCreate === true && fileScript.async === false,
+      runOnSettle: fileScript.runOnSettle ?? false,
+      stopOnSettle: fileScript.stopOnSettle ?? false,
+      ...(readEnvironmentScope(environmentId, AuthSettingsWriteScope) ? { keybinding: null } : {}),
+      previewUrl: fileScript.previewUrl ?? null,
+      autoOpenPreview: fileScript.previewUrl ? (fileScript.autoOpenPreview ?? false) : false,
+    };
+    const result = await onAddScript(payload);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      setEditorRequest({
+        scriptId: null,
+        initial: payload,
+        error: error instanceof Error ? error.message : "Failed to import action.",
+      });
+    }
+  };
+
+  const importMenuItems = importableScripts.length > 0 && (
+    <>
+      {scripts.length > 0 && <MenuSeparator />}
+      <MenuGroup>
+        <MenuGroupLabel>From t3.json</MenuGroupLabel>
+        {importableScripts.map((fileScript) => (
+          <MenuItem
+            density={presentation === "menu" ? "touch" : "default"}
+            key={`${fileScript.name} ${fileScript.command}`}
+            onClick={() => void importFileScript(fileScript)}
+          >
+            <ScriptIcon icon={fileScript.icon ?? "play"} className="size-4" />
+            <MenuItemLabel>{fileScript.name}</MenuItemLabel>
+            <MenuShortcut>
+              <DownloadIcon className="size-3.5" aria-label="Import" />
+            </MenuShortcut>
+          </MenuItem>
+        ))}
+      </MenuGroup>
+    </>
+  );
+
+  const scriptItems = (
+    <>
+      {scripts.map((script) => {
+        const shortcutLabel = shortcutLabelForCommand(
+          keybindings,
+          commandForProjectScript(script.id),
+        );
+        return (
+          <MenuItem
+            density={presentation === "menu" ? "touch" : "default"}
+            key={script.id}
+            className="group"
+            disabled={!onRunScript}
+            onClick={() => onRunScript?.(script)}
+          >
+            <ScriptIcon icon={script.icon} className="size-4" />
+            <MenuItemLabel>{projectScriptMenuLabel(script)}</MenuItemLabel>
+            <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
+              {shortcutLabel &&
+                (presentation === "menu" ? (
+                  <MenuShortcut className="ms-0 mr-7">{shortcutLabel}</MenuShortcut>
+                ) : (
+                  <span className="transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
+                    <MenuShortcut className="ms-0">{shortcutLabel}</MenuShortcut>
+                  </span>
+                ))}
+              <span
+                className={`absolute right-0 top-1/2 flex -translate-y-1/2 ${presentation === "menu" ? "" : "opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"}`}
+              >
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="size-6"
+                  aria-label={`Edit ${script.name}`}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    openEditDialog(script);
+                  }}
+                >
+                  <SettingsIcon className="size-3.5" />
+                </Button>
+              </span>
+            </span>
+          </MenuItem>
+        );
+      })}
+      {importMenuItems}
+      <MenuItem density={presentation === "menu" ? "touch" : "default"} onClick={openAddDialog}>
+        <PlusIcon className="size-4" />
+        <MenuItemLabel>{isPanel ? "Add project script" : "Add action"}</MenuItemLabel>
+      </MenuItem>
+    </>
+  );
 
   return (
     <>
-      {primaryScript ? (
-        <Group aria-label="Project scripts">
-          <Button
-            size="xs"
-            variant="outline"
-            onClick={() => onRunScript(primaryScript)}
-            title={`Run ${primaryScript.name}`}
-          >
-            <ScriptIcon icon={primaryScript.icon} />
-            <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-              {primaryScript.name}
-            </span>
-          </Button>
-          <GroupSeparator className="hidden @3xl/header-actions:block" />
-          <Menu highlightItemOnHover={false}>
-            <MenuTrigger
-              render={<Button size="icon-xs" variant="outline" aria-label="Script actions" />}
+      {presentation === "menu" ? (
+        <>
+          {primaryScript && (
+            <MenuItem
+              density={presentation === "menu" ? "touch" : "default"}
+              disabled={!onRunScript}
+              onClick={() => onRunScript?.(primaryScript)}
             >
-              <ChevronDownIcon className="size-4" />
+              <ScriptIcon icon={primaryScript.icon} className="size-4" />
+              <MenuItemLabel>Run {primaryScript.name}</MenuItemLabel>
+              <MenuShortcut>
+                {shortcutLabelForCommand(keybindings, commandForProjectScript(primaryScript.id))}
+              </MenuShortcut>
+            </MenuItem>
+          )}
+          {scripts.length > 0 || importableScripts.length > 0 ? (
+            <MenuSub
+              open={actionsMenuOpen.scripts}
+              onOpenChange={(open) =>
+                setActionsMenuOpen({ presentation, scripts: open, imports: false })
+              }
+            >
+              <MenuSubTrigger density="touch">
+                <ScriptIcon icon="play" className="size-4" />
+                <MenuItemLabel>Project actions</MenuItemLabel>
+              </MenuSubTrigger>
+              <MenuSubPopup>{scriptItems}</MenuSubPopup>
+            </MenuSub>
+          ) : (
+            <MenuItem
+              density={presentation === "menu" ? "touch" : "default"}
+              onClick={openAddDialog}
+            >
+              <PlusIcon className="size-4" />
+              <MenuItemLabel>Add project action…</MenuItemLabel>
+            </MenuItem>
+          )}
+        </>
+      ) : primaryScript ? (
+        <ActionGroup
+          role="group"
+          aria-label="Project scripts"
+          {...(isPanel
+            ? { className: THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS, ref: panelAnchorRef }
+            : {})}
+        >
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <ThreadDetailsControl
+                  size="xs"
+                  variant={isPanel ? "ghost" : "outline"}
+                  part="primary"
+                  panel={isPanel}
+                  className={isPanel ? undefined : "w-7 sm:w-6 @3xl/header-actions:w-auto!"}
+                  aria-label={`Run ${primaryScript.name}`}
+                  // Tooltip replaces the button data-slot, so toolbar theming needs a separate hook.
+                  data-toolbar-control=""
+                  aria-disabled={!onRunScript || undefined}
+                  onClick={() => onRunScript?.(primaryScript)}
+                />
+              }
+            >
+              <ScriptIcon
+                icon={primaryScript.icon}
+                {...(isPanel ? { className: THREAD_DETAILS_PANEL_ICON_CLASS } : {})}
+              />
+              <span
+                className={cn(
+                  "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5",
+                  isPanel && cn("not-sr-only ml-0 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS),
+                )}
+              >
+                {primaryScript.name}
+              </span>
+            </TooltipTrigger>
+            <TooltipPopup side="top">
+              {onRunScript
+                ? `Run ${primaryScript.name}`
+                : "Pair this client again with permission to run terminal commands."}
+            </TooltipPopup>
+          </Tooltip>
+          {isPanel ? (
+            <span aria-hidden="true" className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS} />
+          ) : (
+            <GroupSeparator className="hidden @3xl/header-actions:block" />
+          )}
+          <Menu
+            open={actionsMenuOpen.scripts}
+            onOpenChange={(open) =>
+              setActionsMenuOpen({ presentation, scripts: open, imports: false })
+            }
+          >
+            <MenuTrigger
+              render={
+                <ThreadDetailsControl
+                  size={isPanel ? "sm" : "icon-xs"}
+                  variant={isPanel ? "ghost" : "outline"}
+                  part="secondary"
+                  panel={isPanel}
+                  aria-label="Script actions"
+                />
+              }
+            >
+              <ChevronDownIcon
+                className={isPanel ? THREAD_DETAILS_PANEL_CHEVRON_CLASS : "size-4"}
+              />
             </MenuTrigger>
-            <MenuPopup align="end">
-              {scripts.map((script) => {
-                const shortcutLabel = shortcutLabelForCommand(
-                  keybindings,
-                  commandForProjectScript(script.id),
-                );
-                return (
-                  <MenuItem
-                    key={script.id}
-                    className={`group ${dropdownItemClassName}`}
-                    onClick={() => onRunScript(script)}
-                  >
-                    <ScriptIcon icon={script.icon} className="size-4" />
-                    <span className="truncate">
-                      {script.runOnWorktreeCreate ? `${script.name} (setup)` : script.name}
-                    </span>
-                    <span className="relative ms-auto flex h-6 min-w-6 items-center justify-end">
-                      {shortcutLabel && (
-                        <MenuShortcut className="ms-0 transition-opacity group-hover:opacity-0 group-focus-visible:opacity-0">
-                          {shortcutLabel}
-                        </MenuShortcut>
-                      )}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-xs"
-                        className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
-                        aria-label={`Edit ${script.name}`}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          openEditDialog(script);
-                        }}
-                      >
-                        <SettingsIcon className="size-3.5" />
-                      </Button>
-                    </span>
-                  </MenuItem>
-                );
-              })}
-              <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
-                <PlusIcon className="size-4" />
-                Add action
-              </MenuItem>
+            <MenuPopup
+              align="end"
+              {...(isPanel ? { anchor: panelAnchorRef } : {})}
+              className={isPanel ? "w-(--anchor-width)" : undefined}
+            >
+              {scriptItems}
             </MenuPopup>
           </Menu>
-        </Group>
+        </ActionGroup>
+      ) : scripts.length > 0 || importableScripts.length > 0 ? (
+        isPanel ? (
+          <div
+            role="group"
+            aria-label="Project actions"
+            className={THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS}
+            ref={panelAnchorRef}
+          >
+            <ThreadDetailsControl
+              size="sm"
+              variant="ghost"
+              part="primary"
+              aria-label="Project actions"
+              onClick={() => setActionsMenuOpen({ presentation, scripts: false, imports: true })}
+            >
+              <WrenchIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+              <span className={cn("min-w-0 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+                Actions
+              </span>
+            </ThreadDetailsControl>
+            <span aria-hidden="true" className={THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS} />
+            <Menu
+              highlightItemOnHover={false}
+              open={actionsMenuOpen.imports}
+              onOpenChange={(open) =>
+                setActionsMenuOpen({ presentation, scripts: false, imports: open })
+              }
+            >
+              <MenuTrigger
+                render={
+                  <ThreadDetailsControl
+                    size="sm"
+                    variant="ghost"
+                    part="secondary"
+                    aria-label="Choose project action"
+                  />
+                }
+              >
+                <ChevronDownIcon className={THREAD_DETAILS_PANEL_CHEVRON_CLASS} />
+              </MenuTrigger>
+              <MenuPopup align="end" anchor={panelAnchorRef} className="w-(--anchor-width)">
+                {scriptItems}
+              </MenuPopup>
+            </Menu>
+          </div>
+        ) : (
+          <Menu
+            highlightItemOnHover={false}
+            open={actionsMenuOpen.imports}
+            onOpenChange={(open) =>
+              setActionsMenuOpen({ presentation, scripts: false, imports: open })
+            }
+          >
+            <MenuTrigger
+              render={<Button size="xs" variant="outline" aria-label="Project actions" />}
+            >
+              <WrenchIcon className="size-3.5" />
+              <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
+                Actions
+              </span>
+              <ChevronDownIcon className="size-3.5" />
+            </MenuTrigger>
+            <MenuPopup align="end">{scriptItems}</MenuPopup>
+          </Menu>
+        )
       ) : (
-        <Button size="xs" variant="outline" onClick={openAddDialog} title="Add action">
-          <PlusIcon className="size-3.5" />
-          <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-            Add action
-          </span>
-        </Button>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <ThreadDetailsControl
+                size="xs"
+                variant={isPanel ? "ghost" : "outline"}
+                part="row"
+                panel={isPanel}
+                className={isPanel ? undefined : "w-7 sm:w-6 @3xl/header-actions:w-auto!"}
+                aria-label={isPanel ? "Add project script" : "Add action"}
+                data-toolbar-control=""
+                onClick={openAddDialog}
+              />
+            }
+          >
+            <PlusIcon className="size-3.5" />
+            <span
+              className={cn(
+                "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5",
+                isPanel && cn("not-sr-only ml-0.5", THREAD_DETAILS_PANEL_LABEL_CLASS),
+              )}
+            >
+              {isPanel ? "Add project script" : "Add action"}
+            </span>
+          </TooltipTrigger>
+          <TooltipPopup side="top">{isPanel ? "Add project script" : "Add action"}</TooltipPopup>
+        </Tooltip>
       )}
 
-      <Dialog
-        onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) {
-            setIconPickerOpen(false);
-          }
-        }}
-        onOpenChangeComplete={(open) => {
-          if (open) return;
-          setEditingScriptId(null);
-          setName("");
-          setCommand("");
-          setIcon("play");
-          setRunOnWorktreeCreate(false);
-          setKeybinding("");
-          setValidationError(null);
-        }}
-        open={dialogOpen}
-      >
-        <DialogPopup>
-          <DialogHeader>
-            <DialogTitle>{isEditing ? "Edit Action" : "Add Action"}</DialogTitle>
-            <DialogDescription>
-              Actions are project-scoped commands you can run from the top bar or keybindings.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogPanel>
-            <form id={addScriptFormId} className="space-y-4" onSubmit={submitAddScript}>
-              <div className="space-y-1.5">
-                <Label htmlFor="script-name">Name</Label>
-                <div className="flex items-center gap-2">
-                  <Popover onOpenChange={setIconPickerOpen} open={iconPickerOpen}>
-                    <PopoverTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="size-9 shrink-0 hover:bg-popover active:bg-popover data-pressed:bg-popover data-pressed:shadow-xs/5 data-pressed:before:shadow-[0_1px_--theme(--color-black/4%)] dark:data-pressed:before:shadow-[0_-1px_--theme(--color-white/6%)]"
-                          aria-label="Choose icon"
-                        />
-                      }
-                    >
-                      <ScriptIcon icon={icon} className="size-4.5" />
-                    </PopoverTrigger>
-                    <PopoverPopup align="start">
-                      <div className="grid grid-cols-3 gap-2">
-                        {SCRIPT_ICONS.map((entry) => {
-                          const isSelected = entry.id === icon;
-                          return (
-                            <button
-                              key={entry.id}
-                              type="button"
-                              className={`relative flex flex-col items-center gap-2 rounded-md border px-2 py-2 text-xs ${
-                                isSelected
-                                  ? "border-primary/70 bg-primary/10"
-                                  : "border-border/70 hover:bg-accent/60"
-                              }`}
-                              onClick={() => {
-                                setIcon(entry.id);
-                                setIconPickerOpen(false);
-                              }}
-                            >
-                              <ScriptIcon icon={entry.id} className="size-4" />
-                              <span>{entry.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </PopoverPopup>
-                  </Popover>
-                  <Input
-                    id="script-name"
-                    autoFocus
-                    placeholder="Test"
-                    value={name}
-                    onChange={(event) => setName(event.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="script-keybinding">Keybinding</Label>
-                <Input
-                  id="script-keybinding"
-                  placeholder="Press shortcut"
-                  value={keybinding}
-                  readOnly
-                  onKeyDown={captureKeybinding}
-                />
-                <p className="text-xs text-muted-foreground">
-                  Press a shortcut. Use <code>Backspace</code> to clear.
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="script-command">Command</Label>
-                <Textarea
-                  id="script-command"
-                  placeholder="bun test"
-                  value={command}
-                  onChange={(event) => setCommand(event.target.value)}
-                />
-              </div>
-              <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
-                <span>Run automatically on worktree creation</span>
-                <Switch
-                  checked={runOnWorktreeCreate}
-                  onCheckedChange={(checked) => setRunOnWorktreeCreate(Boolean(checked))}
-                />
-              </label>
-              {validationError && <p className="text-sm text-destructive">{validationError}</p>}
-            </form>
-          </DialogPanel>
-          <DialogFooter>
-            {isEditing && (
-              <Button
-                type="button"
-                variant="destructive-outline"
-                className="mr-auto"
-                onClick={() => setDeleteConfirmOpen(true)}
-              >
-                Delete
-              </Button>
-            )}
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setDialogOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button form={addScriptFormId} type="submit">
-              {isEditing ? "Save changes" : "Save action"}
-            </Button>
-          </DialogFooter>
-        </DialogPopup>
-      </Dialog>
-
-      <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-        <AlertDialogPopup>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete action "{name}"?</AlertDialogTitle>
-            <AlertDialogDescription>This action cannot be undone.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-            <Button variant="destructive" onClick={confirmDeleteScript}>
-              Delete action
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogPopup>
-      </AlertDialog>
+      <ProjectScriptEditorDialog
+        environmentId={environmentId}
+        request={editorRequest}
+        scripts={scripts}
+        onSubmit={submitScript}
+        onDelete={(scriptId) => void onDeleteScript(scriptId)}
+        onClose={() => setEditorRequest(null)}
+      />
     </>
   );
 }

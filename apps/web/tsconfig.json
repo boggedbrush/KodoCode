@@ -2,24 +2,38 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "composite": true,
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
+    "erasableSyntaxOnly": false,
+    "verbatimModuleSyntax": false,
     "jsx": "react-jsx",
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"],
+    "lib": ["ES2023", "ESNext.Disposable", "DOM", "DOM.Iterable"],
     "paths": {
       "~/*": ["./src/*"]
     },
     "plugins": [
       {
         "name": "@effect/language-service",
-        "namespaceImportPackages": ["@effect/platform-node"],
+        // Diagnostic severities are deep-merged with tsconfig.base.json; list only web-specific overrides here.
         "diagnosticSeverity": {
-          "importFromBarrel": "error",
-          "anyUnknownInErrorContext": "warning",
-          "instanceOfSchema": "warning",
-          "deterministicKeys": "warning"
+          "globalDate": "off",
+          "globalConsole": "off",
+          "globalRandom": "off",
+          "globalTimers": "off",
+          "globalFetch": "off"
         }
       }
     ]
   },
-  "include": ["src", "vite.config.ts", "test"]
+  "include": [
+    "src",
+    "vite",
+    "vite.config.ts",
+    "vercel.ts",
+    "test",
+    "scripts/verify-built-boot.ts",
+    "scripts/warm-dep-cache.ts",
+    "../../scripts/lib/public-config.ts",
+    "../../scripts/lib/third-party-licenses.ts"
+  ]
 }

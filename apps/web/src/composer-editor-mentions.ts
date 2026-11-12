@@ -1,7 +1,12 @@
+import { collectComposerModelMentions } from "@t3tools/client-runtime/composer-model-mentions";
+import type { AssistantCitation } from "@t3tools/contracts";
+import { collectAssistantCitations } from "@t3tools/shared/assistantCitations";
+import { collectComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import {
-  INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
-  type TerminalContextDraft,
-} from "./lib/terminalContext";
+  collectComposerInlineTokens,
+  composerMathRanges,
+  type ComposerInlineToken,
+} from "@t3tools/shared/composerInlineTokens";
 
 export type ComposerPromptSegment =
   | {
@@ -11,13 +16,35 @@ export type ComposerPromptSegment =
   | {
       type: "mention";
       path: string;
+      source: string;
     }
   | {
-      type: "terminal-context";
-      context: TerminalContextDraft | null;
+      type: "skill";
+      name: string;
+      source: string;
+    }
+  | {
+      type: "model";
+      instanceId: string;
+      model: string;
+      source: string;
+    }
+  | {
+      type: "citation";
+      citation: AssistantCitation;
+      source: string;
+    }
+  | {
+      type: "context-reference";
+      kind: string;
+      contextId: string;
+      label: string;
+      source: string;
     };
 
-const MENTION_TOKEN_REGEX = /(^|\s)@([^\s@]+)(?=\s)/g;
+function rangeIncludesIndex(start: number, end: number, index: number): boolean {
+  return start <= index && index < end;
+}
 
 function pushTextSegment(segments: ComposerPromptSegment[], text: string): void {
   if (!text) return;
@@ -29,32 +56,116 @@ function pushTextSegment(segments: ComposerPromptSegment[], text: string): void 
   segments.push({ type: "text", text });
 }
 
+function forEachPromptTextSlice(
+  prompt: string,
+  visitor: (text: string, promptOffset: number) => boolean | void,
+): boolean {
+  return prompt.length > 0 && visitor(prompt, 0) === true;
+}
+
+function forEachMentionMatch(
+  prompt: string,
+  visitor: (
+    match: Extract<ComposerInlineToken, { type: "mention" }>,
+    promptOffset: number,
+  ) => boolean | void,
+): boolean {
+  return forEachPromptTextSlice(prompt, (text, promptOffset) => {
+    for (const match of collectComposerPromptInlineTokens(text)) {
+      if (match.type !== "mention") {
+        continue;
+      }
+      if (visitor(match, promptOffset) === true) {
+        return true;
+      }
+    }
+    return false;
+  });
+}
+
+// Like `$skill`, a typed reference waits for whitespace so `gpt-6` cannot chip while typing `gpt-6.1`.
+function collectModelTokens(text: string, inlineTokens: ReadonlyArray<ComposerInlineToken>) {
+  const mentions = collectComposerModelMentions(text).filter((mention) =>
+    /\s/.test(text[mention.end] ?? ""),
+  );
+  if (mentions.length === 0) return [];
+  const taken = [...inlineTokens, ...composerMathRanges(text)];
+  return mentions
+    .filter(
+      (mention) => !taken.some((range) => mention.start < range.end && mention.end > range.start),
+    )
+    .map((mention) => ({ ...mention, type: "model" as const }));
+}
+
+export function collectComposerPromptInlineTokens(text: string) {
+  const inlineTokens = collectComposerInlineTokens(text);
+  const models = collectModelTokens(text, inlineTokens);
+  const tokens =
+    models.length === 0
+      ? inlineTokens
+      : [...inlineTokens, ...models].sort((left, right) => left.start - right.start);
+  const citations = collectAssistantCitations(text);
+  const references = collectComposerContextReferences(text);
+  if (citations.length === 0 && references.length === 0) return tokens;
+
+  // An unfinished @ mention can otherwise consume the start of a link label.
+  const links = [
+    ...citations.map((match) => ({ ...match, type: "citation" as const })),
+    ...references.map((match) => ({ ...match, type: "context-reference" as const })),
+  ];
+  return [
+    ...tokens.filter(
+      (token) => !links.some((link) => token.start < link.end && token.end > link.start),
+    ),
+    ...links,
+  ].sort((left, right) => left.start - right.start);
+}
+
 function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegment[] {
   const segments: ComposerPromptSegment[] = [];
   if (!text) {
     return segments;
   }
 
+  const tokenMatches = collectComposerPromptInlineTokens(text);
   let cursor = 0;
-  for (const match of text.matchAll(MENTION_TOKEN_REGEX)) {
-    const fullMatch = match[0];
-    const prefix = match[1] ?? "";
-    const path = match[2] ?? "";
-    const matchIndex = match.index ?? 0;
-    const mentionStart = matchIndex + prefix.length;
-    const mentionEnd = mentionStart + fullMatch.length - prefix.length;
-
-    if (mentionStart > cursor) {
-      pushTextSegment(segments, text.slice(cursor, mentionStart));
+  for (const match of tokenMatches) {
+    if (match.start < cursor) {
+      continue;
     }
 
-    if (path.length > 0) {
-      segments.push({ type: "mention", path });
+    if (match.start > cursor) {
+      pushTextSegment(segments, text.slice(cursor, match.start));
+    }
+
+    if (match.type === "citation") {
+      segments.push({ type: "citation", citation: match.citation, source: match.source });
+    } else if (match.type === "context-reference") {
+      segments.push({
+        type: "context-reference",
+        kind: match.kind,
+        contextId: match.contextId,
+        label: match.label,
+        source: match.source,
+      });
+    } else if (match.type === "mention") {
+      segments.push({
+        type: "mention",
+        path: match.value,
+        source: match.source,
+      });
+    } else if (match.type === "model") {
+      segments.push({
+        type: "model",
+        instanceId: match.instanceId,
+        model: match.model,
+        source: match.source,
+      });
     } else {
-      pushTextSegment(segments, text.slice(mentionStart, mentionEnd));
+      segments.push({ type: "skill", name: match.value, source: match.source });
     }
 
-    cursor = mentionEnd;
+    cursor = match.end;
   }
 
   if (cursor < text.length) {
@@ -64,37 +175,40 @@ function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegmen
   return segments;
 }
 
-export function splitPromptIntoComposerSegments(
+export function selectionTouchesMentionBoundary(
   prompt: string,
-  terminalContexts: ReadonlyArray<TerminalContextDraft> = [],
-): ComposerPromptSegment[] {
-  if (!prompt) {
-    return [];
+  start: number,
+  end: number,
+): boolean {
+  if (!prompt || start >= end) {
+    return false;
   }
 
-  const segments: ComposerPromptSegment[] = [];
-  let textCursor = 0;
-  let terminalContextIndex = 0;
+  return forEachMentionMatch(prompt, (match, promptOffset) => {
+    const mentionStart = promptOffset + match.start;
+    const mentionEnd = promptOffset + match.end;
+    const beforeMentionIndex = mentionStart - 1;
+    const afterMentionIndex = mentionEnd;
 
-  for (let index = 0; index < prompt.length; index += 1) {
-    if (prompt[index] !== INLINE_TERMINAL_CONTEXT_PLACEHOLDER) {
-      continue;
+    if (
+      beforeMentionIndex >= 0 &&
+      /\s/.test(prompt[beforeMentionIndex] ?? "") &&
+      rangeIncludesIndex(start, end, beforeMentionIndex)
+    ) {
+      return true;
     }
 
-    if (index > textCursor) {
-      segments.push(...splitPromptTextIntoComposerSegments(prompt.slice(textCursor, index)));
+    if (
+      afterMentionIndex < prompt.length &&
+      /\s/.test(prompt[afterMentionIndex] ?? "") &&
+      rangeIncludesIndex(start, end, afterMentionIndex)
+    ) {
+      return true;
     }
-    segments.push({
-      type: "terminal-context",
-      context: terminalContexts[terminalContextIndex] ?? null,
-    });
-    terminalContextIndex += 1;
-    textCursor = index + 1;
-  }
+    return false;
+  });
+}
 
-  if (textCursor < prompt.length) {
-    segments.push(...splitPromptTextIntoComposerSegments(prompt.slice(textCursor)));
-  }
-
-  return segments;
+export function splitPromptIntoComposerSegments(prompt: string): ComposerPromptSegment[] {
+  return splitPromptTextIntoComposerSegments(prompt);
 }

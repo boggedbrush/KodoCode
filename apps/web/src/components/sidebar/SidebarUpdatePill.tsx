@@ -1,193 +1,589 @@
-import { DownloadIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useState } from "react";
+import {
+  type DesktopBridge,
+  type DesktopUpdateState,
+  managedUpdatesDenial,
+} from "@t3tools/contracts";
+import { TriangleAlertIcon } from "lucide-react";
+import { type ComponentProps, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { isElectron } from "../../env";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
+import { cn } from "../../lib/utils";
+import { ensureLocalApi } from "../../localApi";
+import { useDesktopUpdateState } from "../../state/desktopUpdate";
+import { usePrimaryManagedPolicy } from "../../state/managedPolicy";
+import { stackedThreadToast, toastManager } from "../ui/toast";
 import {
-  setDesktopUpdateStateQueryData,
-  useDesktopUpdateState,
-} from "../../lib/desktopUpdateReactQuery";
-import { toastManager } from "../ui/toast";
-import {
+  canCheckForUpdate,
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
   getDesktopUpdateButtonTooltip,
+  getDesktopUpdateDownloadedVersion,
+  getDesktopUpdateIdleTooltip,
   getDesktopUpdateInstallConfirmationMessage,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
   shouldShowArm64IntelBuildWarning,
-  shouldShowDesktopUpdateButton,
   shouldToastDesktopUpdateActionResult,
 } from "../desktopUpdate.logic";
+import { showDesktopUpdateDownloadedToast } from "../desktopUpdate.toast";
+import { useCheckProviderUpdates } from "../ProviderUpdatesAction";
 import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
+import { Popover, PopoverCreateHandle, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { SidebarMenuItem } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import {
+  DesktopUpdateStatusIcon,
+  type DesktopUpdateStatusIconState,
+  shouldContinueDesktopUpdateCheckAnimation,
+  shouldShowDesktopUpdateCheckIcon,
+} from "./DesktopUpdateStatusIcon";
+import { SidebarUpdateReleaseNotes } from "./SidebarUpdateReleaseNotes";
+import { SidebarUpdateCapsule } from "./SidebarUpdateCapsule";
+import { UpdateEverythingDialog } from "./UpdateEverythingDialog";
+import type { UpdateEverythingRun, UpdateRunLocalState } from "./updateEverything.logic";
+import {
+  clearSavedUpdateEverythingResult,
+  saveUpdateEverythingResult,
+  useUpdateEverythingRun,
+} from "./updateEverythingRun";
+import { type ReportLocalUpdateError, useUpdateEverything } from "./useUpdateEverything";
+
+type SidebarUpdatePopoverChangeDetails = Parameters<
+  NonNullable<ComponentProps<typeof Popover>["onOpenChange"]>
+>[1];
+type SidebarUpdatePopoverHandle = ReturnType<typeof PopoverCreateHandle>;
+
+function shouldUseSidebarUpdateReleaseNotesPopover(
+  showUpdateDetails: boolean,
+  state: DesktopUpdateState | null,
+): boolean {
+  return showUpdateDetails && (state?.releaseNotes.length ?? 0) > 0;
+}
+
+function handleSidebarUpdateReleaseNotesPopoverOpenChange(
+  _open: boolean,
+  details: Pick<SidebarUpdatePopoverChangeDetails, "reason" | "cancel">,
+): void {
+  if (details.reason === "trigger-press") details.cancel();
+}
+
+function openSidebarUpdateReleaseNotesPopoverOnForwardTab(
+  event: { readonly key: string; readonly shiftKey: boolean },
+  handle: Pick<SidebarUpdatePopoverHandle, "open">,
+  triggerId: string,
+): void {
+  if (event.key !== "Tab" || event.shiftKey) return;
+  // Hover-open popovers do not manage focus. Promote this one before native Tab runs.
+  flushSync(() => handle.open(triggerId));
+}
+
+function resolveSidebarUpdatePresentation({
+  action,
+  showsEverything,
+  run,
+  isDownloading,
+  showCheckIcon,
+}: {
+  readonly action: ReturnType<typeof resolveDesktopUpdateButtonAction>;
+  readonly showsEverything: boolean;
+  readonly run: UpdateEverythingRun | null;
+  readonly isDownloading: boolean;
+  readonly showCheckIcon: boolean;
+}) {
+  const showUpdateDetails = action !== "none" || showsEverything || run !== null || isDownloading;
+  const iconStatus: DesktopUpdateStatusIconState = showCheckIcon
+    ? "checking"
+    : isDownloading
+      ? "downloading"
+      : run !== null
+        ? run.localVersion !== null && action === "install"
+          ? "downloaded"
+          : "everything"
+        : showsEverything
+          ? "everything"
+          : action === "install"
+            ? "downloaded"
+            : action === "download"
+              ? "available"
+              : "idle";
+
+  return {
+    iconStatus,
+    showUpdateDetails,
+    showUpdateIconState: showUpdateDetails && !showCheckIcon,
+  } as const;
+}
+
+export function SidebarUpdateArchitectureWarning() {
+  return isElectron ? <SidebarUpdateArchitectureWarningContent /> : null;
+}
+
+function SidebarUpdateArchitectureWarningContent() {
+  const state = useDesktopUpdateState();
+  const visible = shouldShowArm64IntelBuildWarning(state);
+  const description = state && visible ? getArm64IntelBuildWarningDescription(state) : null;
+
+  if (!visible || !description) return null;
+
+  return (
+    <Alert variant="warning">
+      <TriangleAlertIcon />
+      <AlertTitle>Intel build on Apple Silicon</AlertTitle>
+      <AlertDescription>{description}</AlertDescription>
+    </Alert>
+  );
+}
+
+const toastUpdateError: ReportLocalUpdateError = (title, description) => {
+  toastManager.add(stackedThreadToast({ type: "error", title, description }));
+};
+
+export async function downloadLocalUpdate(
+  bridge: DesktopBridge,
+  {
+    notifyDownloaded,
+    reportError = toastUpdateError,
+  }: { readonly notifyDownloaded: boolean; readonly reportError?: ReportLocalUpdateError },
+): Promise<boolean> {
+  try {
+    const result = await bridge.downloadUpdate();
+    if (result.completed && notifyDownloaded) {
+      showDesktopUpdateDownloadedToast(bridge, result.state);
+    }
+    const actionError = shouldToastDesktopUpdateActionResult(result)
+      ? getDesktopUpdateActionError(result)
+      : null;
+    if (actionError) reportError("Could not download update", actionError);
+    return result.completed;
+  } catch (error) {
+    reportError(
+      "Could not start update download",
+      error instanceof Error ? error.message : "An unexpected error occurred.",
+    );
+    return false;
+  }
+}
+
+export async function installLocalUpdate(
+  bridge: DesktopBridge,
+  reportError: ReportLocalUpdateError = toastUpdateError,
+  expectedVersion?: string,
+): Promise<boolean> {
+  try {
+    const result = await bridge.installUpdate(expectedVersion);
+    if (!result.accepted) {
+      showDesktopUpdateDownloadedToast(bridge, result.state);
+      return false;
+    }
+    const actionError = shouldToastDesktopUpdateActionResult(result)
+      ? getDesktopUpdateActionError(result)
+      : null;
+    if (!actionError) return true;
+    reportError("Could not install update", actionError);
+    return false;
+  } catch (error) {
+    reportError(
+      "Could not install update",
+      error instanceof Error ? error.message : "An unexpected error occurred.",
+    );
+    return false;
+  }
+}
 
 export function SidebarUpdatePill() {
-  const queryClient = useQueryClient();
-  const state = useDesktopUpdateState().data ?? null;
-  const [dismissed, setDismissed] = useState(false);
+  return <SidebarUpdateControl />;
+}
 
-  const visible = isElectron && shouldShowDesktopUpdateButton(state) && !dismissed;
-  const tooltip = state ? getDesktopUpdateButtonTooltip(state) : "Update available";
-  const disabled = isDesktopUpdateButtonDisabled(state);
+function SidebarUpdateControl() {
+  const state = useDesktopUpdateState();
+  // The desktop updates this machine, whose policy the primary environment reports.
+  const updatesDenial = managedUpdatesDenial(usePrimaryManagedPolicy());
+  const [isActionPending, setIsActionPending] = useState(false);
+  const [providerCheck, setProviderCheck] = useState<"button" | "dialog" | null>(null);
+  const isCheckingProviders = providerCheck === "button";
+  const [isConfirmingEverything, setIsConfirmingEverything] = useState(false);
+  const [checkAnimationKey, setCheckAnimationKey] = useState(0);
+  const [releaseNotesPopoverHandle] = useState(() => PopoverCreateHandle());
+  const suppressReleaseNotesFocusOpen = useRef(false);
+  const releaseNotesPopupRef = useRef<HTMLDivElement>(null);
+  const releaseNotesTriggerId = useId();
+  const prefersReducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+
+  const updateStatus = state?.status;
+  const [isCheckAnimationLatched, setIsCheckAnimationLatched] = useState(
+    () => !prefersReducedMotion && updateStatus === "checking",
+  );
+  const [latchInputs, setLatchInputs] = useState({ prefersReducedMotion, updateStatus });
+  if (
+    latchInputs.prefersReducedMotion !== prefersReducedMotion ||
+    latchInputs.updateStatus !== updateStatus
+  ) {
+    setLatchInputs({ prefersReducedMotion, updateStatus });
+    if (prefersReducedMotion) {
+      setIsCheckAnimationLatched(false);
+    } else if (updateStatus === "checking") {
+      setIsCheckAnimationLatched(true);
+    }
+  }
+
   const action = state ? resolveDesktopUpdateButtonAction(state) : "none";
+  const isDownloading = state?.status === "downloading";
+  const localUpdateVersion =
+    state && action !== "none" ? getDesktopUpdateDownloadedVersion(state) : null;
+  const everything = useUpdateEverything(localUpdateVersion);
+  const checkProviderUpdates = useCheckProviderUpdates();
+  const runsEverything = everything.hasUpdates && !isDownloading;
+  const run = useUpdateEverythingRun();
+  const isRunningEverything = run !== null;
+  const showCheckIcon = shouldShowDesktopUpdateCheckIcon({
+    isAnimationLatched: isCheckAnimationLatched,
+    isChecking: state?.status === "checking" || isCheckingProviders,
+    prefersReducedMotion,
+  });
+  const { iconStatus, showUpdateDetails, showUpdateIconState } = resolveSidebarUpdatePresentation({
+    action,
+    showsEverything: runsEverything,
+    run,
+    isDownloading,
+    showCheckIcon,
+  });
+  const idleTooltip =
+    !showUpdateDetails && !showCheckIcon ? getDesktopUpdateIdleTooltip(state, updatesDenial) : null;
+  const tooltip = runsEverything
+    ? everything.summary
+    : showUpdateDetails
+      ? state
+        ? getDesktopUpdateButtonTooltip(state)
+        : "Update available"
+      : showCheckIcon
+        ? "Checking for updates…"
+        : (idleTooltip?.title ?? "Check for updates");
+  const disabled = showCheckIcon
+    ? true
+    : runsEverything
+      ? false
+      : showUpdateDetails
+        ? isDesktopUpdateButtonDisabled(state)
+        : !canCheckForUpdate(state);
+  const isInteractionDisabled = disabled || isActionPending || isRunningEverything;
+  const showReleaseNotesPopover =
+    !isRunningEverything && shouldUseSidebarUpdateReleaseNotesPopover(showUpdateDetails, state);
 
-  const showArm64Warning = isElectron && shouldShowArm64IntelBuildWarning(state);
-  const arm64Description =
-    state && showArm64Warning ? getArm64IntelBuildWarningDescription(state) : null;
+  const [releaseNotesOpen, setReleaseNotesOpen] = useState(false);
+  const [releaseNotesTriggerFocusVisible, setReleaseNotesTriggerFocusVisible] = useState(false);
+  // Release notes close when they stop applying, and open when they start
+  // applying while the trigger already holds keyboard focus.
+  const [releaseNotesShownBefore, setReleaseNotesShownBefore] = useState(showReleaseNotesPopover);
+  if (releaseNotesShownBefore !== showReleaseNotesPopover) {
+    setReleaseNotesShownBefore(showReleaseNotesPopover);
+    setReleaseNotesOpen(showReleaseNotesPopover && releaseNotesTriggerFocusVisible);
+  }
 
-  const handleAction = useCallback(() => {
+  const handleAction = async () => {
     const bridge = window.desktopBridge;
-    if (!bridge || !state) return;
-    if (disabled || action === "none") return;
+    if (isInteractionDisabled) return;
 
-    if (action === "download") {
-      void bridge
-        .downloadUpdate()
-        .then((result) => {
-          setDesktopUpdateStateQueryData(queryClient, result.state);
-          if (result.completed) {
-            toastManager.add({
-              type: "success",
-              title: "Update downloaded",
-              description: "Restart the app from the update button to install it.",
-            });
-          }
-          if (!shouldToastDesktopUpdateActionResult(result)) return;
-          const actionError = getDesktopUpdateActionError(result);
-          if (!actionError) return;
-          toastManager.add({
-            type: "error",
-            title: "Could not download update",
-            description: actionError,
-          });
-        })
-        .catch((error) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not start update download",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
-          });
-        });
+    if (runsEverything) {
+      setIsConfirmingEverything(true);
+      // Machines that still cache an older latest version add their rows while the dialog is open.
+      setProviderCheck("dialog");
+      void checkProviderUpdates({ quiet: true }).finally(() => setProviderCheck(null));
       return;
     }
 
-    if (action === "open-release") {
-      if (!state.releasePageUrl) return;
-      void bridge.openExternal(state.releasePageUrl).catch((error) => {
-        toastManager.add({
-          type: "error",
-          title: "Could not open release page",
-          description: error instanceof Error ? error.message : "An unexpected error occurred.",
-        });
-      });
+    if (!bridge || !state) return;
+    setIsActionPending(true);
+
+    if (action === "download") {
+      void downloadLocalUpdate(bridge, { notifyDownloaded: true }).finally(() =>
+        setIsActionPending(false),
+      );
       return;
     }
 
     if (action === "install") {
-      const confirmed = window.confirm(getDesktopUpdateInstallConfirmationMessage(state));
-      if (!confirmed) return;
-      void bridge
-        .installUpdate()
-        .then((result) => {
-          setDesktopUpdateStateQueryData(queryClient, result.state);
-          if (!shouldToastDesktopUpdateActionResult(result)) return;
-          const actionError = getDesktopUpdateActionError(result);
-          if (!actionError) return;
-          toastManager.add({
+      let confirmed = false;
+      try {
+        confirmed = await ensureLocalApi().dialogs.confirm(
+          getDesktopUpdateInstallConfirmationMessage(state),
+        );
+      } catch (error) {
+        setIsActionPending(false);
+        toastManager.add(
+          stackedThreadToast({
             type: "error",
-            title: "Could not install update",
-            description: actionError,
-          });
-        })
-        .catch((error) => {
-          toastManager.add({
-            type: "error",
-            title: "Could not install update",
-            description: error instanceof Error ? error.message : "An unexpected error occurred.",
-          });
-        });
+            title: "Could not confirm update",
+            description: error instanceof Error ? error.message : "Update confirmation failed.",
+          }),
+        );
+        return;
+      }
+      if (!confirmed) {
+        setIsActionPending(false);
+        return;
+      }
+      void installLocalUpdate(bridge).finally(() => setIsActionPending(false));
+      return;
     }
-  }, [action, disabled, queryClient, state]);
 
-  if (!visible && !showArm64Warning) return null;
+    if (!prefersReducedMotion) {
+      setIsCheckAnimationLatched(true);
+      setCheckAnimationKey((key) => key + 1);
+    }
+    const appCheck = bridge
+      .checkForUpdate()
+      .then((result) => {
+        if (result.checked) return;
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not check for updates",
+            description:
+              updatesDenial ??
+              result.state.message ??
+              "Automatic updates are not available in this build.",
+          }),
+        );
+      })
+      .catch((error) => {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not check for updates",
+            description: error instanceof Error ? error.message : "Update check failed.",
+          }),
+        );
+      });
+    setProviderCheck("button");
+    const providersChecked = checkProviderUpdates().finally(() => setProviderCheck(null));
+    void Promise.allSettled([appCheck, providersChecked]).then(() => setIsActionPending(false));
+  };
+
+  const runEverything = async () => {
+    const bridge = window.desktopBridge;
+    setIsConfirmingEverything(false);
+    setIsActionPending(true);
+    const result = await settlePromise(() =>
+      everything.run({
+        ...(bridge && action === "download"
+          ? {
+              downloadLocal: (reportError) =>
+                downloadLocalUpdate(bridge, { notifyDownloaded: false, reportError }),
+            }
+          : {}),
+        ...(bridge && action !== "none"
+          ? { installLocal: (reportError) => installLocalUpdate(bridge, reportError) }
+          : {}),
+      }),
+    );
+    if (result._tag === "Failure") {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not update everything",
+          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        }),
+      );
+    }
+    setIsActionPending(false);
+  };
+
+  const handleCheckAnimationIteration = () => {
+    setIsCheckAnimationLatched(
+      shouldContinueDesktopUpdateCheckAnimation({
+        isChecking: state?.status === "checking" || isCheckingProviders,
+        prefersReducedMotion,
+      }),
+    );
+  };
+
+  if (!isElectron && !runsEverything && !isRunningEverything) return null;
+
+  const statusIcon = (
+    <DesktopUpdateStatusIcon
+      key={showCheckIcon ? checkAnimationKey : iconStatus}
+      downloadPercent={state?.downloadPercent ?? null}
+      isCheckAnimating={showCheckIcon && !prefersReducedMotion}
+      onCheckAnimationIteration={handleCheckAnimationIteration}
+      status={iconStatus}
+    />
+  );
+  const confirmDialog = (
+    <UpdateEverythingDialog
+      open={isConfirmingEverything}
+      onOpenChange={setIsConfirmingEverything}
+      version={everything.version}
+      providerCount={everything.providerCount}
+      rows={everything.rows}
+      restarts={everything.restarts}
+      checking={providerCheck === "dialog"}
+      onConfirm={() => void runEverything()}
+    />
+  );
+
+  if (run !== null) {
+    const local: UpdateRunLocalState =
+      run.localVersion === null
+        ? null
+        : state?.status === "downloading"
+          ? { status: "downloading", percent: state.downloadPercent }
+          : { status: "waiting" };
+    return (
+      <SidebarMenuItem className="ml-auto flex flex-1">
+        <SidebarUpdateCapsule
+          run={run}
+          local={local}
+          icon={statusIcon}
+          {...(run.localVersion === null && action === "install" && window.desktopBridge
+            ? {
+                onRestart: async () => {
+                  saveUpdateEverythingResult({
+                    localVersion: localUpdateVersion,
+                    updatedServers: 0,
+                    updatedProviders: 0,
+                    failures: [],
+                    restarting: [],
+                  });
+                  if (!(await installLocalUpdate(window.desktopBridge!))) {
+                    clearSavedUpdateEverythingResult();
+                  }
+                },
+              }
+            : {})}
+        />
+        {confirmDialog}
+      </SidebarMenuItem>
+    );
+  }
+
+  const updateButton = (
+    <button
+      type="button"
+      aria-label={idleTooltip?.detail ? `${tooltip}: ${idleTooltip.detail}` : tooltip}
+      aria-disabled={isInteractionDisabled || undefined}
+      className={cn(
+        "inline-flex size-8 items-center justify-center rounded-full outline-hidden ring-ring transition-colors focus-visible:ring-2 focus-visible:ring-inset",
+        isInteractionDisabled ? "cursor-not-allowed" : "cursor-pointer",
+        showUpdateIconState
+          ? cn(
+              "bg-sidebar-control-surface text-sidebar-foreground",
+              !isInteractionDisabled && "hover:bg-sidebar-row-hover",
+            )
+          : cn(
+              "text-(--sidebar-icon-color)",
+              !isInteractionDisabled && "hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+            ),
+        disabled && !showUpdateIconState && "opacity-60",
+      )}
+      onClick={handleAction}
+      onBlur={() => {
+        suppressReleaseNotesFocusOpen.current = false;
+        setReleaseNotesTriggerFocusVisible(false);
+      }}
+      onFocus={(event) => {
+        const focusVisible = event.currentTarget.matches(":focus-visible");
+        setReleaseNotesTriggerFocusVisible(focusVisible);
+        if (!showReleaseNotesPopover || !focusVisible) return;
+        if (suppressReleaseNotesFocusOpen.current) {
+          suppressReleaseNotesFocusOpen.current = false;
+          return;
+        }
+        flushSync(() => releaseNotesPopoverHandle.open(releaseNotesTriggerId));
+      }}
+      onKeyDown={(event) => {
+        if (!showReleaseNotesPopover) return;
+        openSidebarUpdateReleaseNotesPopoverOnForwardTab(
+          event,
+          releaseNotesPopoverHandle,
+          releaseNotesTriggerId,
+        );
+      }}
+    >
+      {statusIcon}
+    </button>
+  );
 
   return (
-    <div className="flex flex-col gap-1">
-      {showArm64Warning && arm64Description && (
-        <Alert variant="warning" className="rounded-2xl border-warning/40 bg-warning/8 text-xs">
-          <TriangleAlertIcon />
-          <AlertTitle>Intel build on Apple Silicon</AlertTitle>
-          <AlertDescription>{arm64Description}</AlertDescription>
-        </Alert>
-      )}
-      {visible && (
-        <div
-          className={`group/update relative flex h-7 w-full items-center rounded-lg bg-primary/15 text-xs font-medium text-primary ${
-            disabled ? " cursor-not-allowed opacity-60" : ""
-          }`}
-        >
-          <div className="pointer-events-none absolute inset-0 rounded-lg transition-colors group-has-[button.update-main:hover]/update:bg-primary/22" />
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <button
-                  type="button"
-                  aria-label={tooltip}
-                  aria-disabled={disabled || undefined}
-                  disabled={disabled}
-                  className="update-main relative flex h-full flex-1 items-center gap-2 px-2 enabled:cursor-pointer"
-                  onClick={handleAction}
-                >
-                  {action === "install" ? (
-                    <>
-                      <RotateCwIcon className="size-3.5" />
-                      <span>Restart to update</span>
-                    </>
-                  ) : action === "open-release" ? (
-                    <>
-                      <DownloadIcon className="size-3.5" />
-                      <span>Open latest release</span>
-                    </>
-                  ) : state?.status === "downloading" ? (
-                    <>
-                      <DownloadIcon className="size-3.5" />
-                      <span>
-                        Downloading
-                        {typeof state.downloadPercent === "number"
-                          ? ` (${Math.floor(state.downloadPercent)}%)`
-                          : "…"}
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <DownloadIcon className="size-3.5" />
-                      <span>Update available</span>
-                    </>
-                  )}
-                </button>
-              }
-            />
-            <TooltipPopup side="top">{tooltip}</TooltipPopup>
-          </Tooltip>
-          {(action === "download" || action === "open-release") && (
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    aria-label="Dismiss update"
-                    className="mr-1 inline-flex size-5 items-center justify-center rounded-md text-primary/60 transition-colors hover:text-primary"
-                    onClick={() => setDismissed(true)}
-                  >
-                    <XIcon className="size-3.5" />
-                  </button>
-                }
+    <SidebarMenuItem className="ml-auto shrink-0">
+      <Popover
+        handle={releaseNotesPopoverHandle}
+        open={releaseNotesOpen && showReleaseNotesPopover}
+        triggerId={releaseNotesTriggerId}
+        onOpenChange={(open, details) => {
+          if (open && !showReleaseNotesPopover) {
+            details.cancel();
+            return;
+          }
+          handleSidebarUpdateReleaseNotesPopoverOpenChange(open, details);
+          if (!details.isCanceled) setReleaseNotesOpen(open);
+        }}
+      >
+        <Tooltip disabled={showReleaseNotesPopover}>
+          <TooltipTrigger
+            id={releaseNotesTriggerId}
+            render={
+              <PopoverTrigger
+                {...(!showReleaseNotesPopover
+                  ? {
+                      "aria-controls": undefined,
+                      "aria-expanded": undefined,
+                      "aria-haspopup": undefined,
+                    }
+                  : {})}
+                closeDelay={150}
+                handle={releaseNotesPopoverHandle}
+                id={releaseNotesTriggerId}
+                openOnHover={showReleaseNotesPopover}
+                render={updateButton}
               />
-              <TooltipPopup side="top">Dismiss until next launch</TooltipPopup>
-            </Tooltip>
-          )}
-        </div>
-      )}
-    </div>
+            }
+          />
+          {!showReleaseNotesPopover ? (
+            <TooltipPopup
+              align="center"
+              side="top"
+              variant={showUpdateDetails ? "glass" : "default"}
+            >
+              {idleTooltip?.detail ? (
+                <div className="text-left">
+                  <div className="font-medium">{idleTooltip.title}</div>
+                  <div className="text-muted-foreground">{idleTooltip.detail}</div>
+                </div>
+              ) : (
+                <span className="whitespace-pre-line">{tooltip}</span>
+              )}
+            </TooltipPopup>
+          ) : null}
+        </Tooltip>
+        {showReleaseNotesPopover && state ? (
+          <PopoverPopup
+            align="center"
+            aria-label="Update release notes"
+            initialFocus={false}
+            onKeyDownCapture={(event) => {
+              if (
+                event.key === "Escape" &&
+                releaseNotesPopupRef.current?.contains(document.activeElement)
+              ) {
+                suppressReleaseNotesFocusOpen.current = true;
+              }
+            }}
+            ref={releaseNotesPopupRef}
+            side="top"
+            tooltipStyle
+          >
+            <SidebarUpdateReleaseNotes
+              shell={window.desktopBridge}
+              state={state}
+              tooltip={tooltip}
+            />
+          </PopoverPopup>
+        ) : null}
+      </Popover>
+      {confirmDialog}
+    </SidebarMenuItem>
   );
 }

@@ -1,116 +1,56 @@
-import { describe, expect, it } from "vitest";
-import { Schema } from "effect";
+import { describe, expect, it } from "vite-plus/test";
+import * as Schema from "effect/Schema";
 
-import { ProviderSendTurnInput, ProviderSessionStartInput } from "./provider";
+import { ThreadId } from "./baseSchemas.ts";
+import { ProviderSendTurnInput, ProviderUploadFeedbackError } from "./provider.ts";
 
-const decodeProviderSessionStartInput = Schema.decodeUnknownSync(ProviderSessionStartInput);
 const decodeProviderSendTurnInput = Schema.decodeUnknownSync(ProviderSendTurnInput);
 
-describe("ProviderSessionStartInput", () => {
-  it("accepts codex-compatible payloads", () => {
-    const parsed = decodeProviderSessionStartInput({
-      threadId: "thread-1",
-      provider: "codex",
-      cwd: "/tmp/workspace",
-      modelSelection: {
-        provider: "codex",
-        model: "gpt-5.3-codex",
-        options: {
-          reasoningEffort: "high",
-          fastMode: true,
-        },
-      },
-      runtimeMode: "full-access",
-    });
-    expect(parsed.runtimeMode).toBe("full-access");
-    expect(parsed.modelSelection?.provider).toBe("codex");
-    expect(parsed.modelSelection?.model).toBe("gpt-5.3-codex");
-    if (parsed.modelSelection?.provider !== "codex") {
-      throw new Error("Expected codex modelSelection");
-    }
-    expect(parsed.modelSelection.options?.reasoningEffort).toBe("high");
-    expect(parsed.modelSelection.options?.fastMode).toBe(true);
-  });
-
-  it("rejects payloads without runtime mode", () => {
-    expect(() =>
-      decodeProviderSessionStartInput({
-        threadId: "thread-1",
-        provider: "codex",
-      }),
-    ).toThrow();
-  });
-
-  it("accepts claude runtime knobs", () => {
-    const parsed = decodeProviderSessionStartInput({
-      threadId: "thread-1",
-      provider: "claudeAgent",
-      cwd: "/tmp/workspace",
-      modelSelection: {
-        provider: "claudeAgent",
-        model: "claude-sonnet-4-6",
-        options: {
-          thinking: true,
-          effort: "max",
-          fastMode: true,
-        },
-      },
-      runtimeMode: "full-access",
-    });
-    expect(parsed.provider).toBe("claudeAgent");
-    expect(parsed.modelSelection?.provider).toBe("claudeAgent");
-    expect(parsed.modelSelection?.model).toBe("claude-sonnet-4-6");
-    if (parsed.modelSelection?.provider !== "claudeAgent") {
-      throw new Error("Expected claude modelSelection");
-    }
-    expect(parsed.modelSelection.options?.thinking).toBe(true);
-    expect(parsed.modelSelection.options?.effort).toBe("max");
-    expect(parsed.modelSelection.options?.fastMode).toBe(true);
-    expect(parsed.runtimeMode).toBe("full-access");
-  });
+describe("ProviderSendTurnInput", () => {
+  it.each(["image", "file"])(
+    "caps total image bytes for %s attachments without charging videos",
+    (type) => {
+      const image = {
+        type,
+        id: "image",
+        name: "image.png",
+        mimeType: "image/png",
+        sizeBytes: 10 * 1024 * 1024,
+      };
+      const video = {
+        type: "file",
+        id: "video",
+        name: "video.mp4",
+        mimeType: "video/mp4",
+        sizeBytes: 50 * 1024 * 1024,
+      };
+      expect(
+        decodeProviderSendTurnInput({
+          threadId: "thread-1",
+          attachments: [...Array.from({ length: 8 }, () => image), video],
+        }).attachments,
+      ).toHaveLength(9);
+      expect(() =>
+        decodeProviderSendTurnInput({
+          threadId: "thread-1",
+          attachments: [...Array.from({ length: 8 }, () => image), { ...image, sizeBytes: 1 }],
+        }),
+      ).toThrow(/80 MiB/);
+    },
+  );
 });
 
-describe("ProviderSendTurnInput", () => {
-  it("accepts codex modelSelection", () => {
-    const parsed = decodeProviderSendTurnInput({
-      threadId: "thread-1",
-      modelSelection: {
-        provider: "codex",
-        model: "gpt-5.3-codex",
-        options: {
-          reasoningEffort: "xhigh",
-          fastMode: true,
-        },
-      },
+describe("provider feedback", () => {
+  it("keeps the failed thread and original cause without exposing upstream text", () => {
+    const cause = new Error("provider request secret");
+    const error = new ProviderUploadFeedbackError({
+      threadId: ThreadId.make("thread-1"),
+      cause,
     });
 
-    expect(parsed.modelSelection?.provider).toBe("codex");
-    expect(parsed.modelSelection?.model).toBe("gpt-5.3-codex");
-    if (parsed.modelSelection?.provider !== "codex") {
-      throw new Error("Expected codex modelSelection");
-    }
-    expect(parsed.modelSelection.options?.reasoningEffort).toBe("xhigh");
-    expect(parsed.modelSelection.options?.fastMode).toBe(true);
-  });
-
-  it("accepts claude modelSelection including ultrathink", () => {
-    const parsed = decodeProviderSendTurnInput({
-      threadId: "thread-1",
-      modelSelection: {
-        provider: "claudeAgent",
-        model: "claude-sonnet-4-6",
-        options: {
-          effort: "ultrathink",
-          fastMode: true,
-        },
-      },
-    });
-
-    expect(parsed.modelSelection?.provider).toBe("claudeAgent");
-    if (parsed.modelSelection?.provider !== "claudeAgent") {
-      throw new Error("Expected claude modelSelection");
-    }
-    expect(parsed.modelSelection.options?.effort).toBe("ultrathink");
-    expect(parsed.modelSelection.options?.fastMode).toBe(true);
+    expect(error.threadId).toBe("thread-1");
+    expect(error.cause).toBe(cause);
+    expect(error.message).toBe("Failed to upload feedback for thread thread-1.");
+    expect(error.message).not.toContain("provider request secret");
   });
 });

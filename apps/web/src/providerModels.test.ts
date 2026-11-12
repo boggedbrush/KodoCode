@@ -1,41 +1,64 @@
-import { describe, expect, it } from "vitest";
-import type { ServerProviderModel } from "@t3tools/contracts";
+import {
+  ProviderDriverKind,
+  type ModelCapabilities,
+  type ServerProviderModel,
+} from "@t3tools/contracts";
+import { describe, expect, it } from "vite-plus/test";
 
 import { getProviderModelCapabilities } from "./providerModels";
 
-const DEFAULT_CAPABILITIES = {
-  reasoningEffortLevels: [{ value: "medium", label: "Medium", isDefault: true }],
-  supportsFastMode: false,
-  supportsThinkingToggle: true,
-  contextWindowOptions: [],
-  promptInjectedEffortLevels: [],
-} as const;
+const PROVIDER = ProviderDriverKind.make("claudeAgent");
+
+function capabilities(id: string): ModelCapabilities {
+  return {
+    optionDescriptors: [{ id, label: id, type: "boolean" }],
+  };
+}
+
+function model(input: {
+  slug: string;
+  capabilities: ModelCapabilities;
+  aliases?: ReadonlyArray<string>;
+  isCustom?: boolean;
+}): ServerProviderModel {
+  return {
+    slug: input.slug,
+    name: input.slug,
+    ...(input.aliases ? { aliases: [...input.aliases] } : {}),
+    isCustom: input.isCustom ?? false,
+    capabilities: input.capabilities,
+  };
+}
 
 describe("getProviderModelCapabilities", () => {
-  it("resolves auto to the provider default model capabilities", () => {
-    const models: ReadonlyArray<ServerProviderModel> = [
-      {
-        slug: "claude-sonnet-4-6",
-        name: "Claude Sonnet 4.6",
-        isCustom: false,
-        capabilities: DEFAULT_CAPABILITIES,
-      },
-      {
-        slug: "custom-preview-model",
-        name: "Custom Preview",
-        isCustom: true,
-        capabilities: {
-          reasoningEffortLevels: [],
-          supportsFastMode: true,
-          supportsThinkingToggle: false,
-          contextWindowOptions: [],
-          promptInjectedEffortLevels: [],
-        },
-      },
+  it("resolves model-declared aliases", () => {
+    const aliasCapabilities = capabilities("aliased-option");
+    const models = [
+      model({
+        slug: "synthetic-model",
+        aliases: ["Legacy-Synthetic-Model"],
+        capabilities: aliasCapabilities,
+      }),
     ];
 
-    expect(getProviderModelCapabilities(models, "auto", "claudeAgent")).toEqual(
-      DEFAULT_CAPABILITIES,
+    expect(getProviderModelCapabilities(models, "legacy-synthetic-model", PROVIDER)).toEqual(
+      aliasCapabilities,
+    );
+  });
+
+  it("prefers an exact custom slug over a built-in model alias", () => {
+    const customCapabilities = capabilities("custom-option");
+    const models = [
+      model({
+        slug: "synthetic-model",
+        aliases: ["custom-model"],
+        capabilities: capabilities("built-in-option"),
+      }),
+      model({ slug: "custom-model", capabilities: customCapabilities, isCustom: true }),
+    ];
+
+    expect(getProviderModelCapabilities(models, " custom-model ", PROVIDER)).toEqual(
+      customCapabilities,
     );
   });
 });

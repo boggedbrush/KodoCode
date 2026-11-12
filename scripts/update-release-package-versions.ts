@@ -1,113 +1,180 @@
-import { appendFileSync, readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+#!/usr/bin/env node
+
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Config from "effect/Config";
+import * as Console from "effect/Console";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import { Argument, Command, Flag } from "effect/cli";
+import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
+
+export class ReleasePackageManifestError extends Schema.TaggedError<ReleasePackageManifestError>()(
+  "ReleasePackageManifestError",
+  {
+    operation: Schema.Literals(["read", "decode", "encode", "write"]),
+    filePath: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to ${this.operation} release package manifest '${this.filePath}'.`;
+  }
+}
+
+export class ReleaseGitHubOutputConfigurationError extends Schema.TaggedError<ReleaseGitHubOutputConfigurationError>()(
+  "ReleaseGitHubOutputConfigurationError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Failed to resolve GITHUB_OUTPUT for release package version output.";
+  }
+}
+
+export class ReleaseGitHubOutputWriteError extends Schema.TaggedError<ReleaseGitHubOutputWriteError>()(
+  "ReleaseGitHubOutputWriteError",
+  {
+    filePath: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to append release package version output to '${this.filePath}'.`;
+  }
+}
 
 export const releasePackageFiles = [
   "apps/server/package.json",
   "apps/desktop/package.json",
   "apps/web/package.json",
   "packages/contracts/package.json",
-  "packages/shared/package.json",
 ] as const;
 
 interface UpdateReleasePackageVersionsOptions {
-  readonly rootDir?: string;
+  readonly rootDir?: string | undefined;
 }
 
-interface MutablePackageJson {
-  version?: string;
-  [key: string]: unknown;
-}
+const PackageJsonSchema = Schema.Record(Schema.String, Schema.Unknown);
+const PackageJsonPrettyJson = fromJsonStringPretty(PackageJsonSchema);
+const decodePackageJson = Schema.decodeUnknownEffect(PackageJsonPrettyJson);
+const encodePackageJson = Schema.encodeEffect(PackageJsonPrettyJson);
 
-export function updateReleasePackageVersions(
+export const updateReleasePackageVersions = Effect.fn("updateReleasePackageVersions")(function* (
   version: string,
   options: UpdateReleasePackageVersionsOptions = {},
-): { changed: boolean } {
-  const rootDir = resolve(options.rootDir ?? process.cwd());
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const rootDir = path.resolve(options.rootDir ?? process.cwd());
   let changed = false;
 
   for (const relativePath of releasePackageFiles) {
-    const filePath = resolve(rootDir, relativePath);
-    const packageJson = JSON.parse(readFileSync(filePath, "utf8")) as MutablePackageJson;
+    const filePath = path.join(rootDir, relativePath);
+    const packageJsonText = yield* fs.readFileString(filePath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ReleasePackageManifestError({
+            operation: "read",
+            filePath,
+            cause,
+          }),
+      ),
+    );
+    const packageJson = yield* decodePackageJson(packageJsonText).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ReleasePackageManifestError({
+            operation: "decode",
+            filePath,
+            cause,
+          }),
+      ),
+    );
     if (packageJson.version === version) {
       continue;
     }
 
-    packageJson.version = version;
-    writeFileSync(filePath, `${JSON.stringify(packageJson, null, 2)}\n`);
+    const packageJsonString = yield* encodePackageJson({ ...packageJson, version }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ReleasePackageManifestError({
+            operation: "encode",
+            filePath,
+            cause,
+          }),
+      ),
+    );
+    yield* fs.writeFileString(filePath, `${packageJsonString}\n`).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ReleasePackageManifestError({
+            operation: "write",
+            filePath,
+            cause,
+          }),
+      ),
+    );
     changed = true;
   }
 
   return { changed };
-}
+});
 
-function parseArgs(argv: ReadonlyArray<string>): {
-  version: string;
-  rootDir: string | undefined;
-  writeGithubOutput: boolean;
-} {
-  let version: string | undefined;
-  let rootDir: string | undefined;
-  let writeGithubOutput = false;
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (argument === undefined) {
-      continue;
-    }
-
-    if (argument === "--github-output") {
-      writeGithubOutput = true;
-      continue;
-    }
-
-    if (argument === "--root") {
-      rootDir = argv[index + 1];
-      if (!rootDir) {
-        throw new Error("Missing value for --root.");
-      }
-      index += 1;
-      continue;
-    }
-
-    if (argument.startsWith("--")) {
-      throw new Error(`Unknown argument: ${argument}`);
-    }
-
-    if (version !== undefined) {
-      throw new Error("Only one release version can be provided.");
-    }
-    version = argument;
-  }
-
-  if (!version) {
-    throw new Error(
-      "Usage: node scripts/update-release-package-versions.ts <version> [--root <path>] [--github-output]",
-    );
-  }
-
-  return { version, rootDir, writeGithubOutput };
-}
-
-const isMain =
-  process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-
-if (isMain) {
-  const { version, rootDir, writeGithubOutput } = parseArgs(process.argv.slice(2));
-  const { changed } = updateReleasePackageVersions(
-    version,
-    rootDir === undefined ? {} : { rootDir },
+const writeGithubOutput = Effect.fn("writeGithubOutput")(function* (changed: boolean) {
+  const fs = yield* FileSystem.FileSystem;
+  const githubOutputPath = yield* Config.NonEmptyString("GITHUB_OUTPUT").pipe(
+    Effect.mapError(
+      (cause) =>
+        new ReleaseGitHubOutputConfigurationError({
+          cause,
+        }),
+    ),
   );
+  yield* fs.writeFileString(githubOutputPath, `changed=${changed}\n`, { flag: "a" }).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ReleaseGitHubOutputWriteError({
+          filePath: githubOutputPath,
+          cause,
+        }),
+    ),
+  );
+});
 
-  if (!changed) {
-    console.log("All package.json versions already match release version.");
-  }
+export const updateReleasePackageVersionsCommand = Command.make(
+  "update-release-package-versions",
+  {
+    version: Argument.String("version").pipe(
+      Argument.withDescription("Release version to write into each releasable package.json."),
+    ),
+    root: Flag.String("root").pipe(
+      Flag.withDescription("Workspace root used to resolve the release package manifests."),
+      Flag.optional,
+    ),
+    githubOutput: Flag.Boolean("github-output").pipe(
+      Flag.withDescription("Append changed=<boolean> to GITHUB_OUTPUT."),
+      Flag.withDefault(false),
+    ),
+  },
+  ({ version, root, githubOutput }) =>
+    updateReleasePackageVersions(version, {
+      rootDir: Option.getOrUndefined(root),
+    }).pipe(
+      Effect.tap(({ changed }) =>
+        changed
+          ? Effect.void
+          : Console.log("All package.json versions already match release version."),
+      ),
+      Effect.tap(({ changed }) => (githubOutput ? writeGithubOutput(changed) : Effect.void)),
+    ),
+).pipe(Command.withDescription("Update release package versions across the workspace."));
 
-  if (writeGithubOutput) {
-    const githubOutputPath = process.env.GITHUB_OUTPUT;
-    if (!githubOutputPath) {
-      throw new Error("GITHUB_OUTPUT is required when --github-output is set.");
-    }
-    appendFileSync(githubOutputPath, `changed=${changed}\n`);
-  }
+if (import.meta.main) {
+  Command.run(updateReleasePackageVersionsCommand, { version: "0.0.0" }).pipe(
+    Effect.provide(NodeServices.layer),
+    NodeRuntime.runMain,
+  );
 }

@@ -1,46 +1,250 @@
-/**
- * Unified settings hook.
- *
- * Abstracts the split between server-authoritative settings (persisted in
- * `settings.json` on the server, fetched via `server.getConfig`) and
- * client-only settings (persisted in localStorage).
- *
- * Consumers use `useSettings(selector)` to read, and `useUpdateSettings()` to
- * write. The hook transparently routes reads/writes to the correct backing
- * store.
- */
-import { useCallback, useMemo } from "react";
-import { ServerSettingsPatch, ModelSelection, ThreadEnvMode } from "@t3tools/contracts";
+import { useRef, useSyncExternalStore, use } from "react";
+import { useSyncExternalStoreWithSelector } from "use-sync-external-store/with-selector";
+import { RegistryContext, useAtomValue } from "@effect/atom-react";
 import {
+  DEFAULT_SERVER_SETTINGS,
+  AuthSettingsWriteScope,
+  requiredScopesForServerSettingsPatch,
+  type EnvironmentId,
+  type ProviderInstanceMutation,
+  type ProviderInstanceId,
+  ServerSettings,
+  type ServerSettingsPatch,
+  sessionGrantsScope,
+} from "@t3tools/contracts";
+import {
+  type ClientSettingsPatch,
   type ClientSettings,
-  ClientSettingsSchema,
   DEFAULT_CLIENT_SETTINGS,
-  DEFAULT_UNIFIED_SETTINGS,
-  ProjectPickerMode,
-  SidebarProjectSortOrder,
-  SidebarThreadSortOrder,
-  TimestampFormat,
-  UnifiedSettings,
+  type EnvironmentIdentificationMode,
+  type UnifiedSettings,
 } from "@t3tools/contracts/settings";
-import { ensureNativeApi } from "~/nativeApi";
-import { useLocalStorage } from "./useLocalStorage";
-import { normalizeCustomModelSlugs } from "~/modelSelection";
-import { Predicate, Schema, Struct } from "effect";
-import { DeepMutable } from "effect/Types";
-import { deepMerge } from "@t3tools/shared/Struct";
-import { applySettingsUpdated, getServerConfig, useServerSettings } from "~/rpc/serverState";
+import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+import {
+  isAtomCommandInterrupted,
+  runAtomCommand,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
+import {
+  filterSharedServerPatch,
+  splitSharedServerPatch,
+  supportsSharedSettingsSync,
+} from "@t3tools/client-runtime/state/shared-settings";
+import { ensureLocalApi } from "~/localApi";
+import {
+  getThemeDefinition,
+  getThemePreviewSidebarArtwork,
+  resolveThemeHalf,
+  subscribeToThemePreview,
+  themeAllowsSidebarArtwork,
+} from "~/themePalette";
+import {
+  modelPreferencesMigrationPatch,
+  resolveModelPreferences,
+} from "@t3tools/shared/serverSettings";
+import * as Equal from "effect/Equal";
+import * as Struct from "effect/Struct";
+import * as Option from "effect/Option";
+import { AsyncResult, Atom } from "effect/reactivity";
+import { toastManager } from "~/components/ui/toast";
+import { isHostedStaticApp } from "~/hostedPairing";
+import { environmentCatalog } from "~/connection/catalog";
+import { primaryServerSettingsAtom, serverEnvironment } from "~/state/server";
+import { useEnvironments, usePrimaryEnvironment } from "~/state/environments";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { useTheme } from "./useTheme";
+import {
+  environmentSession,
+  environmentSessionStatesAtom,
+  readEnvironmentScope,
+  useEnvironmentScope,
+} from "~/state/session";
+import { environmentIdsKey } from "~/state/environmentAtomList";
+import { appAtomRegistry } from "~/rpc/atomRegistry";
 
-const CLIENT_SETTINGS_STORAGE_KEY = "t3code:client-settings:v1";
-const OLD_SETTINGS_KEY = "t3code:app-settings:v1";
-export type SettingsUpdatePatch = Partial<UnifiedSettings> & ServerSettingsPatch;
+const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = "[CLIENT_SETTINGS]";
 
-// ── Key sets for routing patches ─────────────────────────────────────
+type UnifiedSettingsPatch = ServerSettingsPatch & ClientSettingsPatch;
 
-const SERVER_SETTINGS_KEYS = new Set<string>(Struct.keys(ServerSettingsPatch.fields));
+const clientSettingsListeners = new Set<() => void>();
+const clientSettingsHydrationListeners = new Set<() => void>();
+type ClientSettingsHydrationStatus = "pending" | "ready" | "failed" | "retrying";
+let clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
+let clientSettingsHydrationStatus: ClientSettingsHydrationStatus = "pending";
+let clientSettingsHydrationPromise: Promise<void> | null = null;
+let clientSettingsHydrationGeneration = 0;
+let clientSettingsPersistenceQueue: Promise<void> = Promise.resolve();
+let deferredClientSettingsPatchCount = 0;
 
-function splitPatch(patch: SettingsUpdatePatch): {
+function emitClientSettingsChange() {
+  for (const listener of clientSettingsListeners) {
+    listener();
+  }
+}
+
+function emitClientSettingsHydrationChange() {
+  for (const listener of clientSettingsHydrationListeners) {
+    listener();
+  }
+}
+
+function getClientSettingsSnapshot(): ClientSettings {
+  return clientSettingsSnapshot;
+}
+
+function replaceClientSettingsSnapshot(settings: ClientSettings): void {
+  clientSettingsSnapshot = settings;
+  emitClientSettingsChange();
+}
+
+function setClientSettingsHydrationStatus(nextStatus: ClientSettingsHydrationStatus): void {
+  if (clientSettingsHydrationStatus === nextStatus) {
+    return;
+  }
+  clientSettingsHydrationStatus = nextStatus;
+  emitClientSettingsHydrationChange();
+}
+
+export function subscribeClientSettings(listener: () => void): () => void {
+  clientSettingsListeners.add(listener);
+  void hydrateClientSettings().catch(() => undefined);
+  return () => {
+    clientSettingsListeners.delete(listener);
+  };
+}
+
+export function getClientSettingsHydratedSnapshot(): boolean {
+  return clientSettingsHydrationStatus === "ready";
+}
+
+function getClientSettingsHydrationStatusSnapshot(): ClientSettingsHydrationStatus {
+  return clientSettingsHydrationStatus;
+}
+
+export function subscribeClientSettingsHydration(listener: () => void): () => void {
+  clientSettingsHydrationListeners.add(listener);
+  void hydrateClientSettings().catch(() => undefined);
+  return () => {
+    clientSettingsHydrationListeners.delete(listener);
+  };
+}
+
+async function hydrateClientSettings(): Promise<void> {
+  if (clientSettingsHydrationStatus === "ready") {
+    return;
+  }
+  if (clientSettingsHydrationPromise) {
+    return clientSettingsHydrationPromise;
+  }
+
+  const hydrationGeneration = clientSettingsHydrationGeneration;
+  setClientSettingsHydrationStatus(
+    clientSettingsHydrationStatus === "failed" || clientSettingsHydrationStatus === "retrying"
+      ? "retrying"
+      : "pending",
+  );
+  const nextHydration = (async () => {
+    try {
+      const persistedSettings = await ensureLocalApi().persistence.getClientSettings();
+      if (hydrationGeneration !== clientSettingsHydrationGeneration) {
+        return;
+      }
+      if (persistedSettings) {
+        replaceClientSettingsSnapshot({ ...DEFAULT_CLIENT_SETTINGS, ...persistedSettings });
+      }
+      setClientSettingsHydrationStatus("ready");
+    } catch (error) {
+      if (hydrationGeneration === clientSettingsHydrationGeneration) {
+        setClientSettingsHydrationStatus("failed");
+      }
+      console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} hydrate failed`, {
+        operation: "hydrate",
+        ...safeErrorLogAttributes(error),
+      });
+      throw error;
+    }
+  })();
+
+  const hydrationPromise = nextHydration.finally(() => {
+    if (clientSettingsHydrationPromise === hydrationPromise) {
+      clientSettingsHydrationPromise = null;
+    }
+  });
+  clientSettingsHydrationPromise = hydrationPromise;
+
+  return clientSettingsHydrationPromise;
+}
+
+const defaultClientSettingsPersistence = (settings: ClientSettings): Promise<void> =>
+  ensureLocalApi().persistence.setClientSettings(settings);
+
+function enqueueClientSettingsPersistence<A>(work: () => Promise<A>): Promise<A> {
+  const result = clientSettingsPersistenceQueue.then(work);
+  clientSettingsPersistenceQueue = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+export function persistClientSettingsPatch(
+  patch: ClientSettingsPatch,
+  persist: (settings: ClientSettings) => Promise<void> = defaultClientSettingsPersistence,
+): Promise<void> {
+  // Patches queued before hydration must publish before newer optimistic patches.
+  const deferPatch =
+    clientSettingsHydrationStatus !== "ready" || deferredClientSettingsPatchCount > 0;
+  if (deferPatch) {
+    deferredClientSettingsPatchCount += 1;
+  } else {
+    replaceClientSettingsSnapshot({ ...getClientSettingsSnapshot(), ...patch });
+  }
+  return enqueueClientSettingsPersistence(async () => {
+    if (deferPatch) {
+      try {
+        if (clientSettingsHydrationStatus !== "ready") {
+          await hydrateClientSettings();
+        }
+        replaceClientSettingsSnapshot({ ...getClientSettingsSnapshot(), ...patch });
+      } finally {
+        deferredClientSettingsPatchCount -= 1;
+      }
+    }
+    await persist(getClientSettingsSnapshot());
+  }).catch((error) => {
+    console.error(`${CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE} persist failed`, {
+      operation: "persist",
+      ...safeErrorLogAttributes(error),
+    });
+  });
+}
+
+/** Reapply to newer snapshots after pending writes to avoid losing concurrent changes. */
+export async function persistClientSettingsUpdate(
+  update: (current: ClientSettings) => ClientSettings,
+  persist: (settings: ClientSettings) => Promise<void> = defaultClientSettingsPersistence,
+): Promise<ClientSettings> {
+  return enqueueClientSettingsPersistence(async () => {
+    if (clientSettingsHydrationStatus !== "ready") {
+      await hydrateClientSettings();
+    }
+    for (;;) {
+      const current = getClientSettingsSnapshot();
+      const next = update(current);
+      await persist(next);
+      if (getClientSettingsSnapshot() === current) {
+        replaceClientSettingsSnapshot(next);
+        return next;
+      }
+    }
+  });
+}
+
+const SERVER_SETTINGS_KEYS = new Set<string>(Struct.keys(ServerSettings.fields));
+
+function splitPatch(patch: UnifiedSettingsPatch): {
   serverPatch: ServerSettingsPatch;
-  clientPatch: Partial<ClientSettings>;
+  clientPatch: ClientSettingsPatch;
 } {
   const serverPatch: Record<string, unknown> = {};
   const clientPatch: Record<string, unknown> = {};
@@ -53,230 +257,511 @@ function splitPatch(patch: SettingsUpdatePatch): {
   }
   return {
     serverPatch: serverPatch as ServerSettingsPatch,
-    clientPatch: clientPatch as Partial<ClientSettings>,
+    clientPatch: clientPatch as ClientSettingsPatch,
   };
 }
 
-// ── Hooks ────────────────────────────────────────────────────────────
-
-/**
- * Read merged settings. Selector narrows the subscription so components
- * only re-render when the slice they care about changes.
- */
-
-export function useSettings<T = UnifiedSettings>(selector?: (s: UnifiedSettings) => T): T {
-  const serverSettings = useServerSettings();
-  const [clientSettings] = useLocalStorage(
-    CLIENT_SETTINGS_STORAGE_KEY,
-    DEFAULT_CLIENT_SETTINGS,
-    ClientSettingsSchema,
-  );
-
-  const merged = useMemo<UnifiedSettings>(
-    () => ({
-      ...serverSettings,
-      ...clientSettings,
-    }),
-    [clientSettings, serverSettings],
-  );
-
-  return useMemo(() => (selector ? selector(merged) : (merged as T)), [merged, selector]);
+export function getClientSettings(): ClientSettings {
+  return getClientSettingsSnapshot();
 }
 
-/**
- * Returns an updater that routes each key to the correct backing store.
- *
- * Server keys are optimistically patched in atom-backed server state, then
- * persisted via RPC. Client keys go straight to localStorage.
- */
-export function useUpdateSettings() {
-  const [, setClientSettings] = useLocalStorage(
-    CLIENT_SETTINGS_STORAGE_KEY,
-    DEFAULT_CLIENT_SETTINGS,
-    ClientSettingsSchema,
+export function isClientSettingsHydrated(): boolean {
+  return getClientSettingsHydratedSnapshot();
+}
+
+/** Failed reads reject and remain retryable so defaults cannot overwrite saved preferences. */
+export function ensureClientSettingsHydrated(): Promise<void> {
+  return hydrateClientSettings();
+}
+
+export function useClientSettingsHydrated(): boolean {
+  return useSyncExternalStore(
+    subscribeClientSettingsHydration,
+    getClientSettingsHydratedSnapshot,
+    () => false,
   );
+}
 
-  const updateSettings = useCallback(
-    (patch: SettingsUpdatePatch) => {
-      const { serverPatch, clientPatch } = splitPatch(patch);
-
-      if (Object.keys(serverPatch).length > 0) {
-        const currentServerConfig = getServerConfig();
-        if (currentServerConfig) {
-          applySettingsUpdated(deepMerge(currentServerConfig.settings, serverPatch));
-        }
-        // Fire-and-forget RPC — push will reconcile on success
-        void ensureNativeApi().server.updateSettings(serverPatch);
-      }
-
-      if (Object.keys(clientPatch).length > 0) {
-        setClientSettings((prev) => ({ ...prev, ...clientPatch }));
-      }
-    },
-    [setClientSettings],
+export function useClientSettingsHydrationStatus(): ClientSettingsHydrationStatus {
+  return useSyncExternalStore(
+    subscribeClientSettingsHydration,
+    getClientSettingsHydrationStatusSnapshot,
+    () => "pending",
   );
+}
 
-  const resetSettings = useCallback(() => {
-    updateSettings(DEFAULT_UNIFIED_SETTINGS);
-  }, [updateSettings]);
+const getDefaultClientSettings = () => DEFAULT_CLIENT_SETTINGS;
+const selectWholeClientSettings = (settings: ClientSettings) => settings;
 
+/** Structurally equal selections retain their reference and skip rendering. */
+export function useClientSettings<T = ClientSettings>(
+  selector?: (settings: ClientSettings) => T,
+): T {
+  return useSyncExternalStoreWithSelector(
+    subscribeClientSettings,
+    getClientSettingsSnapshot,
+    getDefaultClientSettings,
+    selector ?? (selectWholeClientSettings as (settings: ClientSettings) => T),
+    Equal.equals,
+  );
+}
+
+export function mergeEnvironmentSettings(
+  serverSettings: ServerSettings,
+  clientSettings: ClientSettings,
+): UnifiedSettings {
+  // Older untyped adapters can return retired client keys; server values must win.
   return {
-    updateSettings,
-    resetSettings,
+    ...clientSettings,
+    ...serverSettings,
+    ...resolveModelPreferences(serverSettings, clientSettings),
   };
 }
 
-// ── One-time migration from localStorage ─────────────────────────────
+const selectLegacyModelPreferences = (settings: ClientSettings) => ({
+  favorites: settings.favorites,
+  providerModelPreferences: settings.providerModelPreferences,
+});
 
-export function buildLegacyServerSettingsMigrationPatch(legacySettings: Record<string, unknown>) {
-  const patch: DeepMutable<ServerSettingsPatch> = {};
+// Servers that predate `migrateModelPreferences` drop it and keep reporting null favorites.
+const attemptedMigrationGenerations = new Map<EnvironmentId, number>();
 
-  if (Predicate.isBoolean(legacySettings.enableAssistantStreaming)) {
-    patch.enableAssistantStreaming = legacySettings.enableAssistantStreaming;
-  }
+const modelPreferencesMigrationTargetsAtom = Atom.make((get) =>
+  [...get(environmentCatalog.catalogValueAtom).entries.keys()].flatMap((environmentId) => {
+    const generation = Option.match(
+      AsyncResult.value(get(environmentCatalog.stateAtom(environmentId))),
+      {
+        onNone: () => null,
+        onSome: (connection) => (connection.phase === "connected" ? connection.generation : null),
+      },
+    );
+    const settings = get(serverEnvironment.settingsValueAtom(environmentId));
+    return generation === null || settings === null
+      ? []
+      : [{ environmentId, generation, settings }];
+  }),
+).pipe(Atom.withLabel("web-model-preferences-migration-targets"));
 
-  if (Schema.is(ThreadEnvMode)(legacySettings.defaultThreadEnvMode)) {
-    patch.defaultThreadEnvMode = legacySettings.defaultThreadEnvMode;
-  }
-
-  if (Schema.is(ModelSelection)(legacySettings.textGenerationModelSelection)) {
-    patch.textGenerationModelSelection = legacySettings.textGenerationModelSelection;
-  }
-
-  if (typeof legacySettings.codexBinaryPath === "string") {
-    patch.providers ??= {};
-    patch.providers.codex ??= {};
-    patch.providers.codex.binaryPath = legacySettings.codexBinaryPath;
-  }
-
-  if (typeof legacySettings.codexHomePath === "string") {
-    patch.providers ??= {};
-    patch.providers.codex ??= {};
-    patch.providers.codex.homePath = legacySettings.codexHomePath;
-  }
-
-  if (Array.isArray(legacySettings.customCodexModels)) {
-    patch.providers ??= {};
-    patch.providers.codex ??= {};
-    patch.providers.codex.customModels = normalizeCustomModelSlugs(
-      legacySettings.customCodexModels,
-      new Set<string>(),
-      "codex",
+function migrateModelPreferences(): void {
+  if (clientSettingsHydrationStatus !== "ready") return;
+  for (const { environmentId, generation, settings } of appAtomRegistry.get(
+    modelPreferencesMigrationTargetsAtom,
+  )) {
+    if (attemptedMigrationGenerations.get(environmentId) === generation) continue;
+    const patch = modelPreferencesMigrationPatch(settings, clientSettingsSnapshot);
+    if (!patch) continue;
+    attemptedMigrationGenerations.set(environmentId, generation);
+    void runAtomCommand(
+      appAtomRegistry,
+      serverEnvironment.updateSettings,
+      { environmentId, input: { patch } },
+      { reportFailure: false },
     );
   }
-
-  if (Predicate.isString(legacySettings.claudeBinaryPath)) {
-    patch.providers ??= {};
-    patch.providers.claudeAgent ??= {};
-    patch.providers.claudeAgent.binaryPath = legacySettings.claudeBinaryPath;
-  }
-
-  if (Array.isArray(legacySettings.customClaudeModels)) {
-    patch.providers ??= {};
-    patch.providers.claudeAgent ??= {};
-    patch.providers.claudeAgent.customModels = normalizeCustomModelSlugs(
-      legacySettings.customClaudeModels,
-      new Set<string>(),
-      "claudeAgent",
-    );
-  }
-
-  return patch;
 }
 
-export function buildLegacyClientSettingsMigrationPatch(
-  legacySettings: Record<string, unknown>,
-): Partial<DeepMutable<ClientSettings>> {
-  const patch: Partial<DeepMutable<ClientSettings>> = {};
+/** Moves this client's legacy model preferences onto each server, once per connection. */
+export function startModelPreferencesMigration(): () => void {
+  const unsubscribes = [
+    appAtomRegistry.subscribe(modelPreferencesMigrationTargetsAtom, migrateModelPreferences),
+    subscribeClientSettings(migrateModelPreferences),
+    subscribeClientSettingsHydration(migrateModelPreferences),
+  ];
+  migrateModelPreferences();
+  return () => {
+    for (const unsubscribe of unsubscribes) unsubscribe();
+  };
+}
 
-  if (Predicate.isBoolean(legacySettings.confirmThreadArchive)) {
-    patch.confirmThreadArchive = legacySettings.confirmThreadArchive;
+export function useMergedSettings<T = UnifiedSettings>(
+  serverSettings: ServerSettings,
+  selector?: (settings: UnifiedSettings) => T,
+): T {
+  return useClientSettings((clientSettings) => {
+    const merged = mergeEnvironmentSettings(serverSettings, clientSettings);
+    return selector ? selector(merged) : (merged as T);
+  });
+}
+
+function resolveEnvironmentIdentificationMode(input: {
+  mode: EnvironmentIdentificationMode;
+  settingsHydrated: boolean;
+  paletteThemeActive?: boolean;
+  paletteThemeAllowsArtwork?: boolean;
+}): EnvironmentIdentificationMode {
+  if (!input.settingsHydrated) return "none";
+  const isArtwork = input.mode !== "pill" && input.mode !== "none";
+  return input.paletteThemeActive && !input.paletteThemeAllowsArtwork && isArtwork
+    ? "pill"
+    : input.mode;
+}
+
+export function useEnvironmentIdentificationMode(): EnvironmentIdentificationMode {
+  const settingsHydrated = useClientSettingsHydrated();
+  const mode = useClientSettings((settings) => settings.environmentIdentificationMode);
+  const { resolvedTheme, theme, themeHalves } = useTheme();
+  const previewSidebarArtwork = useSyncExternalStore(
+    subscribeToThemePreview,
+    getThemePreviewSidebarArtwork,
+    () => null,
+  );
+  const activeTheme = resolveThemeHalf(theme, themeHalves, resolvedTheme);
+  const activeThemeDefinition = getThemeDefinition(activeTheme);
+  return resolveEnvironmentIdentificationMode({
+    mode,
+    settingsHydrated,
+    paletteThemeActive: previewSidebarArtwork !== null || activeThemeDefinition !== null,
+    paletteThemeAllowsArtwork: previewSidebarArtwork ?? themeAllowsSidebarArtwork(activeTheme),
+  });
+}
+
+export async function prepareModelPreferencesPatch(
+  settings: ServerSettings,
+  patch: ServerSettingsPatch,
+): Promise<ServerSettingsPatch> {
+  if (settings.favorites === null || settings.providerModelPreferences === null) {
+    await ensureClientSettingsHydrated();
   }
+  return { ...modelPreferencesMigrationPatch(settings, getClientSettings()), ...patch };
+}
 
-  if (Predicate.isBoolean(legacySettings.confirmThreadDelete)) {
-    patch.confirmThreadDelete = legacySettings.confirmThreadDelete;
-  }
+export function useUpdateEnvironmentModelPreferences(environmentId: EnvironmentId | null) {
+  const settings = useAtomValue(
+    environmentId ? serverEnvironment.settingsValueAtom(environmentId) : noEnvironmentSettingsAtom,
+  );
+  const save = useAtomCommand(serverEnvironment.updateSettings, "model preferences update");
+  return async (patch: ServerSettingsPatch) => {
+    if (!environmentId || !settings) return;
+    let prepared: ServerSettingsPatch;
+    try {
+      prepared = await prepareModelPreferencesPatch(settings, patch);
+    } catch {
+      toastManager.add({
+        type: "error",
+        title: "Model preferences not saved",
+        description: "Could not load saved model preferences. Try again.",
+      });
+      return;
+    }
+    return save({ environmentId, input: { patch: prepared } });
+  };
+}
 
-  if (Predicate.isBoolean(legacySettings.diffWordWrap)) {
-    patch.diffWordWrap = legacySettings.diffWordWrap;
-  }
-
-  if (Array.isArray(legacySettings.favorites)) {
-    const favorites = legacySettings.favorites.flatMap((favorite) => {
-      if (!Predicate.isObject(favorite)) {
-        return [];
+/** Send the desired state so two clients adding a favorite do not cancel each other. */
+export function useToggleEnvironmentModelFavorite(environmentId: EnvironmentId | null) {
+  const registry = use(RegistryContext);
+  const pendingFavorites = useRef(
+    new Map<string, { favorite: boolean; settings: ServerSettings; pending: boolean }>(),
+  );
+  const save = useUpdateEnvironmentModelPreferences(environmentId);
+  return async (provider: ProviderInstanceId, model: string) => {
+    if (!environmentId) return;
+    const settingsAtom = serverEnvironment.settingsValueAtom(environmentId);
+    const settings = registry.get(settingsAtom);
+    if (!settings) return;
+    if (settings.favorites === null) {
+      try {
+        await ensureClientSettingsHydrated();
+      } catch {
+        toastManager.add({
+          type: "error",
+          title: "Favorites not saved",
+          description: "Could not load saved model preferences. Try again.",
+        });
+        return;
       }
-      const provider = favorite.provider;
-      const model = favorite.model;
-      if (
-        (provider === "codex" || provider === "claudeAgent") &&
-        typeof model === "string" &&
-        model.trim().length > 0
-      ) {
-        return [{ provider, model: model.trim() }] as const;
-      }
-      return [];
+    }
+    const currentSettings = registry.get(settingsAtom) ?? settings;
+    const favorites = resolveModelPreferences(currentSettings, getClientSettings()).favorites;
+    const key = JSON.stringify([environmentId, provider, model]);
+    const previous = pendingFavorites.current.get(key);
+    // Keep the acknowledged choice until the config stream catches up with the RPC reply.
+    const previousFavorite =
+      previous && (previous.pending || previous.settings.favorites === currentSettings.favorites)
+        ? previous.favorite
+        : favorites.some((favorite) => favorite.provider === provider && favorite.model === model);
+    const pending = {
+      favorite: !previousFavorite,
+      settings: currentSettings,
+      pending: true,
+    };
+    pendingFavorites.current.set(key, pending);
+    const result = await save({
+      setModelFavorites: [{ provider, model, favorite: pending.favorite }],
     });
-    if (favorites.length > 0) {
-      patch.favorites = favorites;
+    if (
+      result &&
+      AsyncResult.isSuccess(result) &&
+      registry.get(settingsAtom)?.favorites === currentSettings.favorites
+    ) {
+      pending.pending = false;
     }
-  }
-
-  if (Schema.is(ProjectPickerMode)(legacySettings.projectPickerMode)) {
-    patch.projectPickerMode = legacySettings.projectPickerMode;
-  }
-
-  if (Schema.is(SidebarProjectSortOrder)(legacySettings.sidebarProjectSortOrder)) {
-    patch.sidebarProjectSortOrder = legacySettings.sidebarProjectSortOrder;
-  }
-
-  if (Schema.is(SidebarThreadSortOrder)(legacySettings.sidebarThreadSortOrder)) {
-    patch.sidebarThreadSortOrder = legacySettings.sidebarThreadSortOrder;
-  }
-
-  if (Schema.is(TimestampFormat)(legacySettings.timestampFormat)) {
-    patch.timestampFormat = legacySettings.timestampFormat;
-  }
-
-  return patch;
+    if (pending.pending && pendingFavorites.current.get(key) === pending) {
+      if (
+        previous &&
+        !previous.pending &&
+        registry.get(settingsAtom)?.favorites === previous.settings.favorites
+      ) {
+        pendingFavorites.current.set(key, previous);
+      } else {
+        pendingFavorites.current.delete(key);
+      }
+    }
+  };
 }
 
-/**
- * Call once on app startup.
- * If the legacy localStorage key exists, migrate its values to the new server
- * and client storage formats, then remove the legacy key so this only runs once.
- */
-export function migrateLocalSettingsToServer(): void {
-  if (typeof window === "undefined") return;
+const noEnvironmentSettingsAtom = Atom.make<ServerSettings | null>(null);
 
-  const raw = localStorage.getItem(OLD_SETTINGS_KEY);
-  if (!raw) return;
+export function useEnvironmentModelPreferences(environmentId: EnvironmentId | null) {
+  const settings = useAtomValue(
+    environmentId ? serverEnvironment.settingsValueAtom(environmentId) : noEnvironmentSettingsAtom,
+  );
+  const legacy = useClientSettings(selectLegacyModelPreferences);
+  return resolveModelPreferences(settings ?? DEFAULT_SERVER_SETTINGS, legacy);
+}
 
-  try {
-    const old = JSON.parse(raw);
-    if (!Predicate.isObject(old)) return;
+export function useEnvironmentSettings<T = UnifiedSettings>(
+  environmentId: EnvironmentId,
+  selector?: (settings: UnifiedSettings) => T,
+): T {
+  const serverSettings = useAtomValue(serverEnvironment.settingsValueAtom(environmentId));
+  return useMergedSettings(serverSettings ?? DEFAULT_SERVER_SETTINGS, selector);
+}
 
-    // Migrate server-relevant keys via RPC
-    const serverPatch = buildLegacyServerSettingsMigrationPatch(old);
-    if (Object.keys(serverPatch).length > 0) {
-      const api = ensureNativeApi();
-      void api.server.updateSettings(serverPatch);
+export function usePersistEnvironmentProviderInstanceMutation(environmentId: EnvironmentId) {
+  const mutateProviderInstance = useAtomCommand(serverEnvironment.mutateProviderInstance, {
+    reportFailure: false,
+  });
+  return (providerInstanceMutation: ProviderInstanceMutation, patch: ServerSettingsPatch = {}) =>
+    mutateProviderInstance({
+      environmentId,
+      input: { patch, providerInstanceMutation },
+    });
+}
+
+export function usePrimarySettings<T = UnifiedSettings>(
+  selector?: (settings: UnifiedSettings) => T,
+): T {
+  const settings = useAtomValue(primaryServerSettingsAtom);
+  return useMergedSettings(settings, selector);
+}
+
+export const PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE =
+  "This setting is saved on a server, and the hosted app is not anchored to one. Change it from the desktop app or from the server's own address.";
+
+/** Hosted clients have no primary: usePrimarySettings reads defaults and cannot write. */
+export function usePrimarySettingsAvailable(): boolean {
+  const primaryEnvironment = usePrimaryEnvironment();
+  return primaryEnvironment !== null || !isHostedStaticApp();
+}
+
+function useSharedSettingsSyncTargetIds(includePending = false): ReadonlyArray<EnvironmentId> {
+  const { environments } = useEnvironments();
+  const targetIds = environments
+    .filter(supportsSharedSettingsSync)
+    .map(({ environmentId }) => environmentId);
+  const results = useAtomValue(environmentSessionStatesAtom(environmentIdsKey(targetIds)));
+  return targetIds.flatMap((environmentId, index) => {
+    const result = results[index]!;
+    // Let the server authorize shared edits with cold grants; suggestions still need confirmed grants.
+    if (includePending && result._tag === "Initial") {
+      return [environmentId];
     }
+    const session = result._tag === "Failure" ? null : AsyncResult.getOrElse(result, () => null);
+    return session !== null && sessionGrantsScope(session, AuthSettingsWriteScope)
+      ? [environmentId]
+      : [];
+  });
+}
 
-    // Migrate client-only keys to the new localStorage key
-    const clientPatch = buildLegacyClientSettingsMigrationPatch(old);
-    if (Object.keys(clientPatch).length > 0) {
-      const existing = localStorage.getItem(CLIENT_SETTINGS_STORAGE_KEY);
-      const current = existing ? (JSON.parse(existing) as Record<string, unknown>) : {};
-      localStorage.setItem(
-        CLIENT_SETTINGS_STORAGE_KEY,
-        JSON.stringify({ ...current, ...clientPatch }),
+function useUpdateSettingsTarget(environmentId: EnvironmentId | null) {
+  useEnvironmentScope(environmentId, AuthSettingsWriteScope);
+  const persist = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "server settings update",
+    reportFailure: false,
+  });
+  const { environments } = useEnvironments();
+  const persistServerSettings = async (
+    request: Parameters<typeof persist>[0],
+    onFailed?: () => void,
+  ) => {
+    const result = await persist(request);
+    if (result._tag === "Failure") onFailed?.();
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      const label =
+        environments.find((environment) => environment.environmentId === request.environmentId)
+          ?.label ?? request.environmentId;
+      const error = squashAtomCommandFailure(result);
+      toastManager.add({
+        type: "error",
+        title: "Setting not saved",
+        description: `Could not save on ${label}: ${error instanceof Error ? error.message : "The save failed. Try reconnecting and saving again."}`,
+      });
+    }
+    return result;
+  };
+  const sharedSettingsSyncTargetIds = useSharedSettingsSyncTargetIds(true);
+  const updateSettings = (
+    patch: UnifiedSettingsPatch,
+    options?: { readonly onFailed?: () => void; readonly onSaved?: () => void },
+  ) => {
+    const { serverPatch, clientPatch } = splitPatch(patch);
+
+    const canWriteServerPatch =
+      environmentId === null ||
+      requiredScopesForServerSettingsPatch(serverPatch).every((scope) =>
+        readEnvironmentScope(environmentId, scope),
       );
+    if (Object.keys(serverPatch).length > 0 && !canWriteServerPatch) {
+      options?.onFailed?.();
+      toastManager.add({
+        type: "warning",
+        title: "Setting not saved",
+        description: `This connection lacks permission to change settings on ${environments.find((target) => target.environmentId === environmentId)?.label ?? "the selected environment"}.`,
+      });
     }
-  } catch (error) {
-    console.error("[MIGRATION] Error migrating local settings:", error);
-  } finally {
-    // Remove the legacy key regardless to keep migration one-shot behavior.
-    localStorage.removeItem(OLD_SETTINGS_KEY);
-  }
+    if (Object.keys(serverPatch).length > 0 && canWriteServerPatch) {
+      const { sharedPatch, localPatch } = splitSharedServerPatch(serverPatch);
+      // Dropping the write silently leaves the control looking saved.
+      const warnUnsaved = (description = PRIMARY_SETTINGS_UNAVAILABLE_MESSAGE) => {
+        options?.onFailed?.();
+        return toastManager.add({
+          type: "warning",
+          title: "Setting not saved",
+          description,
+        });
+      };
+      if (Object.keys(localPatch).length > 0) {
+        if (environmentId) {
+          void persistServerSettings(
+            { environmentId, input: { patch: localPatch } },
+            options?.onFailed,
+          ).then((result) => {
+            if (result._tag === "Success") options?.onSaved?.();
+          });
+        } else {
+          warnUnsaved();
+        }
+      }
+      if (Object.keys(sharedPatch).length > 0) {
+        const sourceSettings = environments.find((target) => target.environmentId === environmentId)
+          ?.serverConfig?.settings;
+        const targets = new Set(sharedSettingsSyncTargetIds);
+        if (environmentId) {
+          targets.add(environmentId);
+        }
+        const writes: Array<Parameters<typeof persist>[0]> = [];
+        const deniedLabels: string[] = [];
+        for (const targetId of targets) {
+          const target = environments.find((candidate) => candidate.environmentId === targetId);
+          const targetPatch = filterSharedServerPatch(
+            sharedPatch,
+            target?.serverConfig?.settings,
+            sourceSettings,
+            targetId === environmentId,
+          );
+          if (Object.keys(targetPatch).length === 0) continue;
+          const session = appAtomRegistry.get(environmentSession.sessionStateAtom(targetId));
+          if (
+            session._tag !== "Initial" &&
+            !requiredScopesForServerSettingsPatch(sharedPatch).every((scope) =>
+              readEnvironmentScope(targetId, scope),
+            )
+          ) {
+            deniedLabels.push(target?.label ?? targetId);
+            continue;
+          }
+          writes.push({
+            environmentId: targetId,
+            input: { patch: targetPatch },
+          });
+        }
+        if (writes.length === 0) {
+          warnUnsaved(
+            deniedLabels.length > 0
+              ? `This connection lacks permission to change settings on ${deniedLabels.join(", ")}.`
+              : targets.size > 0
+                ? "Update older servers to save this setting."
+                : undefined,
+          );
+        } else {
+          void Promise.all(
+            writes.map(async (request) => ({
+              label:
+                environments.find((target) => target.environmentId === request.environmentId)
+                  ?.label ?? request.environmentId,
+              result: await persist(request),
+            })),
+          ).then((outcomes) => {
+            if (
+              deniedLabels.length > 0 ||
+              outcomes.some(({ result }) => result._tag === "Failure")
+            ) {
+              options?.onFailed?.();
+            }
+            const failures = outcomes.flatMap(({ label, result }) => {
+              if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return [];
+              const error = squashAtomCommandFailure(result);
+              return [
+                `Could not save on ${label}: ${error instanceof Error ? error.message : "The save failed. Try reconnecting and saving again."}`,
+              ];
+            });
+            if (
+              deniedLabels.length === 0 &&
+              outcomes.every(({ result }) => result._tag === "Success")
+            ) {
+              options?.onSaved?.();
+            }
+            if (failures.length === 0) return;
+            const saved = outcomes
+              .filter(({ result }) => result._tag === "Success")
+              .map(({ label }) => label);
+            toastManager.add({
+              type: "error",
+              title: saved.length > 0 ? "Setting saved on some environments" : "Setting not saved",
+              description: [
+                ...failures,
+                ...(saved.length > 0 ? [`Saved on ${saved.join(", ")}.`] : []),
+              ].join("\n"),
+            });
+          });
+        }
+      }
+    }
+    if (Object.keys(clientPatch).length > 0) {
+      void persistClientSettingsPatch(clientPatch);
+    }
+  };
+
+  return updateSettings;
+}
+
+export function useUpdateEnvironmentSettings(environmentId: EnvironmentId | null) {
+  return useUpdateSettingsTarget(environmentId);
+}
+
+export function useUpdatePrimarySettings() {
+  return useUpdateSettingsTarget(usePrimaryEnvironment()?.environmentId ?? null);
+}
+
+export function updateClientSettings(patch: ClientSettingsPatch): Promise<void> {
+  return persistClientSettingsPatch(patch);
+}
+
+export function __resetClientSettingsPersistenceForTests(): void {
+  clientSettingsHydrationGeneration += 1;
+  clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS;
+  clientSettingsHydrationStatus = "pending";
+  clientSettingsHydrationPromise = null;
+  clientSettingsPersistenceQueue = Promise.resolve();
+  deferredClientSettingsPatchCount = 0;
+  clientSettingsListeners.clear();
+  clientSettingsHydrationListeners.clear();
+}
+
+export function __setClientSettingsForTests(settings: ClientSettings): void {
+  clientSettingsHydrationGeneration += 1;
+  clientSettingsSnapshot = settings;
+  clientSettingsHydrationStatus = "ready";
+  clientSettingsHydrationPromise = null;
 }
