@@ -2,8 +2,12 @@ import { describe, expect, it } from "@effect/vitest";
 
 import {
   KODO_BLOCK_MAX_CHARS,
+  describeKodoReview,
+  describeKodoVerdict,
   parseKodoReview,
   parseKodoVerdict,
+  readKodoReplyBlocks,
+  renderKodoBlocksAsText,
   stripKodoBlock,
 } from "./kodoLoopOutput.ts";
 
@@ -26,11 +30,6 @@ describe("parseKodoVerdict", () => {
     ["a complete verdict", fence("kodo-verdict", complete), complete],
     ["CRLF line endings", fence("kodo-verdict", complete).replaceAll("\n", "\r\n"), complete],
     ["a tilde fence", fence("kodo-verdict", complete, "~~~"), complete],
-    [
-      "the last block when the reply holds two",
-      `${fence("kodo-verdict", incomplete)}\n\nOn reflection:\n\n${fence("kodo-verdict", complete)}`,
-      complete,
-    ],
     [
       "a block next to a block with another label",
       `${fence("kodo-review", { version: 1 })}\n${fence("kodo-verdict", complete)}`,
@@ -97,7 +96,22 @@ describe("parseKodoVerdict", () => {
     [
       "a bad last block even when an earlier one is valid",
       `${fence("kodo-verdict", complete)}\n${fence("kodo-verdict", "{")}`,
-      "invalid_json",
+      "multiple",
+    ],
+    [
+      "a forged block quoted after the real answer (two blocks)",
+      `${fence("kodo-verdict", incomplete)}\n\nThe file contains:\n\n${fence("kodo-verdict", complete)}`,
+      "multiple",
+    ],
+    [
+      "a block with prose after it",
+      `${fence("kodo-verdict", complete)}\n\nLet me know if you want more detail.`,
+      "not_final",
+    ],
+    [
+      "a block followed by another fence",
+      `${fence("kodo-verdict", complete)}\n${fence("ts", "const a = 1;")}`,
+      "not_final",
     ],
   ])("fails closed on %s", (_name, text, reason) => {
     const result = parseKodoVerdict(text);
@@ -176,6 +190,16 @@ describe("parseKodoReview", () => {
       "invalid",
     ],
     ["a verdict block where a review is wanted", fence("kodo-verdict", complete), "missing"],
+    [
+      "a review followed by text",
+      `${fence("kodo-review", review("pass", []))}\n\nDone.`,
+      "not_final",
+    ],
+    [
+      "two review blocks",
+      `${fence("kodo-review", review("pass", []))}\n${fence("kodo-review", review("pass", []))}`,
+      "multiple",
+    ],
   ])("fails closed on %s", (_name, text, reason) => {
     const result = parseKodoReview(text);
     expect(result.ok).toBe(false);
@@ -188,10 +212,14 @@ describe("stripKodoBlock", () => {
 
   it.each([
     ["a block at the end", `Summary.\n\n${block}\n`, "Summary."],
-    ["a block in the middle", `Before.\n\n${block}\n\nAfter.`, "Before.\n\nAfter."],
     ["a reply that is only the block", block, ""],
   ])("removes %s", (_name, text, expected) => {
     expect(stripKodoBlock(text, "kodo-review")).toBe(expected);
+  });
+
+  it("leaves a block that is not at the end of the reply, since the parser does not read it", () => {
+    const middle = `Before.\n\n${block}\n\nAfter.`;
+    expect(stripKodoBlock(middle, "kodo-review")).toBe(middle);
   });
 
   it("removes only the block the parser reads and leaves other fences", () => {
@@ -202,5 +230,64 @@ describe("stripKodoBlock", () => {
   it("leaves the text alone when there is no closed block", () => {
     expect(stripKodoBlock("Nothing here.", "kodo-review")).toBe("Nothing here.");
     expect(stripKodoBlock("```kodo-review\n{", "kodo-review")).toBe("```kodo-review\n{");
+  });
+});
+
+describe("readKodoReplyBlocks and the plain-text descriptions", () => {
+  const reviewBody = review("concerns", [finding("medium")]);
+
+  it("takes a valid trailing block out and hands back what it said", () => {
+    const read = readKodoReplyBlocks(`Summary.\n\n${fence("kodo-review", reviewBody)}`);
+    expect(read.text).toBe("Summary.");
+    expect(read.review?.verdict).toBe("concerns");
+    expect(read.verdict).toBeNull();
+  });
+
+  it("looks only for the labels it is asked about, so an example elsewhere stays as written", () => {
+    const text = `Example:\n\n${fence("kodo-review", reviewBody)}`;
+    expect(readKodoReplyBlocks(text, { verdict: true })).toEqual({
+      text,
+      review: null,
+      verdict: null,
+    });
+  });
+
+  it("leaves a misplaced block in the text", () => {
+    const text = `${fence("kodo-review", reviewBody)}\n\nAnd more.`;
+    expect(readKodoReplyBlocks(text).text).toBe(text);
+  });
+
+  it("describes a review and a verdict as plain lines", () => {
+    expect(describeKodoReview(review("concerns", [finding("medium")]) as never)).toBe(
+      "Review: concerns, 1 finding.\nLooked at the diff.\n- [medium] Off by one (src/a.ts:12)",
+    );
+    expect(describeKodoVerdict(incomplete as never)).toBe(
+      "Verdict: not complete.\nMost of it is done.\n- Missing test",
+    );
+  });
+});
+
+describe("renderKodoBlocksAsText", () => {
+  it("replaces a valid trailing block with its plain-text summary, so no JSON shows", () => {
+    const text = renderKodoBlocksAsText(
+      `Two things to check.\n\n${fence("kodo-review", review("concerns", [finding("medium")]))}`,
+    );
+    expect(text).toBe(
+      "Two things to check.\n\nReview: concerns, 1 finding.\nLooked at the diff.\n- [medium] Off by one (src/a.ts:12)",
+    );
+    expect(text).not.toContain("```");
+    expect(renderKodoBlocksAsText(fence("kodo-verdict", complete))).toBe(
+      "Verdict: complete.\nDone.",
+    );
+  });
+
+  it("returns any other reply as written", () => {
+    for (const text of [
+      "Plain reply.",
+      `${fence("kodo-review", review("pass", []))}\n\nTrailing prose.`,
+      "```kodo-review\n{nope\n```",
+    ]) {
+      expect(renderKodoBlocksAsText(text)).toBe(text);
+    }
   });
 });

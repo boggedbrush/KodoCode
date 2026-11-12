@@ -527,10 +527,14 @@ export const OrchestratorMcpThreadSendResult = Schema.Struct({
   threadId: ThreadId,
   link: Schema.optional(Schema.String),
   messageId: MessageId,
-  runId: RunId,
+  /** KODO: loop-intercept - absent when the message was a `/loop` command, which starts no turn. */
+  runId: Schema.optional(RunId),
   taskId: Schema.optional(NodeId),
-  status: OrchestrationV2RunStatus,
-  delivery: Schema.Literals(["started", "queued", "steered", "restarted"]),
+  status: Schema.optional(OrchestrationV2RunStatus),
+  /** `loop`: the message controlled the thread's loop (see `note`) instead of starting a turn. */
+  delivery: Schema.Literals(["started", "queued", "steered", "restarted", "loop"]),
+  /** What a `/loop` command did, in words. */
+  note: Schema.optional(Schema.String),
 });
 export type OrchestratorMcpThreadSendResult = typeof OrchestratorMcpThreadSendResult.Type;
 

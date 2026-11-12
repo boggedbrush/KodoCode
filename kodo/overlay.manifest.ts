@@ -451,7 +451,17 @@ export default {
       file: "apps/mobile/src/state/thread-outbox.test.ts",
       hooks: ["mode-preserve", "mode-models-send"],
     },
-    { file: "apps/mobile/src/state/threadOutboxDelivery.ts", hooks: ["mode-models-send"] },
+    {
+      file: "apps/mobile/src/state/threadOutboxDelivery.ts",
+      hooks: ["mode-models-send", "loop-mobile-mode-sync"],
+    },
+    { file: "apps/mobile/src/features/threads/ThreadFeed.tsx", hooks: ["kodo-blocks-mobile"] },
+    { file: "apps/server/src/cli/thread.ts", hooks: ["loop-intercept"] },
+    { file: "apps/server/src/mcp/WorktreeMcpService.ts", hooks: ["loop-intercept"] },
+    {
+      file: "apps/server/src/orchestration-v2/ThreadLaunchService.test.ts",
+      hooks: ["loop-intercept"],
+    },
     {
       file: "apps/mobile/src/state/use-thread-composer-state.ts",
       hooks: ["mode-preserve", "mode-models-send"],
@@ -466,10 +476,19 @@ export default {
     },
     {
       file: "apps/server/src/mcp/OrchestratorMcpService.ts",
-      hooks: ["mode-peer-limit", "mode-child-limit", "mode-task-control", "mode-models-send"],
+      hooks: [
+        "mode-peer-limit",
+        "mode-child-limit",
+        "mode-task-control",
+        "mode-models-send",
+        "loop-intercept",
+      ],
     },
     { file: "apps/server/src/mcp/toolkits/project/handlers.ts", hooks: ["mode-models-send"] },
-    { file: "apps/server/src/scheduledTasks/ScheduledTaskService.ts", hooks: ["mode-models-send"] },
+    {
+      file: "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
+      hooks: ["mode-models-send", "loop-intercept"],
+    },
     { file: "apps/server/src/mcp/delegatedTaskModes.ts", hooks: ["mode-rank", "mode-child-limit"] },
     { file: "apps/server/src/mcp/threadAccess.test.ts", hooks: ["mode-rank"] },
     { file: "apps/server/src/mcp/threadAccess.ts", hooks: ["thread-mode-type", "mode-rank"] },
@@ -497,6 +516,7 @@ export default {
         "mode-models-send",
         "loop-command",
         "loop-stage",
+        "loop-message",
       ],
     },
     {
@@ -586,9 +606,12 @@ export default {
     },
     {
       file: "apps/web/src/components/chat/TimelineUserMessageRow.tsx",
-      hooks: ["mode-models-notice"],
+      hooks: ["mode-models-notice", "loop-stage-marker"],
     },
-    { file: "apps/web/src/components/chat/useTimelineRows.ts", hooks: ["mode-models-notice"] },
+    {
+      file: "apps/web/src/components/chat/useTimelineRows.ts",
+      hooks: ["mode-models-notice", "inline-kodo-blocks"],
+    },
     {
       file: "apps/web/src/components/chat/ChatComposer.tsx",
       hooks: [
@@ -625,7 +648,13 @@ export default {
     { file: "apps/web/src/components/chat/useComposerResume.ts", hooks: ["send-mode"] },
     {
       file: "apps/web/src/components/chat/useComposerSend.ts",
-      hooks: ["send-mode", "mode-slash-send", "usage-slash-send", "mode-models-send"],
+      hooks: [
+        "send-mode",
+        "mode-slash-send",
+        "usage-slash-send",
+        "mode-models-send",
+        "loop-query-send",
+      ],
     },
     { file: "apps/web/src/components/chat/useMultipleModelSend.ts", hooks: ["send-mode"] },
     { file: "apps/web/src/components/chat/useThreadLifecycle.tsx", hooks: ["send-mode"] },
@@ -664,7 +693,10 @@ export default {
       hooks: ["thread-mode-type", "mode-models-send", "loop-command"],
     },
     { file: "packages/client-runtime/src/state/threadCommands.ts", hooks: ["loop-command"] },
-    { file: "packages/client-runtime/src/handoff.ts", hooks: ["mode-models-notice"] },
+    {
+      file: "packages/client-runtime/src/handoff.ts",
+      hooks: ["mode-models-notice", "inline-kodo-blocks"],
+    },
     { file: "packages/contracts/src/environmentHttp.ts", hooks: ["prompt-enhance-http"] },
     {
       file: "packages/contracts/src/index.ts",
@@ -686,7 +718,10 @@ export default {
         "loop-stage",
       ],
     },
-    { file: "packages/contracts/src/orchestratorMcp.ts", hooks: ["thread-mode-type"] },
+    {
+      file: "packages/contracts/src/orchestratorMcp.ts",
+      hooks: ["thread-mode-type", "loop-intercept"],
+    },
     {
       file: "packages/provider-acp/src/server/adapter.ts",
       hooks: ["mode-instructions", "mode-session-policy"],
@@ -1029,7 +1064,12 @@ export default {
       "apps/server/src/kodo/loop/evidence.test.ts",
       "apps/server/src/kodo/loop/loopCommand.test.ts",
       "apps/server/src/kodo/loop/loopControl.test.ts",
+      "apps/server/src/kodo/loop/loopRecord.test.ts",
+      "apps/server/src/kodo/loop/threadSingleFlight.test.ts",
       "apps/server/src/orchestration-v2/KodoLoop.integration.test.ts",
+      "apps/server/src/orchestration-v2/ThreadLaunchService.test.ts",
+      "apps/web/src/kodo/loopCommand.logic.test.ts",
+      "apps/web/src/kodo/loopStageMarker.logic.test.ts",
       "apps/server/src/auth/RpcAuthorization.test.ts",
       "apps/web/src/kodo/inlineCode.logic.test.ts",
       "apps/web/src/kodo/inlineBlocks.logic.test.ts",

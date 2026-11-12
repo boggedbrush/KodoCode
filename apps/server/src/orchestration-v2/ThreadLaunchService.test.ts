@@ -57,6 +57,9 @@ import { ClaudeProviderCapabilitiesV2 } from "./Adapters/ClaudeAdapterV2.ts";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as EffectOutbox from "./EffectOutbox.ts";
+import { DispatchModeLimit } from "./DispatchModeLimit.ts"; // KODO: loop-intercept
+import { sendToThreadOrLoop } from "../kodo/loop/LoopService.ts"; // KODO: loop-intercept
+import { userFacingDispatchErrorMessage } from "./UserFacingErrors.ts"; // KODO: loop-intercept
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ThreadLaunch from "./ThreadLaunchService.ts";
@@ -2502,3 +2505,134 @@ it.effect("replays an accepted send after the project disables the instance", ()
     }
   }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerFiles)));
 });
+
+// KODO: loop-intercept - a `/loop` first message and a `/loop` sent to a thread, through the real
+// launch and thread-management services.
+it.effect(
+  "a launch whose first message is `/loop` starts the loop, with the message as a row and no run yet",
+  () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "command:loop:launch",
+          thread: "thread:loop:launch",
+          message: "/loop 2 add retries",
+        }),
+      );
+      const projection = yield* threads.getThreadProjection(launched.threadId);
+      assert.equal(projection.thread.kodoLoop?.status, "active");
+      assert.equal(projection.thread.kodoLoop?.maxRounds, 2);
+      assert.equal(
+        projection.runs.length,
+        0,
+        "the stages are sent by the loop worker, not the launch",
+      );
+      assert.equal(
+        projection.messages.find((message) => message.text === "/loop 2 add retries")?.role,
+        "user",
+      );
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
+
+it.effect.each([
+  {
+    name: "an agent's thread below Code",
+    over: { createdBy: "agent", creationSource: "mcp", interactionMode: "plan" },
+    expected: "limited to plan mode",
+  },
+  {
+    name: "a new worktree",
+    over: { workspace: { type: "worktree", baseRef: "main" } },
+    expected: "worktree is still being set up",
+  },
+] as const)(
+  "a launch whose first message is `/loop` is refused before anything is created: $name",
+  ({ over, expected }) => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const { workspace, ...rest } = over as {
+        readonly workspace?: ThreadLaunch.ThreadLaunchWorkspaceStrategy;
+      } & Record<string, unknown>;
+      const failure = yield* launches
+        .launch({
+          ...launchInput({
+            command: "command:loop:refused",
+            thread: "thread:loop:refused",
+            message: "/loop implement X",
+            ...(workspace === undefined ? {} : { workspace }),
+          }),
+          ...rest,
+        })
+        .pipe(Effect.flip);
+      assert.include(String(failure.cause), expected);
+      assert.isNull(yield* threads.getThreadShell(ThreadId.make("thread:loop:refused")));
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
+
+it.effect(
+  "`/loop` sent to a thread: a sender that answers in words is told what happened, and one that cannot is told so",
+  () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch(
+        launchInput({ command: "command:loop:send", thread: "thread:loop:send" }),
+      );
+      const send = (suffix: string, text: string) => ({
+        projectId,
+        commandId: CommandId.make(`command:loop:send:${suffix}`),
+        threadId: launched.threadId,
+        messageId: MessageId.make(`message:loop:send:${suffix}`),
+        text,
+        attachments: [],
+        mode: "auto" as const,
+        createdBy: "agent" as const,
+        creationSource: "mcp" as const,
+      });
+      // Limited to Plan: refused, with nothing started (the sender's mode limit rides the fiber).
+      const refused = yield* sendToThreadOrLoop(
+        threads.sendToThread(send("limited", "/loop implement X")),
+      ).pipe(
+        Effect.provideService(DispatchModeLimit, {
+          runtimeMode: "full-access",
+          interactionMode: "plan",
+        }),
+        Effect.flip,
+      );
+      assert.include(
+        userFacingDispatchErrorMessage(refused) ?? String(refused),
+        "limited to plan mode",
+      );
+      assert.isUndefined((yield* threads.getThreadProjection(launched.threadId)).thread.kodoLoop);
+
+      const started = yield* sendToThreadOrLoop(
+        threads.sendToThread(send("start", "/loop 2 add retries")),
+      );
+      assert.equal(started.delivery, "loop");
+      assert.equal(
+        (yield* threads.getThreadProjection(launched.threadId)).thread.kodoLoop?.status,
+        "active",
+      );
+      const status = yield* sendToThreadOrLoop(
+        threads.sendToThread(send("status", "/loop status")),
+      );
+      assert.equal(status.delivery === "loop" && status.note.includes("running"), true);
+
+      // A sender that only knows about turns is failed with the outcome in the message, not left guessing.
+      const unaware = yield* threads.sendToThread(send("stop", "/loop stop")).pipe(Effect.flip);
+      assert.include(userFacingDispatchErrorMessage(unaware) ?? String(unaware), "starts no turn");
+      assert.equal(
+        (yield* threads.getThreadProjection(launched.threadId)).thread.kodoLoop?.stopReason,
+        "user_stop",
+      );
+    }).pipe(Effect.provide(harness.layer));
+  },
+);

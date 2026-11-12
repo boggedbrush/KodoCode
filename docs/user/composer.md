@@ -176,29 +176,64 @@ device until you sign back into the same account.
 A loop works on one request in rounds. Each round plans, codes, reviews and judges,
 and the Judge decides whether the request is complete or what is still outstanding.
 Start one by sending `/loop <request>` on its own, or `/loop 5 <request>` to allow at
-most five rounds (the default is three; the cap is sixteen). The card above the
+most five rounds (the default is three; the cap is sixteen; a request is at most 20,000
+characters and takes no attachments). A loop starts only when no turn is running on the
+thread, and the thread runs one loop at a time. Your `/loop` message stays in the thread
+as you sent it; each stage's own hand-off message shows as a one-line marker such as
+"Round 2 · Review", which opens to the text that stage was told. The card above the
 composer shows the round and stage, for example "Round 2 of 3 · Review".
+
+An agent or a scheduled task can send `/loop` to a thread too. A sender that is limited
+to a mode below Code cannot start, extend, approve or retry a loop, because the coding
+stage writes to the workspace; it is refused with that said, and nothing is started.
+Starting a loop as the first message of a new thread works, except when the thread
+gets a new worktree: the worktree is made while the first stage would already run, so
+create the thread first and send `/loop` in it.
 
 - Plan, Review and the Judge are read-only; only Code changes your workspace, under
   the thread's usual permission mode. Each stage runs in its own mode and on that
   mode's model, and the thread's own model is unchanged afterwards. Every stage starts
   a fresh conversation and is told everything it needs: the request, the plan, the
   changes and the findings.
-- While a loop runs the mode picker is locked, because the loop sets the mode.
-  When it ends the thread returns to the mode it started in.
-- **Stop** on the card or `/loop stop` ends it and interrupts the stage that is running.
-  `/loop status` says where it is.
+- While a loop runs, only the loop sets the thread's mode. The mode picker is locked,
+  and the server refuses a mode change from anywhere else (mobile, an agent, another
+  client), saying to stop the loop first.
+- **Stop** on the card or `/loop stop` ends the loop and interrupts the stage that is
+  running. `/loop status` says where it is. Neither leaves a message in the thread.
+- When a loop ends, the thread goes back to the mode it started in once nothing is
+  running, unless you changed the mode after it ended. This also happens for a loop
+  that ended while the server was down: it is finished the next time the server starts,
+  and a stage run that a restart or a usage-limit auto-resume would have continued does
+  not run on after the loop has ended.
+- **Any message you send on the thread ends the loop**, including one you steer into
+  the stage that is running; so does a message from a scheduled task or another agent.
+  The message is yours to run: a message that starts its own turn runs in the mode the
+  thread started in, and no later stage starts. The stage that was running is not
+  interrupted; it finishes first, so a message queued behind it waits for it. A steer
+  joins that stage's turn, and the mode goes back when that turn finishes. Wakes from
+  delegated tasks, monitor notices, context compaction and restart continuations are
+  not your messages: they do not end the loop, and the loop waits for them to finish
+  before it starts the next stage.
 - A loop also ends when the Judge finds the request complete; when the round limit is
   reached with work outstanding (**Run N more rounds** continues it); when the Judge's
   answer cannot be read (**Retry judge** asks again; nothing is retried
-  automatically); when a stage fails or the provider's usage limit is hit; or when you
-  send a message on the thread. A message you send still runs.
+  automatically); when a stage fails, finishes without a reply, or the provider's usage
+  limit is hit; or when the loop cannot make progress, for example it cannot get the
+  thread into a stage's mode. The card says why. A loop that ends without being
+  complete lists what the Judge last said was outstanding.
 - A stage that needs an approval waits for you, and the loop continues once it is
   answered.
 - **After a loop, the thread continues from the last stage's conversation**, not from
   everything the loop did. The loop's own messages stay visible in the thread.
-- Reviews and Judge verdicts show as a compact list inside their reply. The newest
-  review's findings are also a card with **Fix in Code**, once no loop is running.
+- A Review or Judge reply ends with a result block, which must be the only one of its
+  kind and the last thing in the reply; otherwise the reply is not read as a result (the
+  loop stops on an unreadable Judge answer, and carries on with the raw text of an
+  unreadable review). In Review-mode replies and the loop's Judge replies a valid block
+  shows as a compact list inside the reply (mobile shows the same as plain text). An
+  example block in an Ask, Plan or Code reply is left as written.
+- The findings card with **Fix in Code** is for a Review-mode turn that is the newest run
+  on the thread when no loop is running. A loop ends with its Judge, so after a loop
+  there is no findings card; the list is in the loop's review reply.
 
 ## Custom models
 

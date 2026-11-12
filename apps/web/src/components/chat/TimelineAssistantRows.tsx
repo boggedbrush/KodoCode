@@ -24,7 +24,7 @@ import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./timelineRowContext";
 import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts";
 import { useKodoFindingsReplacesBlock } from "../../kodo/findingsBlockStore"; // KODO: findings-card
-import { readKodoInlineBlocks } from "../../kodo/inlineBlocks.logic"; // KODO: inline-kodo-blocks
+import { kodoInlineBlockStage, readKodoInlineBlocks } from "../../kodo/inlineBlocks.logic"; // KODO: inline-kodo-blocks
 import { KodoInlineFindings, KodoInlineVerdict } from "../../kodo/KodoInlineBlocks"; // KODO: inline-kodo-blocks
 
 export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
@@ -38,7 +38,11 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   const fullText = liveText ?? row.message.text;
   // KODO: findings-card, inline-kodo-blocks (a valid review or verdict block is never shown raw: the
   // newest review's findings are the card above the composer, every other one is a compact list here)
-  const kodoBlocks = readKodoInlineBlocks(fullText);
+  const kodoBlocks = readKodoInlineBlocks(
+    fullText,
+    kodoInlineBlockStage(ctx.runs, row.message.runId),
+    Boolean(row.message.streaming),
+  );
   const kodoInlineReview = kodoReplacesBlock ? null : kodoBlocks.review;
   const kodoInlineShown = kodoInlineReview !== null || kodoBlocks.verdict !== null;
   const kodoBlocksHidden = kodoBlocks.review !== null || kodoBlocks.verdict !== null;

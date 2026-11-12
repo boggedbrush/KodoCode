@@ -1,11 +1,10 @@
 // Keeps every running loop moving. It looks at a loop's thread when something happened on it (an event
 // from the orchestrator) and on every scheduler tick, which also covers a restart: loops that were
 // running when the server stopped are found once at startup and picked up where their state says.
-import { type OrchestrationV2DomainEvent, ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -16,20 +15,9 @@ import * as DueHint from "../../scheduling/DueHint.ts";
 import * as Scheduler from "../../scheduling/Scheduler.ts";
 import { forkParked } from "../../serverActivation.ts";
 import type { LoopDiffEvidence } from "./evidence.ts";
+import { affectsLoop, isTrackedLoopEvent } from "./loopEvents.ts";
 import { makeKodoLoopStepper } from "./LoopStepper.ts";
-
-// Events that can change what the loop should do next; streaming text cannot.
-const affectsLoop = (event: OrchestrationV2DomainEvent) =>
-  event.type.startsWith("thread.") ||
-  event.type === "run.created" ||
-  event.type === "run.updated" ||
-  event.type === "message.updated" ||
-  event.type === "plan.updated" ||
-  event.type === "runtime-request.updated";
-
-const isRunningLoop = (event: OrchestrationV2DomainEvent) =>
-  event.type === "thread.metadata-updated" &&
-  (event.payload.kodoLoop?.status === "active" || event.payload.kodoLoop?.status === "held");
+import { makeThreadSingleFlight } from "./threadSingleFlight.ts";
 
 const DIFF_TRUNCATED_MARKER = "[truncated]";
 
@@ -65,22 +53,28 @@ export const layer = Layer.effectDiscard(
       readDiff: makeDiffReader(diffQuery),
     });
     const tracked = new Set<ThreadId>();
-    const permit = yield* Semaphore.make(1);
     const due = DueHint.make();
 
-    const look = Effect.fn("KodoLoopWorker.look")(function* (threadId: ThreadId) {
-      const result = yield* permit.withPermits(1)(stepper.step(threadId));
-      if (result === "gone") tracked.delete(threadId);
-      return result;
-    });
+    // At most one look per thread at a time, and a look never waits in a line behind another thread's.
+    const look = makeThreadSingleFlight(
+      Effect.fn("KodoLoopWorker.look")(function* (threadId: ThreadId) {
+        const result = yield* stepper.step(threadId);
+        if (result === "gone") tracked.delete(threadId);
+        return result;
+      }),
+    );
 
-    // Loops that were running when the server stopped. Thread rows hold the loop in their payload,
-    // so this reads them once; after that, events say which threads to look at.
+    // Loops that were running when the server stopped, and loops that ended while it was down with a
+    // stop or a mode still owed. Thread rows hold the loop in their payload, so this reads them once;
+    // after that, events say which threads to look at.
     const found = yield* sql<{ readonly thread_id: string }>`
       SELECT thread_id
       FROM orchestration_v2_projection_threads
       WHERE deleted_at IS NULL
-        AND json_extract(payload_json, '$.kodoLoop.status') IN ('active', 'held')
+        AND (
+          json_extract(payload_json, '$.kodoLoop.status') IN ('active', 'held')
+          OR json_extract(payload_json, '$.kodoLoop.cleanup') IS NOT NULL
+        )
     `.pipe(
       Effect.map((rows) => rows.map((row) => ThreadId.make(row.thread_id))),
       Effect.orElseSucceed((): ReadonlyArray<ThreadId> => []),
@@ -91,7 +85,7 @@ export const layer = Layer.effectDiscard(
       Stream.runForEach(orchestrator.streamDomainEvents, (event) => {
         if (!("threadId" in event) || !affectsLoop(event)) return Effect.void;
         const threadId = event.threadId;
-        if (isRunningLoop(event)) tracked.add(threadId);
+        if (isTrackedLoopEvent(event)) tracked.add(threadId);
         if (!tracked.has(threadId)) return Effect.void;
         return Effect.all([due.invalidate, look(threadId).pipe(Effect.forkScoped)], {
           discard: true,
@@ -109,7 +103,7 @@ export const layer = Layer.effectDiscard(
       let moving = false;
       for (const threadId of tracked) {
         const result = yield* look(threadId);
-        if (result === "acted" || result === "failed") moving = true;
+        if (result === "acted" || result === "failed" || result === "waiting") moving = true;
       }
       // A look that did something, or could not, is repeated on the next tick.
       if (!moving) yield* due.record(readVersion, Infinity, nowMs);

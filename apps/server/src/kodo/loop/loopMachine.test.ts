@@ -159,12 +159,56 @@ describe("progress", () => {
       kind: "advance",
       outcome: { reviewParse: "ok", review: { verdict: "pass" } },
     });
-    for (const text of ["Looks good to me.", "```kodo-review\n{nope\n```", null]) {
+    for (const text of [
+      "Looks good to me.",
+      "```kodo-review\n{nope\n```",
+      // A block that is not the end of the reply, or a second block, is unreadable too.
+      `${reviewBlock(passReview)}\n\nAnything else?`,
+      `${reviewBlock(passReview)}\n${reviewBlock(passReview)}`,
+    ]) {
       const bad = atStage("review", "completed", { text });
       const step = decideLoopStep(bad.loop, bad.observation);
       expect(step).toMatchObject({ kind: "advance", outcome: { reviewParse: "failed" } });
       expect((step as { outcome: object }).outcome).not.toHaveProperty("review");
     }
+  });
+
+  it.each([
+    ["plan", { text: null, planMarkdown: null }, "error"],
+    ["review", { text: null }, "error"],
+    ["judge", { text: null }, "verdict_invalid"],
+    ["judge", { text: "   " }, "verdict_invalid"],
+  ] as const)(
+    "a completed %s run with no usable reply ends the loop instead of waiting for ever",
+    (stage, output, reason) => {
+      const { loop, observation } = atStage(stage, "completed", output);
+      expect(decideLoopStep(loop, observation)).toMatchObject({
+        kind: "finish",
+        status: "failed",
+        reason,
+        detail: expect.stringMatching(/without/),
+      });
+    },
+  );
+
+  it("a run whose reply is still streaming is waited for, not read", () => {
+    const { loop, observation } = atStage("plan", "completed", undefined);
+    expect(decideLoopStep(loop, observation)).toEqual({ kind: "idle" });
+  });
+
+  it("each settled stage carries one conclusion line for its record", () => {
+    const planned = atStage("plan", "completed", { text: "## Plan\n1. Do x.\n2. Do y." });
+    expect(decideLoopStep(planned.loop, planned.observation)).toMatchObject({
+      outcome: { conclusion: "Plan" },
+    });
+    const coded = atStage("code", "completed", { text: "Changed the parser.\nChecks pass." });
+    expect(decideLoopStep(coded.loop, coded.observation)).toMatchObject({
+      outcome: { conclusion: "Changed the parser." },
+    });
+    const judged = atStage("judge", "completed", { text: verdictBlock(incompleteVerdict) });
+    expect(decideLoopStep(judged.loop, judged.observation)).toMatchObject({
+      outcome: { conclusion: incompleteVerdict.summary },
+    });
   });
 
   it("an incomplete verdict starts the next round", () => {
@@ -179,13 +223,14 @@ describe("progress", () => {
 });
 
 describe("stop precedence", () => {
-  describe("1. a person's stop, left to clean up", () => {
+  describe("1. an ended loop's clean-up, owed from the end and recorded on the loop", () => {
     const stopped = (over: Partial<KodoLoop> = {}) =>
       testLoop({
         status: "stopped",
         stopReason: "user_stop",
         stage: "code",
         startMode: "ask",
+        cleanup: { leftMode: "code", interrupt: true },
         ...over,
       });
 
@@ -224,14 +269,21 @@ describe("stop precedence", () => {
       expect(decideLoopStep(loop, observation)).toEqual({ kind: "idle" });
     });
 
-    it("restores the start mode once nothing is running", () => {
+    it("restores the start mode once nothing is running, then reports itself done", () => {
       const loop = stopped();
       const observation = observe({
         threadMode: "code",
         runs: [run({ runId: "r1", userMessageId: msg(loop), status: "interrupted" })],
       });
       expect(decideLoopStep(loop, observation)).toEqual({ kind: "restore-mode", mode: "ask" });
-      expect(decideLoopStep(loop, { ...observation, threadMode: "ask" })).toEqual({ kind: "idle" });
+      expect(decideLoopStep(loop, { ...observation, threadMode: "ask" })).toEqual({
+        kind: "cleaned",
+      });
+    });
+
+    it("a loop that owes nothing has nothing to look at", () => {
+      const loop = testLoop({ status: "done", stopReason: "complete" });
+      expect(decideLoopStep(loop, observe({ threadMode: "review" }))).toEqual({ kind: "idle" });
     });
   });
 
@@ -241,32 +293,57 @@ describe("stop precedence", () => {
       ["a round cap", { status: "stopped", stopReason: "round_cap" }],
       ["a budget stop", { status: "stopped", stopReason: "budget" }],
       ["an error", { status: "failed", stopReason: "error" }],
+      [
+        "a person's message that was steered into the run",
+        { status: "stopped", stopReason: "user_message" },
+      ],
     ] as const)("%s restores the start mode when idle", (_name, ended) => {
-      const loop = testLoop({ ...ended, stage: "judge", startMode: "plan" });
+      const loop = testLoop({
+        ...ended,
+        stage: "judge",
+        startMode: "plan",
+        cleanup: { leftMode: "review" },
+      });
       expect(decideLoopStep(loop, observe({ threadMode: "review" }))).toEqual({
         kind: "restore-mode",
         mode: "plan",
       });
     });
 
-    it("does not restore while any run is active, nor over a mode the person chose", () => {
+    it("waits while any run is active, so a steer's run settles first", () => {
+      const loop = testLoop({
+        status: "stopped",
+        stopReason: "user_message",
+        stage: "code",
+        startMode: "plan",
+        cleanup: { leftMode: "code" },
+      });
+      const busy = observe({
+        threadMode: "code",
+        runs: [run({ runId: "r1", userMessageId: msg(loop), status: "running" })],
+      });
+      expect(decideLoopStep(loop, busy)).toEqual({ kind: "idle" });
+      expect(
+        decideLoopStep(
+          loop,
+          observe({
+            threadMode: "code",
+            runs: [run({ runId: "r1", userMessageId: msg(loop), status: "completed" })],
+          }),
+        ),
+      ).toEqual({ kind: "restore-mode", mode: "plan" });
+    });
+
+    it("leaves a mode a person chose since the loop ended", () => {
       const loop = testLoop({
         status: "done",
         stopReason: "complete",
         stage: "judge",
         startMode: "plan",
+        cleanup: { leftMode: "review" },
       });
-      const busy = observe({
-        threadMode: "review",
-        runs: [run({ runId: "x", userMessageId: "m-user", status: "queued" })],
-      });
-      expect(decideLoopStep(loop, busy)).toEqual({ kind: "idle" });
-      expect(decideLoopStep(loop, observe({ threadMode: "ask" }))).toEqual({ kind: "idle" });
-    });
-
-    it("leaves the mode to the message that stopped the loop", () => {
-      const loop = testLoop({ status: "stopped", stopReason: "user_message", startMode: "plan" });
-      expect(decideLoopStep(loop, observe({ threadMode: "code" }))).toEqual({ kind: "idle" });
+      expect(decideLoopStep(loop, observe({ threadMode: "ask" }))).toEqual({ kind: "cleaned" });
+      expect(decideLoopStep(loop, observe({ threadMode: "plan" }))).toEqual({ kind: "cleaned" });
     });
   });
 
@@ -311,167 +388,63 @@ describe("stop precedence", () => {
         outcome: { stage: "judge", status: "failed" },
       });
     });
-
-    it("beats a person's message and a complete verdict elsewhere", () => {
-      const failed = atStage("code", "failed", undefined);
-      const withForeign = {
-        ...failed.observation,
-        runs: [...failed.observation.runs, run({ runId: "x", userMessageId: "m-user" })],
-      };
-      expect(decideLoopStep(failed.loop, withForeign)).toMatchObject({ reason: "error" });
-      const invalid = atStage("judge", "completed", { text: "nothing" });
-      const invalidWithForeign = {
-        ...invalid.observation,
-        runs: [
-          ...invalid.observation.runs,
-          run({ runId: "x", userMessageId: "m-user", status: "queued" }),
-        ],
-      };
-      expect(decideLoopStep(invalid.loop, invalidWithForeign)).toMatchObject({
-        reason: "verdict_invalid",
-      });
-    });
   });
 
-  describe("3. user_message", () => {
-    it.each(["queued", "running", "waiting", "starting", "preparing"] as const)(
-      "a %s run that is not the loop's stops it",
-      (status) => {
-        const loop = testLoop({ stage: "code" });
-        const observation = observe({
-          threadMode: "code",
-          runs: [
-            run({ runId: "r1", userMessageId: msg(loop), status: "running" }),
-            run({ runId: "x", userMessageId: "m-user", status }),
-          ],
-        });
-        expect(decideLoopStep(loop, observation)).toMatchObject({
-          kind: "finish",
-          status: "stopped",
-          reason: "user_message",
-        });
-      },
-    );
-
-    it("a finished run that is not the loop's does not", () => {
+  describe("3. turns that are not the loop's (a person's message ends the loop before this)", () => {
+    it("does not read a run that is not the loop's as an end of the loop", () => {
       const loop = testLoop({ stage: "code" });
       const observation = observe({
         threadMode: "code",
         runs: [
           run({ runId: "old", userMessageId: "m-old", status: "completed" }),
           run({ runId: "r1", userMessageId: msg(loop), status: "running" }),
+          run({ runId: "wake", userMessageId: "m-wake", status: "queued" }),
         ],
       });
       expect(decideLoopStep(loop, observation)).toEqual({ kind: "idle" });
     });
 
-    it("beats the round cap and the budget", () => {
-      const { loop, observation } = atStage(
-        "judge",
-        "completed",
-        { text: verdictBlock(incompleteVerdict) },
-        { round: 3, budget: { stopAtLimitPercent: 50 } },
-        { usage: { costUsd: null, limitPercent: 99 } },
-      );
-      const withForeign = {
-        ...observation,
-        runs: [...observation.runs, run({ runId: "x", userMessageId: "m-user", status: "queued" })],
-      };
-      expect(decideLoopStep(loop, withForeign)).toMatchObject({ reason: "user_message" });
-    });
-
-    it("loses to a complete verdict that settled at the same time", () => {
-      const { loop, observation } = atStage(
-        "judge",
-        "completed",
-        { text: verdictBlock(completeVerdict) },
-        { round: 3, budget: { stopAtLimitPercent: 50 } },
-        { usage: { costUsd: null, limitPercent: 99 } },
-      );
-      const withForeign = {
-        ...observation,
-        runs: [...observation.runs, run({ runId: "x", userMessageId: "m-user", status: "queued" })],
-      };
-      expect(decideLoopStep(loop, withForeign)).toMatchObject({
-        kind: "finish",
-        status: "done",
-        reason: "complete",
-      });
-    });
-
-    describe("a message that began and ended between two looks", () => {
-      const loopAfter = (over: Partial<KodoLoop> = {}) =>
-        testLoop({ stage: "code", baseline: { runOrdinal: 4 }, ...over });
-
-      it("stops the loop when its run is already over", () => {
-        const loop = loopAfter();
-        const observation = observe({
-          threadMode: "code",
-          runs: [
-            run({ runId: "r1", userMessageId: msg(loop), status: "running", ordinal: 5 }),
-            run({ runId: "x", userMessageId: "m-user", status: "completed", ordinal: 6 }),
-          ],
+    it.each(["queued", "running", "waiting", "starting", "preparing"] as const)(
+      "a %s wake between stages is waited out before the next stage's mode is set or sent",
+      (status) => {
+        const loop = testLoop({
+          stage: "review",
+          stages: [testRecord({ round: 1, stage: "code" })],
         });
-        expect(decideLoopStep(loop, observation)).toMatchObject({
-          kind: "finish",
-          status: "stopped",
-          reason: "user_message",
+        const wake = run({ runId: "wake", userMessageId: "m-wake", status });
+        // In the thread's old mode, nothing is changed under the wake...
+        expect(decideLoopStep(loop, observe({ threadMode: "code", runs: [wake] }))).toEqual({
+          kind: "idle",
         });
-      });
+        // ...and in the stage's own mode, nothing starts behind it either.
+        expect(decideLoopStep(loop, observe({ threadMode: "review", runs: [wake] }))).toEqual({
+          kind: "idle",
+        });
+        // Once it has finished, the loop goes on.
+        expect(
+          decideLoopStep(
+            loop,
+            observe({ threadMode: "code", runs: [{ ...wake, status: "completed" }] }),
+          ),
+        ).toEqual({ kind: "set-mode", mode: "review" });
+      },
+    );
 
-      it.each(["failed", "cancelled", "interrupted"] as const)("also when it %s", (status) => {
-        const loop = loopAfter();
-        const observation = observe({
-          threadMode: "code",
-          runs: [
-            run({ runId: "r1", userMessageId: msg(loop), status: "running", ordinal: 5 }),
-            run({ runId: "x", userMessageId: "m-user", status, ordinal: 6 }),
-          ],
-        });
-        expect(decideLoopStep(loop, observation)).toMatchObject({ reason: "user_message" });
+    it("a goal command or an interrupt-restart that cut the stage run is an error only if the loop is still running", () => {
+      // The orchestrator ended the loop as user_message in the message's own commit, so by the time a
+      // look sees the cut run the loop is over and owes only its clean-up.
+      const loop = testLoop({
+        status: "stopped",
+        stopReason: "user_message",
+        stage: "code",
+        startMode: "ask",
+        cleanup: { leftMode: "code" },
       });
-
-      it("does not read the runs from before the loop, or the loop's own, as a person's", () => {
-        const loop = loopAfter();
-        const observation = observe({
-          threadMode: "code",
-          runs: [
-            run({ runId: "old", userMessageId: "m-old", status: "completed", ordinal: 4 }),
-            run({ runId: "r1", userMessageId: msg(loop), status: "completed", ordinal: 5 }),
-          ],
-        });
-        expect(decideLoopStep(loop, observation)).toEqual({ kind: "idle" });
+      const observation = observe({
+        threadMode: "code",
+        runs: [run({ runId: "r1", userMessageId: msg(loop), status: "interrupted" })],
       });
-
-      it("does not read a restart continuation of the loop's run as a person's", () => {
-        const loop = loopAfter();
-        const observation = observe({
-          threadMode: "code",
-          runs: [
-            run({ runId: "r1", userMessageId: msg(loop), status: "cancelled", ordinal: 5 }),
-            run({
-              runId: "r2",
-              userMessageId: "restart-note",
-              restartContinuationOfRunId: "r1",
-              status: "running",
-              ordinal: 6,
-            }),
-          ],
-        });
-        expect(decideLoopStep(loop, observation)).toEqual({ kind: "idle" });
-      });
-
-      it("is not noticed by a loop that recorded no starting point", () => {
-        const loop = testLoop({ stage: "code" });
-        const observation = observe({
-          threadMode: "code",
-          runs: [
-            run({ runId: "r1", userMessageId: msg(loop), status: "running", ordinal: 5 }),
-            run({ runId: "x", userMessageId: "m-user", status: "completed", ordinal: 6 }),
-          ],
-        });
-        expect(decideLoopStep(loop, observation)).toEqual({ kind: "idle" });
-      });
+      expect(decideLoopStep(loop, observation)).toEqual({ kind: "restore-mode", mode: "ask" });
     });
 
     it("a request message and the loop's earlier stage messages are the loop's own", () => {
@@ -571,14 +544,21 @@ describe("stop precedence", () => {
       });
     });
 
-    it("the same message-less run is a person's when no link ties it to the loop", () => {
+    it("a run no link ties to the loop is not its own: it is waited out, and never interrupted", () => {
       const loop = testLoop({ stage: "code" });
       const runs = [
         run({ runId: "r1", userMessageId: msg(loop), status: "running" }),
         run({ runId: "r2", userMessageId: "restart-note", status: "running" }),
       ];
-      expect(decideLoopStep(loop, observe({ threadMode: "code", runs }))).toMatchObject({
-        reason: "user_message",
+      expect(decideLoopStep(loop, observe({ threadMode: "code", runs }))).toEqual({ kind: "idle" });
+      const ended = testLoop({
+        stage: "code",
+        status: "stopped",
+        stopReason: "user_stop",
+        cleanup: { interrupt: true },
+      });
+      expect(decideLoopStep(ended, observe({ threadMode: "code", runs: runs.slice(1) }))).toEqual({
+        kind: "idle",
       });
     });
 

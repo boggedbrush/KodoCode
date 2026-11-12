@@ -8,7 +8,7 @@ import {
   type KodoLoopServerOp,
   type KodoLoopStartOp,
 } from "./loopState.ts";
-import { incompleteVerdict, testLoop, testRecord } from "./testing.ts";
+import { testLoop, testRecord } from "./testing.ts";
 
 const start: KodoLoopStartOp = {
   type: "start",
@@ -335,7 +335,11 @@ describe("server operations", () => {
     ["failed", "verdict_invalid"],
   ] as const)("finishes as %s for %s with its record, detail and summary", (status, reason) => {
     const loop = testLoop({ stage: "judge", status: "held", hold: "runtime_request" });
-    const record = testRecord({ round: 1, stage: "judge", verdict: incompleteVerdict });
+    const record = testRecord({
+      round: 1,
+      stage: "judge",
+      verdict: { complete: false, outstandingCount: 1, outstanding: [{ title: "No test" }] },
+    });
     const result = applyKodoLoopOp(loop, {
       ...server(loop),
       type: "finish",
@@ -368,5 +372,103 @@ describe("stage order", () => {
   it("steps through a round and into the next, and ends after the last judge", () => {
     expect(nextKodoLoopStage({ round: 2, stage: "judge" }, 3)).toEqual({ round: 3, stage: "plan" });
     expect(nextKodoLoopStage({ round: 3, stage: "judge" }, 3)).toBeNull();
+  });
+});
+
+describe("what an ended loop still owes the thread", () => {
+  const finish = (loop: ReturnType<typeof testLoop>, threadMode: string) =>
+    applyKodoLoopOp(
+      loop,
+      { ...server(loop), type: "finish", status: "failed", reason: "error" },
+      { threadMode },
+    );
+
+  it("a loop that ended in a stage mode other than its start mode owes the start mode back", () => {
+    const result = finish(testLoop({ startMode: "ask", stage: "review" }), "review");
+    expect(result.ok && result.loop.cleanup).toEqual({ leftMode: "review" });
+  });
+
+  it.each([
+    ["the thread is already in the start mode", "ask"],
+    ["a person chose a mode that is no stage's", "ask"],
+  ])("owes nothing when %s", (name, mode) => {
+    const result = finish(testLoop({ startMode: name.includes("already") ? "ask" : "code" }), mode);
+    expect(result.ok && result.loop.cleanup).toBeUndefined();
+  });
+
+  it("a person's stop also owes the end of the loop's own runs", () => {
+    const loop = testLoop({ startMode: "ask", stage: "code" });
+    const result = applyKodoLoopOp(loop, { type: "stop" }, { threadMode: "code" });
+    expect(result.ok && result.loop).toMatchObject({
+      status: "stopped",
+      stopReason: "user_stop",
+      cleanup: { leftMode: "code", interrupt: true },
+    });
+    const idle = applyKodoLoopOp(
+      testLoop({ startMode: "ask" }),
+      { type: "stop" },
+      { threadMode: "ask" },
+    );
+    expect(idle.ok && idle.loop.cleanup).toEqual({ interrupt: true });
+  });
+
+  it("a person's message ends the loop as user_message; the mode is owed only when it was not given back with the message", () => {
+    const loop = testLoop({ startMode: "ask", stage: "code" });
+    const steer = applyKodoLoopOp(
+      loop,
+      { type: "user_message", restoredNow: false },
+      { threadMode: "code" },
+    );
+    expect(steer.ok && steer.loop).toMatchObject({
+      status: "stopped",
+      stopReason: "user_message",
+      cleanup: { leftMode: "code" },
+    });
+    const queued = applyKodoLoopOp(
+      loop,
+      { type: "user_message", restoredNow: true },
+      { threadMode: "code" },
+    );
+    expect(queued.ok && queued.loop.cleanup).toBeUndefined();
+    expect(
+      refusal(testLoop({ status: "done" }), { type: "user_message", restoredNow: false }),
+    ).toBe("not_active");
+  });
+
+  it("is settled by `cleaned`, from the writer that read the revision, and only while something is owed", () => {
+    const owed = testLoop({
+      status: "stopped",
+      stopReason: "user_stop",
+      cleanup: { interrupt: true },
+    });
+    const done = applyKodoLoopOp(owed, { ...server(owed), type: "cleaned" });
+    expect(done.ok && done.loop).toMatchObject({ revision: owed.revision + 1 });
+    expect(done.ok && done.loop.cleanup).toBeUndefined();
+    expect(
+      refusal(owed, { loopId: "L1", expectedRevision: owed.revision + 5, type: "cleaned" }),
+    ).toBe("stale_revision");
+    const nothing = testLoop({ status: "stopped", stopReason: "user_stop" });
+    expect(refusal(nothing, { ...server(nothing), type: "cleaned" })).toBe("not_active");
+  });
+
+  it("a message that gave the mode back clears that part, and keeps the stop's own", () => {
+    const owed = testLoop({
+      status: "stopped",
+      stopReason: "user_stop",
+      cleanup: { leftMode: "code", interrupt: true },
+    });
+    const result = applyKodoLoopOp(owed, { type: "mode_restored" });
+    expect(result.ok && result.loop.cleanup).toEqual({ interrupt: true });
+  });
+
+  it("resuming a loop drops what the ended one owed", () => {
+    const capped = testLoop({
+      status: "stopped",
+      stopReason: "round_cap",
+      stage: "judge",
+      cleanup: { leftMode: "review" },
+    });
+    const result = applyKodoLoopOp(capped, { type: "extend", rounds: 1 });
+    expect(result.ok && result.loop.cleanup).toBeUndefined();
   });
 });

@@ -1,3 +1,4 @@
+import { sendToThreadOrLoop } from "../kodo/loop/LoopService.ts"; // KODO: loop-intercept
 import {
   CommandId,
   MessageId,
@@ -940,9 +941,10 @@ export const layer = Layer.effect(
           threadId: ThreadId,
           projectId: ProjectId,
           retries: number,
-        ): ReturnType<typeof threadManagement.sendToThread> =>
-          threadManagement
-            .sendToThread({
+        ): Effect.Effect<unknown, Effect.Error<ReturnType<typeof threadManagement.sendToThread>>> =>
+          // KODO: loop-intercept - a task whose prompt is `/loop ...` controls the loop and succeeds
+          sendToThreadOrLoop(
+            threadManagement.sendToThread({
               projectId,
               commandId,
               threadId,
@@ -954,22 +956,22 @@ export const layer = Layer.effect(
               ...(threadMode === "fresh_session" ? { freshContext: true } : {}),
               createdBy: active.createdBy,
               creationSource: active.creationSource,
-            })
-            .pipe(
-              Effect.catchTags({
-                ThreadManagementThreadNotFoundError: (error) =>
-                  retries === 0
-                    ? Effect.fail(error)
-                    : threadManagement.getThreadShell(threadId).pipe(
-                        Effect.orElseSucceed(() => null),
-                        Effect.flatMap((shell) =>
-                          shell === null || shell.projectId === projectId
-                            ? Effect.fail(error)
-                            : sendBound(threadId, shell.projectId, retries - 1),
-                        ),
+            }),
+          ).pipe(
+            Effect.catchTags({
+              ThreadManagementThreadNotFoundError: (error) =>
+                retries === 0
+                  ? Effect.fail(error)
+                  : threadManagement.getThreadShell(threadId).pipe(
+                      Effect.orElseSucceed(() => null),
+                      Effect.flatMap((shell) =>
+                        shell === null || shell.projectId === projectId
+                          ? Effect.fail(error)
+                          : sendBound(threadId, shell.projectId, retries - 1),
                       ),
-              }),
-            );
+                    ),
+            }),
+          );
 
         // Capture defects and interrupts too so dispatch failures still reach markCompleted.
         const result =

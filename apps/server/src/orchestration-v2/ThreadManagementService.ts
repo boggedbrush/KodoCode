@@ -66,7 +66,7 @@ import { DispatchModeLimit, exceededDispatchModeLimit } from "./DispatchModeLimi
 import { projectTurnItemForDetail } from "./WireProjection.ts";
 import * as LegacyV1ThreadImporter from "./legacy/LegacyV1ThreadImporter.ts";
 import * as ServerSettings from "../serverSettings.ts";
-import { makeKodoLoopService } from "../kodo/loop/LoopService.ts"; // KODO: loop-intercept
+import { KodoLoopSendNote, makeKodoLoopService } from "../kodo/loop/LoopService.ts"; // KODO: loop-intercept
 
 export type ThreadManagementSendMode = "auto" | "queue" | "steer" | "restart";
 
@@ -167,6 +167,16 @@ export interface ThreadManagementSendResult {
   readonly run: OrchestrationV2Run;
   readonly turnItem: Extract<OrchestrationV2TurnItem, { readonly type: "user_message" }> | null;
   readonly delivery: "started" | "queued" | "steered" | "restarted";
+}
+
+/**
+ * What sending `/loop ...` to a thread answers: no turn was started, so there is no message or run to
+ * report; `note` says what happened (a loop started or stopped, or where it stands).
+ */
+export interface ThreadManagementLoopSendResult {
+  readonly delivery: "loop";
+  readonly note: string;
+  readonly dispatch: Orchestrator.OrchestratorV2DispatchResult | undefined;
 }
 
 export interface ThreadManagementWaitInput {
@@ -822,14 +832,43 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  const sendToThread: ThreadManagementServiceShape["sendToThread"] = Effect.fn(
-    "ThreadManagementService.sendToThread",
-  )(function* (input) {
+  const sendToThreadOrLoop = Effect.fn("ThreadManagementService.sendToThreadOrLoop")(function* (
+    input: ThreadManagementSendInput,
+  ): Effect.fn.Return<
+    ThreadManagementSendResult | ThreadManagementLoopSendResult, // KODO: loop-intercept
+    ThreadManagementFailure
+  > {
     const target = yield* getProjectThreadRecords(input, ["runs", "providerTurns"]);
     if (target.thread.archivedAt !== null) {
       return yield* new ThreadManagementThreadArchivedError({
         threadId: input.threadId,
       });
+    }
+    // KODO: loop-intercept - `/loop ...` from an agent or a scheduled task controls the loop and
+    // answers in words; there is no message or run to report.
+    const loopCommand = {
+      type: "message.dispatch",
+      commandId: input.commandId,
+      threadId: input.threadId,
+      messageId: input.messageId,
+      ...(input.scheduledTaskId === undefined ? {} : { scheduledTaskId: input.scheduledTaskId }),
+      ...(input.senderThreadId === undefined ? {} : { senderThreadId: input.senderThreadId }),
+      text: input.text,
+      attachments: input.attachments,
+      dispatchMode: { type: "start_immediately" },
+      createdBy: input.createdBy,
+      creationSource: input.creationSource,
+    } satisfies Extract<OrchestrationV2Command, { readonly type: "message.dispatch" }>;
+    const loopControl = kodoLoop.sendControl(loopCommand);
+    if (loopControl !== undefined) {
+      yield* ensureCommandTranscripts(loopCommand);
+      yield* assertDispatchTargetEnabled(loopCommand);
+      const outcome = yield* loopControl;
+      return {
+        delivery: "loop",
+        note: outcome.note,
+        dispatch: outcome.dispatch,
+      } satisfies ThreadManagementLoopSendResult;
     }
     const steerableRun = latestSteerableRun(target);
     // A fresh send never joins a running turn, so it needs none to steer or restart.
@@ -923,6 +962,24 @@ const make = Effect.gen(function* () {
             : "steered";
     return { dispatch: dispatched, projection, message, run, turnItem, delivery };
   });
+
+  // A `/loop` command starts no turn, so `sendToThread` fails it with the outcome inside the error;
+  // senders that can say what a loop command did read it back with `sendToThreadOrLoop` (kodo/loop).
+  const sendToThread: ThreadManagementServiceShape["sendToThread"] = (input) =>
+    sendToThreadOrLoop(input).pipe(
+      Effect.filterOrFail(
+        (result): result is ThreadManagementSendResult => result.delivery !== "loop",
+        (result) =>
+          new Orchestrator.OrchestratorDispatchError({
+            commandId: input.commandId,
+            commandType: "message.dispatch",
+            cause: new KodoLoopSendNote(
+              result.delivery === "loop" ? result.note : "",
+              result.delivery === "loop" ? result.dispatch : undefined,
+            ),
+          }),
+      ),
+    );
 
   const waitForThread: ThreadManagementServiceShape["waitForThread"] = Effect.fn(
     "ThreadManagementService.waitForThread",

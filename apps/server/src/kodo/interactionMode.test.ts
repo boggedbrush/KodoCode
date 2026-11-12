@@ -217,8 +217,9 @@ describe("resolveKodoInteractionMode", () => {
     expect(KODO_REVIEW_MODE_INSTRUCTIONS).toContain(
       "exactly one fenced block labelled `kodo-review`",
     );
-    const example = parseKodoReview(KODO_REVIEW_MODE_INSTRUCTIONS);
-    expect(example.ok).toBe(true);
+    // The example is a block inside the instructions, not the end of them, so read it on its own.
+    const example = /```kodo-review\n[\s\S]*?\n```/.exec(KODO_REVIEW_MODE_INSTRUCTIONS)?.[0] ?? "";
+    expect(parseKodoReview(example).ok).toBe(true);
   });
 });
 

@@ -204,7 +204,7 @@ export interface LoopJudgePromptInput {
 
 /** The format the judge answers in. Kept here so its example can be checked against the parser. */
 export const LOOP_VERDICT_FORMAT = [
-  "Answer with a short explanation, then end your reply with exactly one fenced block labelled `kodo-verdict`, holding JSON, and nothing after it:",
+  "Answer with a short explanation, then end your reply with exactly one fenced block labelled `kodo-verdict`, holding JSON. It must be the very last thing in the reply: no text after it, and no other `kodo-verdict` block anywhere. A block that is not last, or a second one, makes the whole answer unreadable:",
   "",
   "```kodo-verdict",
   '{"version":1,"complete":false,"summary":"One or two sentences.","outstanding":[{"id":"o1","title":"Short name","detail":"What is still missing or wrong."}],"approach":"How the next round should proceed."}',

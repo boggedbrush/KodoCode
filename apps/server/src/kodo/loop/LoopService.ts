@@ -5,6 +5,7 @@ import {
   DEFAULT_KODO_LOOP_SETTINGS,
   type KodoLoop,
   type KodoLoopBudget,
+  KODO_LOOP_REQUEST_MAX_CHARS,
   type KodoLoopControl,
   type KodoLoopSettings,
   type MessageId,
@@ -17,6 +18,7 @@ import * as Effect from "effect/Effect";
 import type * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import { OrchestratorDispatchError } from "../../orchestration-v2/Orchestrator.ts";
 import { parseLoopCommand } from "./loopCommand.ts";
+import { isKodoLoopAutomatedMessage } from "./loopControl.ts";
 import { isKodoLoopTerminal } from "./loopState.ts";
 
 type MessageDispatchCommand = Extract<
@@ -55,16 +57,31 @@ function describeKodoLoop(loop: KodoLoop): string {
   }
 }
 
-/** Messages that are not a person (or an agent) typing `/loop`: continuations, wakes and notices. */
+/** Whether a `/loop ...` message is a person's (or an agent's) to act on, not one the server sent. */
 const isControlText = (command: MessageDispatchCommand) =>
   command.kodoLoopStage === undefined &&
-  command.notification === undefined &&
   command.guestMessageId === undefined &&
-  command.delegatedCompletion === undefined &&
-  command.idleCompaction === undefined &&
-  command.restartContinuationOfRunId === undefined &&
-  command.usageLimitContinuationOfRunId === undefined &&
-  command.manualContinuationOfRunId === undefined;
+  !isKodoLoopAutomatedMessage(command);
+
+/**
+ * The outcome of a `/loop` command, carried in the failure `sendToThread` ends with (no turn started,
+ * so there is no message or run to return). `sendToThreadOrLoop` turns it back into an answer.
+ */
+export class KodoLoopSendNote {
+  readonly note: string;
+  readonly dispatch: Orchestrator.OrchestratorV2DispatchResult | undefined;
+  readonly message: string;
+  constructor(note: string, dispatch: Orchestrator.OrchestratorV2DispatchResult | undefined) {
+    this.note = note;
+    this.dispatch = dispatch;
+    this.message = `That was a /loop command, which starts no turn. ${note}`;
+  }
+}
+
+export interface KodoLoopSendOutcome {
+  readonly note: string;
+  readonly dispatch: Orchestrator.OrchestratorV2DispatchResult | undefined;
+}
 
 export const makeKodoLoopService = (deps: KodoLoopServiceDeps) => {
   const { orchestrator, serverSettings } = deps;
@@ -93,6 +110,10 @@ export const makeKodoLoopService = (deps: KodoLoopServiceDeps) => {
     readonly requestMessageId: MessageId;
     readonly request: string;
     readonly maxRounds?: number | undefined;
+    readonly requestMessage?: Extract<
+      KodoLoopControl,
+      { readonly type: "start" }
+    >["requestMessage"];
   }) {
     // Unreadable settings mean the defaults, never a loop that cannot start.
     const settings = yield* serverSettings.getSettings.pipe(
@@ -111,6 +132,7 @@ export const makeKodoLoopService = (deps: KodoLoopServiceDeps) => {
         type: "start",
         request: input.request,
         requestMessageId: input.requestMessageId,
+        ...(input.requestMessage === undefined ? {} : { requestMessage: input.requestMessage }),
         maxRounds: input.maxRounds ?? settings.defaultMaxRounds,
         planApproval: settings.planApproval,
         budget,
@@ -168,34 +190,115 @@ export const makeKodoLoopService = (deps: KodoLoopServiceDeps) => {
     return loop === undefined ? "There is no loop on this thread." : describeKodoLoop(loop);
   });
 
+  const requestMessageOf = (command: MessageDispatchCommand) =>
+    ({
+      text: command.text.slice(0, KODO_LOOP_REQUEST_MAX_CHARS + 200),
+      createdBy: command.createdBy,
+      creationSource: command.creationSource,
+      ...(command.scheduledTaskId === undefined
+        ? {}
+        : { scheduledTaskId: command.scheduledTaskId }),
+      ...(command.senderThreadId === undefined ? {} : { senderThreadId: command.senderThreadId }),
+    }) as const;
+
   /**
-   * The dispatch a `/loop` message stands for, or undefined when the message is anything else. The
-   * message itself is not sent as a turn: the loop's stage messages carry the request on.
+   * What a `/loop` message does, or undefined when the message is anything else. The message itself is
+   * not sent as a turn: a start records it as a row of the thread and the loop's stage messages carry
+   * the request on. `status` and an invalid command come back as `info` and `refusal`, so the caller
+   * decides how to say them.
    */
-  const intercept = (command: OrchestrationV2ServerCommand) => {
+  const messageControl = (command: OrchestrationV2ServerCommand) => {
     if (command.type !== "message.dispatch" || !isControlText(command)) return undefined;
     const parsed = parseLoopCommand(command.text);
     if (parsed === null) return undefined;
     const { threadId, commandId } = command;
-    const fail = (message: string) => Effect.fail(refuse(commandId, command.type, message));
+    if (command.attachments.length > 0) {
+      return {
+        kind: "refusal",
+        message: "A /loop command takes text only; send it again without attachments.",
+      } as const;
+    }
     switch (parsed.type) {
       case "invalid":
-        return fail(parsed.message);
+        return { kind: "refusal", message: parsed.message } as const;
       case "status":
-        // No turn is sent for a status, so the answer travels as the message's refusal.
-        return status(threadId).pipe(Effect.flatMap(fail));
+        return { kind: "info", read: status(threadId) } as const;
       case "stop":
-        return stop({ threadId, commandId });
+        return {
+          kind: "stop",
+          note: "The loop was stopped." as string,
+          run: stop({ threadId, commandId }),
+          running: currentLoop(threadId).pipe(
+            Effect.map((loop) => loop !== undefined && !isKodoLoopTerminal(loop.status)),
+          ),
+        } as const;
       case "start":
-        return command.attachments.length > 0
-          ? fail("A loop takes text only; send it again without attachments.")
-          : start({
-              threadId,
-              commandId,
-              requestMessageId: command.messageId,
-              request: parsed.request,
-              maxRounds: parsed.maxRounds,
-            });
+        return {
+          kind: "run",
+          note: `The loop started: it plans, codes, reviews and judges in rounds, and the thread reports where it stands.`,
+          run: start({
+            threadId,
+            commandId,
+            requestMessageId: command.messageId,
+            request: parsed.request,
+            maxRounds: parsed.maxRounds,
+            requestMessage: requestMessageOf(command),
+          }),
+        } as const;
+    }
+  };
+
+  /** The dispatch a `/loop` message stands for, as the message funnel returns it. */
+  const intercept = (command: OrchestrationV2ServerCommand) => {
+    const decided = messageControl(command);
+    if (decided === undefined) return undefined;
+    const fail = (message: string) => Effect.fail(refuse(command.commandId, command.type, message));
+    switch (decided.kind) {
+      case "refusal":
+        return fail(decided.message);
+      // No turn is sent for a status, so the answer travels as the message's refusal.
+      case "info":
+        return decided.read.pipe(Effect.flatMap(fail));
+      case "run":
+      case "stop":
+        return decided.run;
+    }
+  };
+
+  /**
+   * The same for a sender that wants an answer, not a dispatch result (an agent's send, a scheduled
+   * task): the outcome in words, and nothing else. Starting, stopping and reading a loop are all
+   * successes here; only a command that cannot be carried out fails, and then with nothing started.
+   */
+  const sendControl = (
+    command: OrchestrationV2ServerCommand,
+  ): Effect.Effect<KodoLoopSendOutcome, Orchestrator.OrchestratorV2Error> | undefined => {
+    const decided = messageControl(command);
+    if (decided === undefined) return undefined;
+    const answered = (note: string) => (dispatch: Orchestrator.OrchestratorV2DispatchResult) =>
+      ({ note, dispatch }) satisfies KodoLoopSendOutcome;
+    switch (decided.kind) {
+      case "refusal":
+        return Effect.fail(refuse(command.commandId, command.type, decided.message));
+      case "info":
+        return decided.read.pipe(
+          Effect.map((note): KodoLoopSendOutcome => ({ note, dispatch: undefined })),
+        );
+      case "run":
+        return decided.run.pipe(Effect.map(answered(decided.note)));
+      // Stopping nothing is not a failure to the sender; it is told there is nothing running.
+      case "stop":
+        return decided.running.pipe(
+          Effect.flatMap(
+            (running): Effect.Effect<KodoLoopSendOutcome, Orchestrator.OrchestratorV2Error> =>
+              running
+                ? decided.run.pipe(Effect.map(answered(decided.note)))
+                : Effect.succeed({
+                    note: "No loop is running on this thread.",
+                    dispatch: undefined,
+                  }),
+          ),
+        );
     }
   };
 
@@ -207,7 +310,29 @@ export const makeKodoLoopService = (deps: KodoLoopServiceDeps) => {
     extend,
     status,
     intercept,
+    sendControl,
   };
 };
 
 export type KodoLoopService = ReturnType<typeof makeKodoLoopService>;
+
+/**
+ * `sendToThread` for senders that can say what a `/loop` command did (an agent's send, a scheduled
+ * task): a loop command answers with its outcome in words instead of failing.
+ */
+export const sendToThreadOrLoop = <
+  R extends { readonly delivery: string },
+  E extends { readonly _tag: string },
+>(
+  sendToThread: Effect.Effect<R, E>,
+) =>
+  sendToThread.pipe(
+    Effect.catch(
+      (error): Effect.Effect<R | { readonly delivery: "loop"; readonly note: string }, E> => {
+        const cause = (error as { readonly cause?: unknown }).cause;
+        return cause instanceof KodoLoopSendNote
+          ? Effect.succeed({ delivery: "loop" as const, note: cause.note })
+          : Effect.fail(error);
+      },
+    ),
+  );

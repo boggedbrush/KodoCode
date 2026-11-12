@@ -3,6 +3,7 @@
 // operations carry the loop id and the revision their writer read, so a stale writer (a tick that
 // observed the loop before a user stop landed) is refused instead of overwriting the newer state.
 import {
+  normalizeKodoInteractionMode,
   KODO_LOOP_MAX_ROUNDS,
   KODO_LOOP_REQUEST_MAX_CHARS,
   KODO_LOOP_STAGES_PER_ROUND,
@@ -20,6 +21,13 @@ export type KodoLoopTerminalStatus = Extract<KodoLoopStatus, "done" | "stopped" 
 
 export const isKodoLoopTerminal = (status: KodoLoopStatus): status is KodoLoopTerminalStatus =>
   status === "done" || status === "stopped" || status === "failed";
+
+/** The modes a stage runs in; a thread left in one of them by an ended loop is given its start mode back. */
+export const KODO_LOOP_STAGE_MODES: ReadonlySet<KodoInteractionMode> = new Set([
+  "plan",
+  "code",
+  "review",
+]);
 
 /** The thread mode a stage runs in. The judge reads in Review mode but answers in its own format. */
 export function kodoLoopStageMode(
@@ -61,6 +69,10 @@ export type KodoLoopStartOp = {
 export type KodoLoopClientOp =
   | KodoLoopStartOp
   | { readonly type: "stop"; readonly detail?: string }
+  /** A person's message arrived on the thread: the loop ends, and the message is theirs to run. */
+  | { readonly type: "user_message"; readonly restoredNow: boolean }
+  /** A person's message was given the start mode back before it ran, so an ended loop owes none. */
+  | { readonly type: "mode_restored" }
   | { readonly type: "approve" }
   | { readonly type: "extend"; readonly rounds: number }
   | { readonly type: "retry-judge" };
@@ -74,6 +86,7 @@ interface KodoLoopServerOpBase {
 export type KodoLoopServerOp =
   | (KodoLoopServerOpBase & { readonly type: "hold"; readonly hold: "runtime_request" })
   | (KodoLoopServerOpBase & { readonly type: "release" })
+  | (KodoLoopServerOpBase & { readonly type: "cleaned" })
   | (KodoLoopServerOpBase & {
       readonly type: "advance";
       /** The settled stage; the loop moves to its successor. */
@@ -91,6 +104,12 @@ export type KodoLoopServerOp =
     });
 
 export type KodoLoopOp = KodoLoopClientOp | KodoLoopServerOp;
+
+/** What the reducer needs to know about the thread it does not own. */
+export interface KodoLoopOpContext {
+  /** The thread's interaction mode in any stored spelling, as it is when the operation applies. */
+  readonly threadMode: string;
+}
 
 export type KodoLoopOpRefusal =
   | "invalid"
@@ -134,15 +153,42 @@ function withRecord(
 }
 
 /** The loop with its stop fields and hold cleared, as every resume does. */
-function running(loop: KodoLoop): Omit<KodoLoop, "hold" | "stopReason" | "stopDetail" | "summary"> {
+function running(
+  loop: KodoLoop,
+): Omit<KodoLoop, "hold" | "stopReason" | "stopDetail" | "summary" | "cleanup"> {
   const {
     hold: _hold,
     stopReason: _reason,
     stopDetail: _detail,
     summary: _summary,
+    cleanup: _cleanup,
     ...rest
   } = loop;
   return rest;
+}
+
+/**
+ * What an ended loop still owes the thread: its own runs ended after a stop, and the start mode back
+ * when the loop left the thread in another stage mode (unless `restoredNow` already did). A mode that
+ * is not a stage mode is one a person chose, and is left alone.
+ */
+function endCleanup(
+  loop: KodoLoop,
+  reason: KodoLoopStopReason,
+  threadMode: string,
+  restoredNow = false,
+): Pick<KodoLoop, "cleanup"> {
+  const mode = normalizeKodoInteractionMode(threadMode);
+  const leftMode =
+    !restoredNow && mode !== loop.startMode && KODO_LOOP_STAGE_MODES.has(mode) ? mode : undefined;
+  const interrupt = reason === "user_stop";
+  if (leftMode === undefined && !interrupt) return {};
+  return {
+    cleanup: {
+      ...(leftMode === undefined ? {} : { leftMode }),
+      ...(interrupt ? { interrupt: true as const } : {}),
+    },
+  };
 }
 
 const FINISH_REASONS: Record<
@@ -192,6 +238,7 @@ function startLoop(current: KodoLoop | undefined, op: KodoLoopStartOp): KodoLoop
 function applyClientOp(
   loop: KodoLoop,
   op: Exclude<KodoLoopClientOp, KodoLoopStartOp>,
+  context: KodoLoopOpContext,
 ): KodoLoopOpResult {
   switch (op.type) {
     case "stop":
@@ -205,8 +252,37 @@ function applyClientOp(
               status: "stopped",
               stopReason: "user_stop",
               ...(op.detail === undefined ? {} : { stopDetail: op.detail }),
+              ...endCleanup(loop, "user_stop", context.threadMode),
             },
           };
+    case "user_message":
+      return isKodoLoopTerminal(loop.status)
+        ? refuse("not_active", "The loop is not running.")
+        : {
+            ok: true,
+            loop: {
+              ...running(loop),
+              revision: loop.revision + 1,
+              status: "stopped",
+              stopReason: "user_message",
+              stopDetail: "A message was sent on the thread.",
+              ...endCleanup(loop, "user_message", context.threadMode, op.restoredNow),
+            },
+          };
+    case "mode_restored": {
+      if (!isKodoLoopTerminal(loop.status) || loop.cleanup === undefined) {
+        return refuse("not_active", "The loop has nothing to clean up.");
+      }
+      const { cleanup: _owed, ...rest } = loop;
+      return {
+        ok: true,
+        loop: {
+          ...rest,
+          revision: loop.revision + 1,
+          ...(loop.cleanup.interrupt === true ? { cleanup: { interrupt: true as const } } : {}),
+        },
+      };
+    }
     case "approve":
       return loop.status === "held" && loop.hold === "plan_approval"
         ? { ok: true, loop: { ...running(loop), revision: loop.revision + 1, status: "active" } }
@@ -249,10 +325,21 @@ function applyClientOp(
   }
 }
 
-function applyServerOp(loop: KodoLoop, op: KodoLoopServerOp): KodoLoopOpResult {
+function applyServerOp(
+  loop: KodoLoop,
+  op: KodoLoopServerOp,
+  context: KodoLoopOpContext,
+): KodoLoopOpResult {
   if (op.loopId !== loop.loopId) return refuse("wrong_loop", "That loop has been replaced.");
   if (op.expectedRevision !== loop.revision) {
     return refuse("stale_revision", "The loop changed since it was read.");
+  }
+  if (op.type === "cleaned") {
+    if (!isKodoLoopTerminal(loop.status) || loop.cleanup === undefined) {
+      return refuse("not_active", "The loop has nothing to clean up.");
+    }
+    const { cleanup: _owed, ...rest } = loop;
+    return { ok: true, loop: { ...rest, revision: loop.revision + 1 } };
   }
   if (isKodoLoopTerminal(loop.status)) return refuse("not_active", "The loop is not running.");
   const revision = loop.revision + 1;
@@ -304,6 +391,7 @@ function applyServerOp(loop: KodoLoop, op: KodoLoopServerOp): KodoLoopOpResult {
           status: op.status,
           stopReason: op.reason,
           ...(op.detail === undefined ? {} : { stopDetail: op.detail }),
+          ...endCleanup(loop, op.reason, context.threadMode),
           ...(op.record === undefined ? {} : { stages: withRecord(loop.stages, op.record) }),
           ...(op.summary === undefined ? {} : { summary: op.summary }),
         },
@@ -316,8 +404,14 @@ function applyServerOp(loop: KodoLoop, op: KodoLoopServerOp): KodoLoopOpResult {
  * Applies one operation to the thread's loop (`undefined` when it has none). Returns the next loop
  * or says why the operation does not apply; it never throws and never mutates.
  */
-export function applyKodoLoopOp(loop: KodoLoop | undefined, op: KodoLoopOp): KodoLoopOpResult {
+export function applyKodoLoopOp(
+  loop: KodoLoop | undefined,
+  op: KodoLoopOp,
+  context: KodoLoopOpContext = { threadMode: "" },
+): KodoLoopOpResult {
   if (op.type === "start") return startLoop(loop, op);
   if (loop === undefined) return refuse("no_loop", "There is no loop on this thread.");
-  return "expectedRevision" in op ? applyServerOp(loop, op) : applyClientOp(loop, op);
+  return "expectedRevision" in op
+    ? applyServerOp(loop, op, context)
+    : applyClientOp(loop, op, context);
 }

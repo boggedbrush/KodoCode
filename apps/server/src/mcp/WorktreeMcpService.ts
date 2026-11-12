@@ -1,3 +1,4 @@
+import { sendToThreadOrLoop } from "../kodo/loop/LoopService.ts"; // KODO: loop-intercept
 import {
   CommandId,
   type GitCommandError,
@@ -326,8 +327,8 @@ const make = Effect.gen(function* () {
           Effect.suspend(() =>
             input.continuationPrompt === undefined
               ? Effect.succeed<WorktreeMcpContinuationStatus>({ status: "skipped" })
-              : threadManagement
-                  .sendToThread({
+              : sendToThreadOrLoop(
+                  threadManagement.sendToThread({
                     projectId: projection.thread.projectId,
                     commandId: ids.continuationCommandId,
                     threadId: scope.thread.threadId,
@@ -337,14 +338,15 @@ const make = Effect.gen(function* () {
                     mode: "queue",
                     createdBy: "agent",
                     creationSource: "mcp",
-                  })
-                  .pipe(
-                    Effect.map((sendResult): WorktreeMcpContinuationStatus => ({
-                      status: "scheduled",
-                      delivery: sendResult.delivery,
-                    })),
-                    reportFailed("worktree handoff continuation failed to queue"),
-                  ),
+                  }),
+                ).pipe(
+                  Effect.map((sendResult): WorktreeMcpContinuationStatus => ({
+                    status: "scheduled",
+                    // KODO: loop-intercept - a `/loop` prompt starts a loop, which is a started turn here
+                    delivery: sendResult.delivery === "loop" ? "started" : sendResult.delivery,
+                  })),
+                  reportFailed("worktree handoff continuation failed to queue"),
+                ),
           );
 
         const continuation = yield* recheckAndBind.pipe(Effect.andThen(queueContinuation));

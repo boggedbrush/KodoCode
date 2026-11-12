@@ -5,7 +5,15 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 
-import { IsoDateTime, MessageId, NonNegativeInt, PositiveInt, RunId } from "./baseSchemas.ts";
+import {
+  IsoDateTime,
+  MessageId,
+  NonNegativeInt,
+  PositiveInt,
+  RunId,
+  ScheduledTaskId,
+  ThreadId,
+} from "./baseSchemas.ts";
 import { KodoInteractionMode } from "./kodoInteractionMode.ts";
 import { ModelSelection } from "./modelSelection.ts";
 
@@ -124,6 +132,34 @@ export const KodoLoopStageUsage = Schema.Struct({
 });
 export type KodoLoopStageUsage = typeof KodoLoopStageUsage.Type;
 
+export const KODO_LOOP_CONCLUSION_MAX_CHARS = 240;
+export const KODO_LOOP_RECORD_OUTSTANDING_MAX = 10;
+export const KODO_LOOP_RECORD_TITLE_MAX_CHARS = 120;
+
+/** What a stage record keeps of the Judge's answer; the full text stays in the thread's messages. */
+export const KodoLoopRecordVerdict = Schema.Struct({
+  complete: Schema.Boolean,
+  outstandingCount: NonNegativeInt,
+  outstanding: Schema.Array(
+    Schema.Struct({ title: cappedNonEmpty(KODO_LOOP_RECORD_TITLE_MAX_CHARS) }),
+  ).check(Schema.isMaxLength(KODO_LOOP_RECORD_OUTSTANDING_MAX)),
+});
+export type KodoLoopRecordVerdict = typeof KodoLoopRecordVerdict.Type;
+
+/** What a stage record keeps of a review: its verdict and counts. `parsed` is false when its block was unreadable. */
+export const KodoLoopRecordReview = Schema.Struct({
+  parsed: Schema.Boolean,
+  verdict: Schema.optional(Schema.Literals(["pass", "concerns", "blocking"])),
+  findings: NonNegativeInt,
+  high: NonNegativeInt,
+});
+export type KodoLoopRecordReview = typeof KodoLoopRecordReview.Type;
+
+/**
+ * One stage, kept small: ids, status, model, times, one conclusion line and the Judge's or reviewer's
+ * headline. The plan, the review's findings and the verdict's detail are read again from the thread's
+ * own messages when a later stage needs them, so the thread payload stays small (see the cap test).
+ */
 export const KodoLoopStageRecord = Schema.Struct({
   round: PositiveInt,
   stage: KodoLoopStage,
@@ -137,10 +173,9 @@ export const KodoLoopStageRecord = Schema.Struct({
   /** The highest limit-window percentage of the stage's provider before and after the stage. */
   quotaBefore: Schema.optional(Schema.Number),
   quotaAfter: Schema.optional(Schema.Number),
-  verdict: Schema.optional(KodoLoopVerdict),
-  review: Schema.optional(KodoReviewResult),
-  reviewParse: Schema.optional(Schema.Literals(["ok", "failed"])),
-  planMarkdown: Schema.optional(capped(20_000)),
+  conclusion: Schema.optional(capped(KODO_LOOP_CONCLUSION_MAX_CHARS)),
+  verdict: Schema.optional(KodoLoopRecordVerdict),
+  review: Schema.optional(KodoLoopRecordReview),
 });
 export type KodoLoopStageRecord = typeof KodoLoopStageRecord.Type;
 
@@ -162,6 +197,26 @@ export const KodoLoopSavings = Schema.Struct({
 });
 export type KodoLoopSavings = typeof KodoLoopSavings.Type;
 
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+// Each field reads its own stored value and falls back to its default when that is not valid. The
+// field's encoded side is `unknown`: a bad value must not fail the section, or the valid fields next
+// to it would be erased on the next save (see kodoModeModels.ts, which solved this for slots).
+const tolerantField = <T>(schema: Schema.Codec<T, T>, fallback: T) => {
+  const isValid = Schema.is(schema);
+  return Schema.Unknown.pipe(
+    Schema.decodeTo(
+      schema,
+      SchemaTransformation.transform({
+        decode: (raw): T => (isValid(raw) ? raw : fallback),
+        encode: (value): unknown => value,
+      }),
+    ),
+    Schema.withDecodingDefault(Effect.succeed(fallback)),
+  );
+};
+
 export const KodoLoop = Schema.Struct({
   loopId: Schema.String.check(Schema.isNonEmpty()),
   /** Bumped by every operation; a writer that read an older one is refused. */
@@ -182,15 +237,33 @@ export const KodoLoop = Schema.Struct({
   baseline: Schema.Struct({
     /** The latest run with a checkpoint when the loop began: the diff evidence starts after it. */
     checkpointTurnCount: Schema.optional(NonNegativeInt),
-    /** The thread's latest run ordinal when the loop began: any later run that is not the loop's is a person's. */
-    runOrdinal: Schema.optional(NonNegativeInt),
     headSha: Schema.optional(Schema.String),
   }),
-  stages: Schema.Array(KodoLoopStageRecord).check(
-    Schema.isMaxLength(KODO_LOOP_MAX_ROUNDS * KODO_LOOP_STAGES_PER_ROUND),
+  // Records written before they were cut to headlines do not decode; the loop then reads with none
+  // rather than making the whole thread unreadable.
+  stages: tolerantField(
+    Schema.Array(KodoLoopStageRecord).check(
+      Schema.isMaxLength(KODO_LOOP_MAX_ROUNDS * KODO_LOOP_STAGES_PER_ROUND),
+    ) as unknown as Schema.Codec<
+      ReadonlyArray<KodoLoopStageRecord>,
+      ReadonlyArray<KodoLoopStageRecord>
+    >,
+    [],
   ),
   summary: Schema.optional(capped(8_000)),
   savings: Schema.optional(KodoLoopSavings),
+  /**
+   * What an ended loop still owes the thread, until it has been done: end its own runs that still
+   * run (a stop), and give the start mode back once no turn runs. Absent while the loop runs and
+   * once nothing is left, so a restart can find loops that ended unfinished.
+   */
+  cleanup: Schema.optional(
+    Schema.Struct({
+      /** The mode the loop left the thread in; given back unless a person changed it since. */
+      leftMode: Schema.optional(KodoInteractionMode),
+      interrupt: Schema.optional(Schema.Literal(true)),
+    }),
+  ),
 });
 export type KodoLoop = typeof KodoLoop.Type;
 
@@ -202,26 +275,6 @@ const PlanApproval = Schema.Literals(["auto", "ask"]);
 const StopAtLimitPercent = Schema.Number.check(Schema.isBetween({ minimum: 1, maximum: 100 }));
 const MaxCostUsd = Schema.NullOr(Schema.Number.check(Schema.isGreaterThan(0)));
 const MaxTokens = Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)));
-
-const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-// Each field reads its own stored value and falls back to its default when that is not valid. The
-// field's encoded side is `unknown`: a bad value must not fail the section, or the valid fields next
-// to it would be erased on the next save (see kodoModeModels.ts, which solved this for slots).
-const tolerantField = <T>(schema: Schema.Codec<T, T>, fallback: T) => {
-  const isValid = Schema.is(schema);
-  return Schema.Unknown.pipe(
-    Schema.decodeTo(
-      schema,
-      SchemaTransformation.transform({
-        decode: (raw): T => (isValid(raw) ? raw : fallback),
-        encode: (value): unknown => value,
-      }),
-    ),
-    Schema.withDecodingDefault(Effect.succeed(fallback)),
-  );
-};
 
 // A section or sub-section that is not a record reads as empty, so every field takes its default.
 const recordOrEmpty = SchemaTransformation.transform({
@@ -277,6 +330,16 @@ export const KodoLoopControl = Schema.Union([
     request: capped(KODO_LOOP_REQUEST_MAX_CHARS),
     /** The person's `/loop` message; it is never run as a turn itself. */
     requestMessageId: MessageId,
+    /** The message as it was sent, so the thread can show it above the first stage. */
+    requestMessage: Schema.optional(
+      Schema.Struct({
+        text: capped(KODO_LOOP_REQUEST_MAX_CHARS + 200),
+        createdBy: Schema.Literals(["user", "agent", "system"]),
+        creationSource: Schema.Literals(["web", "mobile", "mcp", "provider", "server"]),
+        scheduledTaskId: Schema.optional(ScheduledTaskId),
+        senderThreadId: Schema.optional(ThreadId),
+      }),
+    ),
     maxRounds: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: KODO_LOOP_MAX_ROUNDS })),
     planApproval: Schema.Literals(["auto", "ask"]),
     budget: KodoLoopBudget,
@@ -295,6 +358,8 @@ export type KodoLoopControl = typeof KodoLoopControl.Type;
 export const KodoLoopAdvanceStep = Schema.Union([
   Schema.Struct({ type: Schema.Literal("hold"), hold: Schema.Literal("runtime_request") }),
   Schema.Struct({ type: Schema.Literal("release") }),
+  /** An ended loop's clean-up is done, or given up on. */
+  Schema.Struct({ type: Schema.Literal("cleaned") }),
   Schema.Struct({
     type: Schema.Literal("advance"),
     record: KodoLoopStageRecord,

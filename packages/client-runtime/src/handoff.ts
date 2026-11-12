@@ -19,7 +19,11 @@ import { REASONING_EFFORT_OPTION_IDS } from "./state/threadExecution.ts";
 export type HandoffTimelineRun = Pick<
   OrchestrationV2Run,
   "id" | "ordinal" | "providerInstanceId" | "modelSelection" | "kodoModel" // KODO: mode-models-notice
->;
+> &
+  // KODO: inline-kodo-blocks - which stage wrote a reply decides whether its result block is read
+  Partial<
+    Pick<OrchestrationV2Run, "interactionMode" | "userMessageId" | "restartContinuationOfRunId">
+  >;
 
 export type HandoffEndpoints = ReturnType<typeof resolveHandoffEndpoints>;
 

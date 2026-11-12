@@ -1,5 +1,6 @@
 // KODO: thread-mode-type
 import { parseLoopCommand } from "../kodo/loop/loopCommand.ts"; // KODO: loop-intercept
+import { kodoLoopLaunchRefusal } from "../kodo/loop/loopControl.ts"; // KODO: loop-intercept
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
@@ -866,6 +867,18 @@ const make = Effect.gen(function* () {
       }
 
       const launchReceipt = yield* readReceipt(input, input.commandId);
+      // KODO: loop-intercept - a `/loop` first message that could not start is refused before the thread exists
+      const kodoLoopRefusal = Option.isNone(launchReceipt)
+        ? kodoLoopLaunchRefusal({
+            createdBy: input.createdBy,
+            interactionMode: input.interactionMode,
+            workspaceStrategy: input.workspaceStrategy,
+            initialMessageText: input.initialMessage?.text,
+          })
+        : undefined;
+      if (kodoLoopRefusal !== undefined) {
+        return yield* mapError(input, "dispatch-message")(kodoLoopRefusal);
+      }
       yield* threads.assertProviderInstanceEnabled({
         projectId: input.projectId,
         commandId: input.commandId,

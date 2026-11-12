@@ -1,3 +1,4 @@
+import { sendToThreadOrLoop } from "../kodo/loop/LoopService.ts"; // KODO: loop-intercept
 import { kodoInteractionModeLimit } from "../kodo/interactionMode.ts"; // KODO: mode-peer-limit
 import {
   CommandId,
@@ -3134,8 +3135,8 @@ const make = Effect.gen(function* () {
         requestKey: key,
         operation: "thread-send",
       });
-      const result = yield* threadManagement
-        .sendToThread({
+      const result = yield* sendToThreadOrLoop(
+        threadManagement.sendToThread({
           projectId: target.thread.projectId,
           commandId: stableCommandId({
             scope,
@@ -3151,17 +3152,27 @@ const make = Effect.gen(function* () {
           ...(input.freshContext ? { freshContext: true } : {}),
           createdBy: "agent",
           creationSource: "mcp",
-        })
-        .pipe(
-          Effect.mapError((error) =>
-            isThreadManagementError(error)
-              ? threadManagementFailure(error)
-              : failure(
-                  "orchestration_error",
-                  `Unable to send to thread ${input.threadId}: ${userFacingDispatchErrorMessage(error) ?? errorMessage(error)}`,
-                ),
-          ),
-        );
+        }),
+      ).pipe(
+        Effect.mapError((error) =>
+          isThreadManagementError(error)
+            ? threadManagementFailure(error)
+            : failure(
+                "orchestration_error",
+                `Unable to send to thread ${input.threadId}: ${userFacingDispatchErrorMessage(error) ?? errorMessage(error)}`,
+              ),
+        ),
+      );
+      // KODO: loop-intercept - a `/loop` command starts no turn, so there is no run to report
+      if (result.delivery === "loop") {
+        return {
+          threadId: input.threadId,
+          link: threadLinkFor(scope, input.threadId, target.thread.title),
+          messageId,
+          delivery: "loop",
+          note: result.note,
+        } satisfies OrchestratorMcpThreadSendResult;
+      }
       return {
         threadId: input.threadId,
         link: threadLinkFor(scope, input.threadId, target.thread.title),

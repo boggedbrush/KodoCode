@@ -31,6 +31,12 @@ export function useStableHandoffRuns(
           providerInstanceId: run.providerInstanceId,
           modelSelection: run.modelSelection,
           ...(run.kodoModel === undefined ? {} : { kodoModel: run.kodoModel }), // KODO: mode-models-notice
+          // KODO: inline-kodo-blocks
+          ...(run.interactionMode === undefined ? {} : { interactionMode: run.interactionMode }),
+          ...(run.userMessageId === undefined ? {} : { userMessageId: run.userMessageId }),
+          ...(run.restartContinuationOfRunId === undefined
+            ? {}
+            : { restartContinuationOfRunId: run.restartContinuationOfRunId }),
         }));
   setState({ source: runs, signature, value });
   return value;

@@ -57,6 +57,7 @@ import {
   collapseExpandedComposerCursor,
 } from "../../composer-logic";
 import { type ChatMessage } from "../../types";
+import { isKodoLoopQuery } from "../../kodo/loopCommand.logic"; // KODO: loop-query-send
 // KODO: send-mode
 import { parseKodoModeSlashCommand } from "../../kodo/interactionModes.logic";
 // KODO: usage-slash-send
@@ -1123,7 +1124,10 @@ export function useComposerSend(input: ComposerSendInput) {
       return;
     }
     const optimisticAttachments = optimisticMessageAttachments(composerAttachmentsSnapshot);
-    if (!shouldQueueBehindActiveRun) {
+    // KODO: loop-query-send - `/loop stop` and `/loop status` are answered by the server with no
+    // message, so no bubble stands in for them (it would be labelled a steer and never settle).
+    const kodoLoopQuery = isKodoLoopQuery(messageTextForSend);
+    if (!shouldQueueBehindActiveRun && !kodoLoopQuery) {
       anchorNewTurn(
         scopedThreadKey(scopeThreadRef(activeThread.environmentId, threadIdForSend)),
         messageIdForSend,
@@ -1152,7 +1156,7 @@ export function useComposerSend(input: ComposerSendInput) {
     } else {
       optimisticBlobPreviews.release(optimisticMessage);
     }
-    setOptimisticUserMessages((existing) => [...existing, optimisticMessage]);
+    if (!kodoLoopQuery) setOptimisticUserMessages((existing) => [...existing, optimisticMessage]); // KODO: loop-query-send
     setThreadError(threadIdForSend, null);
     if (expiredTerminalContextCount > 0) {
       const toastCopy = buildExpiredTerminalContextToastCopy(

@@ -61,6 +61,7 @@ import {
 } from "@t3tools/contracts";
 import type { ToolCallVisibility } from "@t3tools/contracts/settings";
 import { renderAssistantCitationsAsText } from "@t3tools/shared/assistantCitations";
+import { renderKodoBlocksAsText } from "@t3tools/shared/kodoLoopOutput"; // KODO: kodo-blocks-mobile
 import { encodeComposerContextFragment } from "@t3tools/shared/composerContextClipboard";
 import { hostedThreadLink, parseThreadLinkHref } from "@t3tools/shared/threadLinks";
 import { PROMPT_LINK_MAX_PROMPT_LENGTH } from "@t3tools/shared/promptLinks";
@@ -1845,7 +1846,10 @@ function renderFeedEntry(
     const { message } = entry;
     const isUser = message.role === "user";
     const presentation = resolveUserMessagePresentation(message);
-    const renderedText = renderAssistantCitationsAsText(presentation.text);
+    // KODO: kodo-blocks-mobile - a Review or Judge reply ends with a JSON block; show its summary, not the JSON
+    const renderedText = renderAssistantCitationsAsText(
+      isUser || message.streaming ? presentation.text : renderKodoBlocksAsText(presentation.text),
+    );
     const styles = isUser ? markdownStyles.user : markdownStyles.assistant;
     const timestampLabel = formatMessageTimestamp(isUser ? message.createdAt : message.updatedAt);
     const attachments = message.attachments ?? [];

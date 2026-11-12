@@ -82,6 +82,34 @@ export function kodoLoopStopText(loop: KodoLoop): string | null {
   return STOP_TEXT[loop.stopReason](loop);
 }
 
+export interface KodoLoopOutstanding {
+  /** The Judge's one-line conclusion of that round. */
+  readonly summary: string | null;
+  readonly items: ReadonlyArray<string>;
+  /** Items the loop kept a count of but not a title for. */
+  readonly more: number;
+}
+
+/**
+ * What the Judge last said was left, for a loop that ended without finishing: the newest judged
+ * round's outstanding items, as the loop's records kept them. Null while the loop runs, when it
+ * is complete, or when no round was ever judged as incomplete.
+ */
+export function kodoLoopOutstanding(loop: KodoLoop): KodoLoopOutstanding | null {
+  if (isKodoLoopRunning(loop) || loop.status === "done") return null;
+  const judged = loop.stages.findLast(
+    (record) => record.stage === "judge" && record.verdict !== undefined,
+  );
+  const verdict = judged?.verdict;
+  if (verdict === undefined || verdict.complete || verdict.outstandingCount === 0) return null;
+  const items = verdict.outstanding.map((item) => item.title);
+  return {
+    summary: judged?.conclusion ?? null,
+    items,
+    more: Math.max(0, verdict.outstandingCount - items.length),
+  };
+}
+
 export const KODO_LOOP_CONTEXT_NOTE =
   "This thread now continues from the last stage's conversation, not the whole loop.";
 

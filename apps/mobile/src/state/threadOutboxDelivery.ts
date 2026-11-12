@@ -826,7 +826,12 @@ export function createThreadOutboxDelivery(): {
       }
     }
 
-    if (settings.interactionMode !== thread.interactionMode) {
+    // KODO: loop-mobile-mode-sync - while a loop runs the server owns the mode and refuses a change; this
+    // message ends the loop, and takes the mode it started in.
+    const kodoLoopOwnsMode =
+      thread.source?.kodoLoopStatus?.status === "active" ||
+      thread.source?.kodoLoopStatus?.status === "held";
+    if (settings.interactionMode !== thread.interactionMode && !kodoLoopOwnsMode) {
       if (!hasAccess()) return true;
       const interactionResult = await runDeliveryCommand(threadEnvironment.setInteractionMode, {
         environmentId: queuedMessage.environmentId,

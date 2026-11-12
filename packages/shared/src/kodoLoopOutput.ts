@@ -11,7 +11,7 @@ import * as Cause from "effect/Cause";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 
-const KODO_VERDICT_LABEL = "kodo-verdict";
+export const KODO_VERDICT_LABEL = "kodo-verdict";
 export const KODO_REVIEW_LABEL = "kodo-review";
 
 /** A block larger than this is refused unread; the schema's own caps are far below it. */
@@ -19,6 +19,8 @@ export const KODO_BLOCK_MAX_CHARS = 40_000;
 
 export type KodoBlockFailureReason =
   | "missing"
+  | "multiple"
+  | "not_final"
   | "unterminated"
   | "too_large"
   | "invalid_json"
@@ -107,11 +109,45 @@ function scanFencedBlocks(text: string): FencedBlock[] {
   return blocks;
 }
 
-/** The last block with the label wins; an earlier valid one never stands in for a bad last one. */
-const lastBlock = (text: string, label: string): FencedBlock | undefined =>
-  scanFencedBlocks(text)
-    .filter((block) => block.label === label)
-    .at(-1);
+/** Every block with the label, in order. */
+const blocksLabelled = (text: string, label: string): FencedBlock[] =>
+  scanFencedBlocks(text).filter((block) => block.label === label);
+
+/**
+ * The one block a reply's result lives in: the only block with the label, and the end of the reply,
+ * with nothing but whitespace after it. A block anywhere else, or a second one (a quoted example, a
+ * line of a diff), cannot stand in for the answer or override it.
+ */
+function finalBlock(
+  text: string,
+  label: string,
+):
+  | { readonly ok: true; readonly block: FencedBlock }
+  | { readonly ok: false; readonly reason: KodoBlockFailureReason; readonly detail: string } {
+  const blocks = blocksLabelled(text, label);
+  const block = blocks.at(-1);
+  if (block === undefined) {
+    return { ok: false, reason: "missing", detail: `no \`${label}\` block in the reply` };
+  }
+  if (blocks.length > 1) {
+    return {
+      ok: false,
+      reason: "multiple",
+      detail: `more than one \`${label}\` block in the reply`,
+    };
+  }
+  if (!block.closed) {
+    return { ok: false, reason: "unterminated", detail: `the \`${label}\` block is not closed` };
+  }
+  if (text.slice(block.end).trim().length > 0) {
+    return {
+      ok: false,
+      reason: "not_final",
+      detail: `the \`${label}\` block is not the end of the reply`,
+    };
+  }
+  return { ok: true, block };
+}
 
 const decodeVerdictExit = Schema.decodeUnknownExit(KodoLoopVerdict);
 const decodeReviewExit = Schema.decodeUnknownExit(KodoReviewResult);
@@ -123,13 +159,9 @@ function parseBlock<T>(
   label: string,
   decode: (value: unknown) => Exit.Exit<T, unknown>,
 ): KodoBlockResult<T> {
-  const block = lastBlock(text, label);
-  if (block === undefined) {
-    return { ok: false, reason: "missing", detail: `no \`${label}\` block in the reply` };
-  }
-  if (!block.closed) {
-    return { ok: false, reason: "unterminated", detail: `the \`${label}\` block is not closed` };
-  }
+  const found = finalBlock(text, label);
+  if (!found.ok) return found;
+  const { block } = found;
   if (block.body.length > KODO_BLOCK_MAX_CHARS) {
     return { ok: false, reason: "too_large", detail: `the \`${label}\` block is too large` };
   }
@@ -162,9 +194,83 @@ export const parseKodoReview = (text: string): KodoBlockResult<KodoReviewResultV
 
 /** The text without the block `parseKodoVerdict` or `parseKodoReview` reads, for a reply a card replaces. */
 export function stripKodoBlock(text: string, label: string): string {
-  const block = lastBlock(text, label);
-  if (block === undefined || !block.closed) return text;
-  const before = text.slice(0, block.start).trimEnd();
-  const after = text.slice(block.end).trimStart();
-  return before.length > 0 && after.length > 0 ? `${before}\n\n${after}` : `${before}${after}`;
+  const found = finalBlock(text, label);
+  return found.ok ? text.slice(0, found.block.start).trimEnd() : text;
+}
+
+/** A reply's result blocks once read: the reply without them, and what they said. */
+export interface KodoReplyBlocks {
+  readonly text: string;
+  readonly review: KodoReviewResultValue | null;
+  readonly verdict: KodoLoopVerdictValue | null;
+}
+
+/**
+ * The reply with its valid trailing `kodo-review` or `kodo-verdict` block taken out, and the result
+ * it held. A reply with an unreadable or misplaced block is returned as written. `only` limits
+ * which label is looked for, since a block outside the stage that asked for it is an example.
+ */
+export function readKodoReplyBlocks(
+  text: string,
+  only: { readonly review?: boolean; readonly verdict?: boolean } = { review: true, verdict: true },
+): KodoReplyBlocks {
+  const wantReview = only.review === true && text.includes(KODO_REVIEW_LABEL);
+  const wantVerdict = only.verdict === true && text.includes(KODO_VERDICT_LABEL);
+  const review = wantReview ? parseKodoReview(text) : undefined;
+  const verdict = wantVerdict ? parseKodoVerdict(text) : undefined;
+  let remaining = text;
+  if (review?.ok) remaining = stripKodoBlock(remaining, KODO_REVIEW_LABEL);
+  if (verdict?.ok) remaining = stripKodoBlock(remaining, KODO_VERDICT_LABEL);
+  return {
+    text: review?.ok || verdict?.ok ? remaining : text,
+    review: review?.ok ? review.value : null,
+    verdict: verdict?.ok ? verdict.value : null,
+  };
+}
+
+const plural = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+/** A review as plain text, for a client that shows no list of its own: one line per finding. */
+export function describeKodoReview(review: KodoReviewResultValue): string {
+  const head =
+    review.findings.length === 0
+      ? `Review: ${review.verdict}.`
+      : `Review: ${review.verdict}, ${plural(review.findings.length, "finding")}.`;
+  const lines = review.findings.map((finding) => {
+    const where =
+      finding.file === undefined
+        ? ""
+        : ` (${finding.file}${finding.line === undefined ? "" : `:${finding.line}`})`;
+    return `- [${finding.severity}] ${finding.title}${where}`;
+  });
+  return [head, review.summary, ...lines].filter((line) => line.length > 0).join("\n");
+}
+
+/** A verdict as plain text: complete or not, and what is outstanding. */
+export function describeKodoVerdict(verdict: KodoLoopVerdictValue): string {
+  const lines = verdict.outstanding.map((item) => `- ${item.title}`);
+  return [
+    verdict.complete ? "Verdict: complete." : "Verdict: not complete.",
+    verdict.summary,
+    ...lines,
+  ]
+    .filter((line) => line.length > 0)
+    .join("\n");
+}
+
+/**
+ * A reply for a client that has no list of its own (mobile): a valid trailing result block is
+ * replaced by its plain-text summary, so no raw JSON shows. Any other reply is returned as written.
+ */
+export function renderKodoBlocksAsText(text: string): string {
+  if (!text.includes(KODO_REVIEW_LABEL) && !text.includes(KODO_VERDICT_LABEL)) return text;
+  const read = readKodoReplyBlocks(text);
+  if (read.review === null && read.verdict === null) return text;
+  return [
+    read.text,
+    read.review === null ? "" : describeKodoReview(read.review),
+    read.verdict === null ? "" : describeKodoVerdict(read.verdict),
+  ]
+    .filter((part) => part.trim().length > 0)
+    .join("\n\n");
 }

@@ -6,11 +6,14 @@ import {
   CommandId,
   MessageId,
   type KodoLoop,
+  type KodoLoopAdvanceStep,
   type KodoLoopStageRecord,
   type OrchestrationV2Run,
   type OrchestrationV2ServerCommand,
   type ThreadId,
 } from "@t3tools/contracts";
+import { parseKodoReview, parseKodoVerdict } from "@t3tools/shared/kodoLoopOutput";
+import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
@@ -23,18 +26,21 @@ import {
   buildLoopReviewPrompt,
   type LoopDiffEvidence,
 } from "./evidence.ts";
+import { compactReview, compactVerdict } from "./loopRecord.ts";
 import { isKodoLoopTerminal } from "./loopState.ts";
 import {
   decideLoopStep,
   loopRunIds,
   kodoLoopStageMessageId,
+  stageRun,
   type LoopObservation,
   type LoopRunOutput,
   type LoopRunView,
   type LoopStageOutcome,
 } from "./loopMachine.ts";
 
-export type LoopStepResult = "gone" | "idle" | "acted" | "failed";
+/** `waiting`: nothing to do yet, but a look is owed soon (a reply still streaming). */
+export type LoopStepResult = "gone" | "idle" | "waiting" | "acted" | "failed";
 
 export interface LoopStepperDeps {
   readonly orchestrator: Pick<
@@ -43,7 +49,9 @@ export interface LoopStepperDeps {
   >;
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
-  ) => Effect.Effect<unknown, { readonly _tag: string }>;
+  ) => Effect.Effect<{ readonly replayed?: boolean | undefined }, { readonly _tag: string }>;
+  /** How long a finished run's reply may stay marked as streaming before it is taken as final. */
+  readonly streamingGraceMs?: number;
   /** The loop's changes between two run ordinals; a project without checkpoints has none. */
   readonly readDiff: (input: {
     readonly threadId: ThreadId;
@@ -59,6 +67,9 @@ const BAD_RUN_STATUSES: ReadonlySet<OrchestrationV2Run["status"]> = new Set([
   "rolled_back",
 ]);
 const MAX_DISPATCH_FAILURES = 3;
+/** The same step may be tried this many times with nothing changing before the loop gives up on it. */
+const MAX_STEP_REPEATS = 3;
+const DEFAULT_STREAMING_GRACE_MS = 30_000;
 
 const iso = (value: DateTime.Utc) => DateTime.formatIso(value);
 
@@ -77,7 +88,12 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
   deps: LoopStepperDeps,
 ) {
   const { orchestrator, dispatch } = deps;
+  const streamingGraceMs = deps.streamingGraceMs ?? DEFAULT_STREAMING_GRACE_MS;
   const failures = yield* Ref.make(new Map<string, number>());
+  /** How often the same step was tried with nothing changing, by loop, revision and step. */
+  const repeats = yield* Ref.make(new Map<string, number>());
+  /** When a finished run's reply was first seen still streaming. */
+  const streamingSince = yield* Ref.make(new Map<string, number>());
 
   /** Runs, with a restart-continuation check made before the read that would see its result. */
   const readRuns = Effect.fn("KodoLoopStepper.readRuns")(function* (
@@ -135,7 +151,6 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
         runId: run.id,
         userMessageId: run.userMessageId,
         status: run.status,
-        ordinal: run.ordinal,
         ...(run.restartContinuationOfRunId === undefined
           ? {}
           : { restartContinuationOfRunId: run.restartContinuationOfRunId }),
@@ -147,17 +162,22 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
     });
   });
 
-  /** A run's final reply and plan artifact; null while its reply is still streaming or absent. */
+  /**
+   * A run's final reply and plan artifact. Undefined while the reply is still streaming, unless
+   * `final` says the run is long over and the reply is taken as it stands; a run with no reply at
+   * all reads as an empty output, so a stage that finished silently can be told from one still writing.
+   */
   const readOutput = Effect.fn("KodoLoopStepper.readOutput")(function* (
     threadId: ThreadId,
     runId: string,
+    final: boolean,
   ) {
     const records = yield* orchestrator.getThreadRecords(threadId, ["messages", "plans"], {
       messageRunIds: [runId as OrchestrationV2Run["id"]],
       messageRoles: ["assistant"],
     });
     const messages = records.messages.filter((message) => message.runId === runId);
-    if (messages.some((message) => message.streaming)) return undefined;
+    if (!final && messages.some((message) => message.streaming)) return undefined;
     const last = messages
       .toSorted(
         (a, b) =>
@@ -182,6 +202,18 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
       (record) => record.round === round && record.stage === stage && record.status === "completed",
     );
 
+  /** What an earlier stage said, read again from its run's reply: records keep only headlines. */
+  const outputOfRecord = Effect.fn("KodoLoopStepper.outputOfRecord")(function* (
+    threadId: ThreadId,
+    record: KodoLoopStageRecord | undefined,
+  ) {
+    if (record?.runId == null) return undefined;
+    return yield* readOutput(threadId, record.runId, true);
+  });
+
+  const planOf = (output: LoopRunOutput | undefined) =>
+    (output?.planMarkdown?.trim() || output?.text?.trim() || "") as string;
+
   const diffFor = Effect.fn("KodoLoopStepper.diffFor")(function* (
     threadId: ThreadId,
     loop: KodoLoop,
@@ -205,33 +237,44 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
     runs: ReadonlyArray<OrchestrationV2Run>,
   ) {
     const common = { request: loop.request, round: loop.round, maxRounds: loop.maxRounds };
-    const plan = lastRecord(loop, loop.round, "plan")?.planMarkdown ?? "";
     const earlier = loop.round - 1;
-    const previousVerdict = earlier < 1 ? undefined : lastRecord(loop, earlier, "judge")?.verdict;
+    // The last round's judge answer, in full, from the judge's own reply.
+    const previousVerdict = Effect.fn("KodoLoopStepper.previousVerdict")(function* () {
+      if (earlier < 1) return undefined;
+      const output = yield* outputOfRecord(threadId, lastRecord(loop, earlier, "judge"));
+      const parsed = parseKodoVerdict(output?.text ?? "");
+      return parsed.ok ? parsed.value : undefined;
+    });
     switch (loop.stage) {
       case "plan": {
         const history = loop.stages
-          .filter((record) => record.stage === "judge" && record.verdict !== undefined)
-          .map((record) => `Round ${record.round}: ${record.verdict?.summary ?? ""}`);
+          .filter((record) => record.stage === "judge" && record.conclusion !== undefined)
+          .map((record) => `Round ${record.round}: ${record.conclusion ?? ""}`);
+        const verdict = yield* previousVerdict();
         return buildLoopPlanPrompt({
           ...common,
-          ...(previousVerdict === undefined
-            ? {}
-            : { previous: { verdict: previousVerdict, history } }),
+          ...(verdict === undefined ? {} : { previous: { verdict, history } }),
         });
       }
       case "code": {
-        const priorReview = earlier < 1 ? undefined : lastRecord(loop, earlier, "review")?.review;
+        const plan = planOf(yield* outputOfRecord(threadId, lastRecord(loop, loop.round, "plan")));
+        const verdict = yield* previousVerdict();
+        const priorReview =
+          earlier < 1
+            ? undefined
+            : parseKodoReview(
+                (yield* outputOfRecord(threadId, lastRecord(loop, earlier, "review")))?.text ?? "",
+              );
         return buildLoopCodePrompt({
           ...common,
           plan,
-          ...(previousVerdict === undefined ? {} : { outstanding: previousVerdict.outstanding }),
-          ...(priorReview === undefined ? {} : { openFindings: priorReview.findings }),
+          ...(verdict === undefined ? {} : { outstanding: verdict.outstanding }),
+          ...(priorReview?.ok === true ? { openFindings: priorReview.value.findings } : {}),
         });
       }
       case "review": {
-        const code = lastRecord(loop, loop.round, "code");
-        const report = code?.runId == null ? undefined : yield* readOutput(threadId, code.runId);
+        const plan = planOf(yield* outputOfRecord(threadId, lastRecord(loop, loop.round, "plan")));
+        const report = yield* outputOfRecord(threadId, lastRecord(loop, loop.round, "code"));
         return buildLoopReviewPrompt({
           ...common,
           plan,
@@ -240,19 +283,16 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
         });
       }
       case "judge": {
-        const review = lastRecord(loop, loop.round, "review");
-        const raw =
-          review?.review === undefined && review?.runId != null
-            ? yield* readOutput(threadId, review.runId)
-            : undefined;
+        const plan = planOf(yield* outputOfRecord(threadId, lastRecord(loop, loop.round, "plan")));
+        const raw = yield* outputOfRecord(threadId, lastRecord(loop, loop.round, "review"));
+        const parsed = parseKodoReview(raw?.text ?? "");
         return buildLoopJudgePrompt({
           ...common,
           plan,
           diff: yield* diffFor(threadId, loop, runs),
-          review:
-            review?.review !== undefined
-              ? { kind: "parsed", result: review.review }
-              : { kind: "raw", text: raw?.text ?? "" },
+          review: parsed.ok
+            ? { kind: "parsed", result: parsed.value }
+            : { kind: "raw", text: raw?.text ?? "" },
         });
       }
     }
@@ -270,17 +310,27 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
     model: run?.modelSelection ?? null,
     startedAt: iso(run?.startedAt ?? run?.requestedAt ?? DateTime.makeUnsafe(0)),
     completedAt: run?.completedAt == null ? null : iso(run.completedAt),
-    ...(outcome.verdict === undefined ? {} : { verdict: outcome.verdict }),
-    ...(outcome.review === undefined ? {} : { review: outcome.review }),
-    ...(outcome.reviewParse === undefined ? {} : { reviewParse: outcome.reviewParse }),
-    ...(outcome.planMarkdown === undefined ? {} : { planMarkdown: outcome.planMarkdown }),
+    ...(outcome.conclusion === undefined ? {} : { conclusion: outcome.conclusion }),
+    ...(outcome.verdict === undefined ? {} : { verdict: compactVerdict(outcome.verdict) }),
+    ...(outcome.stage === "review" && outcome.reviewParse !== undefined
+      ? { review: compactReview(outcome.review, outcome.reviewParse === "ok") }
+      : {}),
   });
+
+  const bump = (map: Ref.Ref<Map<string, number>>, key: string) =>
+    Ref.modify(map, (current) => {
+      const next = (current.get(key) ?? 0) + 1;
+      current.set(key, next);
+      return [next, current] as const;
+    });
 
   const stepThread = Effect.fn("KodoLoopStepper.stepThread")(function* (
     threadId: ThreadId,
   ): Effect.fn.Return<LoopStepResult, { readonly _tag: string }> {
     const first = (yield* orchestrator.getThreadRecords(threadId, [])).thread.kodoLoop;
     if (first === undefined) return "gone";
+    // An ended loop that owes nothing costs no more than this one read.
+    if (isKodoLoopTerminal(first.status) && first.cleanup === undefined) return "gone";
     const { thread, runs, pending } = yield* readRuns(threadId, first);
     const loop = thread.kodoLoop;
     if (loop === undefined) return "gone";
@@ -298,15 +348,31 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
       messageId,
     );
     const views = yield* viewsFor(threadId, runs, pending, memberIds);
-    // The output of the run now carrying the current stage, once it has completed.
+    // Only the run now carrying the current stage has a reply the loop reads, and only once it has completed.
     const outputs: Record<string, LoopRunOutput> = {};
-    for (const view of views) {
-      if (view.status !== "completed" || !memberIds.has(view.runId)) continue;
-      const chainEnd = !views.some((other) => other.restartContinuationOfRunId === view.runId);
-      if (!chainEnd) continue;
-      const output = yield* readOutput(threadId, view.runId);
-      if (output !== undefined && (output.text !== null || output.planMarkdown !== null)) {
-        outputs[view.runId] = output;
+    let waitingOnReply = false;
+    if (!isKodoLoopTerminal(loop.status)) {
+      const stageView = stageRun(views, messageId);
+      if (stageView !== undefined && stageView.status === "completed") {
+        const output = yield* readOutput(threadId, stageView.runId, false);
+        if (output !== undefined) {
+          outputs[stageView.runId] = output;
+        } else {
+          // A reply still marked as streaming on a finished run is taken as it stands after a while.
+          const now = yield* Clock.currentTimeMillis;
+          const since = yield* Ref.modify(streamingSince, (current) => {
+            const seen = current.get(stageView.runId) ?? now;
+            current.set(stageView.runId, seen);
+            return [seen, current] as const;
+          });
+          if (now - since >= streamingGraceMs) {
+            outputs[stageView.runId] = yield* readOutput(threadId, stageView.runId, true).pipe(
+              Effect.map((final) => final ?? { text: null, planMarkdown: null }),
+            );
+          } else {
+            waitingOnReply = true;
+          }
+        }
       }
     }
     const observation: LoopObservation = {
@@ -320,6 +386,30 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
     const id = (suffix: string) => CommandId.make(`kodo-loop:${loop.loopId}:${suffix}`);
     const advanceId = (type: string) => id(`rev${loop.revision}:${type}`);
     const runFor = (runId: string) => runs.find((run) => run.id === runId);
+    const advance = (step: KodoLoopAdvanceStep) =>
+      dispatch({
+        type: "thread.kodo-loop.advance",
+        commandId: advanceId(step.type),
+        threadId,
+        loopId: loop.loopId,
+        expectedRevision: loop.revision,
+        step,
+      });
+
+    const subject = (() => {
+      switch (decision.kind) {
+        case "set-mode":
+        case "restore-mode":
+          return `${decision.mode}:${String(thread.interactionMode)}`;
+        case "interrupt":
+          return decision.runId;
+        case "dispatch":
+          return decision.messageId;
+        default:
+          return "";
+      }
+    })();
+    const stepKey = `${loop.loopId}:${loop.revision}:${decision.kind}:${subject}`;
 
     const act = Effect.gen(function* (): Effect.fn.Return<
       LoopStepResult,
@@ -327,17 +417,22 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
     > {
       switch (decision.kind) {
         case "idle":
-          // A loop that has ended and has nothing left to clean up needs no more looks.
-          return isKodoLoopTerminal(loop.status) ? "gone" : "idle";
-        case "set-mode":
+          return waitingOnReply ? "waiting" : "idle";
+        case "set-mode": {
+          // Each try is a new command: a replayed one would change nothing and be tried for ever.
+          const attempt = yield* bump(repeats, stepKey);
+          if (attempt > MAX_STEP_REPEATS) return yield* giveUp(attempt);
           yield* dispatch({
             type: "thread.interaction-mode.set",
-            commandId: id(`${messageId}:mode:from-${String(thread.interactionMode)}`),
+            commandId: id(`rev${loop.revision}:${messageId}:mode:${attempt}`),
             threadId,
             interactionMode: decision.mode,
           });
           return "acted";
-        case "restore-mode":
+        }
+        case "restore-mode": {
+          const attempt = yield* bump(repeats, stepKey);
+          if (attempt > MAX_STEP_REPEATS) return yield* giveUp(attempt);
           yield* dispatch({
             type: "thread.interaction-mode.set",
             commandId: id(`rev${loop.revision}:restore:${decision.mode}`),
@@ -345,7 +440,10 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
             interactionMode: decision.mode,
           });
           return "acted";
+        }
         case "dispatch": {
+          const attempt = yield* bump(repeats, stepKey);
+          if (attempt > MAX_STEP_REPEATS) return yield* giveUp(attempt);
           const text = yield* stagePrompt(threadId, loop, runs);
           yield* dispatch({
             type: "message.dispatch",
@@ -362,68 +460,67 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
           });
           return "acted";
         }
-        case "interrupt":
-          yield* dispatch({
+        case "interrupt": {
+          const sent = yield* dispatch({
             type: "run.interrupt",
             commandId: id(`interrupt:${decision.runId}`),
             threadId,
             runId: decision.runId as OrchestrationV2Run["id"],
             reason: "The loop was stopped.",
           });
-          return "acted";
+          // Already asked: the run ends when its provider stops it, and that event brings the next look.
+          return sent.replayed === true ? "idle" : "acted";
+        }
         case "hold":
-          yield* dispatch({
-            type: "thread.kodo-loop.advance",
-            commandId: advanceId("hold"),
-            threadId,
-            loopId: loop.loopId,
-            expectedRevision: loop.revision,
-            step: { type: "hold", hold: decision.hold },
-          });
+          yield* advance({ type: "hold", hold: decision.hold });
           return "acted";
         case "release":
-          yield* dispatch({
-            type: "thread.kodo-loop.advance",
-            commandId: advanceId("release"),
-            threadId,
-            loopId: loop.loopId,
-            expectedRevision: loop.revision,
-            step: { type: "release" },
-          });
+          yield* advance({ type: "release" });
+          return "acted";
+        case "cleaned":
+          yield* advance({ type: "cleaned" });
           return "acted";
         case "advance":
-          yield* dispatch({
-            type: "thread.kodo-loop.advance",
-            commandId: advanceId("advance"),
-            threadId,
-            loopId: loop.loopId,
-            expectedRevision: loop.revision,
-            step: {
-              type: "advance",
-              record: recordFor(decision.outcome, runFor(decision.outcome.runId)),
-              ...(decision.hold === undefined ? {} : { hold: decision.hold }),
-            },
+          yield* advance({
+            type: "advance",
+            record: recordFor(decision.outcome, runFor(decision.outcome.runId)),
+            ...(decision.hold === undefined ? {} : { hold: decision.hold }),
           });
           return "acted";
         case "finish":
-          yield* dispatch({
-            type: "thread.kodo-loop.advance",
-            commandId: advanceId("finish"),
-            threadId,
-            loopId: loop.loopId,
-            expectedRevision: loop.revision,
-            step: {
-              type: "finish",
-              status: decision.status,
-              reason: decision.reason,
-              ...(decision.detail === undefined ? {} : { detail: decision.detail }),
-              ...(decision.outcome === undefined
-                ? {}
-                : { record: recordFor(decision.outcome, runFor(decision.outcome.runId)) }),
-            },
+          yield* advance({
+            type: "finish",
+            status: decision.status,
+            reason: decision.reason,
+            ...(decision.detail === undefined ? {} : { detail: decision.detail }),
+            ...(decision.outcome === undefined
+              ? {}
+              : { record: recordFor(decision.outcome, runFor(decision.outcome.runId)) }),
           });
           return "acted";
       }
+    });
+
+    /** The same step was tried too often with nothing changing: end the loop (or its clean-up) rather than spin. */
+    const giveUp = Effect.fn("KodoLoopStepper.giveUp")(function* (
+      attempts: number,
+    ): Effect.fn.Return<LoopStepResult, { readonly _tag: string }> {
+      yield* Effect.logWarning("kodo.loop.no-progress", {
+        threadId,
+        step: decision.kind,
+        attempts,
+      });
+      if (isKodoLoopTerminal(loop.status)) {
+        yield* advance({ type: "cleaned" });
+      } else {
+        yield* advance({
+          type: "finish",
+          status: "failed",
+          reason: "error",
+          detail: noProgressDetail(loop, decision.kind, attempts),
+        });
+      }
+      return "acted";
     });
 
     const key = `${loop.loopId}:${decision.kind}:${loop.round}:${loop.stage}:${loop.revision}`;
@@ -431,19 +528,15 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
       Effect.tap(() => Ref.update(failures, (map) => (map.delete(key), map))),
       Effect.catch((cause) =>
         Effect.gen(function* () {
-          const count = yield* Ref.modify(failures, (map) => {
-            const next = (map.get(key) ?? 0) + 1;
-            map.set(key, next);
-            return [next, map] as const;
-          });
+          const count = yield* bump(failures, key);
           yield* Effect.logWarning("kodo.loop.step-failed", {
             threadId,
             step: decision.kind,
             count,
             cause,
           });
-          // A stage that cannot be sent (provider turned off, mode above a ceiling) ends the loop
-          // instead of retrying forever; a stale write is simply read again.
+          // A stage that cannot be sent (provider turned off, mode above a ceiling, refused by the
+          // orchestrator) ends the loop instead of retrying forever; a stale write is simply read again.
           if (decision.kind === "dispatch" && count >= MAX_DISPATCH_FAILURES) {
             yield* dispatch({
               type: "thread.kodo-loop.advance",
@@ -458,6 +551,15 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
                 detail: errorText(cause).slice(0, 500),
               },
             }).pipe(Effect.ignore);
+            return "acted" as const;
+          }
+          // A clean-up that keeps failing is given up on, so an ended loop never keeps the worker busy.
+          if (
+            isKodoLoopTerminal(loop.status) &&
+            (decision.kind === "restore-mode" || decision.kind === "interrupt") &&
+            count >= MAX_DISPATCH_FAILURES
+          ) {
+            yield* advance({ type: "cleaned" }).pipe(Effect.ignore);
             return "acted" as const;
           }
           return "failed" as const;
@@ -478,5 +580,13 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
 
   return { step };
 });
+
+const noProgressDetail = (loop: KodoLoop, step: string, attempts: number) => {
+  const what: Record<string, string> = {
+    "set-mode": "set the thread's mode",
+    dispatch: `start the ${loop.stage} stage`,
+  };
+  return `The loop could not make progress: it tried to ${what[step] ?? step} ${attempts - 1} times and nothing changed.`;
+};
 
 export type KodoLoopStepper = Effect.Success<ReturnType<typeof makeKodoLoopStepper>>;

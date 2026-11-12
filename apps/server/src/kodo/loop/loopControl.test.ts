@@ -2,7 +2,15 @@ import { describe, expect, it } from "@effect/vitest";
 import { CheckpointId, MessageId, type KodoLoopControl } from "@t3tools/contracts";
 
 import * as ThreadManagementService from "../../orchestration-v2/ThreadManagementService.ts";
-import { decideKodoLoopAdvance, decideKodoLoopControl, validKodoLoopStage } from "./loopControl.ts";
+import {
+  decideKodoLoopAdvance,
+  decideKodoLoopControl,
+  decideKodoLoopMessage,
+  kodoLoopBlocksContinuation,
+  kodoLoopLimitRefusal,
+  kodoLoopModeSetRefusal,
+  validKodoLoopStage,
+} from "./loopControl.ts";
 import { kodoLoopStageMessageId } from "./loopMachine.ts";
 import { testLoop, testRecord } from "./testing.ts";
 
@@ -37,7 +45,7 @@ describe("starting", () => {
       loop: {
         loopId: "cmd-1",
         startMode: "plan",
-        baseline: { runOrdinal: 3, checkpointTurnCount: 2 },
+        baseline: { checkpointTurnCount: 2 },
       },
     });
   });
@@ -57,6 +65,22 @@ describe("starting", () => {
       });
     },
   );
+
+  it("keeps the mode a loop started in when the one before it left the thread in a stage mode", () => {
+    const ended = testLoop({
+      status: "stopped",
+      stopReason: "user_message",
+      startMode: "ask",
+      cleanup: { leftMode: "code" },
+    });
+    const result = decideKodoLoopControl({
+      commandId: "c",
+      control: start,
+      thread: thread({ interactionMode: "code", kodoLoop: ended }),
+      runs: [],
+    });
+    expect(result).toMatchObject({ ok: true, loop: { startMode: "ask" } });
+  });
 
   it("is refused while a loop is running, and allowed after it ended", () => {
     const refused = decideKodoLoopControl({
@@ -81,20 +105,18 @@ describe("resuming", () => {
     status: "stopped",
     stopReason: "round_cap",
     stage: "judge",
-    baseline: { runOrdinal: 4 },
+    cleanup: { leftMode: "review" },
   });
 
-  it("moves the baseline past whatever a person ran in the meantime", () => {
+  it("runs another round, and drops a clean-up the resumed loop no longer owes", () => {
     const result = decideKodoLoopControl({
       commandId: "c",
       control: { type: "extend", rounds: 2 },
-      thread: thread({ interactionMode: "code", kodoLoop: capped }),
+      thread: thread({ interactionMode: "review", kodoLoop: capped }),
       runs: [run("completed", 9)],
     });
-    expect(result).toMatchObject({
-      ok: true,
-      loop: { round: 2, maxRounds: 5, baseline: { runOrdinal: 9 } },
-    });
+    expect(result).toMatchObject({ ok: true, loop: { round: 2, maxRounds: 5 } });
+    expect(result.ok && result.loop.cleanup).toBeUndefined();
   });
 
   it("is refused while a turn runs", () => {
@@ -175,5 +197,204 @@ describe("a message's claim to be a loop stage", () => {
     });
     expect(stamped).not.toHaveProperty("kodoLoopStage");
     expect(stamped).toMatchObject({ createdBy: "user", text: "hi" });
+  });
+});
+
+describe("what a message arriving on the thread means for its loop", () => {
+  const running = testLoop({ stage: "code", startMode: "ask" });
+  const base = { threadMode: "code", steersActiveRun: false } as const;
+  const person = { messageId: "m-person" };
+
+  it("a person's message ends the loop as user_message and takes the start mode back before its run exists", () => {
+    const decision = decideKodoLoopMessage({ ...base, loop: running, message: person });
+    expect(decision).toMatchObject({
+      type: "stop",
+      setMode: "ask",
+      loop: { status: "stopped", stopReason: "user_message", revision: 2 },
+    });
+    // The mode is handed back in the same commit, so the loop owes nothing afterwards.
+    expect(decision.type === "stop" && decision.loop.cleanup).toBeUndefined();
+  });
+
+  it("a steer into the stage run ends the loop too, and leaves the mode to the clean-up after the run", () => {
+    const decision = decideKodoLoopMessage({
+      ...base,
+      steersActiveRun: true,
+      loop: running,
+      message: person,
+    });
+    expect(decision).toMatchObject({
+      type: "stop",
+      setMode: undefined,
+      loop: { stopReason: "user_message", cleanup: { leftMode: "code" } },
+    });
+  });
+
+  it.each([
+    ["a scheduled task", { scheduledTaskId: "task" }],
+    ["another agent", { senderThreadId: "other-thread" }],
+    ["a goal command", {}],
+  ])("%s is treated like a person", (_name, extra) => {
+    expect(
+      decideKodoLoopMessage({ ...base, loop: running, message: { ...person, ...extra } }),
+    ).toMatchObject({ type: "stop" });
+  });
+
+  it.each([
+    ["a delegated task's wake", { delegatedCompletion: {} }],
+    ["a notice", { notification: {} }],
+    ["idle compaction", { idleCompaction: {} }],
+    ["a restart's continuation", { restartContinuationOfRunId: "r" }],
+    ["a usage limit's auto-resume", { usageLimitContinuationOfRunId: "r" }],
+    ["a person's resume of a run", { manualContinuationOfRunId: "r" }],
+  ])("%s does not end the loop", (_name, extra) => {
+    expect(
+      decideKodoLoopMessage({ ...base, loop: running, message: { ...person, ...extra } }),
+    ).toEqual({ type: "pass" });
+  });
+
+  it("a message on a thread with no loop, or whose loop owes nothing, is nobody's business", () => {
+    expect(decideKodoLoopMessage({ ...base, loop: undefined, message: person })).toEqual({
+      type: "pass",
+    });
+    const ended = testLoop({ status: "done", stopReason: "complete", startMode: "ask" });
+    expect(decideKodoLoopMessage({ ...base, loop: ended, message: person })).toEqual({
+      type: "pass",
+    });
+  });
+
+  it("a message that starts its own run after a steer-stop takes the start mode, once", () => {
+    const ended = testLoop({
+      status: "stopped",
+      stopReason: "user_message",
+      startMode: "ask",
+      cleanup: { leftMode: "code" },
+    });
+    const decision = decideKodoLoopMessage({ ...base, loop: ended, message: person });
+    expect(decision).toMatchObject({ type: "restore", setMode: "ask" });
+    expect(decision.type === "restore" && decision.loop.cleanup).toBeUndefined();
+    // A second steer into the same run waits for the clean-up like the first.
+    expect(
+      decideKodoLoopMessage({ ...base, steersActiveRun: true, loop: ended, message: person }),
+    ).toEqual({ type: "pass" });
+    // A person who changed the mode since keeps their choice.
+    expect(
+      decideKodoLoopMessage({ ...base, threadMode: "review", loop: ended, message: person }),
+    ).toEqual({ type: "pass" });
+  });
+
+  describe("a stage message", () => {
+    const loop = testLoop({ stage: "code" });
+    const id = kodoLoopStageMessageId(loop, 1, "code");
+    const claim = { loopId: "L1", round: 1, stage: "code" } as const;
+    const stage = { messageId: id, kodoLoopStage: claim };
+
+    it("is accepted when the active loop is at that stage and the thread is in its mode", () => {
+      expect(decideKodoLoopMessage({ ...base, loop, message: stage })).toEqual({
+        type: "stage",
+        stage: claim,
+      });
+    });
+
+    it.each([
+      ["the thread is in another mode", { threadMode: "ask" }, stage],
+      ["the loop was stopped", { loop: { ...loop, status: "stopped" as const } }, stage],
+      ["the loop moved to another stage", { loop: { ...loop, stage: "review" as const } }, stage],
+      ["the claim names another loop", {}, { ...stage, kodoLoopStage: { ...claim, loopId: "x" } }],
+      ["the loop is held", { loop: { ...loop, status: "held" as const } }, stage],
+    ])("is refused when %s", (_name, over, message) => {
+      const decision = decideKodoLoopMessage({ ...base, loop, ...over, message });
+      expect(decision).toMatchObject({ type: "refuse" });
+    });
+
+    it("cannot be forged: a message with a loop-stage-shaped id is refused whatever it claims", () => {
+      // No claim at all (the transport stripped it), and a client's own id in the reserved shape.
+      for (const message of [{ messageId: id }, { messageId: "kodo-loop-L1-r1-plan" }]) {
+        expect(decideKodoLoopMessage({ ...base, loop, message })).toMatchObject({
+          type: "refuse",
+          message: expect.stringContaining("only the running loop"),
+        });
+      }
+      // And on a thread with no loop at all.
+      expect(
+        decideKodoLoopMessage({ ...base, loop: undefined, message: { messageId: id } }),
+      ).toMatchObject({ type: "refuse" });
+    });
+  });
+});
+
+describe("mode changes while a loop runs", () => {
+  const running = testLoop();
+
+  it("are refused from anyone but the loop, with a message that says how to get out", () => {
+    expect(kodoLoopModeSetRefusal(running, { commandId: "command:web:mode" })).toContain(
+      "/loop stop",
+    );
+    expect(kodoLoopModeSetRefusal(running, { commandId: "kodo-loop:other:rev1:x:mode:1" })).toBe(
+      kodoLoopModeSetRefusal(running, { commandId: "client" }),
+    );
+  });
+
+  it("are the loop's own to make, and anyone's once it has ended or when there is none", () => {
+    expect(
+      kodoLoopModeSetRefusal(running, { commandId: "kodo-loop:L1:rev1:m:mode:1" }),
+    ).toBeUndefined();
+    expect(
+      kodoLoopModeSetRefusal(testLoop({ status: "done" }), { commandId: "c" }),
+    ).toBeUndefined();
+    expect(kodoLoopModeSetRefusal(undefined, { commandId: "c" })).toBeUndefined();
+  });
+});
+
+describe("a sender limited below Code", () => {
+  const control = (type: KodoLoopControl["type"]) =>
+    ({
+      type: "thread.kodo-loop.control",
+      control: type === "start" ? start : ({ type, rounds: 1 } as KodoLoopControl),
+    }) as const;
+
+  it.each(["start", "extend", "approve", "retry-judge"] as const)(
+    "cannot %s a loop, whatever mode it is limited to below Code",
+    (type) => {
+      for (const limited of ["ask", "plan", "review"]) {
+        expect(kodoLoopLimitRefusal(control(type), { interactionMode: limited })).toContain(
+          `limited to ${limited} mode`,
+        );
+      }
+    },
+  );
+
+  it("can stop one, and a sender allowed Code (or with no limit) can do all of it", () => {
+    expect(kodoLoopLimitRefusal(control("stop"), { interactionMode: "plan" })).toBeUndefined();
+    expect(kodoLoopLimitRefusal(control("start"), { interactionMode: "code" })).toBeUndefined();
+    expect(kodoLoopLimitRefusal(control("start"), undefined)).toBeUndefined();
+    expect(
+      kodoLoopLimitRefusal({ type: "message.dispatch" }, { interactionMode: "ask" }),
+    ).toBeUndefined();
+  });
+});
+
+describe("continuing a run of a loop that ended", () => {
+  const runs = [
+    { id: "r1", userMessageId: "kodo-loop-L1-r1-plan" },
+    { id: "r2", userMessageId: "m-restart", restartContinuationOfRunId: "r1" },
+    { id: "r3", userMessageId: "m-person" },
+  ];
+
+  it.each(["user_stop", "provider_limit", "error", "round_cap"] as const)(
+    "is blocked for the loop's own runs when it ended as %s, and for what continued them",
+    (stopReason) => {
+      const loop = testLoop({ status: "stopped", stopReason });
+      expect(kodoLoopBlocksContinuation(loop, runs, { id: "r1" })).toBe(true);
+      expect(kodoLoopBlocksContinuation(loop, runs, { id: "r2" })).toBe(true);
+      expect(kodoLoopBlocksContinuation(loop, runs, { id: "r3" })).toBe(false);
+    },
+  );
+
+  it("is allowed after a person's message took the run over, while the loop runs, or with no loop", () => {
+    const taken = testLoop({ status: "stopped", stopReason: "user_message" });
+    expect(kodoLoopBlocksContinuation(taken, runs, { id: "r1" })).toBe(false);
+    expect(kodoLoopBlocksContinuation(testLoop(), runs, { id: "r1" })).toBe(false);
+    expect(kodoLoopBlocksContinuation(undefined, runs, { id: "r1" })).toBe(false);
   });
 });

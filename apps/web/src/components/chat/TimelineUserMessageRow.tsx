@@ -41,6 +41,8 @@ import {
 import { Button, InlineButton } from "../ui/button";
 import { FreshSessionRow, ModelSwitchRow } from "./V2LifecycleRow";
 import { KodoRunModelNotice } from "../../kodo/KodoRunModelNotice"; // KODO: mode-models-notice
+import { KodoLoopStageMarker } from "../../kodo/KodoLoopStageMarker"; // KODO: loop-stage-marker
+import { parseKodoLoopStageMessageId } from "../../kodo/loopStageMarker.logic"; // KODO: loop-stage-marker
 import { useAssetUrlRefresh, useAssetUrls, useAssetUrlState } from "../../assets/assetUrls";
 import { AttachmentImage } from "../media/AttachmentImage";
 import { MediaVideoPlayer } from "../media/MediaVideoPlayer";
@@ -252,9 +254,14 @@ export function UserMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mes
   const ctx = use(TimelineRowCtx);
   const item = row.projectedItem?.item;
   const modelSwitch = item?.type === "user_message" ? item.modelSwitch : undefined;
+  // KODO: loop-stage-marker - the loop's own hand-off message is a one-line marker, not a bubble
+  const kodoStage =
+    row.message.createdBy === "user" ? null : parseKodoLoopStageMessageId(row.message.id);
   return (
     <>
-      {item?.type === "user_message" && item.freshContext ? <FreshSessionRow /> : null}
+      {item?.type === "user_message" && item.freshContext && kodoStage === null ? (
+        <FreshSessionRow />
+      ) : null}
       {/* KODO: mode-models-notice */}
       {item?.type === "user_message" ? (
         <KodoRunModelNotice
@@ -265,7 +272,11 @@ export function UserMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mes
       {modelSwitch ? (
         <ModelSwitchRow environmentId={ctx.activeThreadEnvironmentId} modelSwitch={modelSwitch} />
       ) : null}
-      <UserMessageContent row={row} />
+      {kodoStage === null ? (
+        <UserMessageContent row={row} />
+      ) : (
+        <KodoLoopStageMarker stage={kodoStage} text={row.message.text} />
+      )}
     </>
   );
 }

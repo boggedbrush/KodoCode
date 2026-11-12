@@ -13,7 +13,13 @@ import {
 } from "@t3tools/contracts";
 import { parseKodoReview, parseKodoVerdict } from "@t3tools/shared/kodoLoopOutput";
 
-import { isKodoLoopTerminal, kodoLoopStageMode, type KodoLoopTerminalStatus } from "./loopState.ts";
+import { conclusionOf, firstSayingLine } from "./loopRecord.ts";
+import {
+  KODO_LOOP_STAGE_MODES,
+  isKodoLoopTerminal,
+  kodoLoopStageMode,
+  type KodoLoopTerminalStatus,
+} from "./loopState.ts";
 
 export type LoopRunStatus =
   | "preparing"
@@ -51,8 +57,6 @@ export interface LoopRunView {
   readonly usageLimit?: boolean | undefined;
   /** One line saying why a failed run failed. */
   readonly failureMessage?: string | undefined;
-  /** The run's ordinal on the thread; later than the loop's baseline means it began after the loop did. */
-  readonly ordinal?: number | undefined;
   /**
    * A server restart ended this run and has not started its continuation yet: the continuation run
    * is created by an effect that runs after the restart commit, so for a while the run looks
@@ -74,8 +78,9 @@ export interface LoopObservation {
   /** Every run on the thread. */
   readonly runs: ReadonlyArray<LoopRunView>;
   /**
-   * The output of each settled run the caller could read, by run id. A completed run with no entry
-   * is one whose message has not arrived yet: the loop waits for it rather than guessing.
+   * The output of the run now carrying the current stage, once it has completed and its reply is
+   * final (an empty output is a reply that never came). A completed run with no entry is one whose
+   * message is still streaming: the loop waits, and the caller bounds that wait.
    */
   readonly outputs: Readonly<Record<string, LoopRunOutput>>;
   /** What the budget gate compares: null where a number is not known, which never stops the loop. */
@@ -97,6 +102,8 @@ export interface LoopStageOutcome {
   readonly review?: KodoReviewResult;
   readonly reviewParse?: "ok" | "failed";
   readonly planMarkdown?: string;
+  /** One line saying what the stage concluded. */
+  readonly conclusion?: string;
 }
 
 export type LoopStep =
@@ -128,7 +135,9 @@ export type LoopStep =
   /** After a stop: end the loop's own run that is still spending. */
   | { readonly kind: "interrupt"; readonly runId: string }
   /** After the loop: put the thread back in the mode it started in. */
-  | { readonly kind: "restore-mode"; readonly mode: KodoInteractionMode };
+  | { readonly kind: "restore-mode"; readonly mode: KodoInteractionMode }
+  /** After the loop: nothing is left to do, or what is left cannot be done. */
+  | { readonly kind: "cleaned" };
 
 const PLAN_MARKDOWN_MAX_CHARS = 20_000;
 
@@ -181,7 +190,10 @@ export function loopRunIds(
 }
 
 /** The run now carrying the stage: the end of the restart chain that starts at the stage's message. */
-function stageRun(runs: ReadonlyArray<LoopRunView>, messageId: string): LoopRunView | undefined {
+export function stageRun(
+  runs: ReadonlyArray<LoopRunView>,
+  messageId: string,
+): LoopRunView | undefined {
   const chain = new Set<string>();
   let grew = true;
   while (grew) {
@@ -245,7 +257,11 @@ function failedRunStep(loop: KodoLoop, messageId: string, run: LoopRunView): Loo
   };
 }
 
-/** What a stage run that completed means: the next stage, or the end. Null while its output is unread. */
+/**
+ * What a stage run that completed means: the next stage, or the end. Null while its reply is still
+ * streaming. A stage that is owed an answer and got none ends the loop with that said, so a run that
+ * finished silently cannot leave it waiting for ever. The coding stage's report is not needed.
+ */
 function settledStep(
   loop: KodoLoop,
   messageId: string,
@@ -260,48 +276,63 @@ function settledStep(
     runId: run.runId,
     status: "completed" as const,
   };
+  const text = trimmedOrNull(output.text);
+  const silent = (reason: "error" | "verdict_invalid", detail: string): LoopStep => ({
+    kind: "finish",
+    status: "failed",
+    reason,
+    detail,
+    outcome: { ...base, status: "failed" },
+  });
   switch (loop.stage) {
     case "plan": {
-      const plan = trimmedOrNull(output.planMarkdown) ?? trimmedOrNull(output.text);
-      if (plan === null) {
-        return {
-          kind: "finish",
-          status: "failed",
-          reason: "error",
-          detail: "The plan stage ended without a plan.",
-          outcome: { ...base, status: "failed" },
-        };
-      }
+      const plan = trimmedOrNull(output.planMarkdown) ?? text;
+      if (plan === null) return silent("error", "The plan stage ended without a plan.");
+      const conclusion = firstSayingLine(plan);
       return {
         kind: "advance",
-        outcome: { ...base, planMarkdown: plan.slice(0, PLAN_MARKDOWN_MAX_CHARS) },
+        outcome: {
+          ...base,
+          planMarkdown: plan.slice(0, PLAN_MARKDOWN_MAX_CHARS),
+          ...(conclusion === undefined ? {} : { conclusion }),
+        },
         ...(loop.planApproval === "ask" ? { hold: "plan_approval" as const } : {}),
       };
     }
-    case "code":
-      return { kind: "advance", outcome: base };
-    case "review": {
-      // A review that cannot be read does not stop the loop: the judge reads the raw text instead.
-      const review = parseKodoReview(output.text ?? "");
+    case "code": {
+      const conclusion = firstSayingLine(text);
       return {
         kind: "advance",
-        outcome: review.ok
-          ? { ...base, review: review.value, reviewParse: "ok" }
-          : { ...base, reviewParse: "failed" },
+        outcome: { ...base, ...(conclusion === undefined ? {} : { conclusion }) },
+      };
+    }
+    case "review": {
+      if (text === null) return silent("error", "The review stage ended without a reply.");
+      // A review that cannot be read does not stop the loop: the judge reads the raw text instead.
+      const review = parseKodoReview(text);
+      const conclusion = review.ok ? conclusionOf(review.value.summary) : firstSayingLine(text);
+      return {
+        kind: "advance",
+        outcome: {
+          ...(review.ok
+            ? { ...base, review: review.value, reviewParse: "ok" as const }
+            : { ...base, reviewParse: "failed" as const }),
+          ...(conclusion === undefined ? {} : { conclusion }),
+        },
       };
     }
     case "judge": {
-      const verdict = parseKodoVerdict(output.text ?? "");
-      if (!verdict.ok) {
-        return {
-          kind: "finish",
-          status: "failed",
-          reason: "verdict_invalid",
-          detail: verdict.detail,
-          outcome: { ...base, status: "failed" },
-        };
+      if (text === null) {
+        return silent("verdict_invalid", "The judge's run ended without a reply.");
       }
-      const outcome = { ...base, verdict: verdict.value };
+      const verdict = parseKodoVerdict(text);
+      if (!verdict.ok) return silent("verdict_invalid", verdict.detail);
+      const conclusion = conclusionOf(verdict.value.summary);
+      const outcome = {
+        ...base,
+        verdict: verdict.value,
+        ...(conclusion === undefined ? {} : { conclusion }),
+      };
       if (verdict.value.complete) {
         return { kind: "finish", status: "done", reason: "complete", outcome };
       }
@@ -346,34 +377,43 @@ function budgetTrip(loop: KodoLoop, usage: LoopObservation["usage"]): string | n
   return null;
 }
 
-const LOOP_STAGE_MODES: ReadonlySet<KodoInteractionMode> = new Set(["plan", "code", "review"]);
-
-/** After the loop ended: stop what still spends, then hand the thread's mode back. */
+/**
+ * After the loop ended: end the loop's own runs a person's stop left running, wait until nothing runs
+ * on the thread, then hand the mode back, unless a person already moved it. Whatever the loop owes is
+ * recorded on it (`cleanup`), so this finds it again after a restart.
+ */
 function cleanupStep(
   loop: KodoLoop,
   observation: LoopObservation,
   members: ReadonlySet<string>,
 ): LoopStep {
-  if (loop.stopReason === "user_stop") {
+  const owed = loop.cleanup;
+  if (owed === undefined) return { kind: "idle" };
+  if (owed.interrupt === true) {
     const spending = observation.runs.find(
       (run) => members.has(run.runId) && ACTIVE_RUN_STATUSES.has(run.status),
     );
     if (spending !== undefined) return { kind: "interrupt", runId: spending.runId };
   }
-  // The message that stopped the loop owns the thread's mode now.
-  if (loop.stopReason === "user_message") return { kind: "idle" };
+  // Another turn (a person's, or a wake) may be running in the mode the loop left; wait for it.
   if (observation.runs.some((run) => ACTIVE_RUN_STATUSES.has(run.status))) return { kind: "idle" };
   const mode = normalizeKodoInteractionMode(observation.threadMode);
-  return mode !== loop.startMode && LOOP_STAGE_MODES.has(mode)
-    ? { kind: "restore-mode", mode: loop.startMode }
-    : { kind: "idle" };
+  if (
+    owed.leftMode !== undefined &&
+    mode === owed.leftMode &&
+    mode !== loop.startMode &&
+    KODO_LOOP_STAGE_MODES.has(mode)
+  ) {
+    return { kind: "restore-mode", mode: loop.startMode };
+  }
+  return { kind: "cleaned" };
 }
 
 /**
- * The next step for a loop, in this order, first match wins: a run that ended badly or an unreadable
- * judge answer; a person's message on the thread; a complete verdict; the round cap; the budget;
- * then holds and ordinary progress. A person's own stop has already ended the loop, and what is left
- * for it here is clean-up.
+ * The next step, first match wins: a stage run that ended badly or an unreadable judge answer; a
+ * complete verdict; the round cap; the budget; then holds and progress. A person's message ends the
+ * loop in the orchestrator, so an ended loop only cleans up. Turns that are not a person's are
+ * waited out before the next stage.
  */
 export function decideLoopStep(loop: KodoLoop, observation: LoopObservation): LoopStep {
   const messageId = kodoLoopStageMessageId(loop, loop.round, loop.stage);
@@ -391,37 +431,6 @@ export function decideLoopStep(loop: KodoLoop, observation: LoopObservation): Lo
     if (run.continuationPending === true) return { kind: "idle" };
     return failedRunStep(loop, messageId, run);
   }
-  if (
-    settled?.kind === "finish" &&
-    (settled.reason === "error" || settled.reason === "verdict_invalid")
-  ) {
-    return settled;
-  }
-
-  // A complete verdict is the answer the loop was after; a message sent while the judge answered
-  // does not undo it.
-  if (settled?.kind === "finish" && settled.status === "done") return settled;
-
-  // A person's message counts whether it is still running or already ended, as long as it began
-  // after the loop did: a run that started and finished between two looks is not missed.
-  const baselineOrdinal = loop.baseline.runOrdinal;
-  const foreign = observation.runs.find(
-    (candidate) =>
-      !members.has(candidate.runId) &&
-      (ACTIVE_RUN_STATUSES.has(candidate.status) ||
-        (baselineOrdinal !== undefined &&
-          candidate.ordinal !== undefined &&
-          candidate.ordinal > baselineOrdinal)),
-  );
-  if (foreign !== undefined) {
-    return {
-      kind: "finish",
-      status: "stopped",
-      reason: "user_message",
-      detail: "A message was sent on the thread.",
-    };
-  }
-
   if (settled?.kind === "finish") return settled;
 
   // Between stages is the only place the budget is read, so a stage in flight always finishes.
@@ -436,6 +445,15 @@ export function decideLoopStep(loop: KodoLoop, observation: LoopObservation): Lo
   if (loop.status === "held" && loop.hold === "plan_approval") return { kind: "idle" };
 
   if (run === undefined) {
+    // A turn that is not the loop's (a wake the stage's work called for, a notice) finishes first, so
+    // it never runs in a mode the loop is about to change.
+    if (
+      observation.runs.some(
+        (other) => !members.has(other.runId) && ACTIVE_RUN_STATUSES.has(other.status),
+      )
+    ) {
+      return { kind: "idle" };
+    }
     const mode = kodoLoopStageMode(loop.stage);
     return normalizeKodoInteractionMode(observation.threadMode) === mode
       ? { kind: "dispatch", round: loop.round, stage: loop.stage, messageId, mode }

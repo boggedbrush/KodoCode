@@ -4,6 +4,7 @@ import { MessageId, type KodoLoop } from "@t3tools/contracts";
 import {
   kodoLoopActions,
   kodoLoopHeldReason,
+  kodoLoopOutstanding,
   kodoLoopStageStrip,
   kodoLoopStopText,
   kodoLoopTitle,
@@ -131,5 +132,74 @@ describe("what the person can do", () => {
       extendBy: 0,
     });
     expect(kodoLoopActions(capped, { ...input, threadIdle: false }).extendBy).toBe(0);
+  });
+});
+
+describe("what a loop that ended without finishing says is outstanding", () => {
+  const judged = (verdict: NonNullable<KodoLoop["stages"][number]["verdict"]>, round = 1) => ({
+    round,
+    stage: "judge" as const,
+    messageId: MessageId.make(`j${round}`),
+    runId: null,
+    status: "completed" as const,
+    model: null,
+    startedAt: "2026-01-01T00:00:00.000Z",
+    completedAt: null,
+    conclusion: "One thing is missing in `parse()`.",
+    verdict,
+  });
+  const incomplete = {
+    complete: false,
+    outstandingCount: 3,
+    outstanding: [{ title: "No test for `strict`" }, { title: "Docs" }],
+  };
+
+  it.each([
+    ["the round cap", { status: "stopped", stopReason: "round_cap" }],
+    ["a stop", { status: "stopped", stopReason: "user_stop" }],
+    ["an error", { status: "failed", stopReason: "error" }],
+  ] as const)(
+    "is listed when the loop ended at %s, with the titles and how many more",
+    (_name, ended) => {
+      const result = kodoLoopOutstanding(loop({ ...ended, stages: [judged(incomplete)] }));
+      expect(result).toEqual({
+        summary: "One thing is missing in `parse()`.",
+        items: ["No test for `strict`", "Docs"],
+        more: 1,
+      });
+    },
+  );
+
+  it("is the newest judged round's, even when the loop stopped in a later round", () => {
+    const result = kodoLoopOutstanding(
+      loop({
+        status: "stopped",
+        stopReason: "user_stop",
+        stages: [
+          judged({ ...incomplete, outstandingCount: 2 }, 1),
+          judged(
+            { complete: false, outstandingCount: 1, outstanding: [{ title: "Only this" }] },
+            2,
+          ),
+        ],
+      }),
+    );
+    expect(result?.items).toEqual(["Only this"]);
+  });
+
+  it.each([
+    ["it runs", { status: "active" }, incomplete],
+    [
+      "it is done",
+      { status: "done", stopReason: "complete" },
+      { complete: true, outstandingCount: 0, outstanding: [] },
+    ],
+    ["no round was judged", { status: "stopped", stopReason: "user_stop" }, undefined],
+  ] as const)("is not shown when %s", (_name, over, verdict) => {
+    expect(
+      kodoLoopOutstanding(
+        loop({ ...over, stages: verdict === undefined ? [] : [judged(verdict)] }),
+      ),
+    ).toBeNull();
   });
 });

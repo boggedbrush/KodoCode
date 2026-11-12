@@ -22,8 +22,12 @@ import { makeKodoModeModelTurn } from "../kodo/modeModelTurn.ts"; // KODO: mode-
 import {
   decideKodoLoopAdvance,
   decideKodoLoopControl,
-  validKodoLoopStage,
+  decideKodoLoopMessage,
+  kodoLoopBlocksContinuation,
+  kodoLoopLimitRefusal,
+  kodoLoopModeSetRefusal,
 } from "../kodo/loop/loopControl.ts"; // KODO: loop-command
+import { buildKodoLoopRequestMessage } from "../kodo/loop/loopRequestMessage.ts"; // KODO: loop-command
 import type { KodoThreadModeModel } from "@t3tools/contracts"; // KODO: mode-models-turn
 import { kodoThreadModeModelFor } from "@t3tools/shared/kodoModeModel"; // KODO: mode-models-turn
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts"; // KODO: mode-models-turn
@@ -3623,6 +3627,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.threadId} is deleted.`,
       });
     }
+    // KODO: loop-command - while a loop runs, only the loop sets the mode
+    const kodoModeRefusal =
+      command.type === "thread.interaction-mode.set"
+        ? kodoLoopModeSetRefusal(thread.kodoLoop, command)
+        : undefined;
+    if (kodoModeRefusal !== undefined) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: kodoModeRefusal,
+      });
+    }
     if (
       command.type === "thread.pull-request.watch" &&
       command.watching &&
@@ -4911,6 +4927,35 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       occurredAt: now,
       payload: { ...thread, kodoLoop: decided.loop, updatedAt: now },
     });
+    // The person's `/loop` message is a row of the thread, so every client shows it above the first stage.
+    if (command.type === "thread.kodo-loop.control" && command.control.type === "start") {
+      const request = buildKodoLoopRequestMessage({
+        threadId: command.threadId,
+        control: command.control,
+        turnItemId: idAllocator.derive.userTurnItem({
+          messageId: command.control.requestMessageId,
+        }),
+        ordinal: yield* nextTurnItemOrdinal({ thread }),
+        now,
+      });
+      if (request !== null) {
+        const emitRequest = emit(events, command);
+        yield* emitRequest({
+          type: "message.updated",
+          threadId: command.threadId,
+          providerInstanceId: thread.providerInstanceId,
+          occurredAt: now,
+          payload: request.message,
+        });
+        yield* emitRequest({
+          type: "turn-item.updated",
+          threadId: command.threadId,
+          providerInstanceId: thread.providerInstanceId,
+          occurredAt: now,
+          payload: request.turnItem,
+        });
+      }
+    }
   });
 
   const dispatchThreadProjectAdoptFolder = Effect.fn(
@@ -6109,7 +6154,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         projection.thread.providerInstanceId !== run.providerInstanceId ||
         projection.runtimeRequests.some((request) => request.status === "pending") ||
         (projection.thread.snoozedUntil != null &&
-          DateTime.toEpochMillis(projection.thread.snoozedUntil) > DateTime.toEpochMillis(now))
+          DateTime.toEpochMillis(projection.thread.snoozedUntil) > DateTime.toEpochMillis(now)) ||
+        // KODO: loop-message - a stage of a loop that ended does not run on
+        kodoLoopBlocksContinuation(projection.thread.kodoLoop, projection.runs, run)
       ) {
         yield* emit(
           events,
@@ -6151,6 +6198,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             !cancelledBeforeStart(run) &&
             runRanAfter(run, source),
         ) ||
+        // KODO: loop-message - a stage of a loop that ended does not run on
+        kodoLoopBlocksContinuation(projection.thread.kodoLoop, projection.runs, source) ||
         (yield* stopReachedRun(command, command.threadId, source.id))
       ) {
         // Preserve the current row so stale automatic deliveries receive an
@@ -6576,6 +6625,52 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         dispatchMode = { type: "queue_after_active" };
       }
     }
+    // KODO: loop-message - a stage message is accepted only from the running loop, and any other message
+    // from a person ends it (see kodo/loop/loopControl.ts); both are decided in this message's commit.
+    const kodoLoopDecision = decideKodoLoopMessage({
+      loop: projection.thread.kodoLoop,
+      threadMode: projection.thread.interactionMode,
+      message: command,
+      steersActiveRun: dispatchMode.type === "steer_active",
+    });
+    if (kodoLoopDecision.type === "refuse") {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: kodoLoopDecision.message,
+      });
+    }
+    if (kodoLoopDecision.type === "stop" || kodoLoopDecision.type === "restore") {
+      const endedAt = yield* DateTime.now;
+      const ended = yield* emit(
+        events,
+        command,
+      )({
+        type: "thread.metadata-updated",
+        threadId: command.threadId,
+        providerInstanceId: projection.thread.providerInstanceId,
+        occurredAt: endedAt,
+        payload: { ...projection.thread, kodoLoop: kodoLoopDecision.loop, updatedAt: endedAt },
+      });
+      projection = applyToProjection(projection, ended);
+      if (kodoLoopDecision.setMode !== undefined) {
+        const restored = yield* emit(
+          events,
+          command,
+        )({
+          type: "thread.interaction-mode-updated",
+          threadId: command.threadId,
+          providerInstanceId: projection.thread.providerInstanceId,
+          occurredAt: endedAt,
+          payload: {
+            ...projection.thread,
+            interactionMode: kodoLoopDecision.setMode,
+            updatedAt: endedAt,
+          },
+        });
+        projection = applyToProjection(projection, restored);
+      }
+    }
     if (dispatchMode.type === "steer_active" || dispatchMode.type === "restart_active") {
       yield* ensureGoalCommandSupported(command, command, modelSelection.instanceId);
       yield* dispatchSteerIntoRun({
@@ -6651,7 +6746,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       followsCurrentConversation:
         followsCurrentConversation(incomingMessage) ||
         isBufferedProviderNotification(incomingMessage),
-      loopStage: validKodoLoopStage(projection.thread.kodoLoop, command), // KODO: loop-stage
+      loopStage: kodoLoopDecision.type === "stage" ? kodoLoopDecision.stage : undefined, // KODO: loop-stage
       // A goal command that stops the active run goes first, so nothing queued is ahead of it.
       queueTail:
         shouldQueue && queuedRunStop === undefined ? kodoQueueTailRun(projection) : undefined,
@@ -14273,6 +14368,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     // Recheck under the lock; the user may have raised modes since sender preflight.
     const limit = yield* DispatchModeLimit;
+    // KODO: loop-command - a loop's coding stage writes, so a sender limited below Code cannot start one
+    const kodoLoopRefusal = kodoLoopLimitRefusal(command, limit);
+    if (kodoLoopRefusal !== undefined) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: kodoLoopRefusal,
+      });
+    }
     if (limit !== undefined) {
       // Fork and merge-back sources are unlocked; validate the modes copied by their dispatch.
       const threadId = commandThreadId(command);

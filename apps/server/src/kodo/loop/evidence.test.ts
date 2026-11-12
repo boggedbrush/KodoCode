@@ -144,7 +144,8 @@ describe("judge prompt", () => {
     expect(prompt).toContain("2. If not, what is outstanding?");
     expect(prompt).toContain("3. If not, what approach should the next round take?");
     expect(prompt).toContain("Do not run any commands");
-    expect(parseKodoVerdict(LOOP_VERDICT_FORMAT).ok).toBe(true);
+    const example = /```kodo-verdict\n[\s\S]*?\n```/.exec(LOOP_VERDICT_FORMAT)?.[0] ?? "";
+    expect(parseKodoVerdict(example).ok).toBe(true);
     expect(prompt).toContain(LOOP_VERDICT_FORMAT);
   });
 
