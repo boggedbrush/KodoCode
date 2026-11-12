@@ -55,6 +55,8 @@ export interface MuseSdkHostOptions {
   readonly environment?: NodeJS.ProcessEnv;
   readonly runtimeMode?: RuntimeMode;
   readonly readOnly?: boolean;
+  /** KODO: mode-launch-restriction - launches without write tools; shell stays on approval. */
+  readonly disableWrite?: boolean;
   /** Read-only generation needs session logging for turn/item notifications. */
   readonly sessionLogging?: boolean;
   readonly signal?: AbortSignal;
@@ -141,14 +143,31 @@ export function musePermissionProfile(runtimeMode: RuntimeMode) {
   return runtimeMode === "full-access" ? ":unrestricted" : ":ask-me";
 }
 
+/**
+ * KODO: mode-launch-restriction - the host flags a read-only Kodo mode needs. Ask and Plan launch
+ * the read-only host (no shell, no write); Review removes write tools only, so shell stays on the
+ * user's approval, which Muse cannot tell apart from read-only shell. Host flags are fixed at launch.
+ */
+export function museModeHostRestriction(policy: {
+  readonly modeReadOnly?: boolean | undefined;
+  readonly approvalPolicy?: unknown;
+}): Pick<MuseSdkHostOptions, "readOnly" | "disableWrite"> {
+  if (policy.modeReadOnly !== true) return {};
+  return policy.approvalPolicy === "never" ? { readOnly: true } : { disableWrite: true };
+}
+
+export const museRestrictionKey = (policy: Parameters<typeof museModeHostRestriction>[0]): string =>
+  JSON.stringify(museModeHostRestriction(policy));
+
 export function museServeArgs(
-  options: Pick<MuseSdkHostOptions, "readOnly" | "sessionLogging" | "runtimeMode">,
+  options: Pick<MuseSdkHostOptions, "readOnly" | "disableWrite" | "sessionLogging" | "runtimeMode">,
 ) {
   const args = ["serve"];
   if (options.readOnly) {
     args.push("--disable-shell", "--disable-write");
     if (options.sessionLogging !== true) args.push("--no-session-log");
   } else {
+    if (options.disableWrite === true) args.push("--disable-write"); // KODO: mode-launch-restriction
     args.push("--trust-workspace");
     if (options.runtimeMode === "full-access") args.push("--disable-sandbox");
   }

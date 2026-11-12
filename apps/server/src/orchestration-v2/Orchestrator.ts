@@ -17,6 +17,7 @@ import {
   kodoModeSwitchDetachSessionIds,
 } from "../kodo/interactionMode.ts"; // KODO: mode-session-restart
 import { kodoRunModeSnapshot } from "../kodo/interactionMode.ts"; // KODO: run-mode-snapshot
+import { kodoMaySteerIntoRun } from "../kodo/interactionMode.ts"; // KODO: mode-steer-guard
 import { threadPullRequestsOf } from "../sourceControl/threadPullRequests.ts";
 import {
   normalizeThreadPullRequestKey,
@@ -6434,6 +6435,22 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             payload: { ...sourcePlan, status: "completed" },
           });
 
+    // KODO: mode-steer-guard - a steer joins a turn running with the policy it started with, so a
+    // message sent in another mode than the run was created in queues as its own run instead.
+    if (
+      dispatchMode.type === "steer_active" &&
+      command.notification === undefined &&
+      delegatedCompletion === undefined
+    ) {
+      const steerTargetId = dispatchMode.targetRunId;
+      const steerTarget = projection.runs.find((run) => run.id === steerTargetId);
+      if (
+        steerTarget !== undefined &&
+        !kodoMaySteerIntoRun(steerTarget.interactionMode, projection.thread.interactionMode)
+      ) {
+        dispatchMode = { type: "queue_after_active" };
+      }
+    }
     if (dispatchMode.type === "steer_active" || dispatchMode.type === "restart_active") {
       yield* ensureGoalCommandSupported(command, command, modelSelection.instanceId);
       yield* dispatchSteerIntoRun({
@@ -10210,6 +10227,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ? null
         : parsedGoalCommand;
     const target = projection.runs.find((run) => run.id === command.targetRunId);
+    // KODO: mode-steer-guard - a queued message keeps the mode it was written in; it can only join a run of that mode.
+    if (
+      target !== undefined &&
+      !kodoMaySteerIntoRun(
+        target.interactionMode,
+        queuedRun.interactionMode ?? projection.thread.interactionMode,
+      )
+    ) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause:
+          "This message was written in another interaction mode than the running turn. Let it run next instead of steering.",
+      });
+    }
     const targetMessage = projection.messages.find(
       (message) => message.id === target?.userMessageId,
     );

@@ -1,6 +1,7 @@
 // Kodo: refuses in-app MCP tools that are not read-only (`Tool.Readonly`) in Ask, Plan and Review,
 // whichever provider called. Only the access kinds with no mode bound of their own are covered;
-// `writesThreads` and `writesEnvironment` already bound what they touch.
+// `writesThreads`, `writesEnvironment` and `startsThreads` already bound what they touch, and an
+// `actsAsCaller` declaration that says `readOnlyModes: "allowed"` is not refused.
 import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";

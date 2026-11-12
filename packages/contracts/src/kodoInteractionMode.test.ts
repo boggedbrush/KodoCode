@@ -14,8 +14,9 @@ describe("thread interaction mode", () => {
     ["code", "code"],
     ["review", "review"],
     ["swarm", "code"],
-    ["", "code"],
-    ["REVIEW", "code"],
+    ["", "ask"],
+    ["REVIEW", "ask"],
+    ["auto", "ask"],
   ])("decodes %j as %s", (stored, expected) => {
     expect(decode(stored)).toBe(expected);
     expect(normalizeKodoInteractionMode(stored)).toBe(expected);
@@ -27,7 +28,7 @@ describe("thread interaction mode", () => {
     expect(normalizeKodoInteractionMode("default")).toBe("code");
   });
 
-  it("degrades absent or malformed values to code instead of failing", () => {
+  it("reads an absent value as code and a non-string as code, never failing", () => {
     expect(normalizeKodoInteractionMode(undefined)).toBe("code");
     expect(normalizeKodoInteractionMode(null)).toBe("code");
     expect(normalizeKodoInteractionMode(3)).toBe("code");

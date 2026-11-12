@@ -73,7 +73,9 @@ import {
   MuseSdkError,
   museApprovalMode,
   museCanonicalPath,
+  museModeHostRestriction,
   musePermissionProfile,
+  museRestrictionKey,
   museWorkspaceRoot,
   type createMuseSdkHost,
   type MuseSdkHost,
@@ -1802,6 +1804,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
               cwd,
               environment,
               runtimeMode: input.runtimePolicy.runtimeMode,
+              ...museModeHostRestriction(input.runtimePolicy), // KODO: mode-launch-restriction
               onProcessExit: (exit) => {
                 Deferred.doneUnsafe(processExited, Effect.succeed(exit));
               },
@@ -1930,7 +1933,11 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
         let missingNativeSession = false;
         return yield* Effect.gen(function* () {
           nativeSessionId = requestedId ?? host.connection.mintCommandId();
-          const mcpSession = yield* mcpSessions.read(args.threadId);
+          // KODO: mode-launch-restriction - the read-only host grants no session MCP, so Ask and Plan run without T3 tools.
+          const mcpSession =
+            museModeHostRestriction(input.runtimePolicy).readOnly === true
+              ? undefined
+              : yield* mcpSessions.read(args.threadId);
           if (mcpSession && !host.initializeResult.grantedCapabilities.includes("sessionMcp"))
             return yield* protocolError(
               "Update Muse Code to a version that supports session MCP servers",
@@ -2086,7 +2093,11 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
           });
         if (turnInput.runtimePolicy.interactionMode === "plan")
           return yield* protocolError("Muse does not support dedicated Plan mode");
-        if (turnInput.runtimePolicy.runtimeMode !== input.runtimePolicy.runtimeMode)
+        if (
+          turnInput.runtimePolicy.runtimeMode !== input.runtimePolicy.runtimeMode ||
+          // KODO: mode-launch-restriction - the host's flags are fixed at launch.
+          museRestrictionKey(turnInput.runtimePolicy) !== museRestrictionKey(input.runtimePolicy)
+        )
           return yield* protocolError("Runtime policy changes require a fresh Muse host");
         const continuation =
           turnInput.message.createdBy === "agent" &&

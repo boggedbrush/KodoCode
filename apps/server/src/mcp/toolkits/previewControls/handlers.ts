@@ -24,21 +24,24 @@ export const layer = McpToolAccess.toLayer(PreviewControlsToolkit, {
       };
     }),
   ),
-  t3_preview_close: McpToolAccess.actsAsCaller((input) =>
-    Effect.gen(function* () {
-      const { scope, manager } = yield* access;
-      const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
-      if (
-        sessions.some((session) => session.tabId === input.tabId && session.runtime === "server")
-      ) {
-        const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
-        yield* broker.invoke({ scope, operation: "close", input: {}, tabId: input.tabId });
+  // KODO: mode-read-only-tools - see McpToolAccess.actsAsCaller
+  t3_preview_close: McpToolAccess.actsAsCaller(
+    (input) =>
+      Effect.gen(function* () {
+        const { scope, manager } = yield* access;
+        const { sessions } = yield* manager.list({ threadId: scope.thread.threadId });
+        if (
+          sessions.some((session) => session.tabId === input.tabId && session.runtime === "server")
+        ) {
+          const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+          yield* broker.invoke({ scope, operation: "close", input: {}, tabId: input.tabId });
+          return {};
+        }
+        yield* manager
+          .close({ threadId: scope.thread.threadId, tabId: input.tabId })
+          .pipe(Effect.mapError(unavailable));
         return {};
-      }
-      yield* manager
-        .close({ threadId: scope.thread.threadId, tabId: input.tabId })
-        .pipe(Effect.mapError(unavailable));
-      return {};
-    }),
+      }),
+    { readOnlyModes: "allowed" },
   ),
 });

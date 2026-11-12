@@ -15,13 +15,21 @@ export const DEFAULT_KODO_INTERACTION_MODE: KodoInteractionMode = "code";
 
 const isKodoInteractionMode = Schema.is(KodoInteractionMode);
 
+/** Stored values written by earlier builds that mean code: upstream's default and Kodo's retired swarm. */
+const LEGACY_CODE_MODES: ReadonlySet<string> = new Set(["default", "swarm"]);
+
 /**
- * Reads any stored or incoming value as one of the four Kodo modes. Legacy `"default"` is code;
- * anything unknown (an absent value, a retired mode such as `"swarm"`, junk) also degrades to
- * code rather than failing a session or a projection replay.
+ * Reads any stored or incoming value as one of the four Kodo modes. An absent value, upstream's
+ * `"default"` and Kodo's retired `"swarm"` are code. Any other string is a mode this build does not
+ * know (a future or foreign value), so it fails closed to ask rather than gaining write access;
+ * nothing fails a session or a projection replay.
  */
 export const normalizeKodoInteractionMode = (value: unknown): KodoInteractionMode =>
-  isKodoInteractionMode(value) ? value : DEFAULT_KODO_INTERACTION_MODE;
+  isKodoInteractionMode(value)
+    ? value
+    : typeof value === "string" && !LEGACY_CODE_MODES.has(value)
+      ? "ask"
+      : DEFAULT_KODO_INTERACTION_MODE;
 
 const decodeThreadInteractionMode = (
   value: string,
@@ -31,7 +39,7 @@ const decodeThreadInteractionMode = (
 /**
  * A thread's interaction mode field. A stored `"default"` decodes unchanged so caches and
  * snapshots round-trip losslessly; read it with `normalizeKodoInteractionMode`, which maps it to
- * code. Any other unknown string (such as a retired `"swarm"`) decodes to `"code"`.
+ * code, as does a retired `"swarm"`. Any other unknown string decodes to `"ask"` (fail closed).
  */
 export const ThreadInteractionMode = Schema.String.pipe(
   Schema.decodeTo(

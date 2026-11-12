@@ -1,13 +1,19 @@
 import { describe, expect, it } from "@effect/vitest";
-import type { RuntimeMode } from "@t3tools/contracts";
+import { KODO_INTERACTION_MODES, type RuntimeMode } from "@t3tools/contracts";
 
 import {
   KODO_ASK_MODE_INSTRUCTIONS,
   KODO_CODE_MODE_INSTRUCTIONS,
   KODO_PLAN_MODE_INSTRUCTIONS,
   KODO_REVIEW_MODE_INSTRUCTIONS,
+  ENFORCEMENT_BY_DRIVER,
   kodoEffectiveRunMode,
   kodoEffectiveRuntimeMode,
+  kodoInteractionModeRestriction,
+  kodoMaySteerIntoRun,
+  kodoMoreRestrictiveMode,
+  kodoSessionNeedsRestart,
+  kodoSessionPolicyKey,
   kodoRunModeSnapshot,
   kodoInteractionModeChangesEffectivePolicy,
   kodoInteractionModeLimit,
@@ -81,8 +87,9 @@ const ENFORCEMENT_TABLE: Record<"ask" | "review" | "plan", Record<string, Cell>>
     kiro: cell("default", true, "never", true),
     fx: cell("default", true, "never", true),
     antigravity: cell("default", true, "never", true),
-    pi: cell("default", false, undefined, true),
-    muse: cell("default", false, undefined, true),
+    // Launched without write and shell tools; the approval policy "never" tells the adapter.
+    pi: cell("default", false, "never", true),
+    muse: cell("default", false, "never", true),
     custom: cell("default", false, undefined, true),
     undefined: cell("default", false, undefined, true),
   },
@@ -115,8 +122,8 @@ const ENFORCEMENT_TABLE: Record<"ask" | "review" | "plan", Record<string, Cell>>
     kiro: cell("default", true, "never", true),
     fx: cell("default", true, "never", true),
     antigravity: cell("default", true, "never", true),
-    pi: cell("default", false, undefined, true),
-    muse: cell("default", false, undefined, true),
+    pi: cell("default", false, "never", true),
+    muse: cell("default", false, "never", true),
     custom: cell("default", false, undefined, true),
     // An unresolved driver fails closed: no native plan mode is assumed.
     undefined: cell("default", false, undefined, true),
@@ -124,7 +131,7 @@ const ENFORCEMENT_TABLE: Record<"ask" | "review" | "plan", Record<string, Cell>>
 };
 
 describe("resolveKodoInteractionMode", () => {
-  it.each(["default", "code", "swarm", undefined, "nonsense"])(
+  it.each(["default", "code", "swarm", undefined])(
     "treats %j as code: the upstream default, no extras, for every driver",
     (mode) => {
       for (const driver of ALL_DRIVERS) {
@@ -454,5 +461,124 @@ describe("kodoEffectiveRunMode", () => {
   it("records a normalized snapshot, so a legacy default is stored as code", () => {
     expect(kodoRunModeSnapshot("default")).toEqual({ interactionMode: "code" });
     expect(kodoRunModeSnapshot("review")).toEqual({ interactionMode: "review" });
+  });
+});
+
+// KODO: mode-restriction-order - Ask is the most restrictive, then Plan, then Review, then Code.
+describe("restrictiveness order and the effective run mode", () => {
+  const ORDER = ["ask", "plan", "review", "code"] as const;
+
+  it("orders the four modes, most restrictive first", () => {
+    expect(ORDER.map(kodoInteractionModeRestriction)).toEqual([3, 2, 1, 0]);
+    expect(kodoInteractionModeRestriction("default")).toBe(0);
+  });
+
+  it.each(
+    KODO_INTERACTION_MODES.flatMap((created) =>
+      KODO_INTERACTION_MODES.map((current) => [created, current] as const),
+    ),
+  )(
+    "a run created in %s on a thread now in %s runs as the more restrictive",
+    (created, current) => {
+      const expected = ORDER.find((mode) => mode === created || mode === current)!;
+      expect(kodoEffectiveRunMode(created, current)).toBe(expected);
+      expect(kodoMoreRestrictiveMode(created, current)).toBe(expected);
+    },
+  );
+
+  it("reads legacy default as code in the table", () => {
+    expect(kodoEffectiveRunMode("default", "ask")).toBe("ask");
+    expect(kodoEffectiveRunMode("review", "default")).toBe("review");
+  });
+});
+
+// KODO: mode-steer-guard
+describe("kodoMaySteerIntoRun", () => {
+  it.each(
+    KODO_INTERACTION_MODES.flatMap((run) =>
+      KODO_INTERACTION_MODES.map((thread) => [run, thread] as const),
+    ),
+  )(
+    "a run created in %s takes a steer from a thread in %s only when the modes match",
+    (run, thread) => {
+      expect(kodoMaySteerIntoRun(run, thread)).toBe(run === thread);
+    },
+  );
+
+  it("lets a run with no recorded mode be steered, and reads legacy default as code", () => {
+    expect(kodoMaySteerIntoRun(undefined, "ask")).toBe(true);
+    expect(kodoMaySteerIntoRun("default", "code")).toBe(true);
+    expect(kodoMaySteerIntoRun("code", "default")).toBe(true);
+  });
+});
+
+// KODO: mode-session-policy
+describe("provider session policy", () => {
+  const codePolicy = (runtimeMode: RuntimeMode = "full-access") =>
+    kodoSessionPolicyKey(
+      kodoRuntimePolicyOverlay({ interactionMode: "code", driver: "grok", runtimeMode }),
+    );
+  const policyFor = (mode: string, driver: string) =>
+    kodoSessionPolicyKey(
+      kodoRuntimePolicyOverlay({ interactionMode: mode, driver, runtimeMode: "full-access" }),
+    );
+
+  it("differs between Code and every read-only mode, and between Ask and Review on launch drivers", () => {
+    for (const driver of ["grok", "kiro", "cursor", "pi", "muse", "codex", "claudeAgent"]) {
+      for (const mode of ["ask", "plan", "review"]) {
+        expect(policyFor(mode, driver)).not.toBe(policyFor("code", driver));
+      }
+    }
+    expect(policyFor("ask", "pi")).not.toBe(policyFor("review", "pi"));
+    expect(policyFor("ask", "muse")).not.toBe(policyFor("review", "muse"));
+    expect(policyFor("code", "grok")).toBe(codePolicy());
+  });
+
+  it("restarts a session whose driver fixes any part of the policy at open", () => {
+    const opened = codePolicy();
+    const asking = policyFor("ask", "grok");
+    for (const driver of [
+      "grok",
+      "kiro",
+      "fx",
+      "cursor",
+      "acp",
+      "acpRegistry",
+      "pi",
+      "muse",
+      undefined,
+    ]) {
+      expect(kodoSessionNeedsRestart({ driver, opened, next: asking })).toBe(true);
+      // The reverse direction: a Code run must not reuse the session an Ask run opened.
+      expect(kodoSessionNeedsRestart({ driver, opened: asking, next: opened })).toBe(true);
+      expect(kodoSessionNeedsRestart({ driver, opened, next: opened })).toBe(false);
+    }
+  });
+
+  it("keeps a session whose driver re-applies the whole policy on every turn", () => {
+    for (const driver of ["claudeAgent", "codex", "opencode", "antigravity"]) {
+      expect(
+        kodoSessionNeedsRestart({ driver, opened: codePolicy(), next: policyFor("ask", driver) }),
+      ).toBe(false);
+    }
+  });
+
+  it("pins where each built-in driver applies its policy", () => {
+    expect(
+      Object.fromEntries(Object.entries(ENFORCEMENT_BY_DRIVER).map(([d, e]) => [d, e.policyScope])),
+    ).toEqual({
+      claudeAgent: "turn",
+      codex: "turn",
+      cursor: "session",
+      opencode: "turn",
+      acp: "session",
+      acpRegistry: "session",
+      grok: "session",
+      kiro: "session",
+      fx: "session",
+      antigravity: "turn",
+      pi: "session",
+      muse: "session",
+    });
   });
 });

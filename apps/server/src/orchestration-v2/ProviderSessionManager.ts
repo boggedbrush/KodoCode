@@ -55,6 +55,11 @@ import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter"
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import {
+  KODO_MODE_DETACH_REASON,
+  kodoSessionNeedsRestart,
+  kodoSessionPolicyKey,
+} from "../kodo/interactionMode.ts"; // KODO: mode-session-policy
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_MAX_IDLE_PIN_MS = 4 * 60 * 60 * 1000;
@@ -244,6 +249,8 @@ interface LiveSessionEntry {
   readonly idleFiber: Fiber.Fiber<void, never> | null;
   readonly pinnedSinceMs: number | null;
   readonly idleThreadUnloads: ReadonlyMap<ThreadId, IdleThreadUnload>;
+  /** KODO: mode-session-policy - the permission-relevant policy this session was opened with. */
+  readonly openedPolicyKey: string;
 }
 
 interface IdleThreadUnload {
@@ -1879,6 +1886,44 @@ export const layerWithOptions = (
         }).pipe(logReleaseFailure(providerSessionId));
       });
 
+      /**
+       * KODO: mode-session-policy - a live session opened under another permission policy than the
+       * run about to use it (Code's, then an Ask run) is reopened unless its driver re-applies the
+       * whole policy per turn. Fails the open rather than reuse the session when it cannot be released.
+       */
+      const releaseForPolicyMismatch = Effect.fn("ProviderSessionManager.releaseForPolicyMismatch")(
+        function* (
+          providerSessionId: ProviderSessionId,
+          runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+        ) {
+          const key = sessionKey(providerSessionId);
+          const entry = (yield* Ref.get(sessions)).get(key);
+          if (
+            entry === undefined ||
+            !kodoSessionNeedsRestart({
+              driver: entry.runtime.driver,
+              opened: entry.openedPolicyKey,
+              next: kodoSessionPolicyKey(runtimePolicy),
+            })
+          ) {
+            return;
+          }
+          yield* releaseEntry({
+            providerSessionId,
+            reason: "manual_shutdown",
+            detail: KODO_MODE_DETACH_REASON,
+          }).pipe(logReleaseFailure(providerSessionId));
+          if ((yield* Ref.get(sessions)).get(key) === entry) {
+            return yield* new ProviderSessionOpenError({
+              instanceId: entry.runtime.instanceId,
+              providerSessionId,
+              cause:
+                "The provider session could not be restarted for the thread's interaction mode.",
+            });
+          }
+        },
+      );
+
       const observeActivity = (
         providerSessionId: ProviderSessionId,
         activity: Effect.Effect<void, ProviderSessionActivityError>,
@@ -2422,6 +2467,7 @@ export const layerWithOptions = (
               const key = sessionKey(input.providerSessionId);
               const live = (yield* Ref.get(sessions)).get(key);
               if (live !== undefined) yield* releaseForLinkedEnvironments(live);
+              yield* releaseForPolicyMismatch(input.providerSessionId, input.runtimePolicy); // KODO: mode-session-policy
               const existing = (yield* Ref.get(sessions)).get(key);
               if (existing !== undefined) {
                 const attached = existing.attachedThreadIds.has(input.threadId);
@@ -2544,6 +2590,7 @@ export const layerWithOptions = (
                 idleFiber: null,
                 pinnedSinceMs: null,
                 idleThreadUnloads: new Map(),
+                openedPolicyKey: kodoSessionPolicyKey(input.runtimePolicy), // KODO: mode-session-policy
               };
               yield* Ref.update(sessions, (current) => {
                 const updated = new Map(current);

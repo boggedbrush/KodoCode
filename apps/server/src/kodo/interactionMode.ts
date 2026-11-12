@@ -13,34 +13,70 @@ import {
  * How a driver enforces read-only, strongest mechanism first (see `resolveKodoInteractionMode`):
  * claude: tool list, `dontAsk` and denied edit tools; codex: readOnly sandbox, approvals never;
  * acp-family and opencode: auto-denying permission policy; cursor: native plan mode plus the
- * approval ceiling; ceiling: the approval ceiling plus instruction text.
+ * approval ceiling; launch: a host launched with its write (and, for Ask and Plan, shell) tools
+ * removed, plus the approval ceiling (pi, muse); ceiling: the approval ceiling plus instruction text.
  */
-type ReadOnlyEnforcement = "claude" | "codex" | "acp-family" | "opencode" | "cursor" | "ceiling";
+type ReadOnlyEnforcement =
+  | "claude"
+  | "codex"
+  | "acp-family"
+  | "opencode"
+  | "cursor"
+  | "launch"
+  | "ceiling";
+
+/**
+ * Where a driver applies its permission level. "turn": the adapter re-applies the whole policy on
+ * every turn (read from its code), so a live session can serve a run with another policy. "session":
+ * some part is fixed when the session or its process opens, so a session opened under another policy
+ * must be reopened (`kodoSessionNeedsRestart`).
+ */
+type PolicyScope = "turn" | "session";
 
 interface DriverEnforcement {
   readonly enforcement: ReadOnlyEnforcement;
   /** Whether wire "plan" selects a provider plan mode that captures plans. */
   readonly nativePlan: boolean;
+  readonly policyScope: PolicyScope;
 }
 
-const ENFORCEMENT_BY_DRIVER: Readonly<Record<string, DriverEnforcement>> = {
-  claudeAgent: { enforcement: "claude", nativePlan: true },
-  codex: { enforcement: "codex", nativePlan: true },
-  cursor: { enforcement: "cursor", nativePlan: true },
-  opencode: { enforcement: "opencode", nativePlan: true },
-  acp: { enforcement: "acp-family", nativePlan: true },
-  acpRegistry: { enforcement: "acp-family", nativePlan: true },
-  // Grok has a native plan mode of its own (exit_plan_mode); kiro, fx and antigravity expose none.
-  grok: { enforcement: "acp-family", nativePlan: true },
-  kiro: { enforcement: "acp-family", nativePlan: false },
-  fx: { enforcement: "acp-family", nativePlan: false },
-  antigravity: { enforcement: "acp-family", nativePlan: false },
-  pi: { enforcement: "ceiling", nativePlan: false },
-  muse: { enforcement: "ceiling", nativePlan: false },
+/**
+ * Every built-in provider driver needs an entry (a server test enumerates BUILT_IN_DRIVERS); a
+ * driver without one fails closed to the weakest mechanism and a session restart on every policy
+ * change.
+ */
+export const ENFORCEMENT_BY_DRIVER: Readonly<Record<string, DriverEnforcement>> = {
+  // Per turn: the query is rebuilt when its policy key changes (a continuation keeps the live query
+  // only when that is no more permissive, see ClaudeAdapterV2.openQuery).
+  claudeAgent: { enforcement: "claude", nativePlan: true, policyScope: "turn" },
+  // Per turn: turn/start carries sandbox, approval policy and collaboration mode.
+  codex: { enforcement: "codex", nativePlan: true, policyScope: "turn" },
+  // Sandbox and auto-review are set when the session opens.
+  cursor: { enforcement: "cursor", nativePlan: true, policyScope: "session" },
+  // Per turn: v1 reapplies permission rules and v2 rewrites session rules and agent on every turn.
+  opencode: { enforcement: "opencode", nativePlan: true, policyScope: "turn" },
+  // Generic ACP agents: their own permission knobs are unknown, so only a reopen resets them.
+  acp: { enforcement: "acp-family", nativePlan: true, policyScope: "session" },
+  acpRegistry: { enforcement: "acp-family", nativePlan: true, policyScope: "session" },
+  // Grok has a native plan mode of its own (exit_plan_mode); its runtime mode is a launch option.
+  grok: { enforcement: "acp-family", nativePlan: true, policyScope: "session" },
+  // Kiro's autopilot and fx's session mode are protocol calls the shared ACP adapter repeats when
+  // the policy changes, but both reopen on a runtime-mode change today, so they stay per session.
+  kiro: { enforcement: "acp-family", nativePlan: false, policyScope: "session" },
+  fx: { enforcement: "acp-family", nativePlan: false, policyScope: "session" },
+  // Per turn: the shared ACP adapter sets the session mode (yolo or default) whenever it changes.
+  antigravity: { enforcement: "acp-family", nativePlan: false, policyScope: "turn" },
+  // Pi's extension environment and tool list, and Muse's host flags, are fixed at launch.
+  pi: { enforcement: "launch", nativePlan: false, policyScope: "session" },
+  muse: { enforcement: "launch", nativePlan: false, policyScope: "session" },
 };
 
 /** An unresolved or unknown driver fails closed: the ceiling plus instructions, like a driver with no plan mode. */
-const UNKNOWN_DRIVER: DriverEnforcement = { enforcement: "ceiling", nativePlan: false };
+const UNKNOWN_DRIVER: DriverEnforcement = {
+  enforcement: "ceiling",
+  nativePlan: false,
+  policyScope: "session",
+};
 
 const READ_ONLY_RUNTIME_CEILING: RuntimeMode = "approval-required";
 const READ_ONLY_SANDBOX = { type: "readOnly" } as const;
@@ -229,6 +265,14 @@ export function resolveKodoInteractionMode(input: {
         sandboxPolicy: undefined,
         approvalPolicy: undefined,
       });
+    case "launch":
+      // The host is launched without write tools (and, in Ask and Plan, without shell); the
+      // approval policy tells the adapter which. Review keeps shell on approval.
+      return resolved({
+        wireInteractionMode: "default",
+        sandboxPolicy: undefined,
+        approvalPolicy: hardDeny,
+      });
     case "ceiling":
       return resolved({
         wireInteractionMode: "default",
@@ -350,6 +394,40 @@ export function kodoModeSwitchDetachSessionIds(input: {
     .map((session) => session.id);
 }
 
+/** The permission-relevant part of a resolved runtime policy, as a comparable key. */
+export function kodoSessionPolicyKey(policy: {
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  readonly sandboxPolicy?: unknown;
+  readonly approvalPolicy?: unknown;
+  readonly modeReadOnly?: boolean | undefined;
+  readonly modeSuppressesPlanCapture?: boolean | undefined;
+}): string {
+  const sandbox = policy.sandboxPolicy;
+  return JSON.stringify([
+    policy.runtimeMode,
+    policy.interactionMode,
+    typeof sandbox === "object" && sandbox !== null && "type" in sandbox ? sandbox.type : null,
+    policy.approvalPolicy ?? null,
+    policy.modeReadOnly === true,
+    policy.modeSuppressesPlanCapture === true,
+  ]);
+}
+
+/**
+ * Whether a live session opened under policy key `opened` must be reopened for a run resolved to
+ * `next`. A driver that re-applies its whole policy per turn keeps the session; every other one
+ * (and an unknown driver) is reopened, because part of its permission level is fixed at open.
+ */
+export function kodoSessionNeedsRestart(input: {
+  readonly driver: string | undefined;
+  readonly opened: string | undefined;
+  readonly next: string;
+}): boolean {
+  if (input.opened === input.next) return false;
+  return enforcementFor(input.driver).policyScope !== "turn";
+}
+
 /**
  * Puts mode instructions in front of the user's text, for every provider. A `/` message is
  * delivered as typed: native commands must start the prompt and take the rest as arguments. The
@@ -427,16 +505,47 @@ export const kodoRunModeSnapshot = (threadMode: unknown) => ({
 });
 
 /**
+ * How much a mode holds an agent back, for choosing between two modes. Ask is the most restrictive
+ * (no shell, no plan flow); Plan is read-only with shell denied wherever the provider can deny it;
+ * Review keeps shell on approval for the providers that cannot tell read-only shell from the
+ * rest; Code restricts nothing.
+ */
+const MODE_RESTRICTION = { ask: 3, plan: 2, review: 1, code: 0 } as const;
+
+export const kodoInteractionModeRestriction = (mode: unknown): number =>
+  MODE_RESTRICTION[normalizeKodoInteractionMode(mode)];
+
+/** The more restrictive of two modes; the first on a tie. */
+export function kodoMoreRestrictiveMode(left: unknown, right: unknown): KodoInteractionMode {
+  const a = normalizeKodoInteractionMode(left);
+  const b = normalizeKodoInteractionMode(right);
+  return MODE_RESTRICTION[b] > MODE_RESTRICTION[a] ? b : a;
+}
+
+/**
  * The mode a run starts with: the more restrictive of the mode it was created in and its thread's
  * current mode. A run created in a read-only mode stays read-only after the thread moves to Code;
- * a run created in Code on a thread since moved to a read-only mode runs read-only; a run with no
- * snapshot takes the thread's mode.
+ * a run created in Code on a thread since moved to a read-only mode runs read-only; a run created
+ * in Review on a thread now in Ask runs as Ask; a run with no snapshot takes the thread's mode.
  */
 export function kodoEffectiveRunMode(runMode: unknown, threadMode: unknown): KodoInteractionMode {
-  const current = normalizeKodoInteractionMode(threadMode);
-  if (runMode === undefined) return current;
-  const created = normalizeKodoInteractionMode(runMode);
-  return created !== "code" ? created : current;
+  return runMode === undefined
+    ? normalizeKodoInteractionMode(threadMode)
+    : kodoMoreRestrictiveMode(runMode, threadMode);
+}
+
+/**
+ * Whether a message sent now may be steered into a running turn. A steer joins a turn that runs
+ * with the policy it started with, so it is allowed only when the run was created in the thread's
+ * current mode: a read-only message must not run with the write access of a Code turn, and a Code
+ * message must not be squeezed into a read-only one. Otherwise it queues as a run of its own. A run
+ * with no recorded mode takes the thread's.
+ */
+export function kodoMaySteerIntoRun(runMode: unknown, threadMode: unknown): boolean {
+  return (
+    runMode === undefined ||
+    normalizeKodoInteractionMode(runMode) === normalizeKodoInteractionMode(threadMode)
+  );
 }
 
 /** The process-wide announcer: turn starts and steers of one thread must share what it was told. */

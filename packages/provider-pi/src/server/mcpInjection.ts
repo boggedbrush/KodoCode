@@ -8,6 +8,7 @@ import {
   PI_T3_MCP_EXTENSION_SOURCE,
   T3_MCP_BEARER_ENV,
   T3_MCP_URL_ENV,
+  T3_PI_MODE_RESTRICTION_ENV,
   T3_PI_RUNTIME_MODE_ENV,
   T3_PI_MCP_EXTENSION_PATH_ENV,
 } from "./mcpExtensionSource.ts";
@@ -246,6 +247,25 @@ export const materializePiT3McpExtension = Effect.fn("materializePiT3McpExtensio
   return dest;
 });
 
+/**
+ * KODO: mode-launch-restriction - how a read-only Kodo mode restricts a Pi session: Ask and Plan
+ * (approval policy "never") refuse everything but read-only tools; Review refuses the file-changing
+ * tools and leaves shell on approval, which Pi cannot tell apart from read-only shell.
+ */
+export function piModeRestriction(policy: {
+  readonly modeReadOnly?: boolean | undefined;
+  readonly approvalPolicy?: unknown;
+}): PiModeRestriction | undefined {
+  if (policy.modeReadOnly !== true) return undefined;
+  return policy.approvalPolicy === "never" ? "read-only" : "no-edits";
+}
+export type PiModeRestriction = "read-only" | "no-edits";
+
+const PI_BUILTIN_EXCLUSIONS = {
+  "read-only": "bash,edit,write",
+  "no-edits": "edit,write",
+} as const;
+
 export function buildPiRpcLaunch(input: {
   readonly launchArgs: ReadonlyArray<string>;
   readonly environment: NodeJS.ProcessEnv;
@@ -259,6 +279,8 @@ export function buildPiRpcLaunch(input: {
   readonly disableExtensions?: boolean;
   readonly disableTools?: boolean;
   readonly runtimeMode?: "approval-required" | "auto-accept-edits" | "auto" | "full-access";
+  /** KODO: mode-launch-restriction - set for a session opened in Ask, Plan or Review. */
+  readonly modeRestriction?: PiModeRestriction | undefined;
 }): {
   readonly args: ReadonlyArray<string>;
   readonly env: NodeJS.ProcessEnv;
@@ -284,6 +306,10 @@ export function buildPiRpcLaunch(input: {
     // Restrictions must follow launch args so user flags cannot re-enable unattended tools/extensions.
     ...(input.disableExtensions === true ? ["--no-extensions"] : []),
     ...(input.disableTools === true ? ["--no-tools"] : []),
+    // KODO: mode-launch-restriction - after the launch args, so user flags cannot re-enable the tools.
+    ...(input.modeRestriction === undefined
+      ? []
+      : ["--exclude-tools", PI_BUILTIN_EXCLUSIONS[input.modeRestriction]]),
   ];
   if (
     hasT3Extension &&
@@ -297,6 +323,7 @@ export function buildPiRpcLaunch(input: {
   delete environment[T3_MCP_URL_ENV];
   delete environment[T3_MCP_BEARER_ENV];
   delete environment[T3_PI_MCP_EXTENSION_PATH_ENV];
+  delete environment[T3_PI_MODE_RESTRICTION_ENV];
 
   return {
     args,
@@ -310,6 +337,9 @@ export function buildPiRpcLaunch(input: {
             [T3_PI_RUNTIME_MODE_ENV]:
               input.runtimeMode === "auto" ? "approval-required" : input.runtimeMode,
           }
+        : {}),
+      ...(hasT3Extension && input.modeRestriction !== undefined
+        ? { [T3_PI_MODE_RESTRICTION_ENV]: input.modeRestriction }
         : {}),
       ...(hasT3Mcp && input.mcpSession !== undefined
         ? {

@@ -31,7 +31,7 @@ import { withExecutedModelNote } from "@t3tools/provider-core/server/subagentPro
 import type * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
 import { ProjectToolkit } from "../mcp/toolkits/project/tools.ts";
 import {
-  resolveInteractionMode,
+  resolveChildInteractionMode, // KODO: mode-child-limit
   resolveRuntimeMode,
   taskPrompt,
 } from "../mcp/delegatedTaskModes.ts";
@@ -249,7 +249,10 @@ const make = Effect.gen(function* () {
       const interactionMode =
         input.interactionMode === undefined || input.interactionMode === "inherit"
           ? undefined
-          : yield* resolveInteractionMode(parent.thread.interactionMode, input.interactionMode);
+          : yield* resolveChildInteractionMode(
+              parent.thread.interactionMode,
+              input.interactionMode,
+            ); // KODO: mode-child-limit
       const projectId = yield* resolveRemoteProject(
         scope,
         target.environmentId,

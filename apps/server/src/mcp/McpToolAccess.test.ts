@@ -124,6 +124,8 @@ const ProbeToolkit = Toolkit.make(
   Tool.make("reads", probe),
   // KODO: mode-read-only-tools - an acting tool that declares itself read-only.
   Tool.make("acts_as_caller_readonly", probe).annotate(Tool.Readonly, true),
+  // KODO: mode-read-only-tools - an acting tool that declares it does not touch the workspace.
+  Tool.make("acts_as_caller_allowed", probe),
   Tool.make("reads_as_caller", probe),
   Tool.make("acts_as_caller", probe),
   Tool.make("writes", probe),
@@ -147,6 +149,7 @@ const probeHandlers: McpToolAccess.Handlers<typeof ProbeToolkit.tools> = {
   reads_as_caller: McpToolAccess.readsAsCaller(() => ran),
   acts_as_caller: McpToolAccess.actsAsCaller(() => ran),
   acts_as_caller_readonly: McpToolAccess.actsAsCaller(() => ran),
+  acts_as_caller_allowed: McpToolAccess.actsAsCaller(() => ran, { readOnlyModes: "allowed" }),
   writes: McpToolAccess.writes(() => ran),
   writes_with_capability: McpToolAccess.writesWithCapability(() => ran),
   writes_threads: McpToolAccess.writesThreads(
@@ -194,6 +197,7 @@ export const refusedAtCompileTime = () => {
       reads_as_caller: unchecked,
       acts_as_caller: unchecked,
       acts_as_caller_readonly: unchecked,
+      acts_as_caller_allowed: unchecked,
       writes: unchecked,
       writes_with_capability: unchecked,
       writes_threads: unchecked,
@@ -328,9 +332,23 @@ it.effect.each([
 
   ["starts_threads", supervised, {}, "approval-required/default"],
   ["starts_threads", supervised, { runtimeMode: "full-access" }, "runtime_mode_escalation_denied"],
-  // KODO: mode-read-only-tools - a read-only caller starts no threads at all.
-  ["starts_threads", plan, {}, "capability_denied"],
-  ["starts_threads", plan, { interactionMode: "default" }, "capability_denied"],
+  // KODO: mode-read-only-tools - a read-only caller starts only threads bound to a mode no less
+  // restrictive than its own, and never one that writes.
+  ["starts_threads", plan, {}, "approval-required/plan"],
+  ["starts_threads", plan, { interactionMode: "plan" }, "approval-required/plan"],
+  ["starts_threads", plan, { interactionMode: "default" }, "interaction_mode_escalation_denied"],
+  ["starts_threads", asking, {}, "full-access/ask"],
+  ["starts_threads", asking, { interactionMode: "plan" }, "interaction_mode_escalation_denied"],
+  ["starts_threads", asking, { interactionMode: "default" }, "interaction_mode_escalation_denied"],
+  ["starts_threads", reviewing, {}, "full-access/review"],
+  ["starts_threads", reviewing, { interactionMode: "plan" }, "full-access/plan"],
+  [
+    "starts_threads",
+    reviewing,
+    { interactionMode: "default" },
+    "interaction_mode_escalation_denied",
+  ],
+  ["starts_threads", planClient, {}, "full-access/plan"],
   ["starts_threads", fullAccess, { runtimeMode: "auto", interactionMode: "plan" }, "auto/plan"],
   ["starts_threads", ended, {}, "parent_not_active"],
   ["starts_threads", supervisedClient, {}, "approval-required/default"],
@@ -345,13 +363,21 @@ it.effect.each([
       ["acts_as_caller", caller, {}, "capability_denied"],
       ["writes", caller, {}, "capability_denied"],
       ["writes_with_capability", caller, {}, "capability_denied"],
-      ["starts_threads", caller, {}, "capability_denied"],
+      [
+        "starts_threads",
+        caller,
+        {},
+        `${caller === plan ? "approval-required" : "full-access"}/${mode}`,
+      ],
       ["writes_environment", caller, {}, "capability_denied"],
       ["acts_as_caller_readonly", caller, {}, "ran"],
+      ["acts_as_caller_allowed", caller, {}, "ran"],
       ["reads", caller, {}, "ran"],
       ["reads_as_caller", caller, {}, "ran"],
     ] as const;
   }),
+  ["acts_as_caller_allowed", ended, {}, "parent_not_active"],
+  ["acts_as_caller_allowed", fullAccessClient, {}, "thread_credential_required"],
   ["acts_as_caller", coding, {}, "ran"],
   ["writes", coding, {}, "ran"],
   ["writes_with_capability", coding, {}, "ran"],
@@ -479,9 +505,14 @@ it.effect.each([
   ["writes", supervised, { environmentId: box }, "writes in environment-box"],
   ["writes_with_capability", readOnlyClient, { environmentId: box }, "capability_denied"],
   // KODO: mode-read-only-tools - a read-only caller is refused here before anything goes.
-  ["starts_threads", plan, { environmentId: box, interactionMode: "default" }, "capability_denied"],
-  ["starts_threads", plan, { environmentId: box }, "capability_denied"],
-  ["starts_threads", reviewing, { environmentId: box }, "capability_denied"],
+  [
+    "starts_threads",
+    plan,
+    { environmentId: box, interactionMode: "default" },
+    "interaction_mode_escalation_denied",
+  ],
+  ["starts_threads", plan, { environmentId: box }, "starts_threads in environment-box"],
+  ["starts_threads", reviewing, { environmentId: box }, "starts_threads in environment-box"],
   ["starts_threads", coding, { environmentId: box }, "starts_threads in environment-box"],
   ["writes_environment", supervised, { environmentId: box }, "capability_denied"],
   [

@@ -121,6 +121,7 @@ import {
 import * as Metrics from "../observability/Metrics.ts";
 import {
   interactionModeRank,
+  resolveChildInteractionMode, // KODO: mode-child-limit
   resolveInteractionMode,
   resolveRuntimeMode,
   runtimeModeRank,
@@ -2421,10 +2422,10 @@ const make = Effect.gen(function* () {
         input.runtimeMode,
         target,
       );
-      const interactionMode = yield* resolveInteractionMode(
+      const interactionMode = yield* resolveChildInteractionMode(
         parent.thread.interactionMode,
         input.interactionMode,
-      );
+      ); // KODO: mode-child-limit
       let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
       if (input.isolation === "worktree" && !isRetryOfAcceptedDelegation) {
         const project = yield* requireProject(parent.thread.projectId);
@@ -2599,10 +2600,8 @@ const make = Effect.gen(function* () {
           .pipe(Effect.mapError(threadManagementFailure));
         if (shell !== null && shell.deletedAt === null) {
           yield* resolveRuntimeMode(parentProjection.thread.runtimeMode, shell.runtimeMode);
-          yield* resolveInteractionMode(
-            parentProjection.thread.interactionMode,
-            shell.interactionMode,
-          );
+          // KODO: mode-task-control - stopping a child never writes the workspace, so a thread
+          // moved to a read-only mode can still stop the (Code) children it started earlier.
         }
         const childThreadIds = yield* threadManagement
           .listAppOwnedChildThreadIds(threadId)
@@ -2834,10 +2833,10 @@ const make = Effect.gen(function* () {
                 request.runtimeMode,
                 target,
               );
-              const interactionMode = yield* resolveInteractionMode(
+              const interactionMode = yield* resolveChildInteractionMode(
                 parent.thread.interactionMode,
                 request.interactionMode,
-              );
+              ); // KODO: mode-child-limit
               yield* assertTargetEnabledForProject(parent, commandId, target);
               const title = threadTitle({
                 parentTitle: parent.thread.title,

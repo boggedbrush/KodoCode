@@ -1,4 +1,7 @@
-import { kodoInteractionModeRank } from "../kodo/interactionMode.ts"; // KODO: mode-rank
+import {
+  kodoInteractionModeRank,
+  kodoInteractionModeRestriction,
+} from "../kodo/interactionMode.ts"; // KODO: mode-rank
 import {
   type ModelSelection,
   OrchestratorMcpFailure,
@@ -86,6 +89,28 @@ export function resolveInteractionMode(
         }),
       )
     : Effect.succeed(resolved);
+}
+
+/**
+ * KODO: mode-child-limit - for a thread or task a caller starts: `resolveInteractionMode`, and on
+ * top of it a child may not be less restrictive than its parent (a Plan parent cannot start a
+ * Review child). Code parents still start any mode.
+ */
+export function resolveChildInteractionMode(
+  parentMode: ThreadInteractionMode,
+  requested: OrchestratorMcpInteractionMode | ThreadInteractionMode | undefined,
+): Effect.Effect<ThreadInteractionMode, OrchestratorMcpFailure> {
+  return resolveInteractionMode(parentMode, requested).pipe(
+    Effect.filterOrFail(
+      (resolved) =>
+        kodoInteractionModeRestriction(resolved) >= kodoInteractionModeRestriction(parentMode),
+      (resolved) =>
+        new OrchestratorMcpFailure({
+          code: "interaction_mode_escalation_denied",
+          message: `Child interaction mode ${resolved} is less restrictive than parent mode ${parentMode}.`,
+        }),
+    ),
+  );
 }
 
 /** The task as its child receives it, with the role the caller asked for. */

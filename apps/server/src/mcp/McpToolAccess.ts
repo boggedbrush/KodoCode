@@ -30,7 +30,7 @@ import {
 } from "./kodoReadOnlyGuard.ts"; // KODO: mode-read-only-tools
 import { assertNotLinked, assertSameLink, callerLinkOrigin } from "./linkOrigin.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
-import { resolveInteractionMode, resolveRuntimeMode } from "./delegatedTaskModes.ts";
+import { resolveChildInteractionMode, resolveRuntimeMode } from "./delegatedTaskModes.ts"; // KODO: mode-child-limit
 import {
   assertFullAccess,
   assertLiveCaller,
@@ -136,18 +136,27 @@ export const reads = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>)
 export const readsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
   declare((params: P) => requireThreadCaller.pipe(Effect.flatMap(() => handle(params))), undefined);
 
-export const actsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
-  refusesInReadOnlyModes(
-    // KODO: mode-read-only-tools
-    declare(
-      (params: P) =>
-        requireThreadCaller.pipe(
-          Effect.andThen(writingCaller),
-          Effect.flatMap(() => handle(params)),
-        ),
-      undefined,
-    ),
+export const actsAsCaller = <P, A, E, R>(
+  handle: (params: P) => Effect.Effect<A, E, R>,
+  options?: {
+    /**
+     * KODO: mode-read-only-tools - the tool does not touch the workspace (it only manages the
+     * thread's own tasks or preview, or bounds what it starts by the caller's mode), so Ask, Plan
+     * and Review threads keep it. Without this, a tool that is not `Tool.Readonly` is refused there.
+     */
+    readonly readOnlyModes?: "allowed";
+  },
+) => {
+  const declaration = declare(
+    (params: P) =>
+      requireThreadCaller.pipe(
+        Effect.andThen(writingCaller),
+        Effect.flatMap(() => handle(params)),
+      ),
+    undefined,
   );
+  return options?.readOnlyModes === "allowed" ? declaration : refusesInReadOnlyModes(declaration); // KODO: mode-read-only-tools
+};
 
 /**
  * Changes something that belongs to no thread, such as a pending upload or a
@@ -258,24 +267,23 @@ export const startsThreads = <P, A, E, R>(
     const requested = modes(params);
     return {
       runtimeMode: yield* resolveRuntimeMode(caller.limits.runtimeMode, requested.runtimeMode),
-      interactionMode: yield* resolveInteractionMode(
+      interactionMode: yield* resolveChildInteractionMode(
         caller.limits.interactionMode,
         requested.interactionMode,
-      ),
+      ), // KODO: mode-child-limit
       linkOrigin: callerLinkOrigin(caller),
     } satisfies StartedModes;
   });
-  return refusesInReadOnlyModes(
-    // KODO: mode-read-only-tools
-    declare(
-      (params: P) =>
-        Effect.gen(function* () {
-          const caller = yield* writingCaller;
-          if (linked !== "stamped") yield* assertNotLinked(caller, linked.refused);
-          return yield* handle(params, yield* started(caller, params));
-        }),
-      (params: P) => Effect.flatMap(writingCaller, (caller) => started(caller, params)),
-    ),
+  // KODO: mode-read-only-tools - not refused in read-only modes: `started` bounds the child's mode by
+  // the caller's (never less restrictive), here and, through the narrowed mode header, in a linked environment.
+  return declare(
+    (params: P) =>
+      Effect.gen(function* () {
+        const caller = yield* writingCaller;
+        if (linked !== "stamped") yield* assertNotLinked(caller, linked.refused);
+        return yield* handle(params, yield* started(caller, params));
+      }),
+    (params: P) => Effect.flatMap(writingCaller, (caller) => started(caller, params)),
   );
 };
 

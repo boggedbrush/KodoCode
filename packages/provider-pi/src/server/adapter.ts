@@ -70,6 +70,7 @@ import {
 } from "./rpc.ts";
 import {
   buildPiRpcLaunch,
+  piModeRestriction,
   materializePiT3McpExtension,
   resolvePiLaunchArgs,
 } from "./mcpInjection.ts";
@@ -486,6 +487,7 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
         mcpSession,
         extensionPath,
         runtimeMode: input.runtimePolicy.runtimeMode,
+        modeRestriction: piModeRestriction(input.runtimePolicy), // KODO: mode-launch-restriction
       });
       const scopedLaunch = yield* agentScope.wrap({
         command: options.settings.binaryPath || "pi",
@@ -2769,6 +2771,12 @@ export const makePiAdapterV2 = Effect.fn("makePiAdapterV2")(function* (
               turnInput.providerThread.nativeThreadRef?.nativeId
             ) {
               return yield* protocolError("Pi turn requested for a different native session");
+            }
+            // KODO: mode-launch-restriction - the tool list and extension environment are fixed at launch.
+            if (
+              piModeRestriction(turnInput.runtimePolicy) !== piModeRestriction(input.runtimePolicy)
+            ) {
+              return yield* protocolError("Interaction mode changes require a fresh Pi session");
             }
             // Fork adoption uses the orchestrator-allocated row; preserve that identity in later updates.
             const continuation =

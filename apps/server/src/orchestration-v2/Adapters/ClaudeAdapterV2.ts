@@ -10968,7 +10968,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             existing !== null &&
             existing.nativeThreadId === nativeThreadId &&
             !existing.stopping &&
-            isClaudeProviderContinuationTurn(turnInput)
+            isClaudeProviderContinuationTurn(turnInput) &&
+            // KODO: mode-session-policy - never on a query more permissive than this turn's policy.
+            (existing.queryPolicyKey === queryPolicyKey ||
+              (existing.queryPolicy.readOnly === true && queryPolicy.readOnly !== true))
           ) {
             return existing;
           }
