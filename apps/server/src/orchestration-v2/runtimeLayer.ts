@@ -1,6 +1,8 @@
 import * as WorktreeBranchSync from "./WorktreeBranchSync.ts";
 import * as GuestShareService from "../guest/GuestShareService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
+import * as KodoLoopWorker from "../kodo/loop/LoopWorker.ts"; // KODO: loop-worker
+import * as CheckpointDiffQuery from "../checkpointing/CheckpointDiffQuery.ts"; // KODO: loop-worker
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
@@ -386,6 +388,16 @@ export const layerProduction = Layer.mergeAll(
     Layer.provide(
       Layer.mergeAll(
         ProjectionStore.layer,
+        layerThreadManagementProvided,
+        layerOrchestratorProvided,
+      ),
+    ),
+  ),
+  // KODO: loop-worker - keeps `/loop` threads moving
+  KodoLoopWorker.layer.pipe(
+    Layer.provide(CheckpointDiffQuery.layer),
+    Layer.provide(
+      Layer.mergeAll(
         layerThreadManagementProvided,
         layerOrchestratorProvided,
       ),
