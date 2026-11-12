@@ -94,6 +94,32 @@ Providers that do not produce a separate plan offer the same choice for the
 agent's final reply. If the turn cannot start, the thread returns to Plan and the
 banner stays. Accepting is unavailable while messages are queued.
 
+### Models by mode
+
+By default every mode runs on the thread's model. To give a mode its own, open
+**Settings → Threads → Models by mode** and pick a model (and reasoning effort)
+for Ask, Plan, Code or Review. **Use the thread's model** clears a mode. Orchestrator
+and Judge appear below them as roles: they are saved but nothing uses them yet, and
+Judge follows the Review model until you set it.
+
+- The composer shows the model the current mode will use, labelled "Ask default"
+  (or the mode's name), and updates as you switch modes.
+- A model you pick in the composer wins for the message you send with it. Switching
+  mode drops the pick, and the next message in a mode with a default uses that
+  default again. In a mode without a default, a pick changes the thread's model as before.
+- Switching to a mode without a default returns to the thread's own model, not the
+  previous mode's.
+- Each message records the model it ran on. If a mode's model is unavailable (its
+  provider is off, not installed or signed in, or no longer offers the model), the
+  message runs on the thread's model and the composer says so.
+- Moving between providers inside one thread passes a text summary of the
+  conversation, not the provider's own session. Threads whose provider cannot hand
+  over a conversation keep their provider, so a mode default from another provider
+  is skipped there. Moving between models of one provider keeps its session where
+  the provider allows it.
+- Messages from mobile, connected apps and background agents follow the same rule,
+  because the server applies it.
+
 ## Send while the agent is working
 
 On web and desktop, choose **Settings → Chat → Follow-up behavior** to queue

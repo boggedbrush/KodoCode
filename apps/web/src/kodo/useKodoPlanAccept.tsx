@@ -11,7 +11,7 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import type { ModelSelection } from "@t3tools/contracts";
-import { ListChecksIcon } from "lucide-react";
+import { CodeXmlIcon, ListChecksIcon } from "lucide-react";
 import { useState } from "react";
 
 import type { ComposerBannerStackItem } from "../components/chat/ComposerBannerStack";
@@ -29,6 +29,7 @@ import {
   type PlanAcceptanceStep,
 } from "./planAccept.logic";
 import type { KodoModeSyncOutcome } from "./interactionModeSync";
+import { KodoModeActionButton } from "./KodoModeActionButton";
 
 /**
  * Plan mode is read-only, so a banner offers a ready plan: accepting switches the thread to Code
@@ -154,15 +155,16 @@ export function useKodoPlanAccept(input: {
         : "Implement the plan above, or reply to keep planning."),
     actions: (
       <>
-        <Button
-          size="xs"
-          variant="ghost"
+        <KodoModeActionButton
+          mode="plan"
+          icon={ListChecksIcon}
           disabled={accepting}
           onClick={() => setDismissedOfferKey(offer.key)}
         >
           Keep planning
-        </Button>
+        </KodoModeActionButton>
         <Button size="xs" disabled={accepting || input.isSendBusy} onClick={() => void accept()}>
+          <CodeXmlIcon aria-hidden />
           {accepting ? "Starting..." : "Implement in Code"}
         </Button>
       </>

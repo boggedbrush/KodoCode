@@ -274,6 +274,11 @@ export default {
           value: { types: "./src/kodoTheme.ts", import: "./src/kodoTheme.ts" },
           create: true,
         },
+        {
+          path: ["exports", "./kodoModeModel"],
+          value: { types: "./src/kodoModeModel.ts", import: "./src/kodoModeModel.ts" },
+          create: true,
+        },
       ],
     },
     {
@@ -350,8 +355,22 @@ export default {
   // are stable kebab-case hook names; the text after the name is free.
   // `kodo:check` warns about files with a marker that is not listed here.
   hooks: [
+    { file: "apps/web/src/components/settings/settingsSearch.ts", hooks: ["mode-models-search"] },
+    { file: "apps/web/src/components/chat/useComposerSelection.ts", hooks: ["mode-models-send"] },
+    {
+      file: "apps/web/src/components/chat/useComposerProviderModel.ts",
+      hooks: ["mode-models-composer"],
+    },
+    { file: "apps/server/src/orchestration-v2/ProjectionStore.ts", hooks: ["mode-models-state"] },
+    { file: "apps/server/src/ws.ts", hooks: ["mode-models-send"] },
+    { file: "packages/client-runtime/src/state/models.ts", hooks: ["mode-models-state"] },
+    { file: "packages/shared/src/serverSettings.ts", hooks: ["mode-models-setting"] },
+    { file: "packages/contracts/src/settings.ts", hooks: ["mode-models-setting"] },
     { file: "apps/web/src/components/onboarding/WelcomePage.tsx", hooks: ["telemetry-copy"] },
-    { file: "apps/web/src/components/settings/SettingsPanels.tsx", hooks: ["telemetry-copy"] },
+    {
+      file: "apps/web/src/components/settings/SettingsPanels.tsx",
+      hooks: ["telemetry-copy", "mode-models-settings"],
+    },
     { file: "apps/desktop/resources/installer.nsh", hooks: ["brand-product-names"] },
     { file: "apps/desktop/scripts/electron-launcher.mjs", hooks: ["brand-launcher-identity"] },
     { file: "apps/desktop/src/app/DesktopAppIdentity.test.ts", hooks: ["brand-profile-names"] },
@@ -429,7 +448,7 @@ export default {
     { file: "apps/server/src/orchestration-v2/DispatchModeLimit.ts", hooks: ["mode-rank"] },
     {
       file: "apps/server/src/orchestration-v2/Orchestrator.ts",
-      hooks: ["mode-session-restart", "mode-steer-guard"],
+      hooks: ["mode-session-restart", "mode-steer-guard", "mode-models-turn"],
     },
     {
       file: "apps/server/src/orchestration-v2/OpenCode2OrchestratorV2.integration.test.ts",
@@ -458,7 +477,7 @@ export default {
     { file: "apps/server/src/orchestration-v2/RuntimePolicy.ts", hooks: ["mode-resolver"] },
     {
       file: "apps/server/src/orchestration-v2/ThreadLaunchService.ts",
-      hooks: ["thread-mode-type"],
+      hooks: ["thread-mode-type", "mode-models-send"],
     },
     {
       file: "apps/server/src/orchestration-v2/legacy/LegacyV1ThreadImporter.ts",
@@ -466,7 +485,7 @@ export default {
     },
     {
       file: "apps/server/src/orchestration-v2/testkit/ProviderReplayHarness.ts",
-      hooks: ["mode-resolver"],
+      hooks: ["mode-resolver", "mode-models-turn"],
     },
     { file: "apps/server/src/peer/PeerForwarding.test.ts", hooks: ["mode-read-only-tools"] },
     { file: "apps/server/src/peer/PeerForwarding.ts", hooks: ["mode-peer-limit"] },
@@ -494,7 +513,13 @@ export default {
     { file: "apps/web/src/components/AppSidebarLayout.tsx", hooks: ["logo-as-sidebar-toggle"] },
     {
       file: "apps/web/src/components/ChatView.tsx",
-      hooks: ["chat-mode-state", "plan-accept-banner", "queued-run-mode"],
+      hooks: [
+        "chat-mode-state",
+        "plan-accept-banner",
+        "queued-run-mode",
+        "mode-models-send",
+        "mode-models-composer",
+      ],
     },
     { file: "apps/web/src/components/CommandPalette.tsx", hooks: ["usage-palette-action"] },
     { file: "apps/web/src/components/CommandPaletteThemeItems.tsx", hooks: ["theme-builtin-list"] },
@@ -502,13 +527,22 @@ export default {
     { file: "apps/web/src/components/Sidebar.logic.ts", hooks: ["thread-mode-compare"] },
     {
       file: "apps/web/src/components/chat/ChatComposer.tsx",
-      hooks: ["composer-mode-props", "mode-slash-select", "composer-enhance", "usage-slash-select"],
+      hooks: [
+        "composer-mode-props",
+        "mode-slash-select",
+        "composer-enhance",
+        "usage-slash-select",
+        "mode-models-composer",
+      ],
     },
     {
       file: "apps/web/src/components/chat/CompactComposerControlsMenu.tsx",
       hooks: ["compact-menu-mode"],
     },
-    { file: "apps/web/src/components/chat/ComposerControlsBar.tsx", hooks: ["controls-bar-mode"] },
+    {
+      file: "apps/web/src/components/chat/ComposerControlsBar.tsx",
+      hooks: ["controls-bar-mode", "mode-models-composer"],
+    },
     {
       file: "apps/web/src/components/chat/QueuedRunsControl.tsx",
       hooks: ["chat-mode-state", "queued-run-mode"],
@@ -522,7 +556,7 @@ export default {
     { file: "apps/web/src/components/chat/useComposerResume.ts", hooks: ["send-mode"] },
     {
       file: "apps/web/src/components/chat/useComposerSend.ts",
-      hooks: ["send-mode", "mode-slash-send", "usage-slash-send"],
+      hooks: ["send-mode", "mode-slash-send", "usage-slash-send", "mode-models-send"],
     },
     { file: "apps/web/src/components/chat/useMultipleModelSend.ts", hooks: ["send-mode"] },
     { file: "apps/web/src/components/chat/useThreadLifecycle.tsx", hooks: ["send-mode"] },
@@ -556,13 +590,19 @@ export default {
     { file: "apps/web/src/themePalette.ts", hooks: ["theme-kodo-import", "theme-kodo-builtin"] },
     { file: "apps/web/src/types.ts", hooks: ["default-interaction-mode"] },
     { file: "apps/web/vite.config.ts", hooks: ["brand-text-plugin"] },
-    { file: "packages/client-runtime/src/operations/commands.ts", hooks: ["thread-mode-type"] },
+    {
+      file: "packages/client-runtime/src/operations/commands.ts",
+      hooks: ["thread-mode-type", "mode-models-send"],
+    },
     { file: "packages/contracts/src/environmentHttp.ts", hooks: ["prompt-enhance-http"] },
     {
       file: "packages/contracts/src/index.ts",
-      hooks: ["thread-mode-type", "prompt-enhance-contract"],
+      hooks: ["thread-mode-type", "prompt-enhance-contract", "mode-models-setting"],
     },
-    { file: "packages/contracts/src/orchestrationV2.ts", hooks: ["thread-mode-type"] },
+    {
+      file: "packages/contracts/src/orchestrationV2.ts",
+      hooks: ["thread-mode-type", "mode-models-state", "mode-models-send"],
+    },
     { file: "packages/contracts/src/orchestratorMcp.ts", hooks: ["thread-mode-type"] },
     {
       file: "packages/provider-acp/src/server/adapter.ts",
@@ -672,6 +712,12 @@ export default {
     { path: "apps/web/src/kodo/", why: "Interaction mode UI logic" },
     { path: "packages/contracts/src/kodoInteractionMode.ts" },
     { path: "packages/contracts/src/kodoInteractionMode.test.ts" },
+    { path: "packages/contracts/src/kodoModeModels.ts", why: "Per-mode model settings" },
+    { path: "packages/contracts/src/kodoModeModels.test.ts" },
+    { path: "packages/shared/src/kodoModeModel.ts", why: "Mode model resolver, server and client" },
+    { path: "packages/shared/src/kodoModeModel.test.ts" },
+    { path: "apps/web/src/components/settings/KodoModeModelsSettings.tsx" },
+    { path: "apps/server/src/orchestration-v2/KodoModeModels.integration.test.ts" },
     { path: "packages/contracts/src/kodoPromptEnhance.ts", why: "Prompt enhance contract" },
     { path: "evals/prompt-enhance/", why: "Prompt enhance eval" },
     { path: "packages/client-runtime/src/kodoPromptEnhance.ts", why: "Prompt enhance request" },
@@ -882,6 +928,11 @@ export default {
       "apps/server/src/orchestration-v2/Adapters/OpenCode2AdapterV2.test.ts",
       "apps/server/src/orchestration-v2/DispatchModeLimit.test.ts",
       "apps/server/src/orchestration-v2/KodoModeEnforcement.integration.test.ts",
+      "apps/server/src/orchestration-v2/KodoModeModels.integration.test.ts",
+      "packages/contracts/src/kodoModeModels.test.ts",
+      "packages/shared/src/kodoModeModel.test.ts",
+      "apps/server/src/kodo/modeModel.test.ts",
+      "apps/web/src/kodo/modeModels.logic.test.ts",
       "apps/server/src/orchestration-v2/OpenCode2OrchestratorV2.integration.test.ts",
       "apps/server/src/orchestration-v2/RuntimePolicy.test.ts",
       "apps/server/src/peer/PeerForwarding.test.ts",

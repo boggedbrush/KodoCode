@@ -9,10 +9,10 @@ import {
 } from "@t3tools/shared/usageLimits";
 
 /** Used share at which a window starts to read as "getting close". Matches the thread details card. */
-export const KODO_USAGE_WARN_USED_PERCENT = 80;
-export const KODO_USAGE_CRITICAL_USED_PERCENT = 90;
+const KODO_USAGE_WARN_USED_PERCENT = 80;
+const KODO_USAGE_CRITICAL_USED_PERCENT = 90;
 /** Provider health refreshes about once a minute; a reading this old means refreshes are failing. */
-export const KODO_USAGE_STALE_AFTER_MS = 30 * 60_000;
+const KODO_USAGE_STALE_AFTER_MS = 30 * 60_000;
 /** The sidebar chip stays small; the rest is one click away on Usage. */
 export const KODO_USAGE_METER_MAX_ENTRIES = 2;
 
@@ -119,7 +119,7 @@ export interface KodoUsageMeterEntry extends KodoUsageReading {
 }
 
 /** One entry per provider: its tightest window across every account the user has signed in. */
-export function summarizePools(
+function summarizePools(
   pools: readonly LimitPool[],
   now: number,
   providerLabel: (driver: ServerProvider["driver"]) => string,
@@ -143,7 +143,7 @@ export function summarizePools(
 }
 
 /** What the quiet sidebar meter shows: only windows past the warning line, tightest first. */
-export function selectMeterEntries(
+function selectMeterEntries(
   entries: readonly KodoUsageMeterEntry[],
 ): readonly KodoUsageMeterEntry[] {
   return entries
@@ -214,7 +214,7 @@ export function providersWithoutLimitData(
   return [...names].toSorted((a, b) => a.localeCompare(b));
 }
 
-export const KODO_USAGE_SLASH_COMMAND = "usage";
+const KODO_USAGE_SLASH_COMMAND = "usage";
 export type KodoUsageSlashCommand = typeof KODO_USAGE_SLASH_COMMAND;
 
 export const KODO_USAGE_SLASH_COMMAND_ITEM = {

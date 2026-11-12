@@ -270,10 +270,11 @@ const setMode = (
   name: string,
   threadId: ThreadId,
   interactionMode: "ask" | "code" | "plan",
+  step: number,
 ) =>
   orchestrator.dispatch({
     type: "thread.interaction-mode.set",
-    commandId: CommandId.make(`command:${name}:mode-${interactionMode}-${Math.random()}`),
+    commandId: CommandId.make(`command:${name}:mode-${step}-${interactionMode}`),
     threadId,
     interactionMode,
   });
@@ -333,7 +334,7 @@ it.live("runs each turn on its mode's model and returns to the thread's own mode
 
         // Code has no default: the thread's model, exactly as before.
         yield* runTurn(ctx, "code-1", selection("base-model"));
-        yield* setMode(orchestrator, name, threadId, "ask");
+        yield* setMode(orchestrator, name, threadId, "ask", 1);
         // The client carries the thread's model; the mode's default replaces it.
         yield* runTurn(ctx, "ask-1", selection("base-model"));
         let thread = (yield* orchestrator.getThreadProjection(threadId)).thread;
@@ -341,7 +342,7 @@ it.live("runs each turn on its mode's model and returns to the thread's own mode
         assert.equal(thread.kodoModeModel?.base.model, "base-model");
 
         // Back in Code the displaced thread model returns, even if the client carries the Ask model.
-        yield* setMode(orchestrator, name, threadId, "code");
+        yield* setMode(orchestrator, name, threadId, "code", 2);
         yield* runTurn(ctx, "code-2", selection("ask-model"));
         thread = (yield* orchestrator.getThreadProjection(threadId)).thread;
         assert.equal(thread.modelSelection.model, "base-model");
@@ -372,7 +373,7 @@ it.live("an explicit pick in a mode with a default wins, and becomes the thread'
         const threadId = ThreadId.make(`thread:${name}`);
         const ctx = { state, orchestrator, worker, name, threadId };
         yield* createThread(orchestrator, { name, threadId, cwd });
-        yield* setMode(orchestrator, name, threadId, "ask");
+        yield* setMode(orchestrator, name, threadId, "ask", 3);
         yield* runTurn(ctx, "picked", selection("picked-model"), true);
         // The same carried model without the flag is not a pick: the default returns.
         yield* runTurn(ctx, "carried", selection("picked-model"), false);
@@ -395,7 +396,7 @@ it.live("a default that cannot be switched to falls back to the thread's model w
         const ctx = { state, orchestrator, worker, name, threadId };
         yield* createThread(orchestrator, { name, threadId, cwd });
         yield* runTurn(ctx, "first", selection("base-model"));
-        yield* setMode(orchestrator, name, threadId, "ask");
+        yield* setMode(orchestrator, name, threadId, "ask", 4);
         yield* runTurn(ctx, "second", selection("base-model"));
         const run = (yield* orchestrator.getThreadProjection(threadId)).runs[1]!;
         assert.equal(run.modelSelection.model, "base-model");
