@@ -105,14 +105,15 @@ export function findActionableProposedPlan(input: {
       };
 }
 
-/** First readable line of a reply, with markdown heading and list markers dropped. */
+/**
+ * A reply's title is its first line only when that line is a markdown heading. Plain prose
+ * ("Here is the plan:", a stray sentence) says nothing about the plan, so it gives no title.
+ */
 export function responseTitle(text: string): string | null {
-  const line = text
-    .split(/\r?\n/)
-    .map((candidate) => candidate.replace(/^[\s#>*\-\d.)]+/, "").trim())
-    .find((candidate) => candidate.length > 0);
-  if (line === undefined) return null;
-  return line.length > 120 ? `${line.slice(0, 117)}...` : line;
+  const first = text.split(/\r?\n/).find((line) => line.trim().length > 0);
+  const heading = first?.match(/^\s{0,3}#{1,6}\s+(.+)$/)?.[1]?.trim();
+  if (heading === undefined || heading.length === 0) return null;
+  return heading.length > 80 ? `${heading.slice(0, 77)}...` : heading;
 }
 
 /**

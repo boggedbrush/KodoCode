@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { searchSlashCommandItems } from "../components/chat/composerSlashCommandSearch";
+
 import {
   KODO_INTERACTION_MODE_OPTIONS,
   cycleKodoInteractionMode,
   isKodoModeSlashCommand,
+  KODO_MODE_SLASH_COMMAND_ITEMS,
+  kodoModeSlashMatchesQuery,
   kodoModeWaitsForNextTurn,
   kodoQueuedRunModeLabel,
   parseKodoModeSlashCommand,
@@ -114,5 +118,37 @@ describe("kodo interaction modes", () => {
         displayedMode: "ask",
       }),
     ).toBe(false);
+  });
+
+  it("matches mode commands by name prefix, ranked first, not by description words", () => {
+    const items = [
+      {
+        id: "m",
+        type: "slash-command" as const,
+        command: "model" as const,
+        label: "/model",
+        description: "Switch response model for this thread",
+      },
+      ...KODO_MODE_SLASH_COMMAND_ITEMS.map((item) => ({
+        id: item.command,
+        type: "slash-command" as const,
+        ...item,
+      })),
+    ];
+    const lookup = (query: string) =>
+      searchSlashCommandItems(items, query)
+        .filter(
+          (item) =>
+            item.type !== "slash-command" ||
+            !isKodoModeSlashCommand(item.command) ||
+            kodoModeSlashMatchesQuery(item.command, query),
+        )
+        .map((item) => (item.type === "slash-command" ? item.command : item.label));
+    // Upstream's own search still lists /code and /ask for "pl" via their descriptions.
+    expect(searchSlashCommandItems(items, "pl").length).toBeGreaterThan(1);
+    expect(lookup("pl")).toEqual(["plan"]);
+    expect(lookup("/PL")).toEqual(["plan"]);
+    expect(lookup("mo")).toEqual(["model"]);
+    expect(lookup("c")[0]).toBe("code");
   });
 });

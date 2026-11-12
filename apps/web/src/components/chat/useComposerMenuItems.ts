@@ -26,6 +26,7 @@ import type { ComposerTrigger } from "../../composer-logic";
 import {
   KODO_MODE_SLASH_COMMAND_ITEMS,
   isKodoModeSlashCommand,
+  kodoModeSlashMatchesQuery,
 } from "../../kodo/interactionModes.logic";
 import type { DraftId } from "../../composerDraftStore";
 import { basenameOfPath } from "../../pierre-icons";
@@ -318,7 +319,13 @@ export function useComposerMenuItems({
         [...builtInSlashCommandItems, ...visibleProviderSlashCommandItems, ...skillItems],
         composerTrigger.rangeStart === 0,
       );
-      return searchSlashCommandItems(slashCommandItems, query);
+      // KODO: mode-slash-items (mode commands match by name prefix only, not by description)
+      return searchSlashCommandItems(slashCommandItems, query).filter(
+        (item) =>
+          item.type !== "slash-command" ||
+          !isKodoModeSlashCommand(item.command) ||
+          kodoModeSlashMatchesQuery(item.command, query),
+      );
     }
     if (composerTrigger.kind === "skill") {
       return searchProviderSkills(selectedProviderSkills, composerTrigger.query).map((skill) => ({

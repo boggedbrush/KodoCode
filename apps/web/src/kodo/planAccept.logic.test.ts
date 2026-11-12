@@ -187,11 +187,13 @@ describe("kodo plan fallback for providers with no plan artifact", () => {
     expect(stale?.kind).toBe("response");
   });
 
-  it("titles a reply by its first readable line", () => {
+  it("titles a reply only by a leading markdown heading", () => {
     expect(responseTitle("\n# Add the picker\n\nmore")).toBe("Add the picker");
-    expect(responseTitle("1. First step")).toBe("First step");
+    expect(responseTitle("Here is the plan:\n# Later heading")).toBeNull();
+    expect(responseTitle("1. First step")).toBeNull();
+    expect(responseTitle("todo list fixture complete")).toBeNull();
     expect(responseTitle("   ")).toBeNull();
-    expect(responseTitle("x".repeat(200))).toHaveLength(120);
+    expect(responseTitle(`# ${"x".repeat(200)}`)).toHaveLength(80);
   });
 });
 

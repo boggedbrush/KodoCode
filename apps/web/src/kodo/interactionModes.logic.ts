@@ -113,6 +113,14 @@ export function isKodoModeSlashCommand(command: string): command is KodoModeSlas
   return KODO_INTERACTION_MODES.some((mode) => mode === command);
 }
 
+/**
+ * Upstream's slash search also matches words in a command's description, so `/pl` would list
+ * `/code` ("Implements"). Mode commands are four short names: only a typed name prefix matches.
+ */
+export function kodoModeSlashMatchesQuery(command: KodoModeSlashCommand, query: string): boolean {
+  return command.startsWith(query.trim().replace(/^\/+/, "").toLowerCase());
+}
+
 export const KODO_MODE_SLASH_COMMAND_ITEMS = KODO_INTERACTION_MODE_OPTIONS.map((option) => ({
   command: option.mode,
   label: `/${option.mode}`,

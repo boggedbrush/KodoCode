@@ -32,8 +32,7 @@ import type { KodoModeSyncOutcome } from "./interactionModeSync";
 
 /**
  * Plan mode is read-only, so a banner offers a ready plan: accepting switches the thread to Code
- * and starts the implementation turn, and a failed start puts the thread back in Plan. Dismissing
- * the banner or replying keeps the thread in Plan.
+ * and starts the implementation turn, and a failed start puts the thread back in Plan. "Keep planning" (or replying) keeps the thread in Plan.
  */
 export function useKodoPlanAccept(input: {
   readonly environmentId: EnvironmentId;
@@ -154,11 +153,19 @@ export function useKodoPlanAccept(input: {
         ? "Review the plan above, then implement it or reply to refine it."
         : "Implement the plan above, or reply to keep planning."),
     actions: (
-      <Button size="xs" disabled={accepting || input.isSendBusy} onClick={() => void accept()}>
-        {accepting ? "Starting..." : "Implement in Code"}
-      </Button>
+      <>
+        <Button
+          size="xs"
+          variant="ghost"
+          disabled={accepting}
+          onClick={() => setDismissedOfferKey(offer.key)}
+        >
+          Keep planning
+        </Button>
+        <Button size="xs" disabled={accepting || input.isSendBusy} onClick={() => void accept()}>
+          {accepting ? "Starting..." : "Implement in Code"}
+        </Button>
+      </>
     ),
-    dismissLabel: "Keep planning",
-    onDismiss: () => setDismissedOfferKey(offer.key),
   };
 }
