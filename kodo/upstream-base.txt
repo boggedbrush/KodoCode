@@ -1,4 +1,7 @@
-# Written by `pnpm kodo:sync`. The upstream (T3 Code) release this fork is based on.
+# Written by `pnpm kodo:sync` and `pnpm kodo:verify`. The upstream (T3 Code) release this fork is based on.
+# `verified` appears only after check and every verification command passed; `kodo:check --release` requires it.
 tag: v0.1.9
 commit: 24e77473ecf41bc1f7142529c7911c1c1aae1d76
 synced: 2026-11-12
+verified: 2026-11-12
+verified-commit: 18ea5c345773d094bb544cf8977c2e37a2670f0e
