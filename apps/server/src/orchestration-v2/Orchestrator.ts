@@ -1381,10 +1381,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const reason = kodoAvailabilityFromProviders(providers)(configured);
         if (reason !== null) return `${configured.model} is unavailable: ${reason}.`;
       }
-      const plan = yield* providerSwitchService
+      // A selection the provider will not switch to is a failed plan; its cause says why.
+      const planned = yield* providerSwitchService
         .plan({ projection, targetModelSelection: configured })
-        .pipe(Effect.option);
-      if (Option.isNone(plan)) return `${configured.model} is unavailable.`;
+        .pipe(Effect.result);
+      if (planned._tag === "Failure") {
+        const cause = planned.failure.cause;
+        return typeof cause === "string" ? cause : `${configured.model} is unavailable.`;
+      }
+      const plan = { value: planned.success };
       if (plan.value.transition.type === "reject") return plan.value.transition.reason;
       const crossesProvider =
         activeProviderThread !== undefined &&
@@ -7997,6 +8002,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       providerThreadId: providerThread.id,
       userMessageId: command.messageId,
       ...kodoRunModeSnapshot(projection.thread.interactionMode), // KODO: run-mode-snapshot
+      ...(kodoRunModel === undefined ? {} : { kodoModel: kodoRunModel }), // KODO: mode-models-turn
       rootNodeId,
       activeAttemptId: attemptId,
       status: "starting",

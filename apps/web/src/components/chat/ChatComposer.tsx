@@ -915,13 +915,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     promptInjectionState: getComposerPromptInjectionState(prompt),
     candidateInstanceIds: [
       composerDraft.activeProvider ?? null,
-      activeThread?.runtime?.providerInstanceId,
+      // KODO: mode-models-composer - while a mode default is applied the live session is not the thread's own provider.
+      activeThread?.kodoModeModel ? undefined : activeThread?.runtime?.providerInstanceId,
       activeThreadModelSelection?.instanceId,
       activeProjectDefaultModelSelection?.instanceId,
     ],
     lockedProvider,
     lockedInstanceId:
-      activeThread?.runtime?.providerInstanceId ?? activeThreadModelSelection?.instanceId,
+      (activeThread?.kodoModeModel ? undefined : activeThread?.runtime?.providerInstanceId) ??
+      activeThreadModelSelection?.instanceId, // KODO: mode-models-composer
   });
   // KODO: mode-models-composer - read when a send starts, so it stays out of the handle's deps.
   const kodoModelSendRef = useRef<

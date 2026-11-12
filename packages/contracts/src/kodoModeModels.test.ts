@@ -5,12 +5,11 @@ import { DEFAULT_KODO_MODE_MODELS, KodoModeModelsSetting } from "./kodoModeModel
 import { ServerSettings } from "./settings.ts";
 
 const decode = Schema.decodeUnknownSync(KodoModeModelsSetting);
+const decodeSettings = Schema.decodeSync(ServerSettings);
 
 describe("mode model settings decoding", () => {
   it("settings written before the section existed decode to all unset", () => {
-    expect(Schema.decodeUnknownSync(ServerSettings)({}).modeModelSelections).toEqual(
-      DEFAULT_KODO_MODE_MODELS,
-    );
+    expect(decodeSettings({}).modeModelSelections).toEqual(DEFAULT_KODO_MODE_MODELS);
   });
 
   it("keeps configured slots, including unknown model ids, and defaults the rest", () => {

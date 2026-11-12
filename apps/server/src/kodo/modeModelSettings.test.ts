@@ -14,6 +14,8 @@ import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettingsModule from "../serverSettings.ts";
 
+const decodeSettingsJson = Schema.decodeEffect(Schema.fromJsonString(ServerSettings));
+
 const layer = ServerSettingsModule.layer.pipe(
   Layer.provide(ServerSecretStore.layer),
   Layer.provide(ManagedPolicy.layerTest()),
@@ -39,9 +41,7 @@ it.effect("saves one mode's model in the settings file and keeps the other slots
     assert.deepEqual(next.modeModelSelections.ask, ask);
     assert.deepEqual(next.modeModelSelections.plan, plan);
     assert.isNull(next.modeModelSelections.review);
-    const saved = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ServerSettings))(
-      yield* fs.readFileString(config.settingsPath),
-    );
+    const saved = yield* decodeSettingsJson(yield* fs.readFileString(config.settingsPath));
     assert.deepEqual(saved.modeModelSelections, next.modeModelSelections);
     const cleared = yield* service.updateSettings({ modeModelSelections: { ask: null } });
     assert.isNull(cleared.modeModelSelections.ask);

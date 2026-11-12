@@ -162,7 +162,12 @@ export function useKodoInteractionMode(input: {
     const target = normalizeKodoInteractionMode(mode);
     if (target === currentMode()) return;
     // A model picked for the old mode's message does not follow the thread into a mode with its own default.
-    if (typeof composerDraftTarget !== "string" && input.modeHasDefaultModel(target)) {
+    // A new thread's pick is its own model, not a one-message override, so it stays.
+    if (
+      !isLocalDraftThread &&
+      typeof composerDraftTarget !== "string" &&
+      input.modeHasDefaultModel(target)
+    ) {
       const store = useComposerDraftStore.getState();
       const draft = store.getComposerDraft(composerDraftTarget);
       const held = draft?.activeProvider

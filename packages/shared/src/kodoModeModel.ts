@@ -24,7 +24,7 @@ export interface KodoModeModelThread {
 /** Null when the selection can run, otherwise a short reason a person can read. */
 export type KodoModelAvailability = (selection: ModelSelection) => string | null;
 
-export const KODO_ALWAYS_AVAILABLE: KodoModelAvailability = () => null;
+const KODO_ALWAYS_AVAILABLE: KodoModelAvailability = () => null;
 
 export interface KodoResolvedModel {
   readonly slot: KodoModeModelSlot;

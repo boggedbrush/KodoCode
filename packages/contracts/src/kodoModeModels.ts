@@ -6,14 +6,7 @@ import * as Schema from "effect/Schema";
 
 import { ModelSelection } from "./modelSelection.ts";
 
-export const KODO_MODE_MODEL_SLOTS = [
-  "ask",
-  "plan",
-  "code",
-  "review",
-  "orchestrator",
-  "judge",
-] as const;
+const KODO_MODE_MODEL_SLOTS = ["ask", "plan", "code", "review", "orchestrator", "judge"] as const;
 export const KodoModeModelSlot = Schema.Literals(KODO_MODE_MODEL_SLOTS);
 export type KodoModeModelSlot = typeof KodoModeModelSlot.Type;
 

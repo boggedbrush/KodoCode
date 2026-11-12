@@ -46,7 +46,10 @@ export function resolveKodoModeModel(input: ResolveKodoModeModelInput): KodoReso
     record != null &&
     input.explicitPick !== true &&
     input.requested !== undefined &&
-    draftModelPickMatchesThread(input.requested, record.applied)
+    (draftModelPickMatchesThread(input.requested, record.applied) ||
+      // The composer's own model read through the live session's provider instance.
+      (input.requested.instanceId === record.applied.instanceId &&
+        input.requested.model === record.base.model))
       ? undefined
       : input.requested;
   const configured = modeModels[slot] ?? (slot === "judge" ? modeModels.review : null);

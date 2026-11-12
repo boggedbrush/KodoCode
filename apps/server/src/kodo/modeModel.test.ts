@@ -44,6 +44,15 @@ describe("resolveKodoModeModel", () => {
     expect(resolveKodoModeModel({ mode: "code", thread: displaced, settings }).selection).toEqual(
       own,
     );
+    // The composer reads the own model through the live session's provider instance.
+    expect(
+      resolveKodoModeModel({
+        mode: "code",
+        thread: displaced,
+        settings,
+        requested: sel("claudeAgent", "own"),
+      }).selection,
+    ).toEqual(own);
     // A client that carries the applied model back (mobile) is not picking it.
     expect(
       resolveKodoModeModel({ mode: "code", thread: displaced, settings, requested: ask }).selection,
