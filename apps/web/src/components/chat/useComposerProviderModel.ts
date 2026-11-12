@@ -98,7 +98,8 @@ export function useComposerProviderModel(
     ? (() => {
         const instanceId =
           baseSelection.selectedProviderEntry?.instanceId ?? NO_PROVIDER_MODEL_SELECTION.instanceId;
-        const driver = baseSelection.selectedProviderEntry?.driverKind ?? baseSelection.requestedDriverKind;
+        const driver =
+          baseSelection.selectedProviderEntry?.driverKind ?? baseSelection.requestedDriverKind;
         const carriedState = deriveEffectiveComposerModelState({
           draft: realDraftModelState,
           providers: providerStatuses,

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "@effect/vitest";
-import { DEFAULT_KODO_MODE_MODELS, type KodoModeModels, ProviderInstanceId } from "@t3tools/contracts";
+import {
+  DEFAULT_KODO_MODE_MODELS,
+  type KodoModeModels,
+  ProviderInstanceId,
+} from "@t3tools/contracts";
 
 import {
   kodoOwnModelAfterQueue,
@@ -38,19 +42,102 @@ describe("resolveKodoModeModelSelection precedence", () => {
     source: string;
     unavailable?: boolean;
   }> = [
-    { name: "nothing configured follows the thread", mode: "ask", modeModels: models({}), expected: own, source: "thread" },
-    { name: "configured mode runs on it", mode: "ask", modeModels: models({ ask: fast }), expected: fast, source: "mode-default" },
-    { name: "other modes keep the thread model", mode: "code", modeModels: models({ ask: fast }), expected: own, source: "thread" },
-    { name: "legacy default reads as code", mode: "default", modeModels: models({ code: strong }), expected: strong, source: "mode-default" },
-    { name: "unknown mode reads as ask (fail closed)", mode: "weird", modeModels: models({ ask: fast }), expected: fast, source: "mode-default" },
-    { name: "explicit pick wins over the mode", mode: "plan", modeModels: models({ plan: strong }), explicit: fast, expected: fast, source: "explicit" },
-    { name: "unavailable configured model falls back with a notice", mode: "plan", modeModels: models({ plan: strong }), availability: never, expected: own, source: "thread", unavailable: true },
-    { name: "orchestrator slot resolves like a mode", mode: "orchestrator", modeModels: models({ orchestrator: strong }), expected: strong, source: "mode-default" },
-    { name: "judge uses its own model", mode: "judge", modeModels: models({ judge: judgeModel, review: strong }), expected: judgeModel, source: "mode-default" },
-    { name: "judge falls back to review", mode: "judge", modeModels: models({ review: strong }), expected: strong, source: "mode-default" },
-    { name: "judge with no review follows the thread", mode: "judge", modeModels: models({}), expected: own, source: "thread" },
-    { name: "judge falls back to review, then the thread when review is unavailable", mode: "judge", modeModels: models({ review: strong }), availability: never, expected: own, source: "thread", unavailable: true },
-    { name: "review does not borrow from judge", mode: "review", modeModels: models({ judge: judgeModel }), expected: own, source: "thread" },
+    {
+      name: "nothing configured follows the thread",
+      mode: "ask",
+      modeModels: models({}),
+      expected: own,
+      source: "thread",
+    },
+    {
+      name: "configured mode runs on it",
+      mode: "ask",
+      modeModels: models({ ask: fast }),
+      expected: fast,
+      source: "mode-default",
+    },
+    {
+      name: "other modes keep the thread model",
+      mode: "code",
+      modeModels: models({ ask: fast }),
+      expected: own,
+      source: "thread",
+    },
+    {
+      name: "legacy default reads as code",
+      mode: "default",
+      modeModels: models({ code: strong }),
+      expected: strong,
+      source: "mode-default",
+    },
+    {
+      name: "unknown mode reads as ask (fail closed)",
+      mode: "weird",
+      modeModels: models({ ask: fast }),
+      expected: fast,
+      source: "mode-default",
+    },
+    {
+      name: "explicit pick wins over the mode",
+      mode: "plan",
+      modeModels: models({ plan: strong }),
+      explicit: fast,
+      expected: fast,
+      source: "explicit",
+    },
+    {
+      name: "unavailable configured model falls back with a notice",
+      mode: "plan",
+      modeModels: models({ plan: strong }),
+      availability: never,
+      expected: own,
+      source: "thread",
+      unavailable: true,
+    },
+    {
+      name: "orchestrator slot resolves like a mode",
+      mode: "orchestrator",
+      modeModels: models({ orchestrator: strong }),
+      expected: strong,
+      source: "mode-default",
+    },
+    {
+      name: "judge uses its own model",
+      mode: "judge",
+      modeModels: models({ judge: judgeModel, review: strong }),
+      expected: judgeModel,
+      source: "mode-default",
+    },
+    {
+      name: "judge falls back to review",
+      mode: "judge",
+      modeModels: models({ review: strong }),
+      expected: strong,
+      source: "mode-default",
+    },
+    {
+      name: "judge with no review follows the thread",
+      mode: "judge",
+      modeModels: models({}),
+      expected: own,
+      source: "thread",
+    },
+    {
+      name: "judge falls back to review, then the thread when review is unavailable",
+      mode: "judge",
+      modeModels: models({ review: strong }),
+      availability: never,
+      expected: own,
+      source: "thread",
+      unavailable: true,
+    },
+    {
+      name: "review does not borrow from judge",
+      mode: "review",
+      modeModels: models({ judge: judgeModel }),
+      expected: own,
+      source: "thread",
+    },
   ];
   it.each(cases)("$name", (c) => {
     const resolved = resolveKodoModeModelSelection({
@@ -75,15 +162,28 @@ describe("own model while a mode default displaces it", () => {
   });
 
   it("records a displacement only for a mode default that differs", () => {
-    expect(kodoThreadModeModelFor({ selection: fast, source: "mode-default", own })).toEqual({ applied: fast, base: own });
+    expect(kodoThreadModeModelFor({ selection: fast, source: "mode-default", own })).toEqual({
+      applied: fast,
+      base: own,
+    });
     expect(kodoThreadModeModelFor({ selection: own, source: "mode-default", own })).toBeUndefined();
     expect(kodoThreadModeModelFor({ selection: fast, source: "explicit", own })).toBeUndefined();
   });
 
   it("a queue tail supplies the own model for runs queued behind it", () => {
     const thread = { modelSelection: own };
-    expect(kodoOwnModelAfterQueue(thread, { modelSelection: fast, kodoModel: { source: "mode-default", base: own } })).toEqual(own);
-    expect(kodoOwnModelAfterQueue(thread, { modelSelection: strong, kodoModel: { source: "explicit", base: own } })).toEqual(strong);
+    expect(
+      kodoOwnModelAfterQueue(thread, {
+        modelSelection: fast,
+        kodoModel: { source: "mode-default", base: own },
+      }),
+    ).toEqual(own);
+    expect(
+      kodoOwnModelAfterQueue(thread, {
+        modelSelection: strong,
+        kodoModel: { source: "explicit", base: own },
+      }),
+    ).toEqual(strong);
     expect(kodoOwnModelAfterQueue(thread, undefined)).toEqual(own);
   });
 });
@@ -100,6 +200,8 @@ describe("kodoSendIsExplicitPick", () => {
     expect(kodoSendIsExplicitPick({ ...base, requested: fast, flagged: undefined })).toBe(false);
   });
   it("is never a pick when the mode has no default", () => {
-    expect(kodoSendIsExplicitPick({ requested: strong, flagged: true, own, configured: null })).toBe(false);
+    expect(
+      kodoSendIsExplicitPick({ requested: strong, flagged: true, own, configured: null }),
+    ).toBe(false);
   });
 });

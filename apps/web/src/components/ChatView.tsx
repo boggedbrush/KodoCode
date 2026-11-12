@@ -149,6 +149,8 @@ import { useWorkspaceMutationRefresh } from "../hooks/useWorkspaceMutationRefres
 import { type ChatMessage } from "../types";
 // KODO: chat-mode-state
 import { useKodoInteractionMode } from "../kodo/useKodoInteractionMode";
+import { kodoModeHasDefault } from "../kodo/modeModels.logic"; // KODO: mode-models-send
+import { kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel"; // KODO: mode-models-composer
 // KODO: plan-accept-banner
 import { useKodoPlanAccept } from "../kodo/useKodoPlanAccept";
 import { resolveKodoPlanOffer } from "../kodo/planAccept.logic";
@@ -1862,6 +1864,7 @@ export default function ChatView(props: ChatViewProps) {
     latestRunOrdinal:
       serverProjection?.runs.reduce((max, run) => Math.max(max, run.ordinal), 0) ?? 0,
     setThreadError,
+    modeHasDefaultModel: (mode) => kodoModeHasDefault(settings.modeModelSelections, mode), // KODO: mode-models-send
   });
   const insertArtifactTemplate = (template: CodexArtifactTemplate) => {
     const composer = composerRef.current;
@@ -2906,6 +2909,7 @@ export default function ChatView(props: ChatViewProps) {
     setPendingServerThreadEnvModeEntry,
     setPendingServerThreadStartFromOriginByThreadId,
     scheduleComposerFocus,
+    kodoHoldModelPick: kodoModeHasDefault(settings.modeModelSelections, interactionMode), // KODO: mode-models-send
   });
   const { onResume, isResuming } = useComposerResume({
     environmentId,
@@ -3728,7 +3732,9 @@ export default function ChatView(props: ChatViewProps) {
                                   activeProjectDefaultModelSelection={
                                     activeProjectDefaultModelSelection
                                   }
-                                  activeThreadModelSelection={activeThread?.modelSelection}
+                                  activeThreadModelSelection={
+                                    activeThread ? kodoThreadOwnModel(activeThread) : undefined
+                                  } // KODO: mode-models-composer
                                   activeProjectId={activeProject?.id ?? null}
                                   projectName={activeProject?.title}
                                   compactThreadUnavailable={compactThreadUnavailable}

@@ -5,7 +5,6 @@ import {
   CommandId,
   MessageId,
   type ModelSelection,
-  type OrchestrationV2Command,
   type OrchestrationV2ProviderCapabilities,
   type OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
@@ -14,7 +13,6 @@ import {
   ProviderInstanceId,
   ProviderThreadId,
   ProviderTurnId,
-  type RunId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
@@ -36,10 +34,6 @@ import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter"
 // Grok fixes its runtime mode when its process launches, so its session cannot take a new policy.
 const driver = ProviderDriverKind.make("grok");
 const providerInstanceId = ProviderInstanceId.make("grok-mode-test");
-const modelSelection = {
-  instanceId: providerInstanceId,
-  model: "mode-model",
-} satisfies ModelSelection;
 const capabilities: OrchestrationV2ProviderCapabilities = {
   ...CodexProviderCapabilitiesV2,
   sessions: {

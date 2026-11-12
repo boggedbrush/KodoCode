@@ -595,6 +595,7 @@ export function useComposerSend(input: ComposerSendInput) {
       selectedProviderModels: ctxSelectedProviderModels,
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
+      kodoModelSend, // KODO: mode-models-send
     } = sendCtx;
     const { images: composerImages, previewAnnotations: composerPreviewAnnotations } =
       mergeDirectPreviewAnnotation({
@@ -1180,11 +1181,20 @@ export function useComposerSend(input: ComposerSendInput) {
       attachments: composerAttachmentsSnapshot,
       fallbackLabels: sendTitleFallbackLabels(sendSnapshot),
     });
-    const threadCreateModelSelection = createModelSelection(
-      ctxSelectedModelSelection.instanceId,
-      ctxSelectedModel || activeProjectDefaultModelSelection?.model || DEFAULT_MODEL,
-      ctxSelectedModelSelection.options,
-    );
+    // KODO: mode-models-send - a shown mode default is not the thread's own model, and is not sent:
+    // the server applies it, so a thread created here keeps the model the composer carries.
+    const threadCreateModelSelection =
+      kodoModelSend.shown && kodoModelSend.own !== null
+        ? kodoModelSend.own
+        : createModelSelection(
+            ctxSelectedModelSelection.instanceId,
+            ctxSelectedModel || activeProjectDefaultModelSelection?.model || DEFAULT_MODEL,
+            ctxSelectedModelSelection.options,
+          );
+    const kodoSendModel = {
+      ...(kodoModelSend.shown ? {} : { modelSelection: ctxSelectedModelSelection }),
+      explicitModelSelection: kodoModelSend.explicit,
+    };
 
     let failure: AtomCommandResult<unknown, unknown> | null = null;
 
@@ -1227,7 +1237,7 @@ export function useComposerSend(input: ComposerSendInput) {
             attachments: [],
             idleCompaction: "onReturn",
           },
-          modelSelection: ctxSelectedModelSelection,
+          ...kodoSendModel, // KODO: mode-models-send
           runtimeMode,
           interactionMode, // KODO: send-mode
         },
@@ -1289,7 +1299,7 @@ export function useComposerSend(input: ComposerSendInput) {
               ),
             }),
           },
-          modelSelection: ctxSelectedModelSelection,
+          ...kodoSendModel, // KODO: mode-models-send
           titleSeed: title,
           runtimeMode,
           interactionMode, // KODO: send-mode
@@ -1327,6 +1337,16 @@ export function useComposerSend(input: ComposerSendInput) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        // KODO: mode-models-send - a pick held in the draft applied to this message only.
+        if (kodoModelSend.explicit && !isLocalDraftThread) {
+          const store = useComposerDraftStore.getState();
+          const heldRef = scopeThreadRef(environmentId, threadIdForSend);
+          const held = store.getComposerDraft(heldRef);
+          const heldPick = held?.activeProvider
+            ? held.modelSelectionByProvider[held.activeProvider]
+            : undefined;
+          if (heldPick) store.releaseModelSelection(heldRef, heldPick);
+        }
         setKeepFullHistory(routeThreadKey, false);
         if (freshArm !== undefined) disarmFreshSession(routeThreadKey, freshArm);
         clearUsageLimitsFor(routeThreadKey);

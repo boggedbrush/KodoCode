@@ -924,19 +924,24 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       activeThread?.runtime?.providerInstanceId ?? activeThreadModelSelection?.instanceId,
   });
   // KODO: mode-models-composer - read when a send starts, so it stays out of the handle's deps.
-  const kodoModelSendRef = useRef<ReturnType<ChatComposerHandle["getSendContext"]>["kodoModelSend"]>({
+  const kodoModelSendRef = useRef<
+    ReturnType<ChatComposerHandle["getSendContext"]>["kodoModelSend"]
+  >({
     shown: false,
     own: null,
     explicit: false,
   });
-  kodoModelSendRef.current = {
-    shown: kodoComposerModel?.shown != null,
-    own:
-      kodoCarried === null
-        ? null
-        : createModelSelection(kodoCarried.instanceId, kodoCarried.model, kodoCarried.options),
-    explicit: composerDraft.modelSelectionExplicit === true,
-  };
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a send reads the model the composer shows at that moment
+  useEffect(() => {
+    kodoModelSendRef.current = {
+      shown: kodoComposerModel?.shown != null,
+      own:
+        kodoCarried === null
+          ? null
+          : createModelSelection(kodoCarried.instanceId, kodoCarried.model, kodoCarried.options),
+      explicit: composerDraft.modelSelectionExplicit === true,
+    };
+  });
   const noProviderAvailable =
     selectedProviderEntry === undefined && multipleModelSelections === null;
   const providerCatalogPending = noProviderAvailable && !providerCatalogKnown;

@@ -44,6 +44,8 @@ export function useKodoInteractionMode(input: {
   /** The mode the running run recorded when it was created; absent on runs that predate it. */
   readonly activeRunMode: ThreadInteractionMode | undefined;
   readonly setThreadError: (threadId: ThreadId, message: string | null) => void;
+  /** Whether a mode has a configured default model; a pick held for the old mode ends when one does. */
+  readonly modeHasDefaultModel: (mode: KodoInteractionMode) => boolean;
 }) {
   const { composerDraftTarget, threadMode, isLocalDraftThread, threadKey, serverThreadId } = input;
   const isServerThread = serverThreadId !== null;
@@ -159,6 +161,16 @@ export function useKodoInteractionMode(input: {
   const handleInteractionModeChange = useStableCallback((mode: ThreadInteractionMode) => {
     const target = normalizeKodoInteractionMode(mode);
     if (target === currentMode()) return;
+    // A model picked for the old mode's message does not follow the thread into a mode with its own default.
+    if (typeof composerDraftTarget !== "string" && input.modeHasDefaultModel(target)) {
+      const store = useComposerDraftStore.getState();
+      const draft = store.getComposerDraft(composerDraftTarget);
+      const held = draft?.activeProvider
+        ? draft.modelSelectionByProvider[draft.activeProvider]
+        : undefined;
+      if (draft?.modelSelectionExplicit && held)
+        store.releaseModelSelection(composerDraftTarget, held);
+    }
     if (serverThreadId === null) {
       setComposerDraftInteractionMode(composerDraftTarget, target);
       if (isLocalDraftThread)

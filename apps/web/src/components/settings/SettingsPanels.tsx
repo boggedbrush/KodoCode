@@ -60,6 +60,7 @@ import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import { useOptionalSettingsScope, useSettingsScope } from "./SettingsScopeContext";
 import { scopedIdleCompaction } from "./scopedSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
+import { KodoModeModelsSettings } from "./KodoModeModelsSettings"; // KODO: mode-models-settings
 import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
 import { SnoozePresetsRow } from "./SnoozePresetsSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
@@ -1704,15 +1705,13 @@ export function ThreadsSettingsPanel() {
           }
         />
       </SettingsSection>
-
       <ProjectDefaultsSettings category="general" />
-
+      {!isProjectScope ? <KodoModeModelsSettings /> : null} {/* KODO: mode-models-settings */}
       {!isProjectScope ? (
         <SettingsSection id="snooze" title="Snooze">
           <SnoozePresetsRow />
         </SettingsSection>
       ) : null}
-
       <SettingsSection id="usage-limits" title="Usage limits">
         <SettingsRow
           serverScoped
@@ -1747,7 +1746,6 @@ export function ThreadsSettingsPanel() {
           }
         />
       </SettingsSection>
-
       {hasServerTargets ? (
         <SettingsSection id="auto-settle" title="Auto-settle">
           <SettingsRow
@@ -1846,7 +1844,6 @@ export function ThreadsSettingsPanel() {
           ) : null}
         </SettingsSection>
       ) : null}
-
       <SettingsSection id="text-generation" title="Text generation">
         <SettingsRow
           serverScoped

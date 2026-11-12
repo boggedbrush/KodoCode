@@ -49,6 +49,8 @@ interface ComposerSelectionInput {
     SetStateAction<Record<string, boolean>>
   >;
   readonly scheduleComposerFocus: () => void;
+  /** KODO: mode-models-send - the thread's mode has a default model, so a pick waits for the send that uses it. */
+  readonly kodoHoldModelPick: boolean;
 }
 
 /**
@@ -74,6 +76,7 @@ export function useComposerSelection(input: ComposerSelectionInput) {
     setPendingServerThreadEnvModeEntry,
     setPendingServerThreadStartFromOriginByThreadId,
     scheduleComposerFocus,
+    kodoHoldModelPick,
   } = input;
   const navigate = useNavigate();
   const setStickyComposerModelSelection = useComposerDraftStore(
@@ -190,7 +193,7 @@ export function useComposerSelection(input: ComposerSelectionInput) {
       replaceOptions: true,
     });
     setStickyComposerModelSelection(nextModelSelection);
-    if (!isLocalDraftThread) applyThreadModelPick(threadRef);
+    if (!isLocalDraftThread && !kodoHoldModelPick) applyThreadModelPick(threadRef); // KODO: mode-models-send
     if (options?.focusComposer !== false) scheduleComposerFocus();
   };
   const onProviderModelSelectStable = useStableCallback(onProviderModelSelect);

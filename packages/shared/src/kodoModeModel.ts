@@ -1,10 +1,5 @@
-// Kodo per-mode model resolution, shared by the server turn-start path and the web composer
-// preview so both apply one rule. Pure: callers supply settings and an availability check.
-//
-// Precedence for one turn, highest first:
-//   1. an explicit pick sent with the message ("explicit")
-//   2. the mode's configured model, if it is available ("mode-default")
-//   3. the thread's own model ("thread"), also the fallback when the configured one is unavailable
+// Kodo per-mode model resolution, shared by the server turn start and the web composer preview.
+// Precedence: explicit pick, then the mode's configured model (judge: review), then the thread's own.
 import {
   type KodoInteractionMode,
   type KodoModelSource,

@@ -294,6 +294,24 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["fallback agent provider out of usage new threads"],
     environmentOnly: true,
   },
+  // KODO: mode-models-search
+  {
+    id: "mode-models",
+    title: "Models by mode",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["ask plan code review default model per mode reasoning effort provider"],
+    environmentOnly: true,
+  },
+  // KODO: mode-models-search
+  {
+    id: "mode-model-roles",
+    title: "Orchestrator and Judge models",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["orchestrator judge role review model assess complete swarm"],
+    environmentOnly: true,
+  },
   {
     id: "default-permissions",
     title: "Permissions",
