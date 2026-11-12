@@ -1,0 +1,4 @@
+# Written by `pnpm kodo:sync`. The upstream (T3 Code) release this fork is based on.
+tag: v0.1.9
+commit: 24e77473ecf41bc1f7142529c7911c1c1aae1d76
+synced: 2026-11-12
