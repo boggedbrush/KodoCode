@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { KODO_INTERACTION_MODES, type RuntimeMode } from "@t3tools/contracts";
+import { parseKodoReview } from "@t3tools/shared/kodoLoopOutput";
 
 import {
   KODO_ASK_MODE_INSTRUCTIONS,
@@ -210,6 +211,14 @@ describe("resolveKodoInteractionMode", () => {
     expect(KODO_REVIEW_MODE_INSTRUCTIONS).toContain(
       "Do not produce a separate implementation plan",
     );
+  });
+
+  it("asks Review to end with a kodo-review block whose example the shared parser accepts", () => {
+    expect(KODO_REVIEW_MODE_INSTRUCTIONS).toContain(
+      "exactly one fenced block labelled `kodo-review`",
+    );
+    const example = parseKodoReview(KODO_REVIEW_MODE_INSTRUCTIONS);
+    expect(example.ok).toBe(true);
   });
 });
 

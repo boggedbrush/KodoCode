@@ -548,6 +548,7 @@ const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   "textGenerationModelSelection",
   "fallbackModelSelection",
   "modeModelSelections", // KODO: mode-models-setting - stored whole; a sparse record would not encode
+  "loop", // KODO: loop-setting - stored whole, for the same reason
   "pullRequestMergeMethod",
   // Empty by default, these hold one whole value, which a managed policy can default.
   ...Object.entries(DEFAULT_SERVER_SETTINGS).flatMap(([key, value]) =>

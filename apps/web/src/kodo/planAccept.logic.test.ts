@@ -338,6 +338,20 @@ describe("kodo plan acceptance run", () => {
     expect(await switched.outcome).toEqual({ status: "failed", stage: "mode", message: null });
   });
 
+  it("names what did not start and the mode it could not return to, for a handoff that is not a plan", async () => {
+    const result = await runKodoPlanAcceptance({
+      stillOffered: () => true,
+      switchToCode: async () => ok,
+      startTurn: async () => fail("", true),
+      returnToPlan: async () => fail("socket"),
+      wording: { notStarted: "The fixes did not start.", returnMode: "Review" },
+    });
+    expect(result).toMatchObject({
+      stage: "turn",
+      message: "The fixes did not start. The thread also could not return to Review: socket",
+    });
+  });
+
   it("checks the offer once, before any command", async () => {
     const stillOffered = vi.fn(() => true);
     await runKodoPlanAcceptance({

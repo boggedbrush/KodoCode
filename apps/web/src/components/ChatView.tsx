@@ -154,6 +154,9 @@ import { kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel"; // KODO: mod
 // KODO: plan-accept-banner
 import { useKodoPlanAccept } from "../kodo/useKodoPlanAccept";
 import { resolveKodoPlanOffer } from "../kodo/planAccept.logic";
+// KODO: findings-card
+import { useKodoFindings } from "../kodo/useKodoFindings";
+import { findKodoFindingsOffer } from "../kodo/reviewFindings.logic";
 import { KodoInteractionModeStatusProvider } from "../kodo/interactionModeStatus";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useTheme } from "../hooks/useTheme";
@@ -2600,6 +2603,28 @@ export default function ChatView(props: ChatViewProps) {
     persistThreadSettingsForNextTurn,
     setThreadError,
   });
+  // KODO: findings-card (a settled Review run's findings come back as a card with Fix in Code)
+  const kodoFindingsBanner = useKodoFindings({
+    environmentId,
+    threadId: activeThreadId,
+    isServerThread,
+    canOperateThread,
+    offer: findKodoFindingsOffer({
+      latestRun: activeLatestRun,
+      runs: serverProjection?.runs ?? EMPTY_RUNS,
+      messageText: (messageId) =>
+        serverProjection?.messages.find((message) => message.id === messageId)?.text ?? null,
+    }),
+    latestRunSettled,
+    pendingUserInputCount: pendingUserInputs.length,
+    isSendBusy,
+    runtimeMode,
+    fallbackModelSelection: activeThread?.modelSelection,
+    composerRef,
+    commitInteractionMode,
+    persistThreadSettingsForNextTurn,
+    setThreadError,
+  });
   const composerBannerItemsBase = (() => {
     const fallbackSelection = draftFallback?.selection;
     const defaultSelection =
@@ -2692,10 +2717,15 @@ export default function ChatView(props: ChatViewProps) {
       }),
     ];
   })() as ComposerBannerStackItem[];
-  // KODO: plan-accept-banner
-  const composerBannerItems = kodoPlanAcceptBanner
-    ? [...composerBannerItemsBase, kodoPlanAcceptBanner]
-    : composerBannerItemsBase;
+  // KODO: plan-accept-banner, findings-card
+  const composerBannerItems =
+    kodoPlanAcceptBanner || kodoFindingsBanner
+      ? [
+          ...composerBannerItemsBase,
+          ...(kodoPlanAcceptBanner ? [kodoPlanAcceptBanner] : []),
+          ...(kodoFindingsBanner ? [kodoFindingsBanner] : []),
+        ]
+      : composerBannerItemsBase;
 
   if (
     terminalUiLaunchContext !== null &&

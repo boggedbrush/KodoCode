@@ -43,6 +43,10 @@
       "types": "./src/kodoModeModel.ts",
       "import": "./src/kodoModeModel.ts"
     },
+    "./kodoLoopOutput": {
+      "types": "./src/kodoLoopOutput.ts",
+      "import": "./src/kodoLoopOutput.ts"
+    },
     "./themePalettes": {
       "types": "./src/themePalettes.ts",
       "import": "./src/themePalettes.ts"

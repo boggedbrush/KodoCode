@@ -23,6 +23,8 @@ import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../times
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./timelineRowContext";
 import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts";
+import { stripKodoBlock, KODO_REVIEW_LABEL } from "@t3tools/shared/kodoLoopOutput"; // KODO: findings-card
+import { useKodoFindingsReplacesBlock } from "../../kodo/findingsBlockStore"; // KODO: findings-card
 
 export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
@@ -31,7 +33,11 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
     row.message.streaming ? ctx.threadRef : null,
     row.projectedItem?.item.id,
   );
-  const text = liveText ?? row.message.text;
+  const kodoReplacesBlock = useKodoFindingsReplacesBlock(row.message.id); // KODO: findings-card
+  const fullText = liveText ?? row.message.text;
+  // KODO: findings-card (the card shows the review block's findings; a reply that is only the block stays whole)
+  const withoutBlock = kodoReplacesBlock ? stripKodoBlock(fullText, KODO_REVIEW_LABEL) : fullText;
+  const text = withoutBlock.trim().length > 0 ? withoutBlock : fullText;
   const messageText =
     text || (row.message.streaming || row.suppressEmptyResponse ? "" : "(empty response)");
 

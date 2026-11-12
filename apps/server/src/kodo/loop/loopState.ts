@@ -1,0 +1,323 @@
+// The loop's state transitions as one pure reducer, so the orchestrator hook only calls it. Client
+// operations (start, stop, approve, extend, retry-judge) apply to whatever state they find. Server
+// operations carry the loop id and the revision their writer read, so a stale writer (a tick that
+// observed the loop before a user stop landed) is refused instead of overwriting the newer state.
+import {
+  KODO_LOOP_MAX_ROUNDS,
+  KODO_LOOP_REQUEST_MAX_CHARS,
+  KODO_LOOP_STAGES_PER_ROUND,
+  type KodoInteractionMode,
+  type KodoLoop,
+  type KodoLoopBudget,
+  type KodoLoopStage,
+  type KodoLoopStageRecord,
+  type KodoLoopStatus,
+  type KodoLoopStopReason,
+  type MessageId,
+} from "@t3tools/contracts";
+
+export type KodoLoopTerminalStatus = Extract<KodoLoopStatus, "done" | "stopped" | "failed">;
+
+export const isKodoLoopTerminal = (status: KodoLoopStatus): status is KodoLoopTerminalStatus =>
+  status === "done" || status === "stopped" || status === "failed";
+
+/** The thread mode a stage runs in. The judge reads in Review mode but answers in its own format. */
+export function kodoLoopStageMode(
+  stage: KodoLoopStage,
+): Extract<KodoInteractionMode, "plan" | "code" | "review"> {
+  return stage === "judge" ? "review" : stage;
+}
+
+/** The stage after `stage`, or null when a judge at `round` was the last round the loop may run. */
+export function nextKodoLoopStage(
+  position: { readonly round: number; readonly stage: KodoLoopStage },
+  maxRounds: number,
+): { readonly round: number; readonly stage: KodoLoopStage } | null {
+  switch (position.stage) {
+    case "plan":
+      return { round: position.round, stage: "code" };
+    case "code":
+      return { round: position.round, stage: "review" };
+    case "review":
+      return { round: position.round, stage: "judge" };
+    case "judge":
+      return position.round >= maxRounds ? null : { round: position.round + 1, stage: "plan" };
+  }
+}
+
+export type KodoLoopStartOp = {
+  readonly type: "start";
+  readonly loopId: string;
+  readonly request: string;
+  readonly requestMessageId: MessageId;
+  readonly startMode: KodoInteractionMode;
+  readonly maxRounds: number;
+  readonly planApproval: "auto" | "ask";
+  readonly budget: KodoLoopBudget;
+  readonly baseline?: KodoLoop["baseline"];
+};
+
+/** What a person can do to a loop. None of these carry a revision: a stop must always win. */
+export type KodoLoopClientOp =
+  | KodoLoopStartOp
+  | { readonly type: "stop"; readonly detail?: string }
+  | { readonly type: "approve" }
+  | { readonly type: "extend"; readonly rounds: number }
+  | { readonly type: "retry-judge" };
+
+interface KodoLoopServerOpBase {
+  readonly loopId: string;
+  readonly expectedRevision: number;
+}
+
+/** What the loop worker writes as it observes the thread. */
+export type KodoLoopServerOp =
+  | (KodoLoopServerOpBase & { readonly type: "hold"; readonly hold: "runtime_request" })
+  | (KodoLoopServerOpBase & { readonly type: "release" })
+  | (KodoLoopServerOpBase & {
+      readonly type: "advance";
+      /** The settled stage; the loop moves to its successor. */
+      readonly record: KodoLoopStageRecord;
+      /** Wait for a person to approve before the successor runs; only after a plan stage. */
+      readonly hold?: "plan_approval";
+    })
+  | (KodoLoopServerOpBase & {
+      readonly type: "finish";
+      readonly status: Extract<KodoLoopTerminalStatus, "done" | "stopped" | "failed">;
+      readonly reason: KodoLoopStopReason;
+      readonly detail?: string;
+      readonly record?: KodoLoopStageRecord;
+      readonly summary?: string;
+    });
+
+export type KodoLoopOp = KodoLoopClientOp | KodoLoopServerOp;
+
+export type KodoLoopOpRefusal =
+  | "invalid"
+  | "no_loop"
+  | "loop_exists"
+  | "wrong_loop"
+  | "stale_revision"
+  | "not_active"
+  | "not_held"
+  | "not_resumable";
+
+export type KodoLoopOpResult =
+  | { readonly ok: true; readonly loop: KodoLoop }
+  | { readonly ok: false; readonly reason: KodoLoopOpRefusal; readonly message: string };
+
+const refuse = (reason: KodoLoopOpRefusal, message: string): KodoLoopOpResult => ({
+  ok: false,
+  reason,
+  message,
+});
+
+const MAX_STAGE_RECORDS = KODO_LOOP_MAX_ROUNDS * KODO_LOOP_STAGES_PER_ROUND;
+
+/** A settled stage replaces its own earlier record; the oldest records go first when the list is full. */
+function withRecord(
+  stages: ReadonlyArray<KodoLoopStageRecord>,
+  record: KodoLoopStageRecord,
+): ReadonlyArray<KodoLoopStageRecord> {
+  const next = [
+    ...stages.filter(
+      (entry) =>
+        !(
+          entry.round === record.round &&
+          entry.stage === record.stage &&
+          entry.messageId === record.messageId
+        ),
+    ),
+    record,
+  ];
+  return next.slice(-MAX_STAGE_RECORDS);
+}
+
+/** The loop with its stop fields and hold cleared, as every resume does. */
+function running(loop: KodoLoop): Omit<KodoLoop, "hold" | "stopReason" | "stopDetail" | "summary"> {
+  const {
+    hold: _hold,
+    stopReason: _reason,
+    stopDetail: _detail,
+    summary: _summary,
+    ...rest
+  } = loop;
+  return rest;
+}
+
+const FINISH_REASONS: Record<
+  Extract<KodoLoopTerminalStatus, "done" | "stopped" | "failed">,
+  ReadonlyArray<KodoLoopStopReason>
+> = {
+  done: ["complete"],
+  failed: ["error", "verdict_invalid"],
+  stopped: ["round_cap", "budget", "user_message", "provider_limit"],
+};
+
+function startLoop(current: KodoLoop | undefined, op: KodoLoopStartOp): KodoLoopOpResult {
+  if (current !== undefined && !isKodoLoopTerminal(current.status)) {
+    return refuse("loop_exists", "A loop is already running on this thread.");
+  }
+  const request = op.request.trim();
+  if (request.length === 0) return refuse("invalid", "A loop needs a request.");
+  if (request.length > KODO_LOOP_REQUEST_MAX_CHARS) {
+    return refuse(
+      "invalid",
+      `A loop request is at most ${KODO_LOOP_REQUEST_MAX_CHARS} characters.`,
+    );
+  }
+  if (!Number.isInteger(op.maxRounds) || op.maxRounds < 1 || op.maxRounds > KODO_LOOP_MAX_ROUNDS) {
+    return refuse("invalid", `A loop runs between 1 and ${KODO_LOOP_MAX_ROUNDS} rounds.`);
+  }
+  return {
+    ok: true,
+    loop: {
+      loopId: op.loopId,
+      revision: 1,
+      status: "active",
+      round: 1,
+      maxRounds: op.maxRounds,
+      stage: "plan",
+      request,
+      requestMessageId: op.requestMessageId,
+      startMode: op.startMode,
+      planApproval: op.planApproval,
+      budget: op.budget,
+      baseline: op.baseline ?? {},
+      stages: [],
+    },
+  };
+}
+
+function applyClientOp(
+  loop: KodoLoop,
+  op: Exclude<KodoLoopClientOp, KodoLoopStartOp>,
+): KodoLoopOpResult {
+  switch (op.type) {
+    case "stop":
+      return isKodoLoopTerminal(loop.status)
+        ? refuse("not_active", "The loop is not running.")
+        : {
+            ok: true,
+            loop: {
+              ...running(loop),
+              revision: loop.revision + 1,
+              status: "stopped",
+              stopReason: "user_stop",
+              ...(op.detail === undefined ? {} : { stopDetail: op.detail }),
+            },
+          };
+    case "approve":
+      return loop.status === "held" && loop.hold === "plan_approval"
+        ? { ok: true, loop: { ...running(loop), revision: loop.revision + 1, status: "active" } }
+        : refuse("not_held", "The loop is not waiting for a plan approval.");
+    case "extend": {
+      if (loop.status !== "stopped" || loop.stopReason !== "round_cap") {
+        return refuse(
+          "not_resumable",
+          "Only a loop that stopped at its round limit can run more rounds.",
+        );
+      }
+      if (
+        !Number.isInteger(op.rounds) ||
+        op.rounds < 1 ||
+        loop.maxRounds + op.rounds > KODO_LOOP_MAX_ROUNDS
+      ) {
+        return refuse("invalid", `A loop runs at most ${KODO_LOOP_MAX_ROUNDS} rounds in all.`);
+      }
+      return {
+        ok: true,
+        loop: {
+          ...running(loop),
+          revision: loop.revision + 1,
+          status: "active",
+          maxRounds: loop.maxRounds + op.rounds,
+          round: loop.round + 1,
+          stage: "plan",
+        },
+      };
+    }
+    case "retry-judge":
+      return loop.status === "failed" &&
+        loop.stopReason === "verdict_invalid" &&
+        loop.stage === "judge"
+        ? { ok: true, loop: { ...running(loop), revision: loop.revision + 1, status: "active" } }
+        : refuse(
+            "not_resumable",
+            "Only a loop whose judge answer was unreadable can retry the judge.",
+          );
+  }
+}
+
+function applyServerOp(loop: KodoLoop, op: KodoLoopServerOp): KodoLoopOpResult {
+  if (op.loopId !== loop.loopId) return refuse("wrong_loop", "That loop has been replaced.");
+  if (op.expectedRevision !== loop.revision) {
+    return refuse("stale_revision", "The loop changed since it was read.");
+  }
+  if (isKodoLoopTerminal(loop.status)) return refuse("not_active", "The loop is not running.");
+  const revision = loop.revision + 1;
+  switch (op.type) {
+    case "hold":
+      return loop.status === "active"
+        ? { ok: true, loop: { ...loop, revision, status: "held", hold: op.hold } }
+        : refuse("not_active", "The loop is already waiting.");
+    case "release":
+      return loop.status === "held" && loop.hold === "runtime_request"
+        ? { ok: true, loop: { ...running(loop), revision, status: "active" } }
+        : refuse("not_held", "The loop is not waiting on a request.");
+    case "advance": {
+      if (loop.status === "held" && loop.hold !== "runtime_request") {
+        return refuse("not_active", "The loop is waiting for a person.");
+      }
+      const { record } = op;
+      if (record.round !== loop.round || record.stage !== loop.stage) {
+        return refuse("invalid", "That stage is not the loop's current stage.");
+      }
+      if (op.hold !== undefined && record.stage !== "plan") {
+        return refuse("invalid", "Only a plan can wait for approval.");
+      }
+      const next = nextKodoLoopStage(loop, loop.maxRounds);
+      if (next === null) return refuse("invalid", "The last round has no stage after it.");
+      return {
+        ok: true,
+        loop: {
+          ...running(loop),
+          revision,
+          status: op.hold === undefined ? "active" : "held",
+          ...(op.hold === undefined ? {} : { hold: op.hold }),
+          round: next.round,
+          stage: next.stage,
+          stages: withRecord(loop.stages, record),
+        },
+      };
+    }
+    case "finish": {
+      if (!FINISH_REASONS[op.status].includes(op.reason)) {
+        return refuse("invalid", `A ${op.status} loop cannot end for ${op.reason}.`);
+      }
+      const { hold: _hold, stopReason: _reason, stopDetail: _detail, ...rest } = loop;
+      return {
+        ok: true,
+        loop: {
+          ...rest,
+          revision,
+          status: op.status,
+          stopReason: op.reason,
+          ...(op.detail === undefined ? {} : { stopDetail: op.detail }),
+          ...(op.record === undefined ? {} : { stages: withRecord(loop.stages, op.record) }),
+          ...(op.summary === undefined ? {} : { summary: op.summary }),
+        },
+      };
+    }
+  }
+}
+
+/**
+ * Applies one operation to the thread's loop (`undefined` when it has none). Returns the next loop
+ * or says why the operation does not apply; it never throws and never mutates.
+ */
+export function applyKodoLoopOp(loop: KodoLoop | undefined, op: KodoLoopOp): KodoLoopOpResult {
+  if (op.type === "start") return startLoop(loop, op);
+  if (loop === undefined) return refuse("no_loop", "There is no loop on this thread.");
+  return "expectedRevision" in op ? applyServerOp(loop, op) : applyClientOp(loop, op);
+}

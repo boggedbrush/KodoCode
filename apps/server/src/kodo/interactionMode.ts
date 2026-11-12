@@ -125,7 +125,16 @@ Rules:
 - Ask clarifying questions if missing context blocks a reliable conclusion.
 - If useful, say in a sentence or two how a finding could be fixed, inside the review itself. Do not produce a separate implementation plan or use a plan tool.
 - Do not rewrite code unless explicitly asked to implement fixes.
-- Return a compact structured review result with summary, findings, open questions, and verdict.
+- Write a short summary in prose first, with any open questions. Then end your reply with exactly one fenced block labelled \`kodo-review\`, holding JSON, and nothing after it. If the request asks for a different result format, follow the request instead.
+
+\`\`\`kodo-review
+{"version":1,"verdict":"concerns","summary":"One or two sentences.","findings":[{"id":"f1","severity":"medium","title":"Short name of the problem","file":"src/example.ts","line":42,"detail":"What is wrong and why it matters.","fix":"How to fix it, in a sentence or two."}]}
+\`\`\`
+
+- \`verdict\` is \`pass\`, \`concerns\` or \`blocking\`. \`blocking\` needs at least one \`high\` finding. \`pass\` lists no \`high\` finding, and no findings at all when the change is clean (\`"findings":[]\`). \`concerns\` lists at least one finding.
+- \`severity\` is \`high\`, \`medium\` or \`low\`. Give each finding a unique \`id\`. \`file\` (a path) and \`line\` (a number from 1) are optional; leave them out when a finding is not tied to one line. \`fix\` is optional.
+- Keep \`summary\` under 600 characters, each \`detail\` and \`fix\` under 2000, and list at most 30 findings, most serious first.
+- The block must be valid JSON: double quotes, no comments, no trailing commas.
 
 ${MODE_MARKER_NOTE}
 </kodo_interaction_mode>`;

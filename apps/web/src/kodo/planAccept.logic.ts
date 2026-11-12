@@ -237,9 +237,13 @@ export async function runKodoPlanAcceptance(deps: {
   readonly stillOffered: () => boolean;
   readonly switchToCode: () => Promise<PlanAcceptanceStep>;
   readonly startTurn: () => Promise<PlanAcceptanceStep>;
+  /** Puts the thread back in the mode it left; named for Plan, where this began. */
   readonly returnToPlan: () => Promise<PlanAcceptanceStep>;
+  /** For a handoff that is not a plan: what did not start, and the mode the thread could not return to. */
+  readonly wording?: { readonly notStarted: string; readonly returnMode: string };
 }): Promise<PlanAcceptanceOutcome> {
   if (!deps.stillOffered()) return { status: "skipped" };
+  const wording = deps.wording ?? { notStarted: "The plan did not start.", returnMode: "Plan" };
   const switched = await deps.switchToCode();
   if (!switched.ok) {
     return {
@@ -257,7 +261,7 @@ export async function runKodoPlanAcceptance(deps: {
     stage: "turn",
     message: rollback.ok
       ? message
-      : `${message ?? "The plan did not start."} The thread also could not return to Plan: ${rollback.message}`,
+      : `${message ?? wording.notStarted} The thread also could not return to ${wording.returnMode}: ${rollback.message}`,
   };
 }
 
