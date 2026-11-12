@@ -284,6 +284,16 @@ export default {
           value: { types: "./src/kodoLoopOutput.ts", import: "./src/kodoLoopOutput.ts" },
           create: true,
         },
+        {
+          path: ["exports", "./kodoLoopLimits"],
+          value: { types: "./src/kodoLoopLimits.ts", import: "./src/kodoLoopLimits.ts" },
+          create: true,
+        },
+        {
+          path: ["exports", "./kodoLoopView"],
+          value: { types: "./src/kodoLoopView.ts", import: "./src/kodoLoopView.ts" },
+          create: true,
+        },
       ],
     },
     {
@@ -360,7 +370,7 @@ export default {
   // are stable kebab-case hook names; the text after the name is free.
   // `kodo:check` warns about files with a marker that is not listed here.
   hooks: [
-    { file: "apps/web/src/components/settings/settingsSearch.ts", hooks: ["mode-models-search"] },
+    { file: "apps/web/src/components/settings/settingsSearch.ts", hooks: ["mode-models-search", "loop-settings-search"] },
     { file: "apps/web/src/components/chat/useComposerSelection.ts", hooks: ["mode-models-send"] },
     {
       file: "apps/web/src/components/chat/useComposerProviderModel.ts",
@@ -387,7 +397,7 @@ export default {
     { file: "apps/web/src/components/onboarding/WelcomePage.tsx", hooks: ["telemetry-copy"] },
     {
       file: "apps/web/src/components/settings/SettingsPanels.tsx",
-      hooks: ["telemetry-copy", "mode-models-settings"],
+      hooks: ["telemetry-copy", "mode-models-settings", "loop-settings"],
     },
     { file: "apps/desktop/resources/installer.nsh", hooks: ["brand-product-names"] },
     { file: "apps/desktop/scripts/electron-launcher.mjs", hooks: ["brand-launcher-identity"] },
@@ -456,6 +466,13 @@ export default {
       hooks: ["mode-models-send", "loop-mobile-mode-sync"],
     },
     { file: "apps/mobile/src/features/threads/ThreadFeed.tsx", hooks: ["kodo-blocks-mobile"] },
+    {
+      file: "apps/mobile/src/features/threads/ThreadDetailScreen.tsx",
+      hooks: ["loop-banner-mobile"],
+    },
+    { file: "apps/server/src/mcp/McpHttpServer.ts", hooks: ["loop-mcp-tools"] },
+    { file: "apps/server/src/usage/UsageService.ts", hooks: ["loop-pricing"] },
+    { file: "apps/server/src/usage/UsageService.test.ts", hooks: ["loop-pricing"] },
     { file: "apps/server/src/cli/thread.ts", hooks: ["loop-intercept"] },
     { file: "apps/server/src/mcp/WorktreeMcpService.ts", hooks: ["loop-intercept"] },
     {
@@ -844,6 +861,23 @@ export default {
       why: "Parser for the loop's kodo-verdict and kodo-review blocks",
     },
     { path: "packages/shared/src/kodoLoopOutput.test.ts" },
+    {
+      path: "packages/shared/src/kodoLoopLimits.ts",
+      why: "Reads a provider's limit windows for the loop's budget gate",
+    },
+    { path: "packages/shared/src/kodoLoopLimits.test.ts" },
+    {
+      path: "packages/shared/src/kodoLoopView.ts",
+      why: "What a loop says about itself (titles, actions, summary, savings), shared by web and mobile",
+    },
+    { path: "packages/shared/src/kodoLoopView.test.ts" },
+    { path: "apps/web/src/components/settings/KodoLoopSettings.tsx" },
+    { path: "apps/mobile/src/features/threads/KodoLoopBanner.tsx", why: "Mobile loop banner" },
+    {
+      path: "apps/server/src/mcp/kodoLoopToolkit.ts",
+      why: "Agent tools to start, stop and read a loop",
+    },
+    { path: "apps/server/src/mcp/kodoLoopToolkit.test.ts" },
     { path: "apps/web/src/components/settings/KodoModeModelsSettings.tsx" },
     { path: "apps/server/src/orchestration-v2/KodoModeModels.integration.test.ts" },
     { path: "apps/server/src/orchestration-v2/KodoLoop.integration.test.ts" },
@@ -1061,6 +1095,12 @@ export default {
       "packages/contracts/src/kodoModeModels.test.ts",
       "packages/contracts/src/kodoLoop.test.ts",
       "packages/shared/src/kodoLoopOutput.test.ts",
+      "packages/shared/src/kodoLoopLimits.test.ts",
+      "packages/shared/src/kodoLoopView.test.ts",
+      "apps/server/src/kodo/loop/stageUsage.test.ts",
+      "apps/server/src/kodo/loop/loopSpend.test.ts",
+      "apps/server/src/mcp/kodoLoopToolkit.test.ts",
+      "apps/server/src/usage/UsageService.test.ts",
       "apps/server/src/kodo/loop/evidence.test.ts",
       "apps/server/src/kodo/loop/loopCommand.test.ts",
       "apps/server/src/kodo/loop/loopControl.test.ts",

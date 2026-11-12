@@ -562,6 +562,14 @@
     "./speech": {
       "types": "./src/speech.ts",
       "import": "./src/speech.ts"
+    },
+    "./kodoLoopLimits": {
+      "types": "./src/kodoLoopLimits.ts",
+      "import": "./src/kodoLoopLimits.ts"
+    },
+    "./kodoLoopView": {
+      "types": "./src/kodoLoopView.ts",
+      "import": "./src/kodoLoopView.ts"
     }
   },
   "scripts": {

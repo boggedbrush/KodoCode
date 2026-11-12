@@ -472,3 +472,60 @@ describe("what an ended loop still owes the thread", () => {
     expect(result.ok && result.loop.cleanup).toBeUndefined();
   });
 });
+
+describe("what the budget gate and the savings leave on the loop", () => {
+  const savings = {
+    actualUsd: 1,
+    referenceUsd: 10,
+    savedUsd: 9,
+    savedPct: 90,
+    referenceModel: { instanceId: "i" as never, model: "big" },
+    pricedStages: 1,
+    unpricedStages: [],
+    sameModelStages: 0,
+  };
+
+  it("an advance and a finish store the savings estimate with the settled stage", () => {
+    const loop = testLoop({ stage: "code" });
+    const advanced = applyKodoLoopOp(loop, {
+      ...server(loop),
+      type: "advance",
+      record: testRecord({ round: 1, stage: "code" }),
+      savings,
+    });
+    expect(advanced.ok && advanced.loop.savings).toEqual(savings);
+    const judging = testLoop({ stage: "judge" });
+    const finished = applyKodoLoopOp(judging, {
+      ...server(judging),
+      type: "finish",
+      status: "done",
+      reason: "complete",
+      record: testRecord({ round: 1, stage: "judge" }),
+      savings,
+    });
+    expect(finished.ok && finished.loop.savings).toEqual(savings);
+  });
+
+  it("a limit check records what could not be seen, replaces it, and clears it when the reading returns", () => {
+    const loop = testLoop();
+    const noted = applyKodoLoopOp(loop, {
+      ...server(loop),
+      type: "limit-check",
+      limitCheck: { state: "stale", provider: "Claude" },
+    });
+    expect(noted.ok && noted.loop).toMatchObject({
+      revision: 2,
+      limitCheck: { state: "stale", provider: "Claude" },
+    });
+    if (!noted.ok) return;
+    const cleared = applyKodoLoopOp(noted.loop, { ...server(noted.loop), type: "limit-check" });
+    expect(cleared.ok && cleared.loop.limitCheck).toBeUndefined();
+  });
+
+  it("a stale limit check is refused like any other server write", () => {
+    const loop = testLoop({ revision: 5 });
+    expect(refusal(loop, { loopId: loop.loopId, expectedRevision: 4, type: "limit-check" })).toBe(
+      "stale_revision",
+    );
+  });
+});

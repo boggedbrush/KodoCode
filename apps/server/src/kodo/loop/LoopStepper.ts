@@ -4,15 +4,26 @@
 // happened. Timing belongs to LoopWorker; tests call `step` directly.
 import {
   CommandId,
+  DEFAULT_KODO_MODE_MODELS,
   MessageId,
+  PROVIDER_DISPLAY_NAMES,
   type KodoLoop,
   type KodoLoopAdvanceStep,
   type KodoLoopStageRecord,
+  type KodoModeModels,
   type OrchestrationV2Run,
   type OrchestrationV2ServerCommand,
+  type ServerProvider,
   type ThreadId,
 } from "@t3tools/contracts";
+import {
+  fullestKodoLimitWindow,
+  observedKodoLimitChange,
+  readKodoLimitWindows,
+  type KodoLimitReading,
+} from "@t3tools/shared/kodoLoopLimits";
 import { parseKodoReview, parseKodoVerdict } from "@t3tools/shared/kodoLoopOutput";
+import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -27,22 +38,45 @@ import {
   type LoopDiffEvidence,
 } from "./evidence.ts";
 import { compactReview, compactVerdict } from "./loopRecord.ts";
-import { isKodoLoopTerminal } from "./loopState.ts";
+import { computeLoopSavings, priceStageUsage, type PriceTokens } from "./loopSpend.ts";
+import { isKodoLoopTerminal, withRecord } from "./loopState.ts";
 import {
   decideLoopStep,
   loopRunIds,
   kodoLoopStageMessageId,
   stageRun,
+  stageRunChain,
+  type LoopBudgetObservation,
   type LoopObservation,
   type LoopRunOutput,
   type LoopRunView,
   type LoopStageOutcome,
 } from "./loopMachine.ts";
+import { resolveKodoModeModel } from "../modeModel.ts";
+import { summarizeStageUsage } from "./stageUsage.ts";
 
 /** `waiting`: nothing to do yet, but a look is owed soon (a reply still streaming). */
 export type LoopStepResult = "gone" | "idle" | "waiting" | "acted" | "failed";
 
+/** What the loop reads to price its stages and check its budget; each is a cheap read, never a probe. */
+export interface LoopSpendDeps {
+  readonly providers: Effect.Effect<
+    ReadonlyArray<Pick<ServerProvider, "instanceId" | "driver" | "usageLimits">>
+  >;
+  readonly modeModels: Effect.Effect<KodoModeModels>;
+  /** One model's price for a set of tokens: null when it has none. */
+  readonly price: PriceTokens;
+}
+
+/** Without these, limit windows read as missing and nothing has a price: the loop still runs. */
+const NO_SPEND: LoopSpendDeps = {
+  providers: Effect.succeed([]),
+  modeModels: Effect.succeed(DEFAULT_KODO_MODE_MODELS),
+  price: () => Effect.succeed(null),
+};
+
 export interface LoopStepperDeps {
+  readonly spend?: LoopSpendDeps;
   readonly orchestrator: Pick<
     Orchestrator.OrchestratorV2["Service"],
     "getThreadRecords" | "restartContinuationPending"
@@ -88,12 +122,17 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
   deps: LoopStepperDeps,
 ) {
   const { orchestrator, dispatch } = deps;
+  const spend = deps.spend ?? NO_SPEND;
   const streamingGraceMs = deps.streamingGraceMs ?? DEFAULT_STREAMING_GRACE_MS;
   const failures = yield* Ref.make(new Map<string, number>());
   /** How often the same step was tried with nothing changing, by loop, revision and step. */
   const repeats = yield* Ref.make(new Map<string, number>());
   /** When a finished run's reply was first seen still streaming. */
   const streamingSince = yield* Ref.make(new Map<string, number>());
+  /** The limit windows as they were when a stage was sent, by stage message. Lost in a restart; then none is shown. */
+  const limitsBefore = yield* Ref.make(
+    new Map<string, { readonly instanceId: string; readonly reading: KodoLimitReading }>(),
+  );
 
   /** Runs, with a restart-continuation check made before the read that would see its result. */
   const readRuns = Effect.fn("KodoLoopStepper.readRuns")(function* (
@@ -317,6 +356,139 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
       : {}),
   });
 
+  const providerLabel = (
+    provider: Pick<ServerProvider, "instanceId" | "driver"> | undefined,
+    fallback: string,
+  ) =>
+    provider === undefined
+      ? fallback
+      : ((PROVIDER_DISPLAY_NAMES as Record<string, string | undefined>)[provider.driver] ??
+        provider.driver);
+
+  interface BudgetGate {
+    readonly budget: LoopBudgetObservation;
+    /** The provider instance the next stage will run on, with its limit reading, to compare after it. */
+    readonly next?: { readonly instanceId: string; readonly reading: KodoLimitReading };
+  }
+
+  /**
+   * The budget gate's reading before the next stage: the fullest limit window of the provider that
+   * stage will use. Any failure to read is the gate's own error, which stops the loop.
+   */
+  const readGate = Effect.fn("KodoLoopStepper.readGate")(function* (
+    thread: Parameters<typeof resolveKodoModeModel>[0]["thread"],
+    loop: KodoLoop,
+  ) {
+    return yield* Effect.gen(function* (): Effect.fn.Return<BudgetGate> {
+      const [providers, modeModels, now] = yield* Effect.all([
+        spend.providers,
+        spend.modeModels,
+        Clock.currentTimeMillis,
+      ]);
+      const { selection } = resolveKodoModeModel({
+        mode: loop.stage,
+        thread,
+        settings: { modeModelSelections: modeModels },
+      });
+      const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+      const reading = readKodoLimitWindows(provider?.usageLimits, now);
+      const label = providerLabel(provider, selection.instanceId);
+      const fullest = fullestKodoLimitWindow(reading);
+      const next = { instanceId: selection.instanceId as string, reading };
+      if (reading.state === "ok" && fullest !== null) {
+        return {
+          budget: {
+            limit: {
+              state: "ok",
+              percent: fullest.usedPercent,
+              provider: label,
+              window: fullest.name,
+            },
+          },
+          next,
+        };
+      }
+      return {
+        budget: {
+          limit: { state: reading.state === "ok" ? "missing" : reading.state, provider: label },
+        },
+        next,
+      };
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.succeed({
+          budget: {
+            limit: { state: "unchecked" },
+            error: errorText(Cause.squash(cause)).slice(0, 200),
+          },
+        } satisfies BudgetGate),
+      ),
+    );
+  });
+
+  /**
+   * A settled stage's record with what it spent: the tokens of its provider turns, priced at the
+   * models that ran and at the reference model, and the limit windows as they were before and after.
+   * Also the loop's savings estimate with this stage included. Reads the thread's attempts (the whole
+   * thread's, filtered here) and one provider-turn query, once per settled stage.
+   */
+  const settledStage = Effect.fn("KodoLoopStepper.settledStage")(function* (input: {
+    readonly threadId: ThreadId;
+    readonly loop: KodoLoop;
+    readonly outcome: LoopStageOutcome;
+    readonly run: OrchestrationV2Run | undefined;
+    readonly chain: ReadonlySet<string>;
+  }) {
+    const { threadId, loop, outcome, run } = input;
+    const base = recordFor(outcome, run);
+    const [modeModels, providers, now] = yield* Effect.all([
+      spend.modeModels,
+      spend.providers,
+      Clock.currentTimeMillis,
+    ]);
+    const reference = modeModels.judge ?? modeModels.review ?? null;
+    let record = base;
+    if (run !== undefined) {
+      const attempts = (yield* orchestrator.getThreadRecords(threadId, ["attempts"])).attempts;
+      const attemptIds = attempts
+        .filter((attempt) => input.chain.has(attempt.runId))
+        .map((attempt) => attempt.id);
+      const turns =
+        attemptIds.length === 0
+          ? []
+          : (yield* orchestrator.getThreadRecords(threadId, ["providerTurns"], {
+              providerTurnAttemptIds: attemptIds,
+            })).providerTurns;
+      const summary = summarizeStageUsage(turns, run.modelSelection.model);
+      const usage =
+        summary === undefined
+          ? undefined
+          : yield* priceStageUsage(summary, { reference, price: spend.price });
+      const before = yield* Ref.modify(limitsBefore, (current) => {
+        const held = current.get(outcome.messageId);
+        current.delete(outcome.messageId);
+        return [held, current] as const;
+      });
+      const provider = providers.find(
+        (candidate) => candidate.instanceId === run.providerInstanceId,
+      );
+      const limits =
+        before !== undefined && before.instanceId === run.providerInstanceId
+          ? observedKodoLimitChange(
+              before.reading,
+              readKodoLimitWindows(provider?.usageLimits, now),
+            )
+          : [];
+      record = {
+        ...base,
+        ...(usage === undefined ? {} : { usage }),
+        ...(limits.length === 0 ? {} : { limits: limits.slice(0, 6) }),
+      };
+    }
+    const savings = computeLoopSavings(withRecord(loop.stages, record), reference);
+    return { record, savings };
+  });
+
   const bump = (map: Ref.Ref<Map<string, number>>, key: string) =>
     Ref.modify(map, (current) => {
       const next = (current.get(key) ?? 0) + 1;
@@ -375,12 +547,15 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
         }
       }
     }
+    // The budget is read between stages only: while a stage runs, a look costs no more than before.
+    const betweenStages =
+      !isKodoLoopTerminal(loop.status) && stageRun(views, messageId) === undefined;
+    const gate: BudgetGate | undefined = betweenStages ? yield* readGate(thread, loop) : undefined;
     const observation: LoopObservation = {
       threadMode: thread.interactionMode,
       runs: views,
       outputs,
-      // No budget data yet: a missing reading never stops a loop.
-      usage: { costUsd: null, limitPercent: null },
+      budget: gate?.budget ?? { limit: { state: "unchecked" } },
     };
     const decision = decideLoopStep(loop, observation);
     const id = (suffix: string) => CommandId.make(`kodo-loop:${loop.loopId}:${suffix}`);
@@ -445,6 +620,11 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
           const attempt = yield* bump(repeats, stepKey);
           if (attempt > MAX_STEP_REPEATS) return yield* giveUp(attempt);
           const text = yield* stagePrompt(threadId, loop, runs);
+          if (gate?.next !== undefined) {
+            yield* Ref.update(limitsBefore, (current) =>
+              current.set(decision.messageId, gate.next!),
+            );
+          }
           yield* dispatch({
             type: "message.dispatch",
             commandId: id(`${decision.messageId}:dispatch`),
@@ -477,27 +657,63 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
         case "release":
           yield* advance({ type: "release" });
           return "acted";
+        case "limit-check":
+          yield* advance({
+            type: "limit-check",
+            ...(decision.limitCheck === undefined ? {} : { limitCheck: decision.limitCheck }),
+          });
+          return "acted";
         case "cleaned":
           yield* advance({ type: "cleaned" });
           return "acted";
-        case "advance":
+        case "advance": {
+          // A usage read that fails is tried again on the next look; the loop does not go on unmeasured.
+          const settled = yield* settledStage({
+            threadId,
+            loop,
+            outcome: decision.outcome,
+            run: runFor(decision.outcome.runId),
+            chain: stageRunChain(views, decision.outcome.messageId),
+          });
           yield* advance({
             type: "advance",
-            record: recordFor(decision.outcome, runFor(decision.outcome.runId)),
+            record: settled.record,
             ...(decision.hold === undefined ? {} : { hold: decision.hold }),
+            ...(settled.savings === undefined ? {} : { savings: settled.savings }),
           });
           return "acted";
-        case "finish":
+        }
+        case "finish": {
+          // The loop ends either way, so a stage whose usage cannot be read is recorded without it.
+          const settled =
+            decision.outcome === undefined
+              ? undefined
+              : yield* settledStage({
+                  threadId,
+                  loop,
+                  outcome: decision.outcome,
+                  run: runFor(decision.outcome.runId),
+                  chain: stageRunChain(views, decision.outcome.messageId),
+                }).pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("kodo.loop.usage-unread", { threadId, cause }).pipe(
+                      Effect.as({
+                        record: recordFor(decision.outcome!, runFor(decision.outcome!.runId)),
+                        savings: undefined,
+                      }),
+                    ),
+                  ),
+                );
           yield* advance({
             type: "finish",
             status: decision.status,
             reason: decision.reason,
             ...(decision.detail === undefined ? {} : { detail: decision.detail }),
-            ...(decision.outcome === undefined
-              ? {}
-              : { record: recordFor(decision.outcome, runFor(decision.outcome.runId)) }),
+            ...(settled === undefined ? {} : { record: settled.record }),
+            ...(settled?.savings === undefined ? {} : { savings: settled.savings }),
           });
           return "acted";
+        }
       }
     });
 
@@ -549,6 +765,24 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
                 status: "failed",
                 reason: "error",
                 detail: errorText(cause).slice(0, 500),
+              },
+            }).pipe(Effect.ignore);
+            return "acted" as const;
+          }
+          // A stage whose spend cannot be read is not followed by another: the loop stops, as it would
+          // for any budget it cannot check.
+          if (decision.kind === "advance" && count >= MAX_DISPATCH_FAILURES) {
+            yield* dispatch({
+              type: "thread.kodo-loop.advance",
+              commandId: advanceId("finish-unmeasured"),
+              threadId,
+              loopId: loop.loopId,
+              expectedRevision: loop.revision,
+              step: {
+                type: "finish",
+                status: "stopped",
+                reason: "budget",
+                detail: `The budget could not be checked (${errorText(cause).slice(0, 160)}), so the loop stopped instead of spending unchecked.`,
               },
             }).pipe(Effect.ignore);
             return "acted" as const;

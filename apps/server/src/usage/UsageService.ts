@@ -7,6 +7,7 @@ import {
   type UsageSource,
   type UsagePricing,
   type UsageSummary,
+  type UsageTokenTotals,
   type UsageSummaryInput,
   UsageReadError,
 } from "@t3tools/contracts";
@@ -40,7 +41,12 @@ import type {
   UsageRecord,
 } from "@t3tools/provider-core/server/usage";
 import { canonicalModelFilter, resolveModelAliases, UsageAggregator } from "./usageAggregation.ts";
-import { createOverrideRateTable, parseRateTable, type RateTable } from "./usagePricing.ts";
+import {
+  createOverrideRateTable,
+  parseRateTable,
+  priceUsage,
+  type RateTable,
+} from "./usagePricing.ts";
 import {
   listTranscriptFiles,
   readDirectoryVolumeId,
@@ -145,6 +151,11 @@ export class UsageService extends Context.Service<
   {
     readonly readSummary: (input: UsageSummaryInput) => Effect.Effect<UsageSummary, UsageReadError>;
     readonly refreshRates: Effect.Effect<UsagePricing>;
+    // KODO: loop-pricing - the loop prices a stage's tokens at one model's rates.
+    readonly priceTokens: (input: {
+      readonly model: string;
+      readonly totals: UsageTokenTotals;
+    }) => Effect.Effect<number | null>;
   }
 >()("t3/usage/UsageService") {}
 
@@ -972,7 +983,36 @@ export const make = Effect.gen(function* () {
     return yield* Deferred.await(deferred);
   });
 
-  return { readSummary, refreshRates, awaitPersisted } as const;
+  // KODO: loop-pricing - null, never zero, when the model has no price (unlisted, or subscription-only).
+  // Reads the rate table already held (fetching it once when it was never loaded) and the person's
+  // price overrides and model aliases, the same as the Usage page does; standard speed, no reported cost.
+  const priceTokens = Effect.fn("UsageService.priceTokens")(function* (input: {
+    readonly model: string;
+    readonly totals: UsageTokenTotals;
+  }) {
+    yield* ensureRates(false);
+    const settings = yield* readSettings;
+    const model = input.model.trim();
+    const priced = priceUsage(
+      rates,
+      {
+        model: resolveModelAliases(settings.usageModelAliases).get(model) ?? model,
+        totals: input.totals,
+        speed: "standard",
+        reportedCostUsd: null,
+      },
+      createOverrideRateTable(settings.usagePriceOverrides),
+    );
+    return priced.costSource === "unpriced" ? null : priced.costUsd;
+  });
+
+  return {
+    readSummary,
+    refreshRates,
+    awaitPersisted,
+    priceTokens: (input: Parameters<typeof priceTokens>[0]) =>
+      priceTokens(input).pipe(Effect.catchCause(() => Effect.succeed(null))),
+  } as const;
 });
 
 export const layer = Layer.effect(UsageService, make);

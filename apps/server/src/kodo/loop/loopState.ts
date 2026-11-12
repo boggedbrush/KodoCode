@@ -10,6 +10,7 @@ import {
   type KodoInteractionMode,
   type KodoLoop,
   type KodoLoopBudget,
+  type KodoLoopSavings,
   type KodoLoopStage,
   type KodoLoopStageRecord,
   type KodoLoopStatus,
@@ -86,6 +87,10 @@ interface KodoLoopServerOpBase {
 export type KodoLoopServerOp =
   | (KodoLoopServerOpBase & { readonly type: "hold"; readonly hold: "runtime_request" })
   | (KodoLoopServerOpBase & { readonly type: "release" })
+  | (KodoLoopServerOpBase & {
+      readonly type: "limit-check";
+      readonly limitCheck?: KodoLoop["limitCheck"];
+    })
   | (KodoLoopServerOpBase & { readonly type: "cleaned" })
   | (KodoLoopServerOpBase & {
       readonly type: "advance";
@@ -93,6 +98,7 @@ export type KodoLoopServerOp =
       readonly record: KodoLoopStageRecord;
       /** Wait for a person to approve before the successor runs; only after a plan stage. */
       readonly hold?: "plan_approval";
+      readonly savings?: KodoLoopSavings;
     })
   | (KodoLoopServerOpBase & {
       readonly type: "finish";
@@ -101,6 +107,7 @@ export type KodoLoopServerOp =
       readonly detail?: string;
       readonly record?: KodoLoopStageRecord;
       readonly summary?: string;
+      readonly savings?: KodoLoopSavings;
     });
 
 export type KodoLoopOp = KodoLoopClientOp | KodoLoopServerOp;
@@ -134,7 +141,7 @@ const refuse = (reason: KodoLoopOpRefusal, message: string): KodoLoopOpResult =>
 const MAX_STAGE_RECORDS = KODO_LOOP_MAX_ROUNDS * KODO_LOOP_STAGES_PER_ROUND;
 
 /** A settled stage replaces its own earlier record; the oldest records go first when the list is full. */
-function withRecord(
+export function withRecord(
   stages: ReadonlyArray<KodoLoopStageRecord>,
   record: KodoLoopStageRecord,
 ): ReadonlyArray<KodoLoopStageRecord> {
@@ -352,6 +359,17 @@ function applyServerOp(
       return loop.status === "held" && loop.hold === "runtime_request"
         ? { ok: true, loop: { ...running(loop), revision, status: "active" } }
         : refuse("not_held", "The loop is not waiting on a request.");
+    case "limit-check": {
+      const { limitCheck: _previous, ...rest } = loop;
+      return {
+        ok: true,
+        loop: {
+          ...rest,
+          revision,
+          ...(op.limitCheck === undefined ? {} : { limitCheck: op.limitCheck }),
+        },
+      };
+    }
     case "advance": {
       if (loop.status === "held" && loop.hold !== "runtime_request") {
         return refuse("not_active", "The loop is waiting for a person.");
@@ -375,6 +393,7 @@ function applyServerOp(
           round: next.round,
           stage: next.stage,
           stages: withRecord(loop.stages, record),
+          ...(op.savings === undefined ? {} : { savings: op.savings }),
         },
       };
     }
@@ -394,6 +413,7 @@ function applyServerOp(
           ...endCleanup(loop, op.reason, context.threadMode),
           ...(op.record === undefined ? {} : { stages: withRecord(loop.stages, op.record) }),
           ...(op.summary === undefined ? {} : { summary: op.summary }),
+          ...(op.savings === undefined ? {} : { savings: op.savings }),
         },
       };
     }

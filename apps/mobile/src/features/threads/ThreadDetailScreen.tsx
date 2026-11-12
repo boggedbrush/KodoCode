@@ -176,6 +176,7 @@ import { PendingApprovalCard } from "./PendingApprovalCard";
 import { ComposerErrorNotice } from "./ComposerErrorNotice";
 import { ManagedRuntimeModeNotice } from "./ManagedRuntimeModeNotice";
 import { FreshSessionNotice } from "./FreshSessionNotice";
+import { KodoLoopBanner } from "./KodoLoopBanner"; // KODO: loop-banner-mobile
 import { ComposerFeedback } from "./ComposerFeedback";
 import { ComposerUsageLimits } from "./ComposerUsageLimits";
 import { PendingUserInputCard } from "./PendingUserInputCard";
@@ -1681,6 +1682,14 @@ function ThreadDetailBody(
                     {freshSessionAvailable ? (
                       <FreshSessionNotice threadKey={selectedThreadKey} />
                     ) : null}
+                    {/* KODO: loop-banner-mobile */}
+                    <KodoLoopBanner
+                      key={props.selectedThread.id}
+                      environmentId={props.environmentId}
+                      threadId={props.selectedThread.id}
+                      status={props.selectedThread.source?.kodoLoopStatus}
+                      canOperateThread={props.canOperateThread}
+                    />
                     {props.canOperateThread ? (
                       <ManagedRuntimeModeNotice
                         threadKey={selectedThreadKey}

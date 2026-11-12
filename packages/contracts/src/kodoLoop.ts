@@ -121,7 +121,13 @@ export const KodoReviewResult = Schema.Struct({
 );
 export type KodoReviewResult = typeof KodoReviewResult.Type;
 
-/** Tokens a stage used, in the ledger's terms; `complete` is false when a provider reported none. */
+export const KODO_LOOP_USAGE_MODELS_MAX = 4;
+export const KODO_LOOP_LIMIT_WINDOWS_MAX = 6;
+
+/**
+ * Tokens a stage used, in the ledger's terms. A stage whose provider reported nothing has no usage
+ * at all (unavailable, not zero); `complete` is false when only some of its turns reported.
+ */
 export const KodoLoopStageUsage = Schema.Struct({
   uncachedInputTokens: NonNegativeInt,
   cachedInputTokens: NonNegativeInt,
@@ -129,6 +135,14 @@ export const KodoLoopStageUsage = Schema.Struct({
   outputTokens: NonNegativeInt,
   reasoningTokens: NonNegativeInt,
   complete: Schema.Boolean,
+  /** The models the provider says ran; absent when it did not say, and the stage's own model stands. */
+  models: Schema.optional(
+    Schema.Array(cappedNonEmpty(120)).check(Schema.isMaxLength(KODO_LOOP_USAGE_MODELS_MAX)),
+  ),
+  /** The tokens priced at the models that ran. Absent: no price (unlisted or subscription-only), never zero. */
+  costUsd: Schema.optional(Schema.Number),
+  /** The same tokens priced at the reference model's rates; absent when there is no reference or no price. */
+  referenceCostUsd: Schema.optional(Schema.Number),
 });
 export type KodoLoopStageUsage = typeof KodoLoopStageUsage.Type;
 
@@ -170,9 +184,12 @@ export const KodoLoopStageRecord = Schema.Struct({
   startedAt: IsoDateTime,
   completedAt: Schema.NullOr(IsoDateTime),
   usage: Schema.optional(KodoLoopStageUsage),
-  /** The highest limit-window percentage of the stage's provider before and after the stage. */
-  quotaBefore: Schema.optional(Schema.Number),
-  quotaAfter: Schema.optional(Schema.Number),
+  /** Each limit window the provider reported both before and after the stage: what was observed, not caused. */
+  limits: Schema.optional(
+    Schema.Array(
+      Schema.Struct({ window: cappedNonEmpty(60), before: Schema.Number, after: Schema.Number }),
+    ).check(Schema.isMaxLength(KODO_LOOP_LIMIT_WINDOWS_MAX)),
+  ),
   conclusion: Schema.optional(capped(KODO_LOOP_CONCLUSION_MAX_CHARS)),
   verdict: Schema.optional(KodoLoopRecordVerdict),
   review: Schema.optional(KodoLoopRecordReview),
@@ -186,14 +203,30 @@ export const KodoLoopBudget = Schema.Struct({
 });
 export type KodoLoopBudget = typeof KodoLoopBudget.Type;
 
+export const KodoLoopStagePosition = Schema.Struct({
+  round: PositiveInt,
+  stage: KodoLoopStage,
+});
+
+/**
+ * An estimate: what the cheaper stages' tokens would have cost at the reference model's rates, minus
+ * what they cost where they ran. A stronger model would use different token counts, so it is never a
+ * measurement. Stages without a price on either side are listed, not counted as free.
+ */
 export const KodoLoopSavings = Schema.Struct({
   actualUsd: Schema.Number,
   referenceUsd: Schema.Number,
   savedUsd: Schema.Number,
   savedPct: Schema.Number,
-  referenceModel: Schema.NullOr(ModelSelection),
+  referenceModel: ModelSelection,
+  /** Stages that were compared and priced on both sides. */
   pricedStages: NonNegativeInt,
-  unpricedStages: NonNegativeInt,
+  /** Stages that ran on a different model but could not be priced, or reported no tokens. */
+  unpricedStages: Schema.Array(KodoLoopStagePosition).check(
+    Schema.isMaxLength(KODO_LOOP_MAX_ROUNDS * KODO_LOOP_STAGES_PER_ROUND),
+  ),
+  /** Stages that ran on the reference model itself: nothing to compare. */
+  sameModelStages: NonNegativeInt,
 });
 export type KodoLoopSavings = typeof KodoLoopSavings.Type;
 
@@ -252,6 +285,16 @@ export const KodoLoop = Schema.Struct({
   ),
   summary: Schema.optional(capped(8_000)),
   savings: Schema.optional(KodoLoopSavings),
+  /**
+   * Set while the limit setting cannot do its job: the provider the next stage uses reported no
+   * limit windows, or only an out-of-date reading. The loop goes on; the summary says so.
+   */
+  limitCheck: Schema.optional(
+    Schema.Struct({
+      state: Schema.Literals(["missing", "stale"]),
+      provider: capped(80),
+    }),
+  ),
   /**
    * What an ended loop still owes the thread, until it has been done: end its own runs that still
    * run (a stop), and give the start mode back once no turn runs. Absent while the loop runs and
@@ -358,12 +401,20 @@ export type KodoLoopControl = typeof KodoLoopControl.Type;
 export const KodoLoopAdvanceStep = Schema.Union([
   Schema.Struct({ type: Schema.Literal("hold"), hold: Schema.Literal("runtime_request") }),
   Schema.Struct({ type: Schema.Literal("release") }),
+  /** What the budget gate saw of the limit windows, when that changed; absent `limitCheck` means a fresh reading. */
+  Schema.Struct({
+    type: Schema.Literal("limit-check"),
+    limitCheck: Schema.optional(
+      Schema.Struct({ state: Schema.Literals(["missing", "stale"]), provider: capped(80) }),
+    ),
+  }),
   /** An ended loop's clean-up is done, or given up on. */
   Schema.Struct({ type: Schema.Literal("cleaned") }),
   Schema.Struct({
     type: Schema.Literal("advance"),
     record: KodoLoopStageRecord,
     hold: Schema.optional(Schema.Literal("plan_approval")),
+    savings: Schema.optional(KodoLoopSavings),
   }),
   Schema.Struct({
     type: Schema.Literal("finish"),
@@ -372,6 +423,7 @@ export const KodoLoopAdvanceStep = Schema.Union([
     detail: Schema.optional(capped(2_000)),
     record: Schema.optional(KodoLoopStageRecord),
     summary: Schema.optional(capped(8_000)),
+    savings: Schema.optional(KodoLoopSavings),
   }),
 ]);
 export type KodoLoopAdvanceStep = typeof KodoLoopAdvanceStep.Type;
@@ -384,6 +436,8 @@ export const KodoLoopStageRef = Schema.Struct({
 });
 export type KodoLoopStageRef = typeof KodoLoopStageRef.Type;
 
+export const KODO_LOOP_SHELL_DETAIL_MAX_CHARS = 240;
+
 /** The slim loop summary a thread shell carries; the full loop travels only with the thread. */
 export const KodoLoopShellStatus = Schema.Struct({
   status: KodoLoopStatus,
@@ -392,6 +446,8 @@ export const KodoLoopShellStatus = Schema.Struct({
   stage: KodoLoopStage,
   hold: Schema.optional(KodoLoopHold),
   stopReason: Schema.optional(KodoLoopStopReason),
+  /** Why it stopped, cut to a line: "Claude 5-hour window at 92%, limit 90%." */
+  stopDetail: Schema.optional(capped(KODO_LOOP_SHELL_DETAIL_MAX_CHARS)),
 });
 export type KodoLoopShellStatus = typeof KodoLoopShellStatus.Type;
 
@@ -403,5 +459,8 @@ export function kodoLoopShellStatus(loop: KodoLoop): KodoLoopShellStatus {
     stage: loop.stage,
     ...(loop.hold === undefined ? {} : { hold: loop.hold }),
     ...(loop.stopReason === undefined ? {} : { stopReason: loop.stopReason }),
+    ...(loop.stopDetail === undefined
+      ? {}
+      : { stopDetail: loop.stopDetail.slice(0, KODO_LOOP_SHELL_DETAIL_MAX_CHARS) }),
   };
 }

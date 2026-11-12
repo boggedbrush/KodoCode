@@ -2,6 +2,9 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
 import {
+  KODO_LOOP_SHELL_DETAIL_MAX_CHARS,
+  KodoLoopShellStatus,
+  kodoLoopShellStatus,
   DEFAULT_KODO_LOOP_SETTINGS,
   KodoLoop,
   KodoLoopControl,
@@ -173,5 +176,30 @@ describe("a stored loop", () => {
       budget: {},
     } as unknown);
     expect(start.type === "start" && start.requestMessage?.text).toBe("/loop x");
+  });
+});
+
+describe("the loop status a thread shell carries", () => {
+  it("keeps the stop reason and a one-line detail, cut so the shell stays small", () => {
+    const loop = decodeLoop({
+      loopId: "L",
+      revision: 4,
+      status: "stopped",
+      stopReason: "budget",
+      stopDetail: "d".repeat(2_000),
+      round: 2,
+      maxRounds: 3,
+      stage: "code",
+      request: "x",
+      requestMessageId: "m",
+      startMode: "code",
+      planApproval: "auto",
+      budget: {},
+      baseline: {},
+      stages: [],
+    });
+    const status = kodoLoopShellStatus(loop);
+    expect(status.stopDetail).toHaveLength(KODO_LOOP_SHELL_DETAIL_MAX_CHARS);
+    expect(() => Schema.decodeUnknownSync(KodoLoopShellStatus)(status)).not.toThrow();
   });
 });

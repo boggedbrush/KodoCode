@@ -30,7 +30,21 @@ const observe = (over: Partial<LoopObservation> = {}): LoopObservation => ({
   threadMode: "plan",
   runs: [],
   outputs: {},
-  usage: { costUsd: null, limitPercent: null },
+  budget: { limit: { state: "unchecked" } },
+  ...over,
+});
+
+const limitAt = (percent: number): Pick<LoopObservation, "budget"> => ({
+  budget: { limit: { state: "ok", percent, provider: "Claude", window: "5-hour" } },
+});
+
+const usageOf = (over: Partial<NonNullable<KodoLoop["stages"][number]["usage"]>> = {}) => ({
+  uncachedInputTokens: 300,
+  cachedInputTokens: 300,
+  cacheCreationTokens: 100,
+  outputTokens: 300,
+  reasoningTokens: 200,
+  complete: true,
   ...over,
 });
 
@@ -584,7 +598,7 @@ describe("stop precedence", () => {
   });
 
   describe("4. complete, 5. round_cap, 6. budget", () => {
-    const tripped = { usage: { costUsd: null, limitPercent: 95 } };
+    const tripped = limitAt(95);
 
     it("a complete verdict ends the loop and beats the round cap and the budget", () => {
       const { loop, observation } = atStage(
@@ -639,72 +653,121 @@ describe("stop precedence", () => {
       [
         "the provider limit",
         { budget: { stopAtLimitPercent: 90 } },
-        { costUsd: null, limitPercent: 90 },
-        "90%",
+        limitAt(90),
+        "Claude 5-hour window at 90%, limit 90%.",
       ],
       [
         "the cost cap",
-        { budget: { maxCostUsd: 1.5 } },
-        { costUsd: 1.5, limitPercent: null },
+        {
+          budget: { maxCostUsd: 1.5 },
+          stages: [testRecord({ round: 1, stage: "plan", usage: usageOf({ costUsd: 1.5 }) })],
+        },
+        {},
         "$1.50",
+      ],
+      [
+        "the cost cap, counting only the stages that have a price",
+        {
+          budget: { maxCostUsd: 1 },
+          stages: [
+            testRecord({ round: 1, stage: "plan", usage: usageOf({ costUsd: 1.25 }) }),
+            testRecord({ round: 1, stage: "code", usage: usageOf() }),
+          ],
+        },
+        {},
+        "stages without a price are not counted",
       ],
       [
         "the token cap",
         {
           budget: { maxTokens: 1000 },
-          stages: [
-            testRecord({
-              round: 1,
-              stage: "plan",
-              usage: {
-                uncachedInputTokens: 300,
-                cachedInputTokens: 300,
-                cacheCreationTokens: 100,
-                outputTokens: 300,
-                reasoningTokens: 200,
-                complete: true,
-              },
-            }),
-          ],
+          stages: [testRecord({ round: 1, stage: "plan", usage: usageOf() })],
         },
-        { costUsd: null, limitPercent: null },
+        {},
         "1,000",
       ],
-    ] as const)("stops between stages at %s", (_name, loopOver, usage, text) => {
+    ] as const)("stops between stages at %s", (_name, loopOver, obs, text) => {
       const loop = testLoop({ stage: "code", ...loopOver });
-      const step = decideLoopStep(loop, observe({ threadMode: "code", usage }));
+      const step = decideLoopStep(loop, observe({ threadMode: "code", ...obs }));
       expect(step).toMatchObject({ kind: "finish", status: "stopped", reason: "budget" });
       expect((step as { detail: string }).detail).toContain(text);
     });
 
     it.each([
+      ["a limit under the line", { budget: { stopAtLimitPercent: 90 } }, limitAt(89)],
+      ["no limit configured", { budget: {} }, limitAt(99)],
       [
-        "a limit reading that is not known",
-        { budget: { stopAtLimitPercent: 90 } },
-        { costUsd: null, limitPercent: null },
+        "a cost that is not known",
+        {
+          budget: { maxCostUsd: 1 },
+          stages: [testRecord({ round: 1, stage: "plan", usage: usageOf() })],
+        },
+        {},
       ],
       [
-        "a limit under the line",
-        { budget: { stopAtLimitPercent: 90 } },
-        { costUsd: null, limitPercent: 89 },
+        "a priced cost under the cap with an unpriced stage beside it",
+        {
+          budget: { maxCostUsd: 1 },
+          stages: [
+            testRecord({ round: 1, stage: "plan", usage: usageOf({ costUsd: 0.4 }) }),
+            testRecord({ round: 1, stage: "code", usage: usageOf() }),
+          ],
+        },
+        {},
       ],
-      ["no limit configured", { budget: {} }, { costUsd: 99, limitPercent: 99 }],
-      ["a cost not known", { budget: { maxCostUsd: 1 } }, { costUsd: null, limitPercent: null }],
-    ] as const)("does not stop on %s", (_name, loopOver, usage) => {
+      [
+        "stages that reported no tokens",
+        { budget: { maxTokens: 10 }, stages: [testRecord({ round: 1, stage: "plan" })] },
+        {},
+      ],
+    ] as const)("does not stop on %s", (_name, loopOver, obs) => {
       const loop = testLoop({ stage: "code", ...loopOver });
-      expect(decideLoopStep(loop, observe({ threadMode: "code", usage }))).toMatchObject({
+      expect(decideLoopStep(loop, observe({ threadMode: "code", ...obs }))).toMatchObject({
         kind: "dispatch",
       });
     });
 
-    it("does not interrupt a stage in flight", () => {
-      const { loop, observation } = atStage(
-        "code",
-        "running",
-        undefined,
-        {},
-        { usage: { costUsd: null, limitPercent: 99 } },
+    it("a gate that could not be read stops the loop instead of spending unchecked", () => {
+      const loop = testLoop({ stage: "code" });
+      const step = decideLoopStep(
+        loop,
+        observe({
+          threadMode: "code",
+          budget: { limit: { state: "unchecked" }, error: "the provider list failed" },
+        }),
       );
+      expect(step).toMatchObject({ kind: "finish", status: "stopped", reason: "budget" });
+      expect((step as { detail: string }).detail).toContain("the provider list failed");
+      expect((step as { detail: string }).detail).toContain("stopped instead of spending");
+    });
+
+    describe("a limit reading that cannot be used does not stop the loop, but is recorded once", () => {
+      const missing = (state: "missing" | "stale") =>
+        observe({ threadMode: "code", budget: { limit: { state, provider: "Claude" } } });
+
+      it.each(["missing", "stale"] as const)("%s", (state) => {
+        const loop = testLoop({ stage: "code" });
+        expect(decideLoopStep(loop, missing(state))).toEqual({
+          kind: "limit-check",
+          limitCheck: { state, provider: "Claude" },
+        });
+        const noted = testLoop({ stage: "code", limitCheck: { state, provider: "Claude" } });
+        expect(decideLoopStep(noted, missing(state))).toMatchObject({ kind: "dispatch" });
+      });
+
+      it("a reading that comes back clears the note", () => {
+        const noted = testLoop({
+          stage: "code",
+          limitCheck: { state: "stale", provider: "Claude" },
+        });
+        expect(decideLoopStep(noted, observe({ threadMode: "code", ...limitAt(10) }))).toEqual({
+          kind: "limit-check",
+        });
+      });
+    });
+
+    it("does not interrupt a stage in flight", () => {
+      const { loop, observation } = atStage("code", "running", undefined, {}, limitAt(99));
       expect(decideLoopStep(loop, observation)).toEqual({ kind: "idle" });
     });
   });
@@ -743,11 +806,7 @@ describe("stop precedence", () => {
 
     it("the budget is read before a plan approval wait", () => {
       const loop = testLoop({ stage: "code", status: "held", hold: "plan_approval" });
-      expect(
-        decideLoopStep(loop, observe({ usage: { costUsd: null, limitPercent: 95 } })),
-      ).toMatchObject({
-        reason: "budget",
-      });
+      expect(decideLoopStep(loop, observe(limitAt(95)))).toMatchObject({ reason: "budget" });
     });
   });
 });

@@ -235,6 +235,42 @@ create the thread first and send `/loop` in it.
   on the thread when no loop is running. A loop ends with its Judge, so after a loop
   there is no findings card; the list is in the loop's review reply.
 
+### Plan approval, budget and the summary
+
+Settings → Threads → **Loop** sets the defaults (rounds, plan approval, budget). `/loop 5 …`
+overrides only the rounds.
+
+- **Plan approval.** *Ask me first* holds the loop after the plan. The card says the plan
+  is ready; **Approve plan** starts coding and **Stop** ends the loop. A message you send
+  also ends it. The hold survives a reload and a server restart. On mobile, a banner above the
+  composer shows "Loop · Round 2 of 3 · Review", **Stop** and **Approve plan**, and
+  how it ended.
+- **Budget.** A loop stops before its next stage when the provider that stage will use is at
+  or above the usage-limit percentage (default 90), when its priced cost reaches the cost cap,
+  or when its tokens reach the token cap. The budget is a soft cap: it is checked between
+  stages, so a stage that is already running always finishes and a loop can pass a cap by up to
+  one stage. A provider that reports no limit windows, or only an out-of-date reading, cannot be
+  checked; the loop goes on and the summary says so. If the check itself fails, the loop stops
+  rather than spend unchecked. The cost cap counts only stages whose model has a price at API
+  rates (the Usage page's prices, including your overrides); a stage without one is not counted
+  as free, and the summary lists it. The token cap counts only what providers report.
+- **Summary.** When a loop ends, the card shows the rounds run, one line per stage (the latest
+  round open, earlier ones folded), why it stopped, the tokens and priced cost, and the note
+  that the thread now continues from the last stage's conversation. A provider that reports no
+  token usage shows as "not reported", never as zero.
+- **Estimated savings.** Compares what the Code stage (and Plan, when it ran on a different
+  model) cost with what the same tokens would cost at the rates of the Judge model, or the
+  Review model when no Judge is set. It is an estimate: a stronger model would use different
+  token counts, and prices are API list prices, not what a subscription costs you. Stages with
+  no price are left out and listed. It also shows token share by model, and the change seen in
+  each usage-limit window around each stage; other work on the same account moves those
+  windows too, and they refresh about once a minute, so they are not the loop's cost. No
+  "quota saved" figure is shown. If no Judge or Review model is set, or Code ran on the
+  reference model, there is nothing to compare and only token share is shown.
+
+Agents can use `t3_loop_start`, `t3_loop_stop` and `t3_loop_status`. Start and stop are
+refused for a thread in Ask, Plan or Review mode; reading status is allowed.
+
 ## Custom models
 
 On web and desktop, use Settings → Providers → **Models** to add an unlisted model with a custom

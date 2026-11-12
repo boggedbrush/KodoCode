@@ -14,6 +14,7 @@ import {
 import { parseKodoReview, parseKodoVerdict } from "@t3tools/shared/kodoLoopOutput";
 
 import { conclusionOf, firstSayingLine } from "./loopRecord.ts";
+import { limitTripDetail, loopTotals } from "./loopSpend.ts";
 import {
   KODO_LOOP_STAGE_MODES,
   isKodoLoopTerminal,
@@ -83,12 +84,30 @@ export interface LoopObservation {
    * message is still streaming: the loop waits, and the caller bounds that wait.
    */
   readonly outputs: Readonly<Record<string, LoopRunOutput>>;
-  /** What the budget gate compares: null where a number is not known, which never stops the loop. */
-  readonly usage: {
-    readonly costUsd: number | null;
-    /** The highest limit-window percentage of the provider the next stage will use. */
-    readonly limitPercent: number | null;
-  };
+  /**
+   * What the budget gate saw, read only between stages (`unchecked` while a stage is in flight). Cost
+   * and tokens come from the loop's own stage records; this carries what only the provider knows.
+   */
+  readonly budget: LoopBudgetObservation;
+}
+
+export type LoopLimitObservation =
+  /** Not read: a stage is in flight, or the loop is not between stages. */
+  | { readonly state: "unchecked" }
+  /** The fullest limit window of the provider the next stage will use. */
+  | {
+      readonly state: "ok";
+      readonly percent: number;
+      readonly provider: string;
+      readonly window: string;
+    }
+  /** The provider reports no windows, or only an out-of-date reading: the limit cannot be checked. */
+  | { readonly state: "missing" | "stale"; readonly provider: string };
+
+export interface LoopBudgetObservation {
+  readonly limit: LoopLimitObservation;
+  /** The gate itself could not be read. The loop stops rather than spend unchecked. */
+  readonly error?: string;
 }
 
 /** A settled stage, without what only the worker knows (model, times, usage). */
@@ -120,6 +139,8 @@ export type LoopStep =
     }
   | { readonly kind: "hold"; readonly hold: "runtime_request" }
   | { readonly kind: "release" }
+  /** Record what the budget gate could not see of the limit windows (or that it sees them again). */
+  | { readonly kind: "limit-check"; readonly limitCheck?: KodoLoop["limitCheck"] }
   | {
       readonly kind: "advance";
       readonly outcome: LoopStageOutcome;
@@ -189,11 +210,11 @@ export function loopRunIds(
   return members;
 }
 
-/** The run now carrying the stage: the end of the restart chain that starts at the stage's message. */
-export function stageRun(
+/** The runs carrying a stage: the run for its message and every restart continuation after it. */
+export function stageRunChain(
   runs: ReadonlyArray<LoopRunView>,
   messageId: string,
-): LoopRunView | undefined {
+): ReadonlySet<string> {
   const chain = new Set<string>();
   let grew = true;
   while (grew) {
@@ -209,6 +230,15 @@ export function stageRun(
       }
     }
   }
+  return chain;
+}
+
+/** The run now carrying the stage: the end of the restart chain that starts at the stage's message. */
+export function stageRun(
+  runs: ReadonlyArray<LoopRunView>,
+  messageId: string,
+): LoopRunView | undefined {
+  const chain = stageRunChain(runs, messageId);
   const continued = new Set(
     runs.flatMap((run) =>
       chain.has(run.runId) && run.restartContinuationOfRunId !== undefined
@@ -343,39 +373,39 @@ function settledStep(
   }
 }
 
-/** The first budget limit the loop has reached, as a sentence; null when none, or when unknown. */
-function budgetTrip(loop: KodoLoop, usage: LoopObservation["usage"]): string | null {
-  const { budget } = loop;
-  if (
-    budget.stopAtLimitPercent !== undefined &&
-    usage.limitPercent !== null &&
-    usage.limitPercent >= budget.stopAtLimitPercent
-  ) {
-    return `The provider's usage reached ${Math.round(usage.limitPercent)}%, at the ${budget.stopAtLimitPercent}% limit.`;
+const formatUsd = (value: number) => `$${value.toFixed(2)}`;
+
+/**
+ * The first budget limit the loop has reached, as a sentence; null when none, or when it cannot be
+ * told. A cost cap counts only stages that have a price: an unpriced stage is not treated as free,
+ * and the summary says it was left out.
+ */
+function budgetTrip(loop: KodoLoop, budget: LoopBudgetObservation): string | null {
+  const limit = loop.budget.stopAtLimitPercent;
+  if (limit !== undefined && budget.limit.state === "ok" && budget.limit.percent >= limit) {
+    return limitTripDetail({
+      provider: budget.limit.provider,
+      window: budget.limit.window,
+      percent: budget.limit.percent,
+      limit,
+    });
   }
+  const totals = loopTotals(loop.stages);
   if (
-    budget.maxCostUsd !== undefined &&
-    usage.costUsd !== null &&
-    usage.costUsd >= budget.maxCostUsd
+    loop.budget.maxCostUsd !== undefined &&
+    totals.costUsd !== null &&
+    totals.costUsd >= loop.budget.maxCostUsd
   ) {
-    return `The loop's cost reached $${usage.costUsd.toFixed(2)}, at the $${budget.maxCostUsd.toFixed(2)} cap.`;
+    return `The loop's cost reached ${formatUsd(totals.costUsd)}, at the ${formatUsd(loop.budget.maxCostUsd)} cap${totals.unpricedStages.length > 0 ? " (stages without a price are not counted)" : ""}.`;
   }
-  const tokens = loop.stages.reduce(
-    (sum, record) =>
-      record.usage === undefined
-        ? sum
-        : sum +
-          record.usage.uncachedInputTokens +
-          record.usage.cachedInputTokens +
-          record.usage.cacheCreationTokens +
-          record.usage.outputTokens,
-    0,
-  );
-  if (budget.maxTokens !== undefined && tokens >= budget.maxTokens) {
-    return `The loop used ${tokens.toLocaleString("en-US")} tokens, at the ${budget.maxTokens.toLocaleString("en-US")} cap.`;
+  if (loop.budget.maxTokens !== undefined && totals.tokens >= loop.budget.maxTokens) {
+    return `The loop used ${totals.tokens.toLocaleString("en-US")} tokens, at the ${loop.budget.maxTokens.toLocaleString("en-US")} cap.`;
   }
   return null;
 }
+
+const sameLimitCheck = (a: KodoLoop["limitCheck"], b: KodoLoop["limitCheck"]) =>
+  a === undefined || b === undefined ? a === b : a.state === b.state && a.provider === b.provider;
 
 /**
  * After the loop ended: end the loop's own runs a person's stop left running, wait until nothing runs
@@ -435,8 +465,27 @@ export function decideLoopStep(loop: KodoLoop, observation: LoopObservation): Lo
 
   // Between stages is the only place the budget is read, so a stage in flight always finishes.
   if (run === undefined) {
-    const detail = budgetTrip(loop, observation.usage);
+    const { budget } = observation;
+    if (budget.error !== undefined) {
+      return {
+        kind: "finish",
+        status: "stopped",
+        reason: "budget",
+        detail: `The budget could not be checked (${budget.error}), so the loop stopped instead of spending unchecked.`,
+      };
+    }
+    const detail = budgetTrip(loop, budget);
     if (detail !== null) return { kind: "finish", status: "stopped", reason: "budget", detail };
+    // A limit that cannot be seen does not stop the loop, but the loop records that it could not look.
+    if (budget.limit.state !== "unchecked") {
+      const seen =
+        budget.limit.state === "ok"
+          ? undefined
+          : { state: budget.limit.state, provider: budget.limit.provider };
+      if (!sameLimitCheck(loop.limitCheck, seen)) {
+        return { kind: "limit-check", ...(seen === undefined ? {} : { limitCheck: seen }) };
+      }
+    }
   }
 
   if (settled !== null) return settled;

@@ -81,13 +81,30 @@ describe("the loop's size in the thread payload", () => {
       startedAt: "2026-01-01T00:00:00.000Z",
       completedAt: "2026-01-01T00:01:00.000Z",
       conclusion: "c".repeat(KODO_LOOP_CONCLUSION_MAX_CHARS),
+      // Priced usage with the most models, and the most limit windows: the largest a record gets.
+      usage: {
+        uncachedInputTokens: 999_999_999,
+        cachedInputTokens: 999_999_999,
+        cacheCreationTokens: 999_999_999,
+        outputTokens: 999_999_999,
+        reasoningTokens: 999_999_999,
+        complete: false,
+        models: Array.from({ length: 4 }, () => "m".repeat(120)),
+        costUsd: 123456.789012,
+        referenceCostUsd: 123456.789012,
+      },
+      limits: Array.from({ length: 6 }, () => ({
+        window: "w".repeat(60),
+        before: 99.5,
+        after: 99.9,
+      })),
       ...(stage === "judge" ? { verdict: compactVerdict(verdict(20)) } : {}),
       ...(stage === "review"
         ? { review: { parsed: true, verdict: "blocking" as const, findings: 30, high: 30 } }
         : {}),
     });
 
-  it("is bounded at about 100 KB even at the most rounds, the most stages and every cap", () => {
+  it("is bounded at about 190 KB even at the most rounds, the most stages and every cap", () => {
     const stages = Array.from({ length: KODO_LOOP_MAX_ROUNDS }, (_, index) =>
       (["plan", "code", "review", "judge"] as const).map((stage) => record(index + 1, stage)),
     ).flat();
@@ -97,11 +114,25 @@ describe("the loop's size in the thread payload", () => {
       request: "q".repeat(20_000),
       stopDetail: "d".repeat(2_000),
       summary: "s".repeat(8_000),
+      limitCheck: { state: "stale", provider: "p".repeat(80) },
+      savings: {
+        actualUsd: 123456.789012,
+        referenceUsd: 123456.789012,
+        savedUsd: 123456.789012,
+        savedPct: 99.999999,
+        referenceModel: modelSelection as never,
+        pricedStages: 64,
+        unpricedStages: Array.from({ length: 64 }, (_, index) => ({
+          round: (index % 16) + 1,
+          stage: "code" as const,
+        })),
+        sameModelStages: 16,
+      },
       stages,
     });
     const bytes = new TextEncoder().encode(JSON.stringify(encodeLoop(loop))).length;
     // Before the records were cut to headlines the same loop was 2 to 3 MB.
-    expect(bytes).toBeLessThan(110_000);
+    expect(bytes).toBeLessThan(200_000);
   });
 
   it("a typical three-round loop is a few kilobytes", () => {
@@ -109,12 +140,22 @@ describe("the loop's size in the thread payload", () => {
       (["plan", "code", "review", "judge"] as const).map((stage) => ({
         ...record(round, stage),
         conclusion: "A short conclusion about what the stage found.",
+        usage: {
+          uncachedInputTokens: 120_000,
+          cachedInputTokens: 400_000,
+          cacheCreationTokens: 0,
+          outputTokens: 20_000,
+          reasoningTokens: 5_000,
+          complete: true,
+          costUsd: 0.4321,
+          referenceCostUsd: 3.21,
+        },
         ...(stage === "judge" ? { verdict: compactVerdict(verdict(2)) } : {}),
       })),
     );
     const loop = KodoLoop.make({ ...testLoop(), stages });
     const bytes = new TextEncoder().encode(JSON.stringify(encodeLoop(loop))).length;
-    expect(bytes).toBeLessThan(15_000);
+    expect(bytes).toBeLessThan(18_000);
   });
 
   it("refuses a record that carries what must be re-read from the thread", () => {

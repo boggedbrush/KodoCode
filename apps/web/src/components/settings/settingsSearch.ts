@@ -312,6 +312,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["orchestrator judge role review model assess complete swarm"],
     environmentOnly: true,
   },
+  // KODO: loop-settings-search
+  {
+    id: "loop-settings",
+    title: "Loop",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["loop rounds plan approval budget cost cap token cap usage limit savings judge"],
+    environmentOnly: true,
+  },
   {
     id: "default-permissions",
     title: "Permissions",

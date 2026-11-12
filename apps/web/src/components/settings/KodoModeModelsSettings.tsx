@@ -48,7 +48,7 @@ const ROLE_SLOTS: ReadonlyArray<{
     slot: "judge",
     title: "Judge",
     description:
-      "Decides whether the work is complete and what is outstanding. Follows the Review model until set. Stored now; nothing uses it yet.",
+      "Decides, at the end of each /loop round, whether the work is complete and what is outstanding. Follows the Review model until set. It is also the reference for the loop's savings estimate.",
   },
 ];
 

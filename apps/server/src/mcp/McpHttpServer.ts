@@ -59,6 +59,11 @@ import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
 import * as OrchestratorHandlers from "./toolkits/orchestrator/handlers.ts";
 import { OrchestratorToolkit } from "./toolkits/orchestrator/tools.ts";
+import {
+  KodoLoopToolkit,
+  layer as KodoLoopHandlers,
+  layerService as KodoLoopToolsService,
+} from "./kodoLoopToolkit.ts"; // KODO: loop-mcp-tools
 import * as PreviewHandlers from "./toolkits/preview/handlers.ts";
 import {
   PreviewSnapshotTool,
@@ -1176,6 +1181,11 @@ export const layerOrchestratorToolkit = toolkitRegistration(
 
 export const layerThreadToolkit = toolkitRegistration(ThreadToolkit, ThreadHandlers.layer);
 
+// KODO: loop-mcp-tools - start, stop and read a thread's loop.
+export const layerKodoLoopToolkit = toolkitRegistration(KodoLoopToolkit, KodoLoopHandlers).pipe(
+  Layer.provide(KodoLoopToolsService),
+);
+
 const layerWorktreeToolkitRegistration = toolkitRegistration(
   WorktreeToolkit,
   WorktreeHandlers.layer,
@@ -1252,6 +1262,7 @@ export const layerTools = Layer.mergeAll(
   layerPreviewToolkit,
   layerOrchestratorToolkit,
   layerThreadToolkit,
+  layerKodoLoopToolkit, // KODO: loop-mcp-tools
   layerAttachmentToolkit,
   layerProjectRegistration,
   layerEnvironmentToolkit,

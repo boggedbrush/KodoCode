@@ -3,8 +3,8 @@ import { CheckIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
 import { KodoInlineText } from "./KodoInlineText";
+import { KodoLoopSummary } from "./KodoLoopSummary";
 import {
-  KODO_LOOP_CONTEXT_NOTE,
   KODO_LOOP_STAGE_LABEL,
   isKodoLoopRunning,
   kodoLoopHeldReason,
@@ -69,9 +69,7 @@ export function KodoLoopCard(props: { readonly loop: KodoLoop }) {
           {outstanding.more === 0 ? null : <p>and {outstanding.more} more</p>}
         </div>
       )}
-      {isKodoLoopRunning(loop) ? null : (
-        <p className="text-muted-foreground/80 text-xs">{KODO_LOOP_CONTEXT_NOTE}</p>
-      )}
+      {isKodoLoopRunning(loop) ? null : <KodoLoopSummary loop={loop} />}
     </div>
   );
 }

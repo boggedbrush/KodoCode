@@ -1,10 +1,11 @@
 // Keeps every running loop moving. It looks at a loop's thread when something happened on it (an event
 // from the orchestrator) and on every scheduler tick, which also covers a restart: loops that were
 // running when the server stopped are found once at startup and picked up where their state says.
-import { ThreadId } from "@t3tools/contracts";
+import { DEFAULT_KODO_MODE_MODELS, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -13,10 +14,13 @@ import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import * as DueHint from "../../scheduling/DueHint.ts";
 import * as Scheduler from "../../scheduling/Scheduler.ts";
+import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import { forkParked } from "../../serverActivation.ts";
+import * as ServerSettings from "../../serverSettings.ts";
+import * as UsageService from "../../usage/UsageService.ts";
 import type { LoopDiffEvidence } from "./evidence.ts";
 import { affectsLoop, isTrackedLoopEvent } from "./loopEvents.ts";
-import { makeKodoLoopStepper } from "./LoopStepper.ts";
+import { makeKodoLoopStepper, type LoopSpendDeps } from "./LoopStepper.ts";
 import { makeThreadSingleFlight } from "./threadSingleFlight.ts";
 
 const DIFF_TRUNCATED_MARKER = "[truncated]";
@@ -47,10 +51,31 @@ export const layer = Layer.effectDiscard(
     const threads = yield* ThreadManagement.ThreadManagementService;
     const diffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery;
     const scheduler = yield* Scheduler.Scheduler;
+    // Each is read where the server has it: no provider list means no limit windows are seen (said on
+    // the loop), no price service means no stage has a price, and unreadable settings mean the defaults.
+    const providerRegistry = yield* Effect.serviceOption(ProviderRegistry.ProviderRegistry);
+    const usageService = yield* Effect.serviceOption(UsageService.UsageService);
+    const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
+    const spend: LoopSpendDeps = {
+      providers: Option.isSome(providerRegistry)
+        ? providerRegistry.value.getProviders
+        : Effect.succeed([]),
+      modeModels: Option.isSome(serverSettings)
+        ? serverSettings.value.getSettings.pipe(
+            Effect.map((settings) => settings.modeModelSelections),
+            Effect.orElseSucceed(() => DEFAULT_KODO_MODE_MODELS),
+          )
+        : Effect.succeed(DEFAULT_KODO_MODE_MODELS),
+      price: (model, totals) =>
+        Option.isSome(usageService)
+          ? usageService.value.priceTokens({ model, totals })
+          : Effect.succeed(null),
+    };
     const stepper = yield* makeKodoLoopStepper({
       orchestrator,
       dispatch: threads.dispatch,
       readDiff: makeDiffReader(diffQuery),
+      spend,
     });
     const tracked = new Set<ThreadId>();
     const due = DueHint.make();

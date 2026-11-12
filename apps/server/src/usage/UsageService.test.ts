@@ -3182,6 +3182,67 @@ describe("UsageService", () => {
       }).pipe(Effect.scoped),
   );
 
+  // KODO: loop-pricing - the loop's price call: null for a model with no price, never zero.
+  it.live(
+    "prices a set of tokens for the loop: cache tokens at their own rates, unlisted models not at all",
+    () =>
+      Effect.gen(function* () {
+        const { settings, home } = yield* setup;
+        yield* Effect.gen(function* () {
+          const service = yield* UsageService.make;
+          const settingsService = yield* ServerSettings.ServerSettingsService;
+          const totals = {
+            uncachedInputTokens: 1_000_000,
+            cachedInputTokens: 1_000_000,
+            cacheCreationTokens: 1_000_000,
+            outputTokens: 1_000_000,
+            // Reasoning is already inside the output count, so it adds nothing.
+            reasoningTokens: 500_000,
+          };
+          assert.closeTo(
+            (yield* service.priceTokens({ model: "priced-model", totals })) ?? NaN,
+            6.7,
+            1e-9,
+          );
+          assert.strictEqual(yield* service.priceTokens({ model: "unlisted-model", totals }), null);
+
+          yield* settingsService.updateSettings({
+            usagePriceOverrides: {
+              "unlisted-model": { inputCostPerMillionTokens: 1, outputCostPerMillionTokens: 3 },
+            },
+            usageModelAliases: { "preview-model": "priced-model" },
+          });
+          // An override prices a model the table does not know; cache tokens fall back to the input rate.
+          assert.closeTo(
+            (yield* service.priceTokens({ model: "unlisted-model", totals })) ?? NaN,
+            6,
+            1e-9,
+          );
+          assert.closeTo(
+            (yield* service.priceTokens({ model: "preview-model", totals })) ?? NaN,
+            6.7,
+            1e-9,
+          );
+        }).pipe(
+          Effect.provide(
+            layerService({
+              prefix: "usage-service-loop-pricing-test",
+              home,
+              settings,
+              ratesDocument: {
+                "priced-model": {
+                  input_cost_per_token: 0.000002,
+                  output_cost_per_token: 0.000004,
+                  cache_read_input_token_cost: 0.0000002,
+                  cache_creation_input_token_cost: 0.0000005,
+                },
+              },
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
   it.live("does not orphan an in-flight scan when its first caller is interrupted", () =>
     Effect.gen(function* () {
       const { settings, home } = yield* setup;
