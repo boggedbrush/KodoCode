@@ -1524,10 +1524,10 @@ it.effect(
         expect(yield* start("approval-required/default", { runtimeMode: "auto" })).toBe(
           "runtime_mode_escalation_denied",
         );
-        // KODO: mode-read-only-tools - narrowed to plan, the client is read-only and starts no thread.
-        expect(yield* start("approval-required/plan")).toBe("capability_denied");
+        // KODO: mode-read-only-tools - narrowed to plan, the client starts only read-only threads.
+        expect(yield* start("approval-required/plan")).toBe("approval-required/plan");
         expect(yield* start("auto-accept-edits/plan", { interactionMode: "default" })).toBe(
-          "capability_denied",
+          "interaction_mode_escalation_denied",
         );
         // A broader header changes nothing: the approved ceiling still holds.
         expect(yield* start("full-access/default")).toBe("auto/default");

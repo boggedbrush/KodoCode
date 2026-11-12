@@ -825,6 +825,93 @@ describe("OrchestratorMcpService", () => {
     }),
   );
 
+  // KODO: mode-task-control
+  it.effect("lets a thread moved to a read-only mode stop the Code child it started", () =>
+    Effect.gen(function* () {
+      const parentThreadId = ThreadId.make("thread:mcp-cancel-readonly-parent-parent");
+      const childThreadId = ThreadId.make("thread:mcp-cancel-readonly-parent-child");
+      const childRunId = RunId.make("run:mcp-cancel-readonly-parent-child");
+      const taskId = NodeId.make("node:mcp-cancel-readonly-parent-task");
+      const dispatched = yield* Ref.make<ReadonlyArray<unknown>>([]);
+      const parentProjection = {
+        thread: { id: parentThreadId, runtimeMode: "full-access", interactionMode: "ask" },
+        runs: [],
+        contextTransfers: [],
+        subagents: [
+          {
+            id: taskId,
+            threadId: parentThreadId,
+            origin: "app_owned",
+            childThreadId,
+            driver: "codex",
+            model: "gpt-5.6-terra",
+            result: null,
+            completionDelivery: { state: "pending" },
+          },
+        ],
+      } as unknown as OrchestrationV2ThreadProjection;
+      const childProjection = {
+        thread: { id: childThreadId, title: "Child" },
+        runs: [{ id: childRunId, status: "running" }],
+        contextTransfers: [],
+        messages: [],
+        subagents: [],
+        providerThreads: [],
+        providerTurns: [],
+        runtimeRequests: [],
+      } as unknown as OrchestrationV2ThreadProjection;
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        NodeCrypto.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          getThreadRecords: (threadId) =>
+            Effect.succeed(threadId === parentThreadId ? parentProjection : childProjection),
+          getThreadShell: (threadId) => Effect.succeed(liveThreadShell(threadId)),
+          listAppOwnedChildThreadIds: () => Effect.succeed([]),
+          dispatch: (command) =>
+            Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+              Effect.andThen(Effect.succeed({} as never)),
+            ),
+          stopDelegatedTasks: () => Effect.void,
+        }),
+        ServerSettings.layerTest(),
+        Layer.mock(ProviderRegistry.ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+        Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({
+          list: () => Effect.succeed([]),
+        }),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      const scope: McpInvocationScope = {
+        environmentId: EnvironmentId.make("environment:mcp-cancel-readonly-parent"),
+        requestNamespace: "provider-session:mcp-cancel-readonly-parent",
+        thread: {
+          threadId: parentThreadId,
+          providerSessionId: "provider-session:mcp-cancel-readonly-parent",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        client: undefined,
+        capabilities: new Set(["orchestration"]),
+        issuedAt: 1,
+      };
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const result = yield* service.cancelTask(scope, {
+          taskId,
+          clientRequestId: "cancel-dispose-failed-task",
+        });
+        assert.equal(result.status, "cancel_requested");
+        assert.deepEqual(
+          (yield* Ref.get(dispatched)).map((command) => (command as { type: string }).type),
+          ["thread.stop", "delegated_task.completion-delivery.dispose"],
+        );
+      }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
+    }),
+  );
+
   it.effect("refuses to cancel a task whose child now runs above the parent's modes", () =>
     Effect.gen(function* () {
       const parentThreadId = ThreadId.make("thread:mcp-cancel-dispose-failed-parent");

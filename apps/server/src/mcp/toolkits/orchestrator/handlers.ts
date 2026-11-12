@@ -19,35 +19,26 @@ const handlers = {
       return yield* service.capabilities(scope, input);
     }),
   ),
-  // KODO: mode-read-only-tools - see McpToolAccess.actsAsCaller
-  delegate_task: McpToolAccess.actsAsCaller(
-    (input) =>
-      Effect.gen(function* () {
-        const scope = yield* McpInvocationContext.McpInvocationContext;
-        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
-        return yield* service.delegateTask(scope, input);
-      }),
-    { readOnlyModes: "allowed" },
+  delegate_task: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+      return yield* service.delegateTask(scope, input);
+    }),
   ),
-  // KODO: mode-read-only-tools - see McpToolAccess.actsAsCaller
-  task_status: McpToolAccess.actsAsCaller(
-    ({ taskId }) =>
-      Effect.gen(function* () {
-        const scope = yield* McpInvocationContext.McpInvocationContext;
-        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
-        return yield* service.taskStatus(scope, taskId);
-      }),
-    { readOnlyModes: "allowed" },
+  task_status: McpToolAccess.actsAsCaller(({ taskId }) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+      return yield* service.taskStatus(scope, taskId);
+    }),
   ),
-  // KODO: mode-read-only-tools - see McpToolAccess.actsAsCaller
-  task_cancel: McpToolAccess.actsAsCaller(
-    (input) =>
-      Effect.gen(function* () {
-        const scope = yield* McpInvocationContext.McpInvocationContext;
-        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
-        return yield* service.cancelTask(scope, input);
-      }),
-    { readOnlyModes: "allowed" },
+  task_cancel: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+      return yield* service.cancelTask(scope, input);
+    }),
   ),
   t3_workflow_stop: McpToolAccess.writesThreads(
     (input) => [input.threadId],
@@ -69,29 +60,26 @@ const handlers = {
         );
       }),
   ),
-  // KODO: mode-read-only-tools - see McpToolAccess.actsAsCaller
-  t3_background_wait: McpToolAccess.actsAsCaller(
-    (input) =>
-      Effect.gen(function* () {
-        const { scope, threads } = yield* readCaller();
-        const caller = yield* McpInvocationContext.requireThreadScope(scope, "t3_background_wait");
-        return yield* threads
-          .awaitBackgroundTasks({
-            threadId: caller.thread.threadId,
-            taskIds: input.taskIds,
-            awaited: input.waiting ?? true,
-          })
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new OrchestratorMcpFailure({
-                  code: cause.reason === "unsupported" ? "invalid_request" : "orchestration_error",
-                  message: cause.message,
-                }),
-            ),
-          );
-      }),
-    { readOnlyModes: "allowed" },
+  t3_background_wait: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const { scope, threads } = yield* readCaller();
+      const caller = yield* McpInvocationContext.requireThreadScope(scope, "t3_background_wait");
+      return yield* threads
+        .awaitBackgroundTasks({
+          threadId: caller.thread.threadId,
+          taskIds: input.taskIds,
+          awaited: input.waiting ?? true,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new OrchestratorMcpFailure({
+                code: cause.reason === "unsupported" ? "invalid_request" : "orchestration_error",
+                message: cause.message,
+              }),
+          ),
+        );
+    }),
   ),
   schedule_task: McpToolAccess.either(
     (input) => input.scheduledTaskId === undefined,
@@ -150,15 +138,12 @@ const handlers = {
       return yield* service.requestSecret(scope, input);
     }),
   ),
-  // KODO: mode-read-only-tools - see McpToolAccess.actsAsCaller
-  create_threads: McpToolAccess.actsAsCaller(
-    (input) =>
-      Effect.gen(function* () {
-        const scope = yield* McpInvocationContext.McpInvocationContext;
-        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
-        return yield* service.createThreads(scope, input);
-      }),
-    { readOnlyModes: "allowed" },
+  create_threads: McpToolAccess.actsAsCaller((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+      return yield* service.createThreads(scope, input);
+    }),
   ),
   t3_thread_list: McpToolAccess.reads((input) =>
     Effect.gen(function* () {

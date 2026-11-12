@@ -18,6 +18,9 @@ import {
   makeMuseEnvironment,
   museApprovalMode,
   museLaunch,
+  museModeHostRestriction,
+  museRestrictionKey,
+  museServeArgs,
   museVerbatimPath,
   museWorkspaceRoot,
   type MuseSdkHost,
@@ -110,6 +113,39 @@ describe("Muse SDK host", () => {
       await host.close();
       expect(fake.close).toHaveBeenCalledOnce();
     }
+  });
+
+  // KODO: mode-launch-restriction
+  it("launches Ask and Plan read-only, Review without write tools, and Code as before", () => {
+    const ask = museModeHostRestriction({ modeReadOnly: true, approvalPolicy: "never" });
+    const review = museModeHostRestriction({ modeReadOnly: true });
+    expect(ask).toEqual({ readOnly: true });
+    expect(review).toEqual({ disableWrite: true });
+    expect(museModeHostRestriction({})).toEqual({});
+    expect(museServeArgs({ ...ask, runtimeMode: "approval-required" })).toEqual([
+      "serve",
+      "--disable-shell",
+      "--disable-write",
+      "--no-session-log",
+    ]);
+    // Shell stays on approval in Review; only the write tools go.
+    expect(museServeArgs({ ...review, runtimeMode: "approval-required" })).toEqual([
+      "serve",
+      "--disable-write",
+      "--trust-workspace",
+    ]);
+    expect(museServeArgs({ runtimeMode: "full-access" })).toEqual([
+      "serve",
+      "--trust-workspace",
+      "--disable-sandbox",
+    ]);
+    expect(
+      new Set(
+        [{ modeReadOnly: true, approvalPolicy: "never" }, { modeReadOnly: true }, {}].map(
+          museRestrictionKey,
+        ),
+      ).size,
+    ).toBe(3);
   });
 
   it.each([undefined, 2])(

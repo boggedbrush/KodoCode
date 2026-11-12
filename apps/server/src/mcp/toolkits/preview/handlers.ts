@@ -196,38 +196,29 @@ const handlers = {
     invokeTargeted<PreviewAutomationStatus>("status", input ?? {}),
   ),
   // Models often pass a dev server as both `url` and `target`; the target knows the environment.
-  // KODO: mode-read-only-tools - see McpToolAccess.actsAsCaller
-  preview_open: McpToolAccess.actsAsCaller(
-    ({ target, url, ...input }) =>
-      Effect.gen(function* () {
-        const opened = yield* invokeTargeted<PreviewAutomationStatus>(
-          "open",
-          normalizePreviewOpenInput(
-            target === undefined && url !== undefined ? { ...input, url } : input,
-          ),
-        );
-        if (target === undefined || opened.tabId === null) return opened;
-        return yield* invokeTargeted<PreviewAutomationStatus>("navigate", {
-          target,
-          tabId: opened.tabId,
-        });
-      }),
-    { readOnlyModes: "allowed" },
+  preview_open: McpToolAccess.actsAsCaller(({ target, url, ...input }) =>
+    Effect.gen(function* () {
+      const opened = yield* invokeTargeted<PreviewAutomationStatus>(
+        "open",
+        normalizePreviewOpenInput(
+          target === undefined && url !== undefined ? { ...input, url } : input,
+        ),
+      );
+      if (target === undefined || opened.tabId === null) return opened;
+      return yield* invokeTargeted<PreviewAutomationStatus>("navigate", {
+        target,
+        tabId: opened.tabId,
+      });
+    }),
   ),
-  // KODO: mode-read-only-tools - see McpToolAccess.actsAsCaller
-  preview_navigate: McpToolAccess.actsAsCaller(
-    (input) => invokeTargeted<PreviewAutomationStatus>("navigate", input, input.timeoutMs),
-    { readOnlyModes: "allowed" },
+  preview_navigate: McpToolAccess.actsAsCaller((input) =>
+    invokeTargeted<PreviewAutomationStatus>("navigate", input, input.timeoutMs),
   ),
-  // KODO: mode-read-only-tools - see McpToolAccess.actsAsCaller
-  preview_resize: McpToolAccess.actsAsCaller(
-    (input) => invokeTargeted<PreviewAutomationResizeResult>("resize", input, input.timeoutMs),
-    { readOnlyModes: "allowed" },
+  preview_resize: McpToolAccess.actsAsCaller((input) =>
+    invokeTargeted<PreviewAutomationResizeResult>("resize", input, input.timeoutMs),
   ),
-  // KODO: mode-read-only-tools - see McpToolAccess.actsAsCaller
-  preview_set_appearance: McpToolAccess.actsAsCaller(
-    (input) => invokeTargeted<PreviewAutomationSetColorSchemeResult>("setColorScheme", input),
-    { readOnlyModes: "allowed" },
+  preview_set_appearance: McpToolAccess.actsAsCaller((input) =>
+    invokeTargeted<PreviewAutomationSetColorSchemeResult>("setColorScheme", input),
   ),
   preview_snapshot: McpToolAccess.readsAsCaller((input) => {
     const { includeImage: _includeImage, save, ...operationInput } = input ?? {};

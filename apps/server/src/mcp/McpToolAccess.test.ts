@@ -22,6 +22,7 @@ import * as McpHttpServer from "./McpHttpServer.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import { liveThreadShell } from "./McpToolAccess.testkit.ts";
+import { AllowedInReadOnlyModes } from "./kodoReadOnlyGuard.ts"; // KODO: mode-read-only-tools
 
 const supervisedThreadId = ThreadId.make("thread:supervised");
 const planThreadId = ThreadId.make("thread:plan");
@@ -125,7 +126,7 @@ const ProbeToolkit = Toolkit.make(
   // KODO: mode-read-only-tools - an acting tool that declares itself read-only.
   Tool.make("acts_as_caller_readonly", probe).annotate(Tool.Readonly, true),
   // KODO: mode-read-only-tools - an acting tool that declares it does not touch the workspace.
-  Tool.make("acts_as_caller_allowed", probe),
+  Tool.make("acts_as_caller_allowed", probe).annotate(AllowedInReadOnlyModes, true),
   Tool.make("reads_as_caller", probe),
   Tool.make("acts_as_caller", probe),
   Tool.make("writes", probe),
@@ -149,7 +150,7 @@ const probeHandlers: McpToolAccess.Handlers<typeof ProbeToolkit.tools> = {
   reads_as_caller: McpToolAccess.readsAsCaller(() => ran),
   acts_as_caller: McpToolAccess.actsAsCaller(() => ran),
   acts_as_caller_readonly: McpToolAccess.actsAsCaller(() => ran),
-  acts_as_caller_allowed: McpToolAccess.actsAsCaller(() => ran, { readOnlyModes: "allowed" }),
+  acts_as_caller_allowed: McpToolAccess.actsAsCaller(() => ran),
   writes: McpToolAccess.writes(() => ran),
   writes_with_capability: McpToolAccess.writesWithCapability(() => ran),
   writes_threads: McpToolAccess.writesThreads(

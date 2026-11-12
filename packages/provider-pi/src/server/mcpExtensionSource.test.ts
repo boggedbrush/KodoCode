@@ -584,3 +584,66 @@ describe("Pi skill references", () => {
     }
   });
 });
+
+// KODO: mode-launch-restriction
+describe("Pi read-only Kodo modes", () => {
+  type ToolCallHook = (
+    event: { toolName: string; input: unknown },
+    ctx: { ui: { confirm: (title: string) => Promise<boolean> } },
+  ) => Promise<{ block: true; reason: string } | undefined>;
+
+  const load = async (modeRestriction: string, runtimeMode = "approval-required") => {
+    const bridge = await loadMcpBridge({ modern: true, runtimeMode, modeRestriction });
+    const confirmations: string[] = [];
+    const ctx = {
+      ui: {
+        // Approving everything shows that a refusal does not depend on the user saying no.
+        confirm: async (title: string) => {
+          confirmations.push(title);
+          return true;
+        },
+      },
+    };
+    const hook = bridge.handlers.get("tool_call") as unknown as ToolCallHook;
+    return { hook, ctx, confirmations };
+  };
+
+  it("refuses everything that is not read-only in Ask and Plan, even when the user would approve", async () => {
+    const { hook, ctx, confirmations } = await load("read-only", "full-access");
+    for (const toolName of [
+      "bash",
+      "edit",
+      "write",
+      "custom_extension_tool",
+      "mcp__t3-code__delegate_task",
+    ]) {
+      assert.equal((await hook({ toolName, input: {} }, ctx))?.block, true, toolName);
+    }
+    for (const toolName of [
+      "read",
+      "grep",
+      "find",
+      "ls",
+      "mcp__t3-code__orchestrator_capabilities",
+    ]) {
+      assert.isUndefined(await hook({ toolName, input: {} }, ctx), toolName);
+    }
+    assert.deepEqual(confirmations, []);
+  });
+
+  it("refuses only the file-changing tools in Review and leaves shell on approval", async () => {
+    const { hook, ctx, confirmations } = await load("no-edits");
+    for (const toolName of ["edit", "write"]) {
+      assert.equal((await hook({ toolName, input: {} }, ctx))?.block, true, toolName);
+    }
+    assert.deepEqual(confirmations, []);
+    assert.isUndefined(await hook({ toolName: "bash", input: { command: "git diff" } }, ctx));
+    assert.deepEqual(confirmations, ["Allow bash?"]);
+  });
+
+  it("changes nothing without a restriction", async () => {
+    const { hook, ctx, confirmations } = await load("", "full-access");
+    assert.isUndefined(await hook({ toolName: "edit", input: {} }, ctx));
+    assert.deepEqual(confirmations, []);
+  });
+});

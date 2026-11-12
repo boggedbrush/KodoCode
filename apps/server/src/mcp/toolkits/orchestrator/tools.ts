@@ -49,6 +49,7 @@ import * as PeerLinks from "../../../peer/PeerLinks.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as OrchestratorMcpService from "../../OrchestratorMcpService.ts";
 import * as ThreadMetadataMcpService from "../../ThreadMetadataMcpService.ts";
+import { AllowedInReadOnlyModes } from "../../kodoReadOnlyGuard.ts"; // KODO: mode-read-only-tools
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -94,7 +95,8 @@ const DelegateTaskTool = Tool.make("delegate_task", {
 })
   .annotate(Tool.Title, "Delegate a child task")
   .annotate(Tool.Destructive, true)
-  .annotate(Tool.OpenWorld, true);
+  .annotate(Tool.OpenWorld, true)
+  .annotate(AllowedInReadOnlyModes, true);
 
 const TaskStatusTool = Tool.make("task_status", {
   description:
@@ -108,7 +110,8 @@ const TaskStatusTool = Tool.make("task_status", {
   .annotate(Tool.Title, "Get delegated task status")
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, true);
+  .annotate(Tool.Idempotent, true)
+  .annotate(AllowedInReadOnlyModes, true);
 
 const TaskCancelTool = Tool.make("task_cancel", {
   description:
@@ -120,7 +123,8 @@ const TaskCancelTool = Tool.make("task_cancel", {
   dependencies,
 })
   .annotate(Tool.Title, "Cancel delegated task")
-  .annotate(Tool.Destructive, true);
+  .annotate(Tool.Destructive, true)
+  .annotate(AllowedInReadOnlyModes, true);
 
 const WorkflowStopTool = Tool.make("t3_workflow_stop", {
   description:
@@ -154,7 +158,9 @@ const BackgroundWaitTool = Tool.make("t3_background_wait", {
   failure: OrchestratorMcpFailure,
   failureMode: "return",
   dependencies,
-}).annotate(Tool.Title, "Wait on background work");
+})
+  .annotate(Tool.Title, "Wait on background work")
+  .annotate(AllowedInReadOnlyModes, true);
 
 const ScheduleTaskTool = Tool.make("schedule_task", {
   description:
@@ -220,7 +226,8 @@ const CreateThreadsTool = Tool.make("create_threads", {
 })
   .annotate(Tool.Title, "Create T3 threads")
   .annotate(Tool.Destructive, true)
-  .annotate(Tool.OpenWorld, true);
+  .annotate(Tool.OpenWorld, true)
+  .annotate(AllowedInReadOnlyModes, true);
 
 const ThreadListTool = Tool.make("t3_thread_list", {
   description:

@@ -11,6 +11,7 @@ import * as ThreadManagementService from "../../../orchestration-v2/ThreadManage
 import * as PreviewManager from "../../../preview/Manager.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import { AllowedInReadOnlyModes } from "../../kodoReadOnlyGuard.ts"; // KODO: mode-read-only-tools
 
 const shared = {
   failure: Schema.Union([PreviewAutomationError, OrchestratorMcpFailure]),
@@ -43,5 +44,7 @@ const PreviewCloseTool = Tool.make("t3_preview_close", {
     "Close one preview tab this thread owns. Use it on a tab you opened for your own check when you finish.",
   parameters: Schema.Struct({ tabId: PreviewTabId }),
   success: Schema.Struct({}),
-}).annotate(Tool.Destructive, true);
+})
+  .annotate(Tool.Destructive, true)
+  .annotate(AllowedInReadOnlyModes, true);
 export const PreviewControlsToolkit = Toolkit.make(PreviewListTool, PreviewCloseTool);

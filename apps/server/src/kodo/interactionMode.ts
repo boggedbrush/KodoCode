@@ -10,11 +10,9 @@ import {
 } from "@t3tools/contracts";
 
 /**
- * How a driver enforces read-only, strongest mechanism first (see `resolveKodoInteractionMode`):
- * claude: tool list, `dontAsk` and denied edit tools; codex: readOnly sandbox, approvals never;
- * acp-family and opencode: auto-denying permission policy; cursor: native plan mode plus the
- * approval ceiling; launch: a host launched with its write (and, for Ask and Plan, shell) tools
- * removed, plus the approval ceiling (pi, muse); ceiling: the approval ceiling plus instruction text.
+ * How a driver enforces read-only, strongest mechanism first: claude: tool list and denied edits;
+ * codex: readOnly sandbox; acp-family, opencode: auto-denying policy; cursor: native plan mode;
+ * launch (pi, muse): write and shell tools removed at launch; ceiling: approval ceiling plus text.
  */
 type ReadOnlyEnforcement =
   | "claude"
@@ -535,11 +533,10 @@ export function kodoEffectiveRunMode(runMode: unknown, threadMode: unknown): Kod
 }
 
 /**
- * Whether a message sent now may be steered into a running turn. A steer joins a turn that runs
- * with the policy it started with, so it is allowed only when the run was created in the thread's
- * current mode: a read-only message must not run with the write access of a Code turn, and a Code
- * message must not be squeezed into a read-only one. Otherwise it queues as a run of its own. A run
- * with no recorded mode takes the thread's.
+ * Whether a message sent now may be steered into a running turn: only when the run was created in
+ * the thread's current mode, since a steer runs with the policy the turn started with (a read-only
+ * message must not get a Code turn's write access, nor a Code message a read-only turn). Otherwise
+ * it queues as its own run.
  */
 export function kodoMaySteerIntoRun(runMode: unknown, threadMode: unknown): boolean {
   return (

@@ -503,10 +503,17 @@ it.effect("launches in a linked environment with the caller's modes, retry-safe"
           ...args,
         });
 
-      // KODO: mode-read-only-tools - a read-only caller starts nothing, here or in a linked environment.
-      const refused = yield* launch("thread:laptop-plan");
-      expect(failureOf(refused)).toMatchObject({ code: "capability_denied" });
-      expect((yield* Ref.get(seen)).launches).toHaveLength(0);
+      // KODO: mode-read-only-tools - a read-only caller starts only read-only threads, and a linked
+      // environment sees it narrowed to plan; asking for more is refused before anything leaves.
+      const bound = yield* launch("thread:laptop-plan", { clientRequestId: "launch-plan" });
+      expect(bound.isError).toBe(false);
+      expect((yield* Ref.get(seen)).launches).toMatchObject([{ interactionMode: "plan" }]);
+      const escalated = yield* launch("thread:laptop-plan", {
+        clientRequestId: "launch-escalated",
+        interactionMode: "default",
+      });
+      expect(failureOf(escalated)).toMatchObject({ code: "interaction_mode_escalation_denied" });
+      expect((yield* Ref.get(seen)).launches).toHaveLength(1);
 
       const first = yield* launch("thread:laptop-full");
       expect(first.isError).toBe(false);
@@ -515,7 +522,7 @@ it.effect("launches in a linked environment with the caller's modes, retry-safe"
         modelSelection: codex,
       });
       const retried = yield* launch("thread:laptop-full");
-      const [launched, relaunched] = (yield* Ref.get(seen)).launches;
+      const [, launched, relaunched] = (yield* Ref.get(seen)).launches;
       // The thread there runs with the caller's own modes here, and a retry asks for the same thread.
       expect(launched).toMatchObject({ runtimeMode: "full-access", interactionMode: "default" });
       expect(relaunched?.threadId).toBe(launched?.threadId);
@@ -531,7 +538,7 @@ it.effect("launches in a linked environment with the caller's modes, retry-safe"
       });
       expect(failureOf(withUpload)).toMatchObject({ code: "invalid_request" });
       expect(yield* Ref.get(b.bearers)).toEqual([]);
-      expect((yield* Ref.get(seen)).launches).toHaveLength(2);
+      expect((yield* Ref.get(seen)).launches).toHaveLength(3);
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

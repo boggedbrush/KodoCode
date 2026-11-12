@@ -58,7 +58,6 @@ import { mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
 import { kodoRuntimePolicyOverlay } from "../../kodo/interactionMode.ts"; // KODO: mode-read-only-claude
 import { assert, describe, it } from "@effect/vitest";
 import * as Cause from "effect/Cause";
-import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -75,7 +74,6 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import { Tool } from "effect/ai";
 import { formatClaudeResumeCompactionQuestion } from "@t3tools/shared/claudeCompaction";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
@@ -88,7 +86,10 @@ import * as ServerConfig from "../../config.ts";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import { T3_CODE_DEVICE_TOOL_INSTRUCTIONS_WITH_TOOL_SEARCH } from "@t3tools/provider-core/server/orchestrationInstructions";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { AllowedInReadOnlyModes, isReadOnlyMcpTool } from "../../mcp/kodoReadOnlyGuard.ts"; // KODO: mode-read-only-tools
+import * as Context from "effect/Context";
 import { PreviewControlsToolkit } from "../../mcp/toolkits/previewControls/tools.ts";
+import { PreviewToolkit } from "../../mcp/toolkits/preview/tools.ts"; // KODO: mode-read-only-tools
 import { HtmlToolkit } from "../../mcp/toolkits/html/tools.ts";
 import { EnvironmentToolkit } from "../../mcp/toolkits/environment/tools.ts";
 import { ProjectToolkit } from "../../mcp/toolkits/project/tools.ts";
@@ -597,6 +598,36 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
     assert.notEqual(rotatedKey, initialKey);
   });
 
+  // KODO: mode-session-policy
+  it("keeps the live query for a continuation only when it is no more permissive than the turn", () => {
+    const codeQuery = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
+      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: "/workspace",
+      }),
+    );
+    const askQuery = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(
+      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        cwd: "/workspace",
+        sandboxPolicy: { type: "readOnly" },
+        approvalPolicy: "never",
+        modeReadOnly: true,
+      }),
+    );
+    assert.isTrue(askQuery.readOnly);
+    assert.isUndefined(codeQuery.readOnly);
+    const code = { queryPolicy: codeQuery, queryPolicyKey: "code" };
+    const ask = { queryPolicy: askQuery, queryPolicyKey: "ask" };
+    // Background work started in Code, woken after the thread moved to Ask: no.
+    assert.isFalse(ClaudeAdapterV2.claudeContinuationMayReuseQuery(code, askQuery, "ask"));
+    assert.isTrue(ClaudeAdapterV2.claudeContinuationMayReuseQuery(code, codeQuery, "code"));
+    // A read-only query may serve a Code continuation: it is the stricter one.
+    assert.isTrue(ClaudeAdapterV2.claudeContinuationMayReuseQuery(ask, codeQuery, "code"));
+  });
+
   it("matches the read-only allowlist to the orchestrator toolkit annotations", () => {
     const readOnlyToolNames = [
       ...Object.values(OrchestratorToolkit.tools),
@@ -605,9 +636,13 @@ describe("ClaudeAdapterV2 MCP query overrides", () => {
       ...Object.values(ProjectToolkit.tools),
       ...Object.values(EnvironmentToolkit.tools),
       ...Object.values(PreviewControlsToolkit.tools),
+      // KODO: mode-read-only-tools - the browser tools are pre-approved only where annotated as allowed.
+      ...Object.values(PreviewToolkit.tools).filter((tool) =>
+        Context.get(tool.annotations, AllowedInReadOnlyModes),
+      ),
       ...Object.values(HtmlToolkit.tools),
     ]
-      .filter((tool) => Context.get(tool.annotations, Tool.Readonly))
+      .filter((tool) => isReadOnlyMcpTool(tool)) // KODO: mode-read-only-tools
       .map((tool) => `mcp__t3-code__${tool.name}`)
       .sort();
 

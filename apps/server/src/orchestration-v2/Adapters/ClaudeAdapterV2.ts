@@ -2003,7 +2003,7 @@ const readClaudeLaunchArgSettings = Effect.fn("ClaudeAdapterV2.readLaunchArgSett
 
 export const CLAUDE_T3_MCP_TOOL_WILDCARD = "mcp__t3-code__*";
 
-// Keep in sync with OrchestratorToolkit Tool.Readonly annotations; ClaudeAdapterV2.test.ts checks this.
+// Keep in sync with the Tool.Readonly and AllowedInReadOnlyModes annotations; ClaudeAdapterV2.test.ts checks this.
 export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__t3-code__orchestrator_capabilities",
   "mcp__t3-code__list_scheduled_tasks",
@@ -2019,6 +2019,18 @@ export const CLAUDE_READ_ONLY_T3_MCP_ALLOWED_TOOLS: ReadonlyArray<string> = [
   "mcp__t3-code__t3_environment_links",
   "mcp__t3-code__html_preview",
   "mcp__t3-code__html_render",
+  // KODO: mode-read-only-tools - tools annotated AllowedInReadOnlyModes: they keep working in Ask and Plan.
+  "mcp__t3-code__delegate_task",
+  "mcp__t3-code__task_status",
+  "mcp__t3-code__task_cancel",
+  "mcp__t3-code__t3_background_wait",
+  "mcp__t3-code__create_threads",
+  "mcp__t3-code__t3_thread_launch",
+  "mcp__t3-code__preview_open",
+  "mcp__t3-code__preview_navigate",
+  "mcp__t3-code__preview_resize",
+  "mcp__t3-code__preview_set_appearance",
+  "mcp__t3-code__t3_preview_close",
 ];
 
 // T3 waits can block for an hour; exceed Claude's default 60 s timeout.
@@ -3062,6 +3074,19 @@ function claudeRuntimeQueryPolicyKey(policy: ClaudeRuntimeQueryPolicy): string {
     installPermissionCallback: policy.installPermissionCallback,
   });
 }
+
+/**
+ * KODO: mode-session-policy - a continuation drains the live query without prompting, so it may
+ * keep that query only when it is the turn's own policy or a read-only one for a Code turn; never
+ * one more permissive than the turn's policy (background work started in Code, woken after Ask).
+ */
+export const claudeContinuationMayReuseQuery = (
+  live: { readonly queryPolicyKey: string; readonly queryPolicy: ClaudeRuntimeQueryPolicy },
+  turnPolicy: ClaudeRuntimeQueryPolicy,
+  turnPolicyKey: string,
+): boolean =>
+  live.queryPolicyKey === turnPolicyKey ||
+  (live.queryPolicy.readOnly === true && turnPolicy.readOnly !== true);
 
 // Live-query reuse must include MCP pre-approvals, which can differ for the same policy key.
 export function claudeEffectiveQueryPolicyKey(
@@ -10969,9 +10994,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             existing.nativeThreadId === nativeThreadId &&
             !existing.stopping &&
             isClaudeProviderContinuationTurn(turnInput) &&
-            // KODO: mode-session-policy - never on a query more permissive than this turn's policy.
-            (existing.queryPolicyKey === queryPolicyKey ||
-              (existing.queryPolicy.readOnly === true && queryPolicy.readOnly !== true))
+            claudeContinuationMayReuseQuery(existing, queryPolicy, queryPolicyKey) // KODO: mode-session-policy
           ) {
             return existing;
           }

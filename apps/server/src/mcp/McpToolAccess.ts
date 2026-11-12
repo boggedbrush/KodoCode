@@ -136,27 +136,18 @@ export const reads = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>)
 export const readsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
   declare((params: P) => requireThreadCaller.pipe(Effect.flatMap(() => handle(params))), undefined);
 
-export const actsAsCaller = <P, A, E, R>(
-  handle: (params: P) => Effect.Effect<A, E, R>,
-  options?: {
-    /**
-     * KODO: mode-read-only-tools - the tool does not touch the workspace (it only manages the
-     * thread's own tasks or preview, or bounds what it starts by the caller's mode), so Ask, Plan
-     * and Review threads keep it. Without this, a tool that is not `Tool.Readonly` is refused there.
-     */
-    readonly readOnlyModes?: "allowed";
-  },
-) => {
-  const declaration = declare(
-    (params: P) =>
-      requireThreadCaller.pipe(
-        Effect.andThen(writingCaller),
-        Effect.flatMap(() => handle(params)),
-      ),
-    undefined,
+export const actsAsCaller = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
+  refusesInReadOnlyModes(
+    // KODO: mode-read-only-tools
+    declare(
+      (params: P) =>
+        requireThreadCaller.pipe(
+          Effect.andThen(writingCaller),
+          Effect.flatMap(() => handle(params)),
+        ),
+      undefined,
+    ),
   );
-  return options?.readOnlyModes === "allowed" ? declaration : refusesInReadOnlyModes(declaration); // KODO: mode-read-only-tools
-};
 
 /**
  * Changes something that belongs to no thread, such as a pending upload or a

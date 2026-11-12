@@ -575,6 +575,46 @@ describe("MuseAdapterV2", () => {
     ),
   );
 
+  // KODO: mode-launch-restriction
+  it.effect.each([
+    {
+      mode: "Ask and Plan",
+      policy: { modeReadOnly: true, approvalPolicy: "never" },
+      launched: { readOnly: true },
+    },
+    { mode: "Review", policy: { modeReadOnly: true }, launched: { disableWrite: true } },
+    { mode: "Code", policy: {}, launched: {} },
+  ] as const)(
+    "launches the host for $mode with the tools that mode keeps",
+    ({ policy, launched }) =>
+      Effect.gen(function* () {
+        const fake = yield* makeFakeMuse();
+        let options: Parameters<NonNullable<MuseAdapterV2Options["createHost"]>>[0] | undefined;
+        yield* makeHarness(
+          fake,
+          INSTANCE_ID,
+          undefined,
+          undefined,
+          undefined,
+          ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+            ...runtimePolicy,
+            runtimeMode: "approval-required",
+            ...policy,
+          }),
+          {
+            createHost: async (hostOptions) => {
+              options = hostOptions;
+              return fake.host;
+            },
+          },
+        );
+        assert.deepStrictEqual(
+          { readOnly: options?.readOnly, disableWrite: options?.disableWrite },
+          { readOnly: undefined, disableWrite: undefined, ...launched },
+        );
+      }).pipe(Effect.scoped, Effect.provide(testLayer)),
+  );
+
   it.effect("pins sessions and turns to native canonical case", () =>
     Effect.gen(function* () {
       using _realpath = vi.spyOn(NodeFSP, "realpath").mockResolvedValue("/workspace/eevee");

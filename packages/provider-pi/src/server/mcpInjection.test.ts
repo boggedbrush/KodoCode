@@ -16,6 +16,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   buildPiRpcLaunch,
   materializePiT3McpExtension,
+  piModeRestriction,
   resolvePiLaunchArgs,
 } from "./mcpInjection.ts";
 import { PI_T3_MCP_EXTENSION_SOURCE } from "./mcpExtensionSource.ts";
@@ -95,6 +96,43 @@ describe("pi T3 MCP injection", () => {
       permissionOnly.env[T3_PI_MCP_EXTENSION_PATH_ENV],
       "/tmp/cache/pi-t3-mcp-extension.ts",
     );
+  });
+
+  // KODO: mode-launch-restriction
+  it.each([
+    ["read-only", "bash,edit,write"],
+    ["no-edits", "edit,write"],
+  ] as const)(
+    "launches a %s Kodo mode without the tools it forbids, after user flags",
+    (restriction, excluded) => {
+      const launch = buildPiRpcLaunch({
+        launchArgs: ["--tools", "read,bash,edit,write"],
+        environment: {},
+        mcpSession,
+        extensionPath: "/tmp/cache/pi-t3-mcp-extension.ts",
+        runtimeMode: "approval-required",
+        modeRestriction: restriction,
+      });
+      const flag = launch.args.indexOf("--exclude-tools");
+      assert.isAbove(flag, launch.args.indexOf("--tools"));
+      assert.equal(launch.args[flag + 1], excluded);
+      assert.equal(launch.env["T3_PI_MODE_RESTRICTION"], restriction);
+      const code = buildPiRpcLaunch({
+        launchArgs: [],
+        environment: { T3_PI_MODE_RESTRICTION: "read-only" },
+        mcpSession,
+        extensionPath: "/tmp/cache/pi-t3-mcp-extension.ts",
+        runtimeMode: "approval-required",
+      });
+      assert.notInclude(code.args, "--exclude-tools");
+      assert.isUndefined(code.env["T3_PI_MODE_RESTRICTION"]);
+    },
+  );
+
+  it("derives the restriction from the resolved Kodo policy", () => {
+    assert.isUndefined(piModeRestriction({}));
+    assert.equal(piModeRestriction({ modeReadOnly: true, approvalPolicy: "never" }), "read-only");
+    assert.equal(piModeRestriction({ modeReadOnly: true }), "no-edits");
   });
 
   it("forces tools and user extensions off for unattended text generation", () => {

@@ -1,7 +1,7 @@
 // Kodo: refuses in-app MCP tools that are not read-only (`Tool.Readonly`) in Ask, Plan and Review,
 // whichever provider called. Only the access kinds with no mode bound of their own are covered;
-// `writesThreads`, `writesEnvironment` and `startsThreads` already bound what they touch, and an
-// `actsAsCaller` declaration that says `readOnlyModes: "allowed"` is not refused.
+// `writesThreads`, `writesEnvironment` and `startsThreads` already bound what they touch, and a tool
+// annotated `AllowedInReadOnlyModes` (it does not touch the workspace) is not refused.
 import { OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -26,9 +26,20 @@ export const refusesWhenAnyRefuses = <Declaration extends object>(
 ): Declaration =>
   from.some((source) => refusedKinds.has(source)) ? refusesInReadOnlyModes(derived) : derived;
 
+/**
+ * Annotates a tool that changes something no read-only mode protects, so Ask, Plan and Review keep
+ * it: the thread's own tasks and preview, or delegation whose child the service bounds by the
+ * caller's mode. Claude pre-approves these in read-only modes too.
+ */
+export const AllowedInReadOnlyModes = Context.Reference<boolean>(
+  "t3/mcp/kodoReadOnlyGuard/AllowedInReadOnlyModes",
+  { defaultValue: () => false },
+);
+
 /** A tool is read-only only when its declaration says so; an unannotated tool is a writing tool. */
 export const isReadOnlyMcpTool = (tool: Tool.Any): boolean =>
-  Context.get(tool.annotations, Tool.Readonly) === true;
+  Context.get(tool.annotations, Tool.Readonly) === true ||
+  Context.get(tool.annotations, AllowedInReadOnlyModes);
 
 /** The name of the tool being called, set only while a refused-kind, non-read-only tool runs. */
 const RefusedInReadOnlyModes = Context.Reference<string | undefined>(

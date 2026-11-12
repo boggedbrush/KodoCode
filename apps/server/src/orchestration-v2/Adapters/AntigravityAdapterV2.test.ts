@@ -1243,3 +1243,128 @@ describe("AntigravityAdapterV2 session system prompt", () => {
       }).pipe(Effect.provide(layerSession), Effect.scoped),
   );
 });
+
+// KODO: mode-session-policy - the session mode (yolo or default) follows each turn's policy.
+describe("AntigravityAdapterV2 permission mode per turn", () => {
+  it.effect("drops yolo for a read-only run on a session opened under full access", () =>
+    Effect.gen(function* () {
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const crypto = yield* SecureRandom.SecureRandom;
+      const mockAgentPath = yield* path.fromFileUrl(
+        new URL("../../../scripts/acp-mock-agent.ts", import.meta.url),
+      );
+      type RuntimeService = AcpSessionRuntime.AcpSessionRuntime["Service"];
+      const modesSet: Array<string> = [];
+      const promptReceived = yield* Deferred.make<void>();
+      const instanceId = ProviderInstanceId.make("antigravity-mode-per-turn-test");
+      const adapter = yield* makeAntigravityAdapterV2({
+        instanceId,
+        selfInvocation: yield* resolveSelfInvocation(),
+        makeRuntime: (input) =>
+          makeAntigravityAcpRuntime({
+            ...input,
+            childProcessSpawner,
+            spawn: {
+              command: process.execPath,
+              args: [mockAgentPath],
+              cwd: input.cwd,
+              env: { T3_ACP_ANTIGRAVITY: "1", T3_ACP_HANG_PROMPT_FOREVER: "1" },
+            },
+          }).pipe(
+            Effect.provideService(SecureRandom.SecureRandom, crypto),
+            Effect.map((runtime): RuntimeService => ({
+              ...runtime,
+              setMode: (modeId) =>
+                Effect.sync(() => {
+                  modesSet.push(modeId);
+                }).pipe(Effect.andThen(runtime.setMode(modeId))),
+              prompt: (request) =>
+                Deferred.succeed(promptReceived, undefined).pipe(
+                  Effect.andThen(runtime.prompt(request)),
+                ),
+            })),
+          ),
+        withProcess: (_stop, task) => task,
+        defaultModel: Effect.undefined,
+      });
+      const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-ag-mode-" });
+      const codePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: workspace,
+      });
+      // What an Ask run resolves to: the runtime mode capped, the wire mode still "default".
+      const askPolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        cwd: workspace,
+        sandboxPolicy: { type: "readOnly" },
+        approvalPolicy: "never",
+        modeReadOnly: true,
+      });
+      const threadId = ThreadId.make("thread-antigravity-mode-per-turn");
+      const modelSelection = { instanceId, model: "gemini-test-low" } as const;
+      const session = yield* adapter.openSession({
+        threadId,
+        providerSessionId: ProviderSessionId.make("provider-session-antigravity-mode-per-turn"),
+        modelSelection,
+        runtimePolicy: codePolicy,
+      });
+      assert.deepEqual(modesSet, ["yolo"]);
+      const providerThread = yield* session.ensureThread({
+        threadId,
+        modelSelection,
+        runtimePolicy: codePolicy,
+      });
+      const now = yield* DateTime.now;
+      yield* session
+        .startTurn({
+          appThread: {
+            createdBy: "user",
+            creationSource: "web",
+            id: threadId,
+            projectId: ProjectId.make("project-antigravity-mode-per-turn"),
+            title: "Antigravity mode per turn",
+            providerInstanceId: instanceId,
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "ask",
+            branch: null,
+            worktreePath: null,
+            activeProviderThreadId: providerThread.id,
+            lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+            forkedFrom: null,
+            createdAt: now,
+            updatedAt: now,
+            archivedAt: null,
+            settledOverride: null,
+            settledAt: null,
+            lastVisitedAt: null,
+            deletedAt: null,
+          },
+          threadId,
+          runId: RunId.make("run-antigravity-mode-per-turn"),
+          runOrdinal: 1,
+          providerTurnOrdinal: 1,
+          attemptId: RunAttemptId.make("attempt-antigravity-mode-per-turn"),
+          rootNodeId: NodeId.make("node-antigravity-mode-per-turn"),
+          providerThread,
+          message: {
+            createdBy: "user",
+            creationSource: "web",
+            messageId: MessageId.make("message-antigravity-mode-per-turn"),
+            text: "what does this do?",
+            attachments: [],
+          },
+          modelSelection,
+          runtimePolicy: askPolicy,
+        })
+        .pipe(Effect.forkScoped);
+      yield* Deferred.await(promptReceived);
+      // The Ask turn reset the session to default before it prompted.
+      assert.deepEqual(modesSet, ["yolo", "default"]);
+    }).pipe(Effect.provide(layerSession), Effect.scoped),
+  );
+});

@@ -37,6 +37,7 @@ import * as ThreadManagementService from "../../../orchestration-v2/ThreadManage
 import * as SourceControlRepositoryService from "../../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
+import { AllowedInReadOnlyModes } from "../../kodoReadOnlyGuard.ts"; // KODO: mode-read-only-tools
 
 const shared = {
   success: Project,
@@ -176,7 +177,8 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
   ],
 })
   .annotate(Tool.Destructive, true)
-  .annotate(Tool.OpenWorld, true);
+  .annotate(Tool.OpenWorld, true)
+  .annotate(AllowedInReadOnlyModes, true);
 
 export const ProjectToolkit = Toolkit.make(
   ThreadLaunchTool,

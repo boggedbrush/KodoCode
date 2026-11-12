@@ -28,6 +28,7 @@ import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
 import * as ServerConfig from "../../../config.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
+import { AllowedInReadOnlyModes } from "../../kodoReadOnlyGuard.ts"; // KODO: mode-read-only-tools
 
 const dependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -222,13 +223,17 @@ const PreviewRecordingStopTool = safeBrowserTool(
   }).annotate(Tool.Title, "Stop browser recording"),
 );
 
+// KODO: mode-read-only-tools - opening, navigating and resizing a preview tab touch nothing in the workspace.
+const allowedInReadOnlyModes = <T extends Tool.Any>(tool: T): T =>
+  tool.annotate(AllowedInReadOnlyModes, true) as T;
+
 export const PreviewToolkit = Toolkit.make(
   PreviewDialogTool,
   PreviewStatusTool,
-  PreviewOpenTool,
-  PreviewNavigateTool,
-  PreviewResizeTool,
-  PreviewSetAppearanceTool,
+  allowedInReadOnlyModes(PreviewOpenTool),
+  allowedInReadOnlyModes(PreviewNavigateTool),
+  allowedInReadOnlyModes(PreviewResizeTool),
+  allowedInReadOnlyModes(PreviewSetAppearanceTool),
   PreviewSnapshotTool,
   PreviewActTool,
   PreviewEvaluateTool,
@@ -240,10 +245,10 @@ export const PreviewToolkit = Toolkit.make(
 export const PreviewStandardToolkit = Toolkit.make(
   PreviewDialogTool,
   PreviewStatusTool,
-  PreviewOpenTool,
-  PreviewNavigateTool,
-  PreviewResizeTool,
-  PreviewSetAppearanceTool,
+  allowedInReadOnlyModes(PreviewOpenTool),
+  allowedInReadOnlyModes(PreviewNavigateTool),
+  allowedInReadOnlyModes(PreviewResizeTool),
+  allowedInReadOnlyModes(PreviewSetAppearanceTool),
   PreviewActTool,
   PreviewEvaluateTool,
   PreviewWaitForTool,
