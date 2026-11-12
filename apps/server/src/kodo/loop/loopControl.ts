@@ -27,10 +27,7 @@ export interface KodoLoopThreadView {
   readonly interactionMode: string;
 }
 
-export type KodoLoopRunView = Pick<
-  OrchestrationV2Run,
-  "status" | "ordinal" | "checkpointId"
->;
+export type KodoLoopRunView = Pick<OrchestrationV2Run, "status" | "ordinal" | "checkpointId">;
 
 const busyMessage = "A turn is running on this thread. Wait for it to finish or stop it first.";
 

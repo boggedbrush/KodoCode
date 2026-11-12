@@ -98,9 +98,9 @@ banner stays. Accepting is unavailable while messages are queued.
 
 By default every mode runs on the thread's model. To give a mode its own, open
 **Settings → Threads → Models by mode** and pick a model (and reasoning effort)
-for Ask, Plan, Code or Review. **Use the thread's model** clears a mode. Orchestrator
-and Judge appear below them as roles: they are saved but nothing uses them yet, and
-Judge follows the Review model until you set it.
+for Ask, Plan, Code or Review. **Use the thread's model** clears a mode. Judge appears
+below them as a role: a [loop](#loops)'s judging stage uses it, and it follows the Review
+model until you set it. Orchestrator is saved but nothing uses it yet.
 
 - The composer shows the model the current mode will use, labelled "Ask default"
   (or the mode's name), and updates as you switch modes. Hover the label for the
@@ -170,6 +170,35 @@ Mobile keeps local copies of draft attachments, so you can preview them and queu
 messages while disconnected. Uploads resume when you reconnect. Drafts and queued
 messages survive app restarts. Signing out of T3 Connect keeps that work on your
 device until you sign back into the same account.
+
+## Loops
+
+A loop works on one request in rounds. Each round plans, codes, reviews and judges,
+and the Judge decides whether the request is complete or what is still outstanding.
+Start one by sending `/loop <request>` on its own, or `/loop 5 <request>` to allow at
+most five rounds (the default is three; the cap is sixteen). The card above the
+composer shows the round and stage, for example "Round 2 of 3 · Review".
+
+- Plan, Review and the Judge are read-only; only Code changes your workspace, under
+  the thread's usual permission mode. Each stage runs in its own mode and on that
+  mode's model, and the thread's own model is unchanged afterwards. Every stage starts
+  a fresh conversation and is told everything it needs: the request, the plan, the
+  changes and the findings.
+- While a loop runs the mode picker is locked, because the loop sets the mode.
+  When it ends the thread returns to the mode it started in.
+- **Stop** on the card or `/loop stop` ends it and interrupts the stage that is running.
+  `/loop status` says where it is.
+- A loop also ends when the Judge finds the request complete; when the round limit is
+  reached with work outstanding (**Run N more rounds** continues it); when the Judge's
+  answer cannot be read (**Retry judge** asks again; nothing is retried
+  automatically); when a stage fails or the provider's usage limit is hit; or when you
+  send a message on the thread. A message you send still runs.
+- A stage that needs an approval waits for you, and the loop continues once it is
+  answered.
+- **After a loop, the thread continues from the last stage's conversation**, not from
+  everything the loop did. The loop's own messages stay visible in the thread.
+- Reviews and Judge verdicts show as a compact list inside their reply. The newest
+  review's findings are also a card with **Fix in Code**, once no loop is running.
 
 ## Custom models
 

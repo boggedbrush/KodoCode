@@ -28,7 +28,8 @@ export type ComposerSlashCommand =
   | "btw"
   | "clear"
   | KodoModeSlashCommand
-  | KodoUsageSlashCommand;
+  | KodoUsageSlashCommand
+  | "loop"; // KODO: loop-slash-items
 export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
 export interface ComposerTrigger {

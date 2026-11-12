@@ -1,10 +1,7 @@
 // Keeps every running loop moving. It looks at a loop's thread when something happened on it (an event
 // from the orchestrator) and on every scheduler tick, which also covers a restart: loops that were
 // running when the server stopped are found once at startup and picked up where their state says.
-import {
-  type OrchestrationV2DomainEvent,
-  ThreadId,
-} from "@t3tools/contracts";
+import { type OrchestrationV2DomainEvent, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -36,7 +33,7 @@ const isRunningLoop = (event: OrchestrationV2DomainEvent) =>
 
 const DIFF_TRUNCATED_MARKER = "[truncated]";
 
-export const makeDiffReader =
+const makeDiffReader =
   (query: CheckpointDiffQuery.CheckpointDiffQuery["Service"]) =>
   (input: {
     readonly threadId: ThreadId;
@@ -44,19 +41,15 @@ export const makeDiffReader =
     readonly toTurnCount: number;
   }): Effect.Effect<LoopDiffEvidence> =>
     query.getTurnDiff(input).pipe(
-      Effect.map(
-        ({ diff }): LoopDiffEvidence => ({
-          kind: "diff",
-          text: diff,
-          truncated: diff.endsWith(DIFF_TRUNCATED_MARKER),
-        }),
-      ),
-      Effect.orElseSucceed(
-        (): LoopDiffEvidence => ({
-          kind: "unavailable",
-          reason: "this project has no saved checkpoints to compare",
-        }),
-      ),
+      Effect.map(({ diff }): LoopDiffEvidence => ({
+        kind: "diff",
+        text: diff,
+        truncated: diff.endsWith(DIFF_TRUNCATED_MARKER),
+      })),
+      Effect.orElseSucceed((): LoopDiffEvidence => ({
+        kind: "unavailable",
+        reason: "this project has no saved checkpoints to compare",
+      })),
     );
 
 export const layer = Layer.effectDiscard(
@@ -103,7 +96,9 @@ export const layer = Layer.effectDiscard(
         return Effect.all([due.invalidate, look(threadId).pipe(Effect.forkScoped)], {
           discard: true,
         });
-      }).pipe(Effect.catchCause((cause) => Effect.logWarning("kodo.loop.events-failed", { cause }))),
+      }).pipe(
+        Effect.catchCause((cause) => Effect.logWarning("kodo.loop.events-failed", { cause })),
+      ),
     );
 
     const sweep = Effect.fn("KodoLoopWorker.sweep")(function* () {
@@ -112,7 +107,7 @@ export const layer = Layer.effectDiscard(
       if (yield* due.isIdle(nowMs)) return;
       const readVersion = yield* due.version;
       let moving = false;
-      for (const threadId of [...tracked]) {
+      for (const threadId of tracked) {
         const result = yield* look(threadId);
         if (result === "acted" || result === "failed") moving = true;
       }

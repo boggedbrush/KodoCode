@@ -108,7 +108,7 @@ export const KodoInteractionModeChip = memo(function KodoInteractionModeChip(pro
   const [open, setOpen] = useComposerMenuState(props.hidden);
   const chipRef = useRef<HTMLButtonElement>(null);
   const option = kodoInteractionModeOption(props.interactionMode);
-  const { appliesNextTurn } = useKodoInteractionModeStatus();
+  const { appliesNextTurn, locked } = useKodoInteractionModeStatus();
   const swapRef = useRef<HTMLSpanElement>(null);
   const shownModeRef = useRef(props.interactionMode);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- plays a one-shot DOM animation when the shown mode changes
@@ -135,6 +135,8 @@ export const KodoInteractionModeChip = memo(function KodoInteractionModeChip(pro
                   ref={chipRef}
                   data-kodo-mode-chip={props.interactionMode}
                   size={size}
+                  disabled={locked}
+                  data-kodo-mode-locked={locked ? "" : undefined}
                   className={cn("ps-1.5", MODE_CHIP_CLASS[props.interactionMode])}
                   data-kodo-mode-next-turn={appliesNextTurn ? "" : undefined}
                   aria-label={`Mode: ${option.label}${appliesNextTurn ? ", applies from the next turn" : ""}`}
@@ -157,7 +159,9 @@ export const KodoInteractionModeChip = memo(function KodoInteractionModeChip(pro
           </span>
         </TooltipTrigger>
         <TooltipPopup side="top">
-          {`Mode: ${option.label}. ${option.description}`}
+          {locked
+            ? `Mode: ${option.label}. The loop sets the mode while it runs.`
+            : `Mode: ${option.label}. ${option.description}`}
           {appliesNextTurn
             ? " The running turn keeps its earlier mode; this applies from the next turn."
             : ""}

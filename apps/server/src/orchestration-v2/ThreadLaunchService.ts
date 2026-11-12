@@ -1,4 +1,5 @@
 // KODO: thread-mode-type
+import { parseLoopCommand } from "../kodo/loop/loopCommand.ts"; // KODO: loop-intercept
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
@@ -1026,7 +1027,8 @@ const make = Effect.gen(function* () {
             (stored) => stored.event.type === "run.created",
           );
           runId = runCreated?.event.type === "run.created" ? runCreated.event.payload.id : null;
-          if (runId === null) {
+          // KODO: loop-intercept - a `/loop` first message starts the loop instead of a run
+          if (runId === null && parseLoopCommand(input.initialMessage.text)?.type !== "start") {
             return yield* mapError(
               input,
               "dispatch-message",

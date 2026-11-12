@@ -26,6 +26,7 @@ export function slashCommandItemsForPromptPosition(
       (item.type === "slash-command" &&
         item.command !== "side" &&
         item.command !== "btw" &&
+        item.command !== "loop" && // KODO: loop-slash-items
         item.command !== "clear"),
   );
 }

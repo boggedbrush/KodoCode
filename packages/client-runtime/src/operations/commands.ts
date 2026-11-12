@@ -29,6 +29,7 @@ import {
   type UploadChatAttachment,
   type GuestMessageId,
 } from "@t3tools/contracts";
+import type { KodoLoopControl } from "@t3tools/contracts"; // KODO: loop-command
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -144,6 +145,11 @@ export interface SetThreadRuntimeModeInput extends ThreadCommandInput {
 
 export interface SetThreadInteractionModeInput extends ThreadCommandInput {
   readonly interactionMode: ThreadInteractionMode;
+}
+
+/** KODO: loop-command - stop, approve, extend or retry the thread's loop; starting one is a `/loop` message. */
+export interface ControlKodoLoopInput extends ThreadCommandInput {
+  readonly control: Exclude<KodoLoopControl, { readonly type: "start" }>;
 }
 
 interface StartThreadBootstrap {
@@ -671,6 +677,17 @@ export const setThreadInteractionMode = Effect.fn("EnvironmentCommands.setThread
     });
   },
 );
+
+export const controlKodoLoop = Effect.fn("EnvironmentCommands.controlKodoLoop")(function* (
+  input: ControlKodoLoopInput,
+) {
+  return yield* dispatch({
+    type: "thread.kodo-loop.control",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    control: input.control,
+  });
+});
 
 export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(function* (
   input: StartThreadTurnInput,

@@ -1991,6 +1991,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         }
         return;
       }
+      // KODO: loop-slash-items
+      if (item.command === "loop") {
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "/loop ", {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+        });
+        if (applied) setComposerHighlightedItemId(null);
+        return;
+      }
       if (item.command === "side" || item.command === "btw") {
         if (props.sideChatDisabledReason) return;
         const applied = applyPromptReplacement(

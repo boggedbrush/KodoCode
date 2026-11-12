@@ -158,6 +158,8 @@ import { resolveKodoPlanOffer } from "../kodo/planAccept.logic";
 import { useKodoFindings } from "../kodo/useKodoFindings";
 import { findKodoFindingsOffer } from "../kodo/reviewFindings.logic";
 import { KodoInteractionModeStatusProvider } from "../kodo/interactionModeStatus";
+import { useKodoLoop } from "../kodo/useKodoLoop"; // KODO: loop-card
+import { isKodoLoopRunning } from "../kodo/loopCard.logic"; // KODO: loop-card
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useTheme } from "../hooks/useTheme";
 import { copyThreadReference } from "../lib/copyThreadReference";
@@ -1859,6 +1861,7 @@ export default function ChatView(props: ChatViewProps) {
     threadKey: routeThreadKey,
     serverThreadId: isServerThread ? activeThreadId : null,
     canOperateThread,
+    modeLocked: isKodoLoopRunning(serverProjection?.thread.kodoLoop), // KODO: loop-card
     activeRunId: kodoActiveRunId,
     activeRunMode:
       kodoActiveRunId === null
@@ -2578,14 +2581,17 @@ export default function ChatView(props: ChatViewProps) {
         })
       : null;
   // KODO: plan-accept-banner (Plan is read-only, so a ready plan offers the approval into Code)
-  const kodoPlanOffer = resolveKodoPlanOffer({
-    plans: serverProjection?.plans ?? [],
-    runs: serverProjection?.runs ?? EMPTY_RUNS,
-    latestRun: activeLatestRun,
-    cutoffOrdinal: planCutoffOrdinal,
-    messageText: (messageId) =>
-      serverProjection?.messages.find((message) => message.id === messageId)?.text ?? null,
-  });
+  const kodoLoopRunning = isKodoLoopRunning(serverProjection?.thread.kodoLoop); // KODO: loop-card
+  const kodoPlanOffer = kodoLoopRunning
+    ? null
+    : resolveKodoPlanOffer({
+        plans: serverProjection?.plans ?? [],
+        runs: serverProjection?.runs ?? EMPTY_RUNS,
+        latestRun: activeLatestRun,
+        cutoffOrdinal: planCutoffOrdinal,
+        messageText: (messageId) =>
+          serverProjection?.messages.find((message) => message.id === messageId)?.text ?? null,
+      });
   const kodoPlanAcceptBanner = useKodoPlanAccept({
     environmentId,
     threadId: activeThreadId,
@@ -2609,12 +2615,15 @@ export default function ChatView(props: ChatViewProps) {
     threadId: activeThreadId,
     isServerThread,
     canOperateThread,
-    offer: findKodoFindingsOffer({
-      latestRun: activeLatestRun,
-      runs: serverProjection?.runs ?? EMPTY_RUNS,
-      messageText: (messageId) =>
-        serverProjection?.messages.find((message) => message.id === messageId)?.text ?? null,
-    }),
+    // KODO: loop-card - a running loop feeds its own findings forward, so the card waits for its end
+    offer: kodoLoopRunning
+      ? null
+      : findKodoFindingsOffer({
+          latestRun: activeLatestRun,
+          runs: serverProjection?.runs ?? EMPTY_RUNS,
+          messageText: (messageId) =>
+            serverProjection?.messages.find((message) => message.id === messageId)?.text ?? null,
+        }),
     latestRunSettled,
     pendingUserInputCount: pendingUserInputs.length,
     isSendBusy,
@@ -2623,6 +2632,15 @@ export default function ChatView(props: ChatViewProps) {
     composerRef,
     commitInteractionMode,
     persistThreadSettingsForNextTurn,
+    setThreadError,
+  });
+  // KODO: loop-card (the loop's progress and its ending, above the composer)
+  const kodoLoopBanner = useKodoLoop({
+    environmentId,
+    threadId: activeThreadId,
+    loop: isServerThread ? serverProjection?.thread.kodoLoop : undefined,
+    canOperateThread,
+    threadIdle: latestRunSettled,
     setThreadError,
   });
   const composerBannerItemsBase = (() => {
@@ -2717,11 +2735,12 @@ export default function ChatView(props: ChatViewProps) {
       }),
     ];
   })() as ComposerBannerStackItem[];
-  // KODO: plan-accept-banner, findings-card
+  // KODO: plan-accept-banner, findings-card, loop-card
   const composerBannerItems =
-    kodoPlanAcceptBanner || kodoFindingsBanner
+    kodoPlanAcceptBanner || kodoFindingsBanner || kodoLoopBanner
       ? [
           ...composerBannerItemsBase,
+          ...(kodoLoopBanner ? [kodoLoopBanner] : []),
           ...(kodoPlanAcceptBanner ? [kodoPlanAcceptBanner] : []),
           ...(kodoFindingsBanner ? [kodoFindingsBanner] : []),
         ]
@@ -3659,6 +3678,7 @@ export default function ChatView(props: ChatViewProps) {
                               // KODO: chat-mode-state
                               <KodoInteractionModeStatusProvider
                                 appliesNextTurn={modeAppliesNextTurn}
+                                locked={kodoLoopRunning}
                               >
                                 <ChatComposer
                                   canOperateThread={canOperateThread}

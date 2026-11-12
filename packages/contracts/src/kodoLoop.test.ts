@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Schema from "effect/Schema";
 
 import { DEFAULT_KODO_LOOP_SETTINGS, KodoLoopSetting, KodoLoopSettingsPatch } from "./kodoLoop.ts";
+import { OrchestrationV2Command } from "./orchestrationV2.ts";
 import { ServerSettings } from "./settings.ts";
 
 const decode = Schema.decodeUnknownSync(KodoLoopSetting);
@@ -76,5 +77,29 @@ describe("loop settings patch", () => {
   it("refuses out-of-range values rather than storing them", () => {
     expect(() => decodePatch({ defaultMaxRounds: 0 })).toThrow();
     expect(() => decodePatch({ budget: { stopAtLimitPercent: 101 } })).toThrow();
+  });
+});
+
+const isClientCommand = Schema.is(OrchestrationV2Command);
+
+describe("loop commands on the wire", () => {
+  const control = {
+    type: "thread.kodo-loop.control",
+    commandId: "c1",
+    threadId: "t1",
+    control: { type: "stop" },
+  };
+  const advance = {
+    type: "thread.kodo-loop.advance",
+    commandId: "c2",
+    threadId: "t1",
+    loopId: "L1",
+    expectedRevision: 1,
+    step: { type: "release" },
+  };
+
+  it("a client may send the control command but never the internal advance", () => {
+    expect(isClientCommand(control)).toBe(true);
+    expect(isClientCommand(advance)).toBe(false);
   });
 });

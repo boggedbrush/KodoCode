@@ -366,7 +366,19 @@ export default {
       file: "apps/web/src/components/chat/useComposerProviderModel.ts",
       hooks: ["mode-models-composer"],
     },
-    { file: "apps/server/src/orchestration-v2/ProjectionStore.ts", hooks: ["mode-models-state"] },
+    {
+      file: "apps/server/src/orchestration-v2/ProjectionStore.ts",
+      hooks: ["mode-models-state", "loop-state"],
+    },
+    {
+      file: "apps/server/src/orchestration-v2/ThreadManagementService.ts",
+      hooks: ["loop-intercept", "loop-stage"],
+    },
+    { file: "apps/server/src/orchestration-v2/runtimeLayer.ts", hooks: ["loop-worker"] },
+    {
+      file: "apps/server/src/orchestration-v2/testkit/OrchestratorScenario.ts",
+      hooks: ["loop-command"],
+    },
     { file: "apps/server/src/ws.ts", hooks: ["mode-models-send"] },
     { file: "packages/client-runtime/src/state/models.ts", hooks: ["mode-models-state"] },
     { file: "packages/shared/src/serverSettings.ts", hooks: ["mode-models-setting"] },
@@ -478,7 +490,14 @@ export default {
     { file: "apps/server/src/orchestration-v2/DispatchModeLimit.ts", hooks: ["mode-rank"] },
     {
       file: "apps/server/src/orchestration-v2/Orchestrator.ts",
-      hooks: ["mode-session-restart", "mode-steer-guard", "mode-models-turn", "mode-models-send"],
+      hooks: [
+        "mode-session-restart",
+        "mode-steer-guard",
+        "mode-models-turn",
+        "mode-models-send",
+        "loop-command",
+        "loop-stage",
+      ],
     },
     {
       file: "apps/server/src/orchestration-v2/OpenCode2OrchestratorV2.integration.test.ts",
@@ -507,7 +526,7 @@ export default {
     { file: "apps/server/src/orchestration-v2/RuntimePolicy.ts", hooks: ["mode-resolver"] },
     {
       file: "apps/server/src/orchestration-v2/ThreadLaunchService.ts",
-      hooks: ["thread-mode-type", "mode-models-send"],
+      hooks: ["thread-mode-type", "mode-models-send", "loop-intercept"],
     },
     {
       file: "apps/server/src/orchestration-v2/legacy/LegacyV1ThreadImporter.ts",
@@ -550,9 +569,13 @@ export default {
         "mode-models-send",
         "mode-models-composer",
         "findings-card",
+        "loop-card",
       ],
     },
-    { file: "apps/web/src/components/chat/TimelineAssistantRows.tsx", hooks: ["findings-card"] },
+    {
+      file: "apps/web/src/components/chat/TimelineAssistantRows.tsx",
+      hooks: ["findings-card", "inline-kodo-blocks"],
+    },
     { file: "apps/web/src/components/CommandPalette.tsx", hooks: ["usage-palette-action"] },
     { file: "apps/web/src/components/CommandPaletteThemeItems.tsx", hooks: ["theme-builtin-list"] },
     { file: "apps/web/src/components/GitHubStarPrompt.tsx", hooks: ["brand-star-repository"] },
@@ -574,6 +597,7 @@ export default {
         "composer-enhance",
         "usage-slash-select",
         "mode-models-composer",
+        "loop-slash-items",
       ],
     },
     {
@@ -592,7 +616,11 @@ export default {
     { file: "apps/web/src/components/chat/ModelPickerSidebar.tsx", hooks: ["usage-picker-hint"] },
     {
       file: "apps/web/src/components/chat/useComposerMenuItems.ts",
-      hooks: ["mode-slash-items", "usage-slash-items"],
+      hooks: ["mode-slash-items", "usage-slash-items", "loop-slash-items"],
+    },
+    {
+      file: "apps/web/src/components/chat/composerSlashCommandSearch.ts",
+      hooks: ["loop-slash-items"],
     },
     { file: "apps/web/src/components/chat/useComposerResume.ts", hooks: ["send-mode"] },
     {
@@ -620,7 +648,7 @@ export default {
     { file: "apps/web/src/components/usage/UsageLimitsPooled.tsx", hooks: ["usage-no-limit-data"] },
     { file: "apps/web/src/components/usage/UsagePage.tsx", hooks: ["usage-open-limits"] },
     { file: "apps/web/src/components/ui/standalone-page.tsx", hooks: ["brand-lockup"] },
-    { file: "apps/web/src/composer-logic.ts", hooks: ["mode-slash-type"] },
+    { file: "apps/web/src/composer-logic.ts", hooks: ["mode-slash-type", "loop-slash-items"] },
     {
       file: "apps/web/src/composerDraftStore.ts",
       hooks: ["thread-mode-type", "draft-mode-hydrate", "draft-mode-set"],
@@ -633,8 +661,9 @@ export default {
     { file: "apps/web/vite.config.ts", hooks: ["brand-text-plugin"] },
     {
       file: "packages/client-runtime/src/operations/commands.ts",
-      hooks: ["thread-mode-type", "mode-models-send"],
+      hooks: ["thread-mode-type", "mode-models-send", "loop-command"],
     },
+    { file: "packages/client-runtime/src/state/threadCommands.ts", hooks: ["loop-command"] },
     { file: "packages/client-runtime/src/handoff.ts", hooks: ["mode-models-notice"] },
     { file: "packages/contracts/src/environmentHttp.ts", hooks: ["prompt-enhance-http"] },
     {
@@ -648,7 +677,14 @@ export default {
     },
     {
       file: "packages/contracts/src/orchestrationV2.ts",
-      hooks: ["thread-mode-type", "mode-models-state", "mode-models-send"],
+      hooks: [
+        "thread-mode-type",
+        "mode-models-state",
+        "mode-models-send",
+        "loop-state",
+        "loop-command",
+        "loop-stage",
+      ],
     },
     { file: "packages/contracts/src/orchestratorMcp.ts", hooks: ["thread-mode-type"] },
     {
@@ -775,6 +811,7 @@ export default {
     { path: "packages/shared/src/kodoLoopOutput.test.ts" },
     { path: "apps/web/src/components/settings/KodoModeModelsSettings.tsx" },
     { path: "apps/server/src/orchestration-v2/KodoModeModels.integration.test.ts" },
+    { path: "apps/server/src/orchestration-v2/KodoLoop.integration.test.ts" },
     { path: "packages/contracts/src/kodoPromptEnhance.ts", why: "Prompt enhance contract" },
     { path: "evals/prompt-enhance/", why: "Prompt enhance eval" },
     { path: "packages/client-runtime/src/kodoPromptEnhance.ts", why: "Prompt enhance request" },
@@ -991,6 +1028,12 @@ export default {
       "packages/shared/src/kodoLoopOutput.test.ts",
       "apps/server/src/kodo/loop/evidence.test.ts",
       "apps/server/src/kodo/loop/loopCommand.test.ts",
+      "apps/server/src/kodo/loop/loopControl.test.ts",
+      "apps/server/src/orchestration-v2/KodoLoop.integration.test.ts",
+      "apps/server/src/auth/RpcAuthorization.test.ts",
+      "apps/web/src/kodo/inlineCode.logic.test.ts",
+      "apps/web/src/kodo/inlineBlocks.logic.test.ts",
+      "apps/web/src/kodo/loopCard.logic.test.ts",
       "apps/server/src/kodo/loop/loopMachine.test.ts",
       "apps/server/src/kodo/loop/loopState.test.ts",
       "apps/server/src/kodo/loopSettings.test.ts",

@@ -16,6 +16,7 @@ import { useStableCallback } from "../hooks/useStableCallback";
 import type { KodoModeSyncOutcome } from "./interactionModeSync";
 import { registerKodoFindingsBlock } from "./findingsBlockStore";
 import { KodoFindingsCard } from "./KodoFindingsCard";
+import { KodoInlineText } from "./KodoInlineText";
 import {
   buildFindingsFixTurn,
   canFixFindings,
@@ -92,7 +93,7 @@ export function useKodoFindings(input: {
     variant: "info",
     icon: <ScanSearchIcon className="text-mode-review" />,
     title: kodoFindingsTitle(offer.review),
-    description: offer.review.summary,
+    description: <KodoInlineText text={offer.review.summary} />,
     children: <KodoFindingsCard review={offer.review} />,
     dismissLabel: "Dismiss review findings",
     onDismiss: () => setDismissedOfferKey(offer.key),

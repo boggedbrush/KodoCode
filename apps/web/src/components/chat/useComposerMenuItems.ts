@@ -251,6 +251,14 @@ export function useComposerMenuItems({
         },
         // KODO: usage-slash-items - opens the Usage page; a bare /usage is never sent to the provider
         { id: "slash:usage", type: "slash-command" as const, ...KODO_USAGE_SLASH_COMMAND_ITEM },
+        // KODO: loop-slash-items - the server reads the whole `/loop` message, so picking it only starts the text
+        {
+          id: "slash:loop",
+          type: "slash-command" as const,
+          command: "loop",
+          label: "/loop",
+          description: "Plan, code, review and judge a request, round after round",
+        },
         // KODO: mode-slash-items
         ...KODO_MODE_SLASH_COMMAND_ITEMS.map((item) => ({
           id: `slash:mode:${item.command}`,

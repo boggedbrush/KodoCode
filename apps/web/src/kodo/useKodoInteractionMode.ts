@@ -39,6 +39,8 @@ export function useKodoInteractionMode(input: {
   /** Set once the server holds the thread. */
   readonly serverThreadId: ThreadId | null;
   readonly canOperateThread: boolean;
+  /** A running loop sets the mode itself, stage by stage. */
+  readonly modeLocked: boolean;
   readonly activeRunId: string | null;
   readonly latestRunOrdinal: number;
   /** The mode the running run recorded when it was created; absent on runs that predate it. */
@@ -161,6 +163,13 @@ export function useKodoInteractionMode(input: {
   const handleInteractionModeChange = useStableCallback((mode: ThreadInteractionMode) => {
     const target = normalizeKodoInteractionMode(mode);
     if (target === currentMode()) return;
+    if (input.modeLocked && serverThreadId !== null) {
+      input.setThreadError(
+        serverThreadId,
+        "The mode is set by the loop while it runs. Stop the loop to change it.",
+      );
+      return;
+    }
     // A model picked for the old mode's message does not follow the thread into a mode with its own default.
     // A new thread's pick is its own model, not a one-message override, so it stays.
     if (

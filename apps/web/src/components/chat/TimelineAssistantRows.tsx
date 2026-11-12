@@ -23,8 +23,9 @@ import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../times
 import { useV2ItemSupport } from "../../state/v2ItemSupport";
 import { TimelineRowCtx, TimelineRowActivityCtx, type TimelineRow } from "./timelineRowContext";
 import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts";
-import { stripKodoBlock, KODO_REVIEW_LABEL } from "@t3tools/shared/kodoLoopOutput"; // KODO: findings-card
 import { useKodoFindingsReplacesBlock } from "../../kodo/findingsBlockStore"; // KODO: findings-card
+import { readKodoInlineBlocks } from "../../kodo/inlineBlocks.logic"; // KODO: inline-kodo-blocks
+import { KodoInlineFindings, KodoInlineVerdict } from "../../kodo/KodoInlineBlocks"; // KODO: inline-kodo-blocks
 
 export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
@@ -35,11 +36,21 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
   );
   const kodoReplacesBlock = useKodoFindingsReplacesBlock(row.message.id); // KODO: findings-card
   const fullText = liveText ?? row.message.text;
-  // KODO: findings-card (the card shows the review block's findings; a reply that is only the block stays whole)
-  const withoutBlock = kodoReplacesBlock ? stripKodoBlock(fullText, KODO_REVIEW_LABEL) : fullText;
-  const text = withoutBlock.trim().length > 0 ? withoutBlock : fullText;
+  // KODO: findings-card, inline-kodo-blocks (a valid review or verdict block is never shown raw: the
+  // newest review's findings are the card above the composer, every other one is a compact list here)
+  const kodoBlocks = readKodoInlineBlocks(fullText);
+  const kodoInlineReview = kodoReplacesBlock ? null : kodoBlocks.review;
+  const kodoInlineShown = kodoInlineReview !== null || kodoBlocks.verdict !== null;
+  const kodoBlocksHidden = kodoBlocks.review !== null || kodoBlocks.verdict !== null;
+  const text =
+    kodoBlocksHidden && (kodoBlocks.text.trim().length > 0 || kodoInlineShown)
+      ? kodoBlocks.text
+      : fullText;
   const messageText =
-    text || (row.message.streaming || row.suppressEmptyResponse ? "" : "(empty response)");
+    text ||
+    (row.message.streaming || row.suppressEmptyResponse || kodoInlineShown
+      ? ""
+      : "(empty response)");
 
   return (
     <>
@@ -53,18 +64,24 @@ export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind
             request={ctx.citationRequest}
             listRef={ctx.listRef}
           >
-            <ChatMarkdown
-              text={messageText}
-              cwd={ctx.markdownCwd}
-              threadRef={ctx.threadRef ?? undefined}
-              isStreaming={Boolean(row.message.streaming)}
-              lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
-              skills={ctx.skills}
-              headingLevelOffset={MESSAGE_HEADING_LEVEL}
-              onUseArtifactTemplate={ctx.onUseArtifactTemplate}
-              onRunShellCommand={ctx.onRunShellCommand}
-              onImageExpand={ctx.onImageExpand}
-            />
+            {kodoInlineShown && messageText.trim().length === 0 ? null : (
+              <ChatMarkdown
+                text={messageText}
+                cwd={ctx.markdownCwd}
+                threadRef={ctx.threadRef ?? undefined}
+                isStreaming={Boolean(row.message.streaming)}
+                lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
+                skills={ctx.skills}
+                headingLevelOffset={MESSAGE_HEADING_LEVEL}
+                onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+                onRunShellCommand={ctx.onRunShellCommand}
+                onImageExpand={ctx.onImageExpand}
+              />
+            )}
+            {kodoInlineReview === null ? null : <KodoInlineFindings review={kodoInlineReview} />}
+            {kodoBlocks.verdict === null ? null : (
+              <KodoInlineVerdict verdict={kodoBlocks.verdict} />
+            )}
           </AssistantCitationSource>
         </div>
         {ctx.onOpenTurnDiff ? (

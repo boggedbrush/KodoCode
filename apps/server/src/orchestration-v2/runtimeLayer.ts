@@ -396,12 +396,7 @@ export const layerProduction = Layer.mergeAll(
   // KODO: loop-worker - keeps `/loop` threads moving
   KodoLoopWorker.layer.pipe(
     Layer.provide(CheckpointDiffQuery.layer),
-    Layer.provide(
-      Layer.mergeAll(
-        layerThreadManagementProvided,
-        layerOrchestratorProvided,
-      ),
-    ),
+    Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerOrchestratorProvided)),
   ),
   layerProviderContinuationWorkerProvided,
   layerAgentSessionImporterProvided,

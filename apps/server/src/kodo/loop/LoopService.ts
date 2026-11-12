@@ -1,14 +1,12 @@
-// The loop's control surface: start, stop, approve, extend, retry the judge and read the status.
-// The `/loop` message intercept, the WebSocket handlers and (later) an agent tool all call these
-// instead of building commands themselves, so the rules (defaults from settings, one loop per
-// thread, nothing starts over a running turn) are decided in one place. The orchestrator enforces
-// the same rules under the thread's lock; the checks here only give the person a clear message.
+// The loop's control surface: start, stop, approve, extend, retry the judge, status. The `/loop`
+// intercept and the handlers call these; the orchestrator enforces the same rules under the lock.
 import {
   CommandId,
   DEFAULT_KODO_LOOP_SETTINGS,
   type KodoLoop,
   type KodoLoopBudget,
   type KodoLoopControl,
+  type KodoLoopSettings,
   type MessageId,
   type OrchestrationV2Command,
   type OrchestrationV2ServerCommand,
@@ -18,7 +16,6 @@ import * as Effect from "effect/Effect";
 
 import type * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import { OrchestratorDispatchError } from "../../orchestration-v2/Orchestrator.ts";
-import type * as ServerSettings from "../../serverSettings.ts";
 import { parseLoopCommand } from "./loopCommand.ts";
 import { isKodoLoopTerminal } from "./loopState.ts";
 
@@ -28,12 +25,20 @@ type MessageDispatchCommand = Extract<
 >;
 
 export interface KodoLoopServiceDeps {
-  readonly orchestrator: Pick<Orchestrator.OrchestratorV2["Service"], "dispatch" | "getThreadRecords">;
-  readonly serverSettings: Pick<ServerSettings.ServerSettingsService["Service"], "getSettings">;
+  readonly orchestrator: Pick<
+    Orchestrator.OrchestratorV2["Service"],
+    "dispatch" | "getThreadRecords"
+  >;
+  readonly serverSettings: {
+    readonly getSettings: Effect.Effect<
+      { readonly loop: KodoLoopSettings },
+      { readonly _tag: string }
+    >;
+  };
 }
 
 /** One line saying where a loop stands, for `/loop status` and for the person reading a stop. */
-export function describeKodoLoop(loop: KodoLoop): string {
+function describeKodoLoop(loop: KodoLoop): string {
   const place = `round ${loop.round} of ${loop.maxRounds}, ${loop.stage} stage`;
   switch (loop.status) {
     case "active":
@@ -172,8 +177,7 @@ export const makeKodoLoopService = (deps: KodoLoopServiceDeps) => {
     const parsed = parseLoopCommand(command.text);
     if (parsed === null) return undefined;
     const { threadId, commandId } = command;
-    const fail = (message: string) =>
-      Effect.fail(refuse(commandId, command.type, message));
+    const fail = (message: string) => Effect.fail(refuse(commandId, command.type, message));
     switch (parsed.type) {
       case "invalid":
         return fail(parsed.message);

@@ -2,6 +2,7 @@ import type { KodoReviewResult, KodoReviewSeverity } from "@t3tools/contracts";
 
 import { ComposerBanner } from "../components/chat/ComposerBanner";
 import { Badge } from "../components/ui/badge";
+import { KodoInlineText } from "./KodoInlineText";
 import { kodoFindingLocation, sortKodoFindings } from "./reviewFindings.logic";
 
 const SEVERITY_BADGE = {
@@ -26,12 +27,21 @@ export function KodoFindingsCard(props: { readonly review: KodoReviewResult }) {
                 <Badge size="sm" variant={badge.variant}>
                   {badge.label}
                 </Badge>
-                <span className="min-w-0 truncate font-medium">{finding.title}</span>
+                <span className="min-w-0 truncate font-medium">
+                  <KodoInlineText text={finding.title} />
+                </span>
                 {location === null ? null : (
                   <code className="shrink-0 text-muted-foreground">{location}</code>
                 )}
               </div>
-              <p className="text-muted-foreground wrap-anywhere">{finding.detail}</p>
+              <p className="text-muted-foreground wrap-anywhere">
+                <KodoInlineText text={finding.detail} />
+              </p>
+              {finding.fix === undefined ? null : (
+                <p className="text-muted-foreground wrap-anywhere">
+                  Fix: <KodoInlineText text={finding.fix} />
+                </p>
+              )}
             </li>
           );
         })}

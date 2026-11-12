@@ -80,13 +80,26 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
   const failures = yield* Ref.make(new Map<string, number>());
 
   /** Runs, with a restart-continuation check made before the read that would see its result. */
-  const readRuns = Effect.fn("KodoLoopStepper.readRuns")(function* (threadId: ThreadId, loop: KodoLoop) {
+  const readRuns = Effect.fn("KodoLoopStepper.readRuns")(function* (
+    threadId: ThreadId,
+    loop: KodoLoop,
+  ) {
     const checked = new Map<string, boolean>();
     let records = yield* orchestrator.getThreadRecords(threadId, ["runs"]);
     // The continuation run is made after the run it continues ends; checking whether one is still
     // owed and only then reading again means a run that looks abandoned is never one that is not.
     for (;;) {
-      const views = records.runs.map((run) => ({ runId: run.id as string, userMessageId: run.userMessageId as string, status: run.status, ...(run.restartContinuationOfRunId === undefined ? {} : { restartContinuationOfRunId: run.restartContinuationOfRunId as string }) }) satisfies LoopRunView);
+      const views = records.runs.map(
+        (run) =>
+          ({
+            runId: run.id as string,
+            userMessageId: run.userMessageId as string,
+            status: run.status,
+            ...(run.restartContinuationOfRunId === undefined
+              ? {}
+              : { restartContinuationOfRunId: run.restartContinuationOfRunId as string }),
+          }) satisfies LoopRunView,
+      );
       const members = loopRunIds(loop, views);
       const unchecked = records.runs.filter(
         (run) => members.has(run.id) && BAD_RUN_STATUSES.has(run.status) && !checked.has(run.id),
@@ -116,7 +129,8 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
           })).turnItems;
     return runs.map((run): LoopRunView => {
       const failure = errors.findLast((item) => item.runId === run.id && item.type === "error");
-      const detail = failure !== undefined && failure.type === "error" ? failure.failure : undefined;
+      const detail =
+        failure !== undefined && failure.type === "error" ? failure.failure : undefined;
       return {
         runId: run.id,
         userMessageId: run.userMessageId,
@@ -144,11 +158,13 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
     });
     const messages = records.messages.filter((message) => message.runId === runId);
     if (messages.some((message) => message.streaming)) return undefined;
-    const last = messages.toSorted(
-      (a, b) =>
-        DateTime.toEpochMillis(a.createdAt) - DateTime.toEpochMillis(b.createdAt) ||
-        a.id.localeCompare(b.id),
-    ).at(-1);
+    const last = messages
+      .toSorted(
+        (a, b) =>
+          DateTime.toEpochMillis(a.createdAt) - DateTime.toEpochMillis(b.createdAt) ||
+          a.id.localeCompare(b.id),
+      )
+      .at(-1);
     const plan = records.plans.findLast(
       (candidate) =>
         candidate.runId === runId &&
@@ -199,7 +215,9 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
           .map((record) => `Round ${record.round}: ${record.verdict?.summary ?? ""}`);
         return buildLoopPlanPrompt({
           ...common,
-          ...(previousVerdict === undefined ? {} : { previous: { verdict: previousVerdict, history } }),
+          ...(previousVerdict === undefined
+            ? {}
+            : { previous: { verdict: previousVerdict, history } }),
         });
       }
       case "code": {
@@ -269,7 +287,14 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
     const messageId = kodoLoopStageMessageId(loop, loop.round, loop.stage);
     const memberIds = loopRunIds(
       loop,
-      runs.map((run) => ({ runId: run.id, userMessageId: run.userMessageId, status: run.status, ...(run.restartContinuationOfRunId === undefined ? {} : { restartContinuationOfRunId: run.restartContinuationOfRunId }) })),
+      runs.map((run) => ({
+        runId: run.id,
+        userMessageId: run.userMessageId,
+        status: run.status,
+        ...(run.restartContinuationOfRunId === undefined
+          ? {}
+          : { restartContinuationOfRunId: run.restartContinuationOfRunId }),
+      })),
       messageId,
     );
     const views = yield* viewsFor(threadId, runs, pending, memberIds);
@@ -296,7 +321,10 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
     const advanceId = (type: string) => id(`rev${loop.revision}:${type}`);
     const runFor = (runId: string) => runs.find((run) => run.id === runId);
 
-    const act = Effect.gen(function* (): Effect.fn.Return<LoopStepResult, { readonly _tag: string }> {
+    const act = Effect.gen(function* (): Effect.fn.Return<
+      LoopStepResult,
+      { readonly _tag: string }
+    > {
       switch (decision.kind) {
         case "idle":
           // A loop that has ended and has nothing left to clean up needs no more looks.
@@ -408,7 +436,12 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
             map.set(key, next);
             return [next, map] as const;
           });
-          yield* Effect.logWarning("kodo.loop.step-failed", { threadId, step: decision.kind, count, cause });
+          yield* Effect.logWarning("kodo.loop.step-failed", {
+            threadId,
+            step: decision.kind,
+            count,
+            cause,
+          });
           // A stage that cannot be sent (provider turned off, mode above a ceiling) ends the loop
           // instead of retrying forever; a stale write is simply read again.
           if (decision.kind === "dispatch" && count >= MAX_DISPATCH_FAILURES) {
