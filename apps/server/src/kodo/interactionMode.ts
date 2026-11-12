@@ -173,9 +173,6 @@ export interface KodoInteractionModeResolution {
   readonly suppressPlanCapture: boolean;
 }
 
-export const isReadOnlyKodoInteractionMode = (mode: KodoInteractionMode): boolean =>
-  mode !== "code";
-
 const CODE_RESOLUTION = {
   wireInteractionMode: "default",
   instructions: undefined,

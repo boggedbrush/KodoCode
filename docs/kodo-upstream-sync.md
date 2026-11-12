@@ -24,7 +24,7 @@ Kodo tracks upstream's **stable releases**, not `main`. A Kodo update ships only
 2. `kodo/upstream-base.txt` exists and records a stable tag, not an unreleased commit.
 3. It carries the `verified` marker, and the marked commit is in HEAD's history. The marker is written only by a `sync` or `kodo:verify` run in which the check and every verification command passed. A sync whose check or verification failed, or that ran with `--no-verify`, has none, so its branch cannot pass the gate.
 
-It warns, without failing, when files other than the base file and the sync log changed after the marked commit; re-run `pnpm kodo:verify` before shipping. `kodo:verify` runs the check and the verification commands on the working tree, writes the marker (uncommitted; commit it) on a full pass, and removes a stale one on a failure. Use it to bless a branch you fixed forward after a failed sync.
+It warns, without failing, when files other than the base file and the sync log changed after the marked commit; re-run `pnpm kodo:verify` before shipping. `kodo:verify` runs the check and the verification commands on the working tree, writes the marker on a full pass, and removes a stale one on a failure. The marker names HEAD, so it refuses to mark a tree with uncommitted changes. Order: commit the work, run `pnpm kodo:verify`, then commit only `kodo/upstream-base.txt` (and the sync log, if it changed). A commit that touches anything else after that makes the gate warn. Use it to bless a branch you fixed forward after a failed sync.
 
 ## Verification
 

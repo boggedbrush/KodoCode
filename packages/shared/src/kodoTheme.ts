@@ -76,9 +76,6 @@ const KODO_ACCENT_NAME: keyof typeof KODO_ACCENTS = "kodo";
 const accentLight = KODO_ACCENTS[KODO_ACCENT_NAME].light;
 const accentDark = KODO_ACCENTS[KODO_ACCENT_NAME].dark;
 
-/** Kept for importers that want the brand fill on its own. */
-export const KODO_PURPLE = accentLight.bg;
-
 const KODO_LIGHT_THEME_COLORS: ThemeColors = {
   ...T3_CODE_LIGHT_THEME_COLORS,
   // window_bg_color, headerbar_bg_color

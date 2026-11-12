@@ -313,6 +313,16 @@ export const runVerify = (ctx: EngineContext): { exitCode: number } => {
     log("PASS, but there is no recorded upstream base to mark (run `kodo:status --record` first).");
     return { exitCode: 1 };
   }
+  // The marker names HEAD, so it can only vouch for a tree that HEAD contains.
+  const dirty = gitLines(ctx.root, ["status", "--porcelain"]).filter(
+    (line) => line.slice(3) !== baseFile,
+  );
+  if (dirty.length > 0) {
+    log(
+      `PASSED, but ${dirty.length} path(s) are uncommitted, so HEAD is not the tree that was verified and no marker was written. Commit them, then run \`kodo:verify\` again.`,
+    );
+    return { exitCode: 1 };
+  }
   writeText(
     ctx.root,
     baseFile,

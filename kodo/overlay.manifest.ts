@@ -350,6 +350,8 @@ export default {
   // are stable kebab-case hook names; the text after the name is free.
   // `kodo:check` warns about files with a marker that is not listed here.
   hooks: [
+    { file: "apps/web/src/components/onboarding/WelcomePage.tsx", hooks: ["telemetry-copy"] },
+    { file: "apps/web/src/components/settings/SettingsPanels.tsx", hooks: ["telemetry-copy"] },
     { file: "apps/desktop/resources/installer.nsh", hooks: ["brand-product-names"] },
     { file: "apps/desktop/scripts/electron-launcher.mjs", hooks: ["brand-launcher-identity"] },
     { file: "apps/desktop/src/app/DesktopAppIdentity.test.ts", hooks: ["brand-profile-names"] },
@@ -401,20 +403,23 @@ export default {
     { file: "apps/server/src/mcp/McpToolAccess.test.ts", hooks: ["mode-read-only-tools"] },
     {
       file: "apps/server/src/mcp/McpToolAccess.ts",
-      hooks: ["thread-mode-type", "mode-read-only-tools"],
+      hooks: ["thread-mode-type", "mode-read-only-tools", "mode-child-limit"],
     },
-    { file: "apps/server/src/mcp/OrchestratorMcpService.ts", hooks: ["mode-peer-limit"] },
-    { file: "apps/server/src/mcp/delegatedTaskModes.ts", hooks: ["mode-rank"] },
+    {
+      file: "apps/server/src/mcp/OrchestratorMcpService.ts",
+      hooks: ["mode-peer-limit", "mode-child-limit", "mode-task-control"],
+    },
+    { file: "apps/server/src/mcp/delegatedTaskModes.ts", hooks: ["mode-rank", "mode-child-limit"] },
     { file: "apps/server/src/mcp/threadAccess.test.ts", hooks: ["mode-rank"] },
     { file: "apps/server/src/mcp/threadAccess.ts", hooks: ["thread-mode-type", "mode-rank"] },
     { file: "apps/server/src/mcp/toolkits/thread/tools.ts", hooks: ["thread-mode-type"] },
     {
       file: "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts",
-      hooks: ["mode-read-only-claude"],
+      hooks: ["mode-read-only-claude", "mode-read-only-tools", "mode-session-policy"],
     },
     {
       file: "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts",
-      hooks: ["mode-read-only-claude"],
+      hooks: ["mode-read-only-claude", "mode-read-only-tools", "mode-session-policy"],
     },
     {
       file: "apps/server/src/orchestration-v2/Adapters/OpenCode2AdapterV2.test.ts",
@@ -422,7 +427,10 @@ export default {
     },
     { file: "apps/server/src/orchestration-v2/DispatchModeLimit.test.ts", hooks: ["mode-rank"] },
     { file: "apps/server/src/orchestration-v2/DispatchModeLimit.ts", hooks: ["mode-rank"] },
-    { file: "apps/server/src/orchestration-v2/Orchestrator.ts", hooks: ["mode-session-restart"] },
+    {
+      file: "apps/server/src/orchestration-v2/Orchestrator.ts",
+      hooks: ["mode-session-restart", "mode-steer-guard"],
+    },
     {
       file: "apps/server/src/orchestration-v2/OpenCode2OrchestratorV2.integration.test.ts",
       hooks: ["mode-read-only-opencode"],
@@ -463,7 +471,10 @@ export default {
     { file: "apps/server/src/peer/PeerForwarding.test.ts", hooks: ["mode-read-only-tools"] },
     { file: "apps/server/src/peer/PeerForwarding.ts", hooks: ["mode-peer-limit"] },
     { file: "apps/server/src/peer/PeerMcpClient.ts", hooks: ["mode-peer-limit"] },
-    { file: "apps/server/src/peer/RemoteDelegation.ts", hooks: ["mode-peer-limit"] },
+    {
+      file: "apps/server/src/peer/RemoteDelegation.ts",
+      hooks: ["mode-peer-limit", "mode-child-limit"],
+    },
     { file: "apps/server/src/server.ts", hooks: ["prompt-enhance-http"] },
     { file: "apps/server/src/telemetry/AnalyticsService.ts", hooks: ["telemetry-endpoint"] },
     { file: "apps/server/vite.config.ts", hooks: ["telemetry-endpoint"] },
@@ -543,7 +554,10 @@ export default {
     },
     { file: "packages/contracts/src/orchestrationV2.ts", hooks: ["thread-mode-type"] },
     { file: "packages/contracts/src/orchestratorMcp.ts", hooks: ["thread-mode-type"] },
-    { file: "packages/provider-acp/src/server/adapter.ts", hooks: ["mode-instructions"] },
+    {
+      file: "packages/provider-acp/src/server/adapter.ts",
+      hooks: ["mode-instructions", "mode-session-policy"],
+    },
     {
       file: "packages/provider-acp/src/server/clientPolicy.test.ts",
       hooks: ["mode-read-only-acp"],
@@ -592,6 +606,48 @@ export default {
         "brand-homepage-author",
       ],
     },
+    { file: "apps/server/src/mcp/OrchestratorMcpService.test.ts", hooks: ["mode-task-control"] },
+    { file: "apps/server/src/mcp/delegatedTaskModes.test.ts", hooks: ["mode-child-limit"] },
+    { file: "apps/server/src/mcp/toolkits/orchestrator/tools.ts", hooks: ["mode-read-only-tools"] },
+    { file: "apps/server/src/mcp/toolkits/preview/tools.ts", hooks: ["mode-read-only-tools"] },
+    {
+      file: "apps/server/src/mcp/toolkits/previewControls/tools.ts",
+      hooks: ["mode-read-only-tools"],
+    },
+    { file: "apps/server/src/mcp/toolkits/project/tools.ts", hooks: ["mode-read-only-tools"] },
+    {
+      file: "apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.test.ts",
+      hooks: ["mode-session-policy"],
+    },
+    {
+      file: "apps/server/src/orchestration-v2/KodoModeEnforcement.integration.test.ts",
+      hooks: ["mode-session-policy"],
+    },
+    {
+      file: "apps/server/src/orchestration-v2/ProviderSessionManager.ts",
+      hooks: ["mode-session-policy"],
+    },
+    {
+      file: "packages/provider-muse/src/server/adapter.test.ts",
+      hooks: ["mode-launch-restriction"],
+    },
+    { file: "packages/provider-muse/src/server/adapter.ts", hooks: ["mode-launch-restriction"] },
+    { file: "packages/provider-muse/src/server/sdk.test.ts", hooks: ["mode-launch-restriction"] },
+    { file: "packages/provider-muse/src/server/sdk.ts", hooks: ["mode-launch-restriction"] },
+    { file: "packages/provider-pi/src/server/adapter.ts", hooks: ["mode-launch-restriction"] },
+    {
+      file: "packages/provider-pi/src/server/mcpExtensionSource.test.ts",
+      hooks: ["mode-launch-restriction"],
+    },
+    {
+      file: "packages/provider-pi/src/server/mcpExtensionSource.ts",
+      hooks: ["mode-launch-restriction"],
+    },
+    {
+      file: "packages/provider-pi/src/server/mcpInjection.test.ts",
+      hooks: ["mode-launch-restriction"],
+    },
+    { file: "packages/provider-pi/src/server/mcpInjection.ts", hooks: ["mode-launch-restriction"] },
   ],
 
   // Kodo-owned paths: a file, a directory (trailing slash) or a glob. On conflict ours
@@ -808,10 +864,14 @@ export default {
       "apps/server/src/mcp/McpHttpServer.test.ts",
       "apps/server/src/mcp/McpInvocationContext.test.ts",
       "apps/server/src/mcp/McpToolAccess.test.ts",
+      "apps/server/src/mcp/OrchestratorMcpService.test.ts",
+      "apps/server/src/mcp/delegatedTaskModes.test.ts",
       "apps/server/src/mcp/threadAccess.test.ts",
+      "apps/server/src/orchestration-v2/Adapters/AntigravityAdapterV2.test.ts",
       "apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.test.ts",
       "apps/server/src/orchestration-v2/Adapters/OpenCode2AdapterV2.test.ts",
       "apps/server/src/orchestration-v2/DispatchModeLimit.test.ts",
+      "apps/server/src/orchestration-v2/KodoModeEnforcement.integration.test.ts",
       "apps/server/src/orchestration-v2/OpenCode2OrchestratorV2.integration.test.ts",
       "apps/server/src/orchestration-v2/RuntimePolicy.test.ts",
       "apps/server/src/peer/PeerForwarding.test.ts",
@@ -834,7 +894,11 @@ export default {
       "packages/contracts/src/kodoInteractionMode.test.ts",
       "packages/provider-acp/src/server/clientPolicy.test.ts",
       "packages/provider-cursor/src/server/adapter.test.ts",
+      "packages/provider-muse/src/server/adapter.test.ts",
+      "packages/provider-muse/src/server/sdk.test.ts",
       "packages/provider-opencode/src/server/adapter.test.ts",
+      "packages/provider-pi/src/server/mcpExtensionSource.test.ts",
+      "packages/provider-pi/src/server/mcpInjection.test.ts",
       "scripts/build-desktop-artifact.test.ts",
       "scripts/kodo/brandCodemod.test.ts",
       "scripts/kodo/conflicts.test.ts",

@@ -189,7 +189,7 @@ export function shouldOfferPlanAcceptance(input: {
   );
 }
 
-export const PLAN_RESPONSE_IMPLEMENTATION_PROMPT =
+const PLAN_RESPONSE_IMPLEMENTATION_PROMPT =
   "The plan you just presented is approved. Implement it now; you can modify the workspace.";
 
 /** The turn that implements an approved plan: always Code, linked to the plan when there is one. */

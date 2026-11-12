@@ -789,6 +789,16 @@ describe("kodo sync readiness", () => {
     assert.strictEqual(runCheck(fx.ctx, { requireRelease: true }).exitCode, 1);
   });
 
+  it("verify refuses to mark a tree with uncommitted changes", () => {
+    const fx = makeFixture(releaseOne);
+    runSync({ ...fx.ctx, exec: () => ({ ok: false, status: 1, output: "" }) }, SYNC);
+    write(fx.fork, "kodo/own.ts", "export const mine = 2;\n");
+    fx.lines.length = 0;
+    assert.strictEqual(runVerify(fx.ctx).exitCode, 1);
+    assert.include(fx.lines.join("\n"), "uncommitted");
+    assert.notMatch(read(fx.fork, "kodo/upstream-base.txt"), /^verified:/m);
+  });
+
   it("verify marks a branch fixed forward, and removes a stale marker when it fails", () => {
     const fx = makeFixture(releaseOne);
     runSync({ ...fx.ctx, exec: () => ({ ok: false, status: 1, output: "" }) }, SYNC);
