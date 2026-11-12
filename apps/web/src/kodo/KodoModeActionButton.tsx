@@ -2,7 +2,7 @@ import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
 
 const MODE_ACTION_TONES = {
-  plan: "border-mode-plan/40 bg-mode-plan/12 text-mode-plan hover:bg-mode-plan/20",
+  plan: "border-mode-plan/40 bg-mode-plan/4 text-mode-plan hover:bg-mode-plan/10",
 } as const;
 
 /** A compact banner action tinted with an interaction mode's accent, with that mode's icon. */

@@ -365,6 +365,7 @@ export default {
     { file: "apps/server/src/ws.ts", hooks: ["mode-models-send"] },
     { file: "packages/client-runtime/src/state/models.ts", hooks: ["mode-models-state"] },
     { file: "packages/shared/src/serverSettings.ts", hooks: ["mode-models-setting"] },
+    { file: "apps/server/src/serverSettings.ts", hooks: ["mode-models-setting"] },
     { file: "packages/contracts/src/settings.ts", hooks: ["mode-models-setting"] },
     { file: "apps/web/src/components/onboarding/WelcomePage.tsx", hooks: ["telemetry-copy"] },
     {
@@ -932,6 +933,7 @@ export default {
       "packages/contracts/src/kodoModeModels.test.ts",
       "packages/shared/src/kodoModeModel.test.ts",
       "apps/server/src/kodo/modeModel.test.ts",
+      "apps/server/src/kodo/modeModelSettings.test.ts",
       "apps/web/src/kodo/modeModels.logic.test.ts",
       "apps/server/src/orchestration-v2/OpenCode2OrchestratorV2.integration.test.ts",
       "apps/server/src/orchestration-v2/RuntimePolicy.test.ts",
