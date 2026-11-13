@@ -499,10 +499,14 @@ export const layerWithOptions = (
                 >(["orchestration", "worktree", "pull-requests"]);
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
-                const subagent = yield* projectionStore.getThread(threadId).pipe(
-                  Effect.map((thread) => thread.lineage.relationshipToParent === "subagent"),
-                  Effect.orElseSucceed(() => false),
+                const lineageThread = yield* projectionStore.getThread(threadId).pipe(
+                  Effect.map((thread) => ({
+                    subagent: thread.lineage.relationshipToParent === "subagent",
+                    kodoSwarm: thread.kodoLead?.kind === "swarm", // KODO: swarm-guard
+                  })),
+                  Effect.orElseSucceed(() => ({ subagent: false, kodoSwarm: false })),
                 );
+                const { subagent, kodoSwarm } = lineageThread;
                 const existing = yield* mcpSessions.read(threadId);
                 if (existing !== undefined) {
                   // Reserve before async validation so release cannot revoke between validation and reservation.
@@ -522,10 +526,13 @@ export const layerWithOptions = (
                     resolved !== undefined &&
                     resolved.thread.threadId === threadId &&
                     resolved.thread.providerInstanceId === providerInstanceId &&
-                    resolved.capabilities.has("preview") === browserToolsAvailable &&
-                    resolved.capabilities.has("device") === deviceToolsAvailable &&
+                    // KODO: swarm-guard - the Orchestrator's credential never has these, so none is expected of it
+                    resolved.capabilities.has("preview") ===
+                      (browserToolsAvailable && !kodoSwarm) &&
+                    resolved.capabilities.has("device") === (deviceToolsAvailable && !kodoSwarm) &&
                     // A credential issued while the lineage read failed is replaced once it works.
-                    (resolved.thread.subagent === true) === subagent
+                    (resolved.thread.subagent === true) === subagent &&
+                    (resolved.thread.kodoSwarm === true) === kodoSwarm // KODO: swarm-guard
                   ) {
                     return { mcpCredentialId: existing.providerSessionId, issued: false };
                   }
@@ -538,6 +545,7 @@ export const layerWithOptions = (
                   browserToolsAvailable,
                   capabilities,
                   subagent,
+                  kodoSwarm, // KODO: swarm-guard
                 });
                 yield* mcpSessions.set(credential.config);
                 reserveMcpCredential(threadId, credential.config.providerSessionId);

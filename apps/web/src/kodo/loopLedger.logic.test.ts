@@ -6,6 +6,11 @@ import { describeKodoLoopLedger } from "./loopLedger.logic";
 const totals = (over: Partial<KodoLoopLedgerTotals> = {}): KodoLoopLedgerTotals => ({
   loops: 3,
   rounds: 5,
+  workers: 0,
+  split: {
+    loop: { tokens: 2_100_000, savedUsd: 10, priced: 3 },
+    subAgents: { tokens: 0, savedUsd: 0, priced: 0 },
+  },
   pricedLoops: 3,
   partialLoops: 0,
   unpricedLoops: 0,
@@ -89,5 +94,40 @@ describe("describeKodoLoopLedger", () => {
     const none = describeKodoLoopLedger(totals({ noUsageLoops: 3, tokens: 0, tokensByModel: [] }));
     expect(none.tokens).toBeNull();
     expect(none.notes).toContain("Token usage was not reported by the provider.");
+  });
+});
+
+describe("the ledger with sub-agent workers", () => {
+  const workers = (over: Partial<KodoLoopLedgerTotals> = {}) =>
+    totals({
+      loops: 2,
+      rounds: 3,
+      workers: 4,
+      split: {
+        loop: { tokens: 1_000_000, savedUsd: 6, priced: 2 },
+        subAgents: { tokens: 1_100_000, savedUsd: 4, priced: 4 },
+      },
+      ...over,
+    });
+
+  it("counts both, and splits the saving by source", () => {
+    const view = describeKodoLoopLedger(workers());
+    expect(view.counts).toBe("2 loops, 3 rounds, 4 sub-agent workers");
+    expect(view.split).toBe("Loops saved about $6.00; sub-agent workers saved about $4.00.");
+  });
+
+  it("is not empty with workers alone, and shows no split for one source", () => {
+    const view = describeKodoLoopLedger(
+      workers({
+        loops: 0,
+        rounds: 0,
+        split: {
+          loop: { tokens: 0, savedUsd: 0, priced: 0 },
+          subAgents: { tokens: 1, savedUsd: 4, priced: 4 },
+        },
+      }),
+    );
+    expect(view.counts).toBe("4 sub-agent workers");
+    expect(view.split).toBeNull();
   });
 });

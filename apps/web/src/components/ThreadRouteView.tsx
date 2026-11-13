@@ -1,3 +1,4 @@
+import { isKodoOrchestratorThreadId } from "@t3tools/contracts"; // KODO: orchestrator-hidden
 import { useAtomValue } from "@effect/atom-react";
 import { parseScopedThreadKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { parseThreadKey, threadKey } from "@t3tools/client-runtime/state/entities";
@@ -120,7 +121,11 @@ export function ThreadRouteView({
   );
   const hidingAnywhere = useAnyEnvironmentHiding();
   const draftRedirectShell = useQuietThreadShell(draftRedirect ?? null);
-  const hiddenByTagFilter = serverThreadRef !== null && hiddenKeys.has(threadKey(serverThreadRef));
+  const hiddenByTagFilter =
+    serverThreadRef !== null &&
+    hiddenKeys.has(threadKey(serverThreadRef)) &&
+    // KODO: orchestrator-hidden - out of every list, but its own row opens it
+    !isKodoOrchestratorThreadId(serverThreadRef.threadId);
   // Cached detail can predate a tag or an archive, so while hiding an off-shell thread opens only
   // as the child of a loaded, visible parent (lineage never changes); anything else stays closed.
   const offShellBlocked =

@@ -13,6 +13,7 @@ import { scopeProject } from "./models.ts";
 import { isScratchProject } from "./projects.ts";
 import { type EnvironmentCatalogState, enabledEnvironmentIds } from "./connections.ts";
 import { arrayElementsEqual, parseProjectKey, projectKey, projectRefsEqual } from "./entities.ts";
+import { isKodoOrchestratorProjectRef } from "./kodoOrchestratorVisibility.ts"; // KODO: orchestrator-hidden
 
 const EMPTY_PROJECTS: ReadonlyArray<OrchestrationProjectShell> = Object.freeze([]);
 const EMPTY_PROJECT_INDEX: ReadonlyMap<ProjectId, OrchestrationProjectShell> = new Map();
@@ -46,10 +47,13 @@ export function createEnvironmentProjectAtoms(input: {
   const environmentProjectRefsAtom = Atom.family((environmentId: EnvironmentId) => {
     let previous: ReadonlyArray<ScopedProjectRef> = [];
     return Atom.make((get) => {
-      const next = get(environmentProjectsAtom(environmentId)).map((project) => ({
-        environmentId,
-        projectId: project.id,
-      }));
+      const next = get(environmentProjectsAtom(environmentId))
+        .map((project) => ({
+          environmentId,
+          projectId: project.id,
+        }))
+        // KODO: orchestrator-hidden - the Orchestrator's project is not one of the person's
+        .filter((ref) => !isKodoOrchestratorProjectRef(ref));
       if (projectRefsEqual(previous, next)) {
         return previous;
       }

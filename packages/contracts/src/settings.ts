@@ -1415,6 +1415,8 @@ export const ServerSettings = Schema.Struct({
   kodoSubAgentsMaxWorkers: Schema.Finite.pipe(
     Schema.withDecodingDefault(Effect.succeed(KODO_SUB_AGENTS_DEFAULT_MAX_WORKERS)),
   ),
+  // KODO: orchestrator-setting - whether the pinned Orchestrator row is shown. Its model is the existing orchestrator slot.
+  kodoOrchestratorEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   defaultRuntimeMode: RuntimeMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
   ),
@@ -1858,6 +1860,7 @@ export const ServerSettingsPatch = Schema.Struct({
   kodoSubAgentsMaxWorkers: Schema.optionalKey(
     Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: KODO_SUB_AGENTS_MAX_WORKERS_LIMIT })),
   ), // KODO: sub-agents-setting
+  kodoOrchestratorEnabled: Schema.optionalKey(Schema.Boolean), // KODO: orchestrator-setting
   /** Replaces each project's override set; null removes it. Omitted providerInstances retains its stored value. */
   projectSettingsOverrides: Schema.optionalKey(
     Schema.Record(

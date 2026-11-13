@@ -290,8 +290,9 @@ overrides only the rounds.
   cost. No "quota saved" figure is shown. If no Judge or Review model is set there is nothing
   to compare against and only token share is shown; if Code ran on the reference model itself
   it says "Nothing to compare".
-- **Savings on the Usage page.** The **Loop savings** section of the Usage page adds up the
-  estimates of every loop that has ended on that environment, for the last 30 days and all
+- **Savings on the Usage page.** The **Loop and sub-agent savings** section of the Usage page
+  adds up the estimates of every loop that has ended on that environment, and of the workers
+  a Sub-agents lead has finished (see [Sub-agents](#sub-agents)), for the last 30 days and all
   time. It keeps counting after you delete a thread or project, and there is no way to clear
   it. It reads "at least" when a loop's figure leaves a stage out, counts loops that could not
   be priced apart (never as zero), and reads "Cost about $X more" when the total went the
@@ -315,6 +316,11 @@ inline in the lead's conversation, and you can open one to see what it did or to
   of its own mode: a Code worker on the Code model, a Review worker on the Review model. The lead
   cannot choose a worker's model, whatever it asks for. A model you pick for a message still wins
   for that message. A worker whose mode has no model set runs on the lead thread's own model.
+- **The lead only reads.** A lead never writes, even in Code mode: its own turns run under the
+  same read-only enforcement as Review (edits denied, shell on approval; the T3 tools that change
+  things are refused). The thread still shows Code, and that is the mode its workers get. Turning
+  Sub-agents off lets the thread write again, from its next turn; a session that cannot switch
+  in place restarts for it, as it does when you change mode.
 - **What workers may do.** A Code thread's lead can start Code workers (they write) and Review
   workers (they only read). A thread in Ask, Plan or Review never gets a worker that can write:
   its workers are read-only too. A worker never has a broader runtime mode than its thread.
@@ -334,6 +340,13 @@ inline in the lead's conversation, and you can open one to see what it did or to
   Delegate to sub-agents** sets the default for new threads, and a project can override it.
   Each thread keeps its own switch, so changing the default does not change threads that
   already exist. A thread that has Sub-agents on cannot run `/loop`; turn it off first.
+- **Workers and cost.** Open a worker and a line at the top says whose it is (a link back to the
+  lead), its mode and its model. In the lead, a line under the header shows what the lead and its
+  workers used, and an estimate of what delegating saved against running the workers' tokens on the
+  lead's model. Like the loop's, it is an estimate at API list prices; a model with no price is
+  shown as unpriced, never as free, and a figure that leaves something out says "at least". The
+  **Usage** page's **Loop and sub-agent savings** section adds finished workers to the loops, and
+  says how much each contributed. Work from before this was added is not back-filled.
 - **Stop.** Stop on the lead stops every worker. **Stop workers**, in the banner above the
   composer while workers run, ends them and leaves the lead's turn going.
 

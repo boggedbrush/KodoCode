@@ -64,6 +64,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { registerCommands, registerMenuAction } from "../shortcuts/dispatcher";
 import { resolveThreadRouteRef } from "../threadRoutes";
+import { KodoOrchestratorCollapsedDot } from "../kodo/KodoOrchestratorRow"; // KODO: orchestrator-row
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = "var(--desktop-window-controls-inset, 90px)";
 
@@ -402,6 +403,8 @@ function SidebarControl({ showSidebar }: { readonly showSidebar: boolean }) {
           </TooltipPopup>
         </Tooltip>
       ) : null}
+      {/* KODO: orchestrator-row - with the sidebar closed the dot alone stays at the top left */}
+      {showSidebar && !isSidebarVisible ? <KodoOrchestratorCollapsedDot /> : null}
     </div>
   );
 }

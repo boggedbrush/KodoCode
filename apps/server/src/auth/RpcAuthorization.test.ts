@@ -504,6 +504,11 @@ it.effect("rejects the loop savings ledger without diagnostics read before its h
         const totals = {
           loops: 0,
           rounds: 0,
+          workers: 0,
+          split: {
+            loop: { tokens: 0, savedUsd: 0, priced: 0 },
+            subAgents: { tokens: 0, savedUsd: 0, priced: 0 },
+          },
           pricedLoops: 0,
           partialLoops: 0,
           unpricedLoops: 0,

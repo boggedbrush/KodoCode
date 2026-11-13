@@ -321,6 +321,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["loop rounds plan approval budget cost cap token cap usage limit savings judge"],
     environmentOnly: true,
   },
+  // KODO: orchestrator-search
+  {
+    id: "orchestrator",
+    title: "Orchestrator",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["orchestrator swarm pinned conversation all projects status delegate model"],
+    environmentOnly: true,
+  },
   // KODO: sub-agents-search
   {
     id: "sub-agents",

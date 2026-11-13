@@ -209,6 +209,9 @@ export function HomeRouteScreen() {
           onOpenSettings={() => selectTab("settings")}
           onSearchQueryChange={setSearchQuery}
           onSelectThread={handleSelectThread}
+          onOpenThreadById={(environmentId, threadId) =>
+            selectThreadRoute({ environmentId: String(environmentId), threadId: String(threadId) })
+          } // KODO: orchestrator-row
           onSelectPendingTask={openPendingTask}
           onDeletePendingTask={confirmDeletePendingTask}
           onNewThreadOnBranch={handleNewThreadOnBranch}

@@ -248,6 +248,7 @@ import {
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
+import { KodoOrchestratorRow } from "../kodo/KodoOrchestratorRow"; // KODO: orchestrator-row
 import { TooltipProvider } from "./ui/tooltip";
 import {
   composerDraftHasUserContent,
@@ -2972,6 +2973,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         className="min-h-full"
         fixedHeader={
           <SidebarGroup className="z-[1]">
+            <KodoOrchestratorRow />{" "}
+            {/* KODO: orchestrator-row - pinned above projects and threads, never scrolls */}
             <SidebarThreadHeader
               hasProjects={projectGroups.length > 0}
               projectScope={

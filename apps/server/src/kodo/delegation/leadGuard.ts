@@ -48,9 +48,10 @@ const MAX_ANCESTRY_DEPTH = 6;
  */
 const MAX_WORKERS_READ = 64;
 
+/** The thread leads workers: a person's sub-agents lead, or the Orchestrator. */
 export const isKodoLead = (shell: {
   readonly kodoLead?: { readonly kind: string } | null | undefined;
-}) => shell.kodoLead?.kind === "sub-agents";
+}) => shell.kodoLead != null;
 
 type GetShell<E> = (threadId: ThreadId) => Effect.Effect<KodoLeadShell | null, E>;
 type GetAncestryShell<E> = (threadId: ThreadId) => Effect.Effect<KodoAncestryShell | null, E>;

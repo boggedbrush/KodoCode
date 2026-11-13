@@ -43,7 +43,7 @@ const ROLE_SLOTS: ReadonlyArray<{
     slot: "orchestrator",
     title: "Lead / Orchestrator",
     description:
-      "The model a thread runs on while Sub-agents is on: it plans, delegates and verifies, and its workers use the Code and Review models. Follows the thread's own model until set.",
+      "The model a thread runs on while Sub-agents is on, and the model of the Orchestrator conversation: it plans, delegates and verifies, and its workers use the Code and Review models. Follows the thread's own model until set.",
   },
   {
     slot: "judge",
@@ -53,8 +53,11 @@ const ROLE_SLOTS: ReadonlyArray<{
   },
 ];
 
-/** One model per mode, plus the Orchestrator and Judge roles; unset slots use the thread's model. */
-export function KodoModeModelsSettings() {
+/**
+ * One model per mode, plus the Orchestrator and Judge roles; unset slots use the thread's model.
+ * With `only`, just that slot's row, for a settings section that owns its slot.
+ */
+export function KodoModeModelsSettings(props: { readonly only?: KodoModeModelSlot } = {}) {
   const { target, connectedEnvironments } = useSettingsScope();
   const settings = useScopedSettings();
   const updateSettings = useUpdateScopedSettings();
@@ -164,6 +167,11 @@ export function KodoModeModelsSettings() {
       />
     );
   };
+
+  if (props.only !== undefined) {
+    const row = [...MODE_SLOTS, ...ROLE_SLOTS].find((candidate) => candidate.slot === props.only);
+    return row === undefined ? null : renderRow(row);
+  }
 
   return (
     <>

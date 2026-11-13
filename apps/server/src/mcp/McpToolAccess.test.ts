@@ -31,6 +31,7 @@ const askThreadId = ThreadId.make("thread:ask");
 const reviewThreadId = ThreadId.make("thread:review");
 const codeThreadId = ThreadId.make("thread:code");
 const legacyDefaultThreadId = ThreadId.make("thread:legacy-default");
+const leadThreadId = ThreadId.make("thread:lead");
 const fullAccessThreadId = ThreadId.make("thread:full-access");
 const endedThreadId = ThreadId.make("thread:ended");
 const backgroundThreadId = ThreadId.make("thread:background");
@@ -56,6 +57,13 @@ const shells = new Map([
   [reviewThreadId, liveThreadShell(reviewThreadId, { interactionMode: "review" })],
   [codeThreadId, liveThreadShell(codeThreadId, { interactionMode: "code" })],
   [legacyDefaultThreadId, liveThreadShell(legacyDefaultThreadId, { interactionMode: "default" })],
+  [
+    leadThreadId,
+    {
+      ...liveThreadShell(leadThreadId, { interactionMode: "code" }),
+      kodoLead: { kind: "sub-agents" as const },
+    },
+  ],
   [endedThreadId, liveThreadShell(endedThreadId, { activeRunId: null })],
   [backgroundThreadId, backgroundShell(backgroundThreadId, ProviderInstanceId.make("codex"))],
   [oldProviderThreadId, backgroundShell(oldProviderThreadId, ProviderInstanceId.make("claude"))],
@@ -240,6 +248,7 @@ const asking = threadCaller(askThreadId);
 const reviewing = threadCaller(reviewThreadId);
 const coding = threadCaller(codeThreadId);
 const legacyDefault = threadCaller(legacyDefaultThreadId);
+const leading = threadCaller(leadThreadId);
 const planClient: McpInvocationContext.McpInvocationScope = {
   ...clientCaller("full-access"),
   client: {
@@ -377,6 +386,15 @@ it.effect.each([
       ["reads_as_caller", caller, {}, "ran"],
     ] as const;
   }),
+  // KODO: delegation-policy - a Code lead is read-only for tools like Ask is, yet its limits stay Code's, so it still starts Code workers.
+  ["acts_as_caller", leading, {}, "capability_denied"],
+  ["writes", leading, {}, "capability_denied"],
+  ["writes_with_capability", leading, {}, "capability_denied"],
+  ["writes_environment", leading, {}, "capability_denied"],
+  ["acts_as_caller_readonly", leading, {}, "ran"],
+  ["acts_as_caller_allowed", leading, {}, "ran"],
+  ["reads", leading, {}, "ran"],
+  ["starts_threads", leading, {}, "full-access/code"],
   ["acts_as_caller_allowed", ended, {}, "parent_not_active"],
   ["acts_as_caller_allowed", fullAccessClient, {}, "thread_credential_required"],
   ["acts_as_caller", coding, {}, "ran"],

@@ -49,7 +49,7 @@ import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter"
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
 import { kodoModeAnnouncer } from "../kodo/interactionMode.ts"; // KODO: mode-instructions
-import { kodoLeadInstructions } from "../kodo/delegation/leadInstructions.ts"; // KODO: delegation-instructions
+import { kodoLeadInstructionsFor } from "../kodo/delegation/leadInstructions.ts"; // KODO: delegation-instructions
 import type { ProjectionStoreV2Error } from "./ProjectionStore.ts";
 import {
   knownProviderFailureMessage,
@@ -1807,10 +1807,7 @@ export const layer: Layer.Layer<
             instructions: input.runtimePolicy.modeInstructions,
             hasPriorTurns: input.nativeThreadHasTurns ?? input.providerTurnOrdinal > 1,
             // KODO: delegation-instructions - a lead's model is told it leads workers
-            leadInstructions:
-              input.appThread.kodoLead?.kind === "sub-agents"
-                ? kodoLeadInstructions(input.appThread.interactionMode)
-                : undefined,
+            leadInstructions: kodoLeadInstructionsFor(input.appThread),
           }),
           modelSelection: input.modelSelection,
           runtimePolicy: input.runtimePolicy,

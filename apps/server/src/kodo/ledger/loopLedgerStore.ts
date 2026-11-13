@@ -15,7 +15,11 @@ const SCHEMA_NAME = "loop_ledger";
 
 type Sql = SqlClient.SqlClient;
 
-/** Each step takes the table from version N to N + 1; every statement is safe to repeat. */
+/**
+ * Each step takes the table from version N to N + 1; every statement is safe to repeat. The table
+ * holds more than loops: `kind` is "loop" or "sub-agents", and `loop_id` is the unit's id (the loop's
+ * own, or `worker:<thread>` for a worker), so the name stays what the first version called it.
+ */
 const SCHEMA_STEPS: ReadonlyArray<(sql: Sql) => Effect.Effect<void, SqlError.SqlError>> = [
   (sql) =>
     Effect.gen(function* () {
@@ -42,6 +46,18 @@ const SCHEMA_STEPS: ReadonlyArray<(sql: Sql) => Effect.Effect<void, SqlError.Sql
       yield* sql`
         CREATE INDEX IF NOT EXISTS kodo_loop_ledger_kind_ended_at_idx
         ON kodo_loop_ledger (kind, ended_at)
+      `;
+    }),
+  // 2: delegated work. A worker's row names its thread, and the lead's rows are found by thread.
+  (sql) =>
+    Effect.gen(function* () {
+      const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(kodo_loop_ledger)`;
+      if (!columns.some((column) => column.name === "child_thread_id")) {
+        yield* sql`ALTER TABLE kodo_loop_ledger ADD COLUMN child_thread_id TEXT`;
+      }
+      yield* sql`
+        CREATE INDEX IF NOT EXISTS kodo_loop_ledger_thread_idx
+        ON kodo_loop_ledger (thread_id, kind)
       `;
     }),
 ];

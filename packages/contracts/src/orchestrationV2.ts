@@ -3430,6 +3430,8 @@ export const OrchestrationV2Command = Schema.Union([
     modelSelection: ModelSelection,
     /** KODO: mode-models-send - see message.dispatch; true when the agent named the provider or model. */
     explicitModelSelection: Schema.optional(Schema.Boolean),
+    /** KODO: swarm-delegate - the project the Orchestrator starts this task in; honored only for its own tasks. */
+    kodoTargetProjectId: Schema.optional(ProjectId),
     runtimeMode: RuntimeMode,
     interactionMode: ThreadInteractionMode,
     workspaceStrategy: Schema.optional(OrchestrationV2ThreadLaunchWorkspaceStrategy),

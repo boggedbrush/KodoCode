@@ -20,6 +20,8 @@ export interface McpCredentialRequest {
   readonly browserToolsAvailable?: boolean;
   readonly capabilities?: ReadonlySet<McpInvocationContext.McpCapability>;
   readonly subagent?: boolean;
+  /** KODO: swarm-guard - the Orchestrator: only the orchestration capability, and its tool allowlist. */
+  readonly kodoSwarm?: boolean;
 }
 
 export interface McpIssuedCredential {
@@ -109,14 +111,20 @@ const makeWithOptions = Effect.fn("McpSessionRegistry.make")(function* (
           providerSessionId,
           providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
           subagent: request.subagent === true,
+          ...(request.kodoSwarm === true ? { kodoSwarm: true } : {}), // KODO: swarm-guard
         },
         client: undefined,
-        capabilities: new Set<McpInvocationContext.McpCapability>([
-          "orchestration",
-          "worktree",
-          "pull-requests",
-          ...(request.capabilities ?? (browserToolsAvailable ? (["preview"] as const) : [])),
-        ]),
+        // KODO: swarm-guard - the Orchestrator never gets worktree, pull-request, preview or device tools
+        capabilities: new Set<McpInvocationContext.McpCapability>(
+          request.kodoSwarm === true
+            ? ["orchestration"]
+            : [
+                "orchestration",
+                "worktree",
+                "pull-requests",
+                ...(request.capabilities ?? (browserToolsAvailable ? (["preview"] as const) : [])),
+              ],
+        ),
         issuedAt,
       };
       yield* SynchronizedRef.update(state, ({ records }) => {

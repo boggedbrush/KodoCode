@@ -8,9 +8,25 @@ export const KODO_LOOP_LEDGER_WINDOW_DAYS = 30;
 export const KODO_LOOP_LEDGER_MODELS_MAX = 20;
 export const KODO_LOOP_LEDGER_REFERENCE_MODELS_MAX = 5;
 
+/** What one source (loops, or sub-agent workers) adds to the totals above. */
+export const KodoLoopLedgerSource = Schema.Struct({
+  tokens: NonNegativeInt,
+  savedUsd: Schema.Number,
+  /** Units of this source with a savings figure. */
+  priced: NonNegativeInt,
+});
+export type KodoLoopLedgerSource = typeof KodoLoopLedgerSource.Type;
+
+/**
+ * Every figure but `loops`, `rounds` and `workers` adds loops and sub-agent workers together, so
+ * `pricedLoops` and its neighbours count units of either; `split` says how much each contributed.
+ */
 export const KodoLoopLedgerTotals = Schema.Struct({
   loops: NonNegativeInt,
   rounds: NonNegativeInt,
+  /** Workers a lead delegated to, one per worker thread. */
+  workers: NonNegativeInt,
+  split: Schema.Struct({ loop: KodoLoopLedgerSource, subAgents: KodoLoopLedgerSource }),
   /** Loops with a savings figure: stages on a cheaper model were priced on both sides. */
   pricedLoops: NonNegativeInt,
   /** Priced loops whose figure leaves something out (an unpriced stage, partial usage), so it is "at least". */

@@ -222,3 +222,30 @@ it.effect.each(["provider-session", "thread", "all"] as const)(
       expect(yield* registry.resolve(token)).toBeUndefined();
     }),
 );
+
+// KODO: swarm-guard - the Orchestrator's credential reaches the orchestration tools and nothing else.
+it.effect("issues the Orchestrator orchestration alone, whatever else is asked for", () =>
+  Effect.gen(function* () {
+    const registry = yield* makeRegistry(() => 1_000);
+    const issued = yield* registry.issue({
+      threadId: ThreadId.make("thread-orchestrator"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      capabilities: new Set(["preview", "device"]),
+      kodoSwarm: true,
+    });
+    const scope = yield* registry.resolve(
+      issued.config.authorizationHeader.replace(/^Bearer\s+/, ""),
+    );
+    expect(scope?.capabilities).toEqual(new Set(["orchestration"]));
+    expect(scope?.thread.kodoSwarm).toBe(true);
+    const ordinary = yield* registry.issue({
+      threadId: ThreadId.make("thread-ordinary"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+    });
+    const other = yield* registry.resolve(
+      ordinary.config.authorizationHeader.replace(/^Bearer\s+/, ""),
+    );
+    expect(other?.thread.kodoSwarm).toBeUndefined();
+    expect(other?.capabilities.has("worktree")).toBe(true);
+  }),
+);

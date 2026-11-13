@@ -37,7 +37,7 @@ import * as Schema from "effect/Schema";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
-import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { NonNegativeInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import {
   ProviderAuthCancelInput,
   ProviderAuthCompleteInput,
@@ -356,6 +356,8 @@ import {
 } from "./providerUsageLimits.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
 import { KodoLoopLedgerReadError, KodoLoopLedgerSummary } from "./kodoLoopLedger.ts"; // KODO: loop-ledger-rpc
+import { KodoDelegationUsage, KodoDelegationUsageReadError } from "./kodoDelegation.ts"; // KODO: delegation-usage-rpc
+import { KodoOrchestratorEnsureResult, KodoOrchestratorError } from "./kodoOrchestrator.ts"; // KODO: orchestrator-rpc
 import {
   StorageCleanupReport,
   DatabaseReclaimError,
@@ -549,6 +551,8 @@ export const WS_METHODS = {
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
   serverGetKodoLoopLedger: "server.getKodoLoopLedger", // KODO: loop-ledger-rpc
+  serverGetKodoDelegationUsage: "server.getKodoDelegationUsage", // KODO: delegation-usage-rpc
+  serverEnsureKodoOrchestrator: "server.ensureKodoOrchestrator", // KODO: orchestrator-rpc
 
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1013,6 +1017,18 @@ const WsServerGetKodoLoopLedgerRpc = Rpc.make(WS_METHODS.serverGetKodoLoopLedger
   success: KodoLoopLedgerSummary,
   error: Schema.Union([EnvironmentAuthorizationError, KodoLoopLedgerReadError]),
 });
+
+const WsServerGetKodoDelegationUsageRpc = Rpc.make(WS_METHODS.serverGetKodoDelegationUsage, {
+  payload: Schema.Struct({ threadId: ThreadId }),
+  success: KodoDelegationUsage,
+  error: Schema.Union([EnvironmentAuthorizationError, KodoDelegationUsageReadError]),
+}); // KODO: delegation-usage-rpc
+
+const WsServerEnsureKodoOrchestratorRpc = Rpc.make(WS_METHODS.serverEnsureKodoOrchestrator, {
+  payload: Schema.Struct({}),
+  success: KodoOrchestratorEnsureResult,
+  error: Schema.Union([EnvironmentAuthorizationError, KodoOrchestratorError]),
+}); // KODO: orchestrator-rpc
 
 const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
@@ -2132,6 +2148,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
   WsServerGetKodoLoopLedgerRpc, // KODO: loop-ledger-rpc
+  WsServerGetKodoDelegationUsageRpc, // KODO: delegation-usage-rpc
+  WsServerEnsureKodoOrchestratorRpc, // KODO: orchestrator-rpc
   WsServerSignalProcessRpc,
   WsScheduledTasksSubscribeRpc,
   WsScheduledTasksUpsertRpc,

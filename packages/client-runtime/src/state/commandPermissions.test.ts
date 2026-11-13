@@ -103,6 +103,24 @@ describe("command permissions", () => {
     ),
   );
 
+  // KODO: orchestrator-rpc - opening the Orchestrator creates its project and thread, so it needs the operate grant
+  it.effect("requires the destination operate grant to open the Orchestrator", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const ensure = createCommandPermissions(runtime, WS_METHODS.serverEnsureKodoOrchestrator);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(ensure.permissionAtom(env))).toBe(false);
+        expect((yield* ensure.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(ensure.permissionAtom(env))).toBe(true);
+        yield* ensure.authorize(registry, env);
+      }),
+    ),
+  );
+
   it.effect("requires the destination preview grant to close a browser tab", () =>
     Effect.scoped(
       Effect.gen(function* () {

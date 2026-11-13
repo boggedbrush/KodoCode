@@ -56,6 +56,7 @@ export const kodoLoopStartRefusalFor = Effect.fn("KodoLoopCaller.startRefusal")(
 }) {
   const sender = input.control.requestMessage?.senderThreadId;
   // KODO: delegation-loop - a lead delegates; a loop would run its stages without that
+  if (input.targetLead?.kind === "swarm") return "The Orchestrator cannot run a loop.";
   if (input.targetLead?.kind === "sub-agents") {
     return "This thread delegates to sub-agents, and a loop would run its stages without that. Turn sub-agents off first, or start the loop on another thread.";
   }

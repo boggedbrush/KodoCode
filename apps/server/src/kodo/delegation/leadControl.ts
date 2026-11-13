@@ -18,6 +18,8 @@ export interface KodoLeadSetInput {
     readonly id: ThreadId;
     readonly interactionMode: unknown;
     readonly loopStatus?: string | undefined;
+    /** The lead the thread has now. */
+    readonly lead?: KodoLead | null | undefined;
   };
   /** A turn, queued run or pending request is unfinished on the thread. */
   readonly busy: boolean;
@@ -40,6 +42,9 @@ export interface KodoLeadSetInput {
 
 export function decideKodoLeadSet(input: KodoLeadSetInput): KodoLeadSetResult {
   const { requested, thread, actor } = input;
+  if (thread.lead?.kind === "swarm") {
+    return refuse("The Orchestrator is always read-only, and nothing changes that.");
+  }
   if (requested !== null && requested.kind !== "sub-agents") {
     return refuse("Only sub-agents can be turned on for a thread in this version.");
   }

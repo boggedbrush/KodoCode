@@ -13,12 +13,12 @@ export const kodoThreadLeads = (
   thread: { readonly kodoLead?: KodoLead | null | undefined } | null | undefined,
 ): boolean => thread?.kodoLead?.kind === "sub-agents";
 
-/** The model slot a thread's turns read: the Orchestrator slot while it leads, else the slot of its mode. */
+/** The model slot a thread's turns read: the Orchestrator slot while it leads (or is the Orchestrator), else the slot of its mode. */
 export const kodoThreadModelSlotMode = (thread: {
   readonly kodoLead?: KodoLead | null | undefined;
   readonly interactionMode: unknown;
 }): KodoModeModelSlot | unknown =>
-  kodoThreadLeads(thread) ? "orchestrator" : thread.interactionMode;
+  thread.kodoLead != null ? "orchestrator" : thread.interactionMode;
 
 export interface KodoSubAgentsToggle {
   readonly checked: boolean;
@@ -41,6 +41,7 @@ export function kodoSubAgentsToggle(input: {
 }): KodoSubAgentsToggle {
   const checked = input.lead?.kind === "sub-agents";
   const refuse = (reason: string): KodoSubAgentsToggle => ({ checked, disabled: true, reason });
+  if (input.lead?.kind === "swarm") return refuse("The Orchestrator is always read-only.");
   if (!input.canOperate) return refuse("You can't change this thread.");
   if (input.isWorker) return refuse("This thread is a worker, and workers can't lead workers.");
   if (input.busy) return refuse("Available when the current turn finishes.");

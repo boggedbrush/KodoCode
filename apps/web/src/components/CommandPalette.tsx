@@ -277,6 +277,12 @@ import {
   requestKodoSubAgentsToggle,
   subscribeKodoSubAgentsToggle,
 } from "../kodo/subAgents.logic";
+// KODO: orchestrator-palette
+import {
+  hasKodoOrchestratorOpen,
+  requestKodoOrchestratorOpen,
+  subscribeKodoOrchestratorOpen,
+} from "../kodo/orchestrator.logic";
 import { threadRecentUse } from "@t3tools/shared/paletteSearch";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
@@ -1278,6 +1284,12 @@ function OpenCommandPaletteDialog(props: {
     hasKodoSubAgentsToggle,
     () => false,
   );
+  // KODO: orchestrator-palette - offered while an opener is mounted (the setting is on)
+  const kodoOrchestratorMounted = useSyncExternalStore(
+    subscribeKodoOrchestratorOpen,
+    hasKodoOrchestratorOpen,
+    () => false,
+  );
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
@@ -1662,6 +1674,21 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/usage" });
     },
   });
+
+  // KODO: orchestrator-palette
+  if (kodoOrchestratorMounted) {
+    actionItems.push({
+      kind: "action",
+      value: "action:open-orchestrator",
+      searchTerms: ["orchestrator", "swarm", "all projects", "status", "delegate", "assistant"],
+      title: "Open Orchestrator",
+      icon: <NetworkIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "orchestrator.open",
+      run: async () => {
+        requestKodoOrchestratorOpen();
+      },
+    });
+  }
 
   // KODO: sub-agents-palette - flips the switch of the thread on screen; offered only while a composer is mounted
   if (kodoSubAgentsToggleMounted) {

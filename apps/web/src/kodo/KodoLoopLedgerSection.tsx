@@ -23,6 +23,9 @@ function LedgerBlock(props: { readonly title: string; readonly totals: KodoLoopL
           {view.basis === null ? null : (
             <p className="text-xs text-muted-foreground">{view.basis}</p>
           )}
+          {view.split === null ? null : (
+            <p className="text-xs text-muted-foreground">{view.split}</p>
+          )}
           {view.notes.map((note) => (
             <p key={note} className="text-xs text-muted-foreground">
               {note}
@@ -64,12 +67,12 @@ function EnvironmentLedger(props: {
       {summary === null ? (
         <p className="text-sm text-muted-foreground">
           {result._tag === "Failure"
-            ? "Loop savings are unavailable from this environment."
-            : "Loading loop savings."}
+            ? "Loop and sub-agent savings are unavailable from this environment."
+            : "Loading loop and sub-agent savings."}
         </p>
-      ) : summary.allTime.loops === 0 ? (
+      ) : summary.allTime.loops + summary.allTime.workers === 0 ? (
         <p className="text-sm text-muted-foreground">
-          No loops recorded yet. {KODO_LOOP_LEDGER_EMPTY_NOTE}
+          No loops or sub-agent work recorded yet. {KODO_LOOP_LEDGER_EMPTY_NOTE}
         </p>
       ) : (
         <div className="grid gap-x-12 gap-y-4 sm:grid-cols-2">
@@ -95,8 +98,8 @@ export function KodoLoopLedgerSection(props: {
   );
   if (readable.length === 0) return null;
   return (
-    <section className="flex flex-col gap-2" aria-label="Loop savings">
-      <h2 className="text-sm font-medium text-foreground">Loop savings</h2>
+    <section className="flex flex-col gap-2" aria-label="Loop and sub-agent savings">
+      <h2 className="text-sm font-medium text-foreground">Loop and sub-agent savings</h2>
       {readable.map((environment) => (
         <EnvironmentLedger
           key={environment.environmentId}

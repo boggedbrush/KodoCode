@@ -20,6 +20,7 @@ import { kodoRunModeSnapshot } from "../kodo/interactionMode.ts"; // KODO: run-m
 import { kodoMaySteerIntoRun } from "../kodo/interactionMode.ts"; // KODO: mode-steer-guard
 import { makeKodoModeModelTurn } from "../kodo/modeModelTurn.ts"; // KODO: mode-models-turn
 import { makeKodoLeadCommands } from "../kodo/delegation/leadCommand.ts"; // KODO: delegation-command
+import { kodoSwarmCommandRefusal } from "../kodo/swarm/swarmGuard.ts"; // KODO: swarm-guard
 import {
   decideKodoLoopAdvance,
   decideKodoLoopControl,
@@ -8776,6 +8777,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         runtimeMode: command.runtimeMode,
         interactionMode: command.interactionMode,
         ...(command.workspaceStrategy === undefined ? {} : { branch: null, worktreePath: null }),
+        // KODO: swarm-delegate - the Orchestrator's task runs in the project it was told to, as that project's own checkout
+        ...(command.kodoTargetProjectId !== undefined &&
+        parentProjection.thread.kodoLead?.kind === "swarm"
+          ? { projectId: command.kodoTargetProjectId, branch: null, worktreePath: null }
+          : {}),
       };
       const task: OrchestrationV2Subagent = {
         id: taskNodeId,
@@ -13987,6 +13993,15 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       | undefined;
     let updateDelegatedCompletionOnlyRunId: RunId | undefined;
+    // KODO: swarm-guard - the Orchestrator's own thread and project are the server's
+    const swarmRefusal = kodoSwarmCommandRefusal(command);
+    if (swarmRefusal !== undefined) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: swarmRefusal,
+      });
+    }
     switch (command.type) {
       case "thread.create":
         yield* dispatchThreadCreate(command, events);

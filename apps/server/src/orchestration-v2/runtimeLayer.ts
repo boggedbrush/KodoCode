@@ -2,6 +2,7 @@ import * as WorktreeBranchSync from "./WorktreeBranchSync.ts";
 import * as GuestShareService from "../guest/GuestShareService.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as KodoLoopWorker from "../kodo/loop/LoopWorker.ts"; // KODO: loop-worker
+import * as KodoDelegationLedgerWorker from "../kodo/delegation/DelegationLedgerWorker.ts"; // KODO: delegation-ledger
 import * as CheckpointDiffQuery from "../checkpointing/CheckpointDiffQuery.ts"; // KODO: loop-worker
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as Layer from "effect/Layer";
@@ -398,6 +399,8 @@ export const layerProduction = Layer.mergeAll(
     Layer.provide(CheckpointDiffQuery.layer),
     Layer.provide(Layer.mergeAll(layerThreadManagementProvided, layerOrchestratorProvided)),
   ),
+  // KODO: delegation-ledger - records what a lead's workers cost
+  KodoDelegationLedgerWorker.layer.pipe(Layer.provide(layerOrchestratorProvided)),
   layerProviderContinuationWorkerProvided,
   layerAgentSessionImporterProvided,
   EffectOutbox.layerPruneWorker.pipe(Layer.provide(EffectOutbox.layer)),

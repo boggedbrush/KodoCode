@@ -114,6 +114,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.serverGetUsageSummary]: AuthDiagnosticsReadScope,
   [WS_METHODS.serverRefreshUsageRates]: AuthDiagnosticsReadScope,
   [WS_METHODS.serverGetKodoLoopLedger]: AuthDiagnosticsReadScope, // KODO: loop-ledger-rpc
+  [WS_METHODS.serverGetKodoDelegationUsage]: AuthOrchestrationReadScope, // KODO: delegation-usage-rpc
   [WS_METHODS.serverSignalProcess]: AuthEnvironmentMaintainScope,
   [WS_METHODS.serverReportClientActivity]: AuthOrchestrationReadScope,
   [WS_METHODS.scheduledTasksSubscribe]: AuthOrchestrationReadScope,

@@ -13,6 +13,7 @@ import {
   kodoInteractionModeRestriction,
   kodoMaySteerIntoRun,
   kodoMoreRestrictiveMode,
+  kodoPolicyMode,
   kodoSessionNeedsRestart,
   kodoSessionPolicyKey,
   kodoRunModeSnapshot,
@@ -167,6 +168,100 @@ describe("resolveKodoInteractionMode", () => {
         });
       },
     );
+  });
+
+  // KODO: delegation-policy - a lead is read-only in every mode, with the displayed mode and no mode text.
+  describe("a lead", () => {
+    const LEAD_TABLE = { "sub-agents": "review", swarm: "ask" } as const;
+    describe.each(Object.entries(LEAD_TABLE))("of kind %s enforces %s", (kind, floor) => {
+      it.each(ALL_DRIVERS.map((driver) => [String(driver), driver] as const))(
+        "on the %s driver, in Code",
+        (name, driver) => {
+          const expected = ENFORCEMENT_TABLE[floor as "ask" | "review"][name]!;
+          expect(
+            resolveKodoInteractionMode({ mode: "code", driver, lead: { kind: kind as "swarm" } }),
+          ).toEqual({
+            mode: "code",
+            wireInteractionMode: expected.wire,
+            instructions: undefined,
+            runtimeModeCeiling: "approval-required",
+            sandboxPolicy: expected.sandbox ? { type: "readOnly" } : undefined,
+            approvalPolicy: expected.approval,
+            readOnly: true,
+            suppressPlanCapture: expected.suppressPlanCapture === true,
+          });
+        },
+      );
+    });
+
+    it("keeps a read-only mode's own enforcement and text, and Code's again with no lead", () => {
+      for (const driver of ALL_DRIVERS) {
+        for (const mode of ["ask", "plan", "review"] as const) {
+          expect(
+            resolveKodoInteractionMode({ mode, driver, lead: { kind: "sub-agents" } }),
+            `${mode} ${String(driver)}`,
+          ).toEqual(resolve(mode, driver));
+        }
+        expect(resolveKodoInteractionMode({ mode: "code", driver, lead: null })).toEqual(
+          resolve("code", driver),
+        );
+      }
+    });
+
+    it("picks the policy mode without changing what the thread displays", () => {
+      expect(kodoPolicyMode("code", { kind: "sub-agents" })).toBe("review");
+      expect(kodoPolicyMode("default", { kind: "sub-agents" })).toBe("review");
+      expect(kodoPolicyMode("code", { kind: "swarm" })).toBe("ask");
+      expect(kodoPolicyMode("plan", { kind: "sub-agents" })).toBe("plan");
+      expect(kodoPolicyMode("code", null)).toBe("code");
+      expect(kodoPolicyMode("code", undefined)).toBe("code");
+    });
+
+    it("caps the runtime mode and marks the policy read-only for the adapters", () => {
+      expect(
+        kodoRuntimePolicyOverlay({
+          interactionMode: "code",
+          driver: "codex",
+          runtimeMode: "full-access",
+          lead: { kind: "sub-agents" },
+        }),
+      ).toEqual({
+        runtimeMode: "approval-required",
+        interactionMode: "default",
+        sandboxPolicy: { type: "readOnly" },
+        approvalPolicy: "never",
+        modeReadOnly: true,
+        modeBlocksNativeSubagents: true,
+      });
+    });
+
+    it("reopens a session that fixes its policy at open when sub-agents switch, and only then", () => {
+      const key = (driver: string, lead: boolean) =>
+        kodoSessionPolicyKey(
+          kodoRuntimePolicyOverlay({
+            interactionMode: "code",
+            driver,
+            runtimeMode: "full-access",
+            lead: lead ? { kind: "sub-agents" } : null,
+          }),
+        );
+      for (const driver of ["grok", "cursor", "pi", "muse", "kiro"]) {
+        expect(
+          kodoSessionNeedsRestart({ driver, opened: key(driver, false), next: key(driver, true) }),
+          driver,
+        ).toBe(true);
+        expect(
+          kodoSessionNeedsRestart({ driver, opened: key(driver, true), next: key(driver, false) }),
+          driver,
+        ).toBe(true);
+      }
+      for (const driver of ["claudeAgent", "codex", "opencode", "antigravity"]) {
+        expect(
+          kodoSessionNeedsRestart({ driver, opened: key(driver, false), next: key(driver, true) }),
+          driver,
+        ).toBe(false);
+      }
+    });
   });
 
   it("never suppresses plan capture for Plan, and only where the wire mode is plan", () => {
@@ -554,7 +649,7 @@ describe("provider session policy", () => {
           interactionMode: "code",
           driver,
           runtimeMode: "full-access",
-          leadsSubAgents: true,
+          lead: { kind: "sub-agents" },
         }),
       );
     for (const driver of ["grok", "cursor", "codex", "claudeAgent", "opencode"]) {
@@ -565,7 +660,7 @@ describe("provider session policy", () => {
         interactionMode: "code",
         driver: "claudeAgent",
         runtimeMode: "full-access",
-        leadsSubAgents: true,
+        lead: { kind: "sub-agents" },
       }),
     ).toMatchObject({ modeBlocksNativeSubagents: true });
     expect(
@@ -573,7 +668,7 @@ describe("provider session policy", () => {
         interactionMode: "code",
         driver: "claudeAgent",
         runtimeMode: "full-access",
-        leadsSubAgents: false,
+        lead: null,
       }),
     ).not.toHaveProperty("modeBlocksNativeSubagents");
   });

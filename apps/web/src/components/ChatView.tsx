@@ -293,6 +293,7 @@ import type { MessagesTimelineHistoryControls } from "./chat/MessagesTimeline";
 import { ThreadTimeline } from "./chat/ThreadTimeline";
 import { NativeChildWorkDialog } from "./chat/NativeChildWorkDialog";
 import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
+import { KodoDelegationBar } from "../kodo/KodoDelegationBar"; // KODO: worker-header
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
@@ -2584,6 +2585,9 @@ export default function ChatView(props: ChatViewProps) {
       : null;
   // KODO: plan-accept-banner (Plan is read-only, so a ready plan offers the approval into Code)
   const kodoLoopRunning = isKodoLoopRunning(serverProjection?.thread.kodoLoop); // KODO: loop-card
+  // KODO: orchestrator-lock - its mode is the server's, so the picker is locked
+  const kodoThreadIsOrchestrator =
+    (serverProjection?.thread.kodoLead ?? activeThread?.kodoLead)?.kind === "swarm";
   const kodoPlanOffer = kodoLoopRunning
     ? null
     : resolveKodoPlanOffer({
@@ -3472,6 +3476,24 @@ export default function ChatView(props: ChatViewProps) {
           </header>
         )}
 
+        {/* KODO: worker-header - a worker says whose it is; a lead says what it and its workers spent */}
+        {embedded ? null : (
+          <KodoDelegationBar
+            environmentId={environmentId}
+            threadId={isServerThread ? activeThreadId : null}
+            lead={serverProjection?.thread.kodoLead ?? activeThread?.kodoLead}
+            relationshipToParent={activeThread?.lineage.relationshipToParent}
+            parent={
+              parentSubagentThread === null
+                ? null
+                : { title: parentSubagentThread.title, kodoLead: parentSubagentThread.kodoLead }
+            }
+            onOpenParent={parentThreadLink?.open ?? null}
+            mode={activeThread?.interactionMode}
+            modelLabel={providerSubagentModelLabel}
+            subagents={serverProjection?.subagents ?? null}
+          />
+        )}
         <div className="relative flex min-h-0 min-w-0 flex-1">
           <ThreadFindCanvas
             findOptions={{
@@ -3707,7 +3729,7 @@ export default function ChatView(props: ChatViewProps) {
                               // KODO: chat-mode-state
                               <KodoInteractionModeStatusProvider
                                 appliesNextTurn={modeAppliesNextTurn}
-                                locked={kodoLoopRunning}
+                                locked={kodoLoopRunning || kodoThreadIsOrchestrator} // KODO: orchestrator-lock
                                 subAgents={kodoSubAgents.status} // KODO: sub-agents
                               >
                                 <ChatComposer

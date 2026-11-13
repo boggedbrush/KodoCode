@@ -262,7 +262,7 @@ describe("the ledger table", () => {
       const marker = yield* sql<{
         version: number;
       }>`SELECT version FROM kodo_schema WHERE name = 'loop_ledger'`;
-      expect(marker).toEqual([{ version: 1 }]);
+      expect(marker).toEqual([{ version: 2 }]);
       const plan = yield* sql<{ detail: string }>`
         EXPLAIN QUERY PLAN
         SELECT COUNT(*) FROM kodo_loop_ledger WHERE kind = 'loop' AND ended_at >= '2026-01-01'
@@ -299,7 +299,7 @@ describe("the ledger table", () => {
       yield* ensureKodoLoopLedger();
       yield* ensureKodoLoopLedger();
       expect(yield* ledgerRows).toHaveLength(1);
-      expect(yield* sql`SELECT version FROM kodo_schema`).toEqual([{ version: 1 }]);
+      expect(yield* sql`SELECT version FROM kodo_schema`).toEqual([{ version: 2 }]);
     }).pipe(Effect.provide(layerTest)),
   );
 
@@ -313,7 +313,7 @@ describe("the ledger table", () => {
       yield* sql`DELETE FROM kodo_schema`;
       yield* ensureKodoLoopLedger();
       expect(yield* ledgerRows).toHaveLength(1);
-      expect(yield* sql`SELECT version FROM kodo_schema`).toEqual([{ version: 1 }]);
+      expect(yield* sql`SELECT version FROM kodo_schema`).toEqual([{ version: 2 }]);
     }).pipe(Effect.provide(layerTest)),
   );
 
@@ -603,6 +603,11 @@ describe("the ledger totals", () => {
       expect(summary.allTime).toEqual({
         loops: 0,
         rounds: 0,
+        workers: 0,
+        split: {
+          loop: { tokens: 0, savedUsd: 0, priced: 0 },
+          subAgents: { tokens: 0, savedUsd: 0, priced: 0 },
+        },
         pricedLoops: 0,
         partialLoops: 0,
         unpricedLoops: 0,

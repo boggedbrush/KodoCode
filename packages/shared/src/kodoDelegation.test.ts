@@ -88,3 +88,28 @@ describe("what a copied thread does not inherit", () => {
     }
   });
 });
+
+describe("the Orchestrator's switch and model slot", () => {
+  it("reads the Orchestrator slot, like any lead", () => {
+    expect(kodoThreadModelSlotMode({ kodoLead: { kind: "swarm" }, interactionMode: "code" })).toBe(
+      "orchestrator",
+    );
+  });
+
+  it("is never offered: it is always read-only", () => {
+    expect(
+      kodoSubAgentsToggle({
+        lead: { kind: "swarm" },
+        provider: { kodoSubAgents: { support: "full" } },
+        busy: false,
+        loopRunning: false,
+        isWorker: false,
+        canOperate: true,
+      }),
+    ).toMatchObject({
+      checked: false,
+      disabled: true,
+      reason: "The Orchestrator is always read-only.",
+    });
+  });
+});

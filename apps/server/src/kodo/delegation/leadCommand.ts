@@ -2,6 +2,7 @@
 // runs, its workers, its ancestry, its provider) and commits the answer. The rules themselves are in
 // leadControl.ts; this file only gathers their inputs, so the hook in the orchestrator stays small.
 import {
+  isKodoOrchestratorThreadId,
   normalizeKodoInteractionMode,
   type KodoLead,
   type OrchestrationV2AppThread,
@@ -105,6 +106,7 @@ export const makeKodoLeadCommands = (services: KodoLeadCommandServices) => {
         id: thread.id,
         interactionMode: normalizeKodoInteractionMode(thread.interactionMode),
         loopStatus: thread.kodoLoop?.status,
+        lead: thread.kodoLead,
       },
       busy: input.busy,
       liveWorkers: counts.live,
@@ -129,6 +131,14 @@ export const makeKodoLeadCommands = (services: KodoLeadCommandServices) => {
   const leadForNewThread = Effect.fn("KodoLeadCommands.leadForNewThread")(function* (
     command: CreateCommand,
   ) {
+    // The Orchestrator is made only by the server, under its fixed id; no transport can send "system".
+    if (
+      command.createdBy === "system" &&
+      command.kodoLead?.kind === "swarm" &&
+      isKodoOrchestratorThreadId(command.threadId)
+    ) {
+      return command.kodoLead;
+    }
     if (command.createdBy !== "user" || command.delegatedFrom !== undefined) return undefined;
     let wanted: KodoLead | null | undefined = command.kodoLead;
     if (wanted === undefined) {

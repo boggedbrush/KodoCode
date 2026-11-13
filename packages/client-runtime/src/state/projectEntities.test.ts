@@ -121,3 +121,31 @@ describe("project scratch identity", () => {
     }
   });
 });
+
+// KODO: orchestrator-hidden - the Orchestrator's project is in no project list, and still readable by id.
+describe("the Orchestrator's project", () => {
+  it("is left out of the project lists and found by a point read", () => {
+    const { registry, projects, snapshotAtom } = makeHarness();
+    try {
+      const id = ProjectId.make("kodo-orchestrator");
+      registry.set(snapshotAtom(environmentId), {
+        ...v2ShellSnapshot,
+        projects: [
+          { ...v2Project, title: "Mine", id: ProjectId.make("mine"), workspaceRoot: "/repo" },
+          { ...v2Project, title: "Orchestrator", id, workspaceRoot: "/home/.t3/orchestrator" },
+        ],
+      });
+      expect(
+        registry
+          .get(projects.projectRefsAtom)
+          .filter((ref) => ref.environmentId === environmentId)
+          .map((ref) => ref.projectId),
+      ).toEqual(["mine"]);
+      expect(registry.get(projects.projectAtom({ environmentId, projectId: id }))?.title).toBe(
+        "Orchestrator",
+      );
+    } finally {
+      registry.dispose();
+    }
+  });
+});

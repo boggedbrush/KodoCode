@@ -208,8 +208,16 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
           thread: makeThread({ now, worktreePath: null, interactionMode: "code", kodoLead }),
           modelSelection,
         });
-      assert.isTrue((yield* resolve({ kind: "sub-agents" })).modeBlocksNativeSubagents);
-      assert.isUndefined((yield* resolve(null)).modeBlocksNativeSubagents);
+      const lead = yield* resolve({ kind: "sub-agents" });
+      assert.isTrue(lead.modeBlocksNativeSubagents);
+      // KODO: delegation-policy - and is read-only though the thread says Code, which a worker keeps.
+      assert.isTrue(lead.modeReadOnly);
+      assert.equal(lead.runtimeMode, "approval-required");
+      assert.equal(lead.interactionMode, "default");
+      const off = yield* resolve(null);
+      assert.isUndefined(off.modeBlocksNativeSubagents);
+      assert.isUndefined(off.modeReadOnly);
+      assert.equal(off.runtimeMode, "full-access");
     }),
   );
 

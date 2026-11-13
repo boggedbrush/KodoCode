@@ -6,6 +6,7 @@ import {
   isRuntimeModeAbove,
   normalizeKodoInteractionMode,
   type KodoInteractionMode,
+  type KodoLead,
   type ProviderInteractionMode,
   type RuntimeMode,
 } from "@t3tools/contracts";
@@ -164,6 +165,28 @@ You are now in Code mode. Any Ask, Plan or Review restriction from earlier in th
 This mode stays in force for the whole thread until a message carries a different kodo_interaction_mode block.
 </kodo_interaction_mode>`;
 
+/**
+ * What a lead thread may do however its displayed mode reads: a sub-agents lead only plans,
+ * delegates and verifies (Review enforcement: edits denied, shell on approval), and the Orchestrator
+ * only reads (Ask enforcement). Workers carry no lead, so they keep their own mode.
+ */
+const LEAD_POLICY_FLOOR: Readonly<Record<KodoLead["kind"], KodoInteractionMode>> = {
+  "sub-agents": "review",
+  swarm: "ask",
+};
+
+/**
+ * The mode a thread's policy is enforced under: its displayed mode, or the lead's floor when that
+ * is more restrictive. The displayed mode (and so the mode workers inherit) is never changed.
+ */
+export const kodoPolicyMode = (
+  mode: unknown,
+  lead: Pick<KodoLead, "kind"> | null | undefined,
+): KodoInteractionMode =>
+  lead === null || lead === undefined
+    ? normalizeKodoInteractionMode(mode)
+    : kodoMoreRestrictiveMode(mode, LEAD_POLICY_FLOOR[lead.kind]);
+
 export interface KodoInteractionModeResolution {
   /** The normalized Kodo mode. */
   readonly mode: KodoInteractionMode;
@@ -201,8 +224,18 @@ const CODE_RESOLUTION = {
 export function resolveKodoInteractionMode(input: {
   readonly mode: unknown;
   readonly driver: string | undefined;
+  /** A lead enforces its floor; the mode stays what was displayed and the lead's own text replaces the mode's. */
+  readonly lead?: Pick<KodoLead, "kind"> | null | undefined;
 }): KodoInteractionModeResolution {
-  const mode = normalizeKodoInteractionMode(input.mode);
+  const displayed = normalizeKodoInteractionMode(input.mode);
+  const mode = kodoPolicyMode(displayed, input.lead);
+  if (mode !== displayed) {
+    return {
+      ...resolveKodoInteractionMode({ mode, driver: input.driver }),
+      mode: displayed,
+      instructions: undefined,
+    };
+  }
   if (mode === "code") return { mode, ...CODE_RESOLUTION };
   const { enforcement, nativePlan } = enforcementFor(input.driver);
   const text =
@@ -311,8 +344,8 @@ export function kodoRuntimePolicyOverlay(input: {
   readonly interactionMode: unknown;
   readonly driver: string | undefined;
   readonly runtimeMode: RuntimeMode;
-  /** The thread leads sub-agents. */
-  readonly leadsSubAgents?: boolean | undefined;
+  /** The thread's lead, which enforces read-only whatever the mode. */
+  readonly lead?: Pick<KodoLead, "kind"> | null | undefined;
 }): {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
@@ -326,6 +359,7 @@ export function kodoRuntimePolicyOverlay(input: {
   const resolution = resolveKodoInteractionMode({
     mode: input.interactionMode,
     driver: input.driver,
+    lead: input.lead,
   });
   return {
     runtimeMode: capRuntimeMode(input.runtimeMode, resolution.runtimeModeCeiling),
@@ -337,7 +371,7 @@ export function kodoRuntimePolicyOverlay(input: {
     ...(resolution.instructions === undefined ? {} : { modeInstructions: resolution.instructions }),
     ...(resolution.readOnly ? { modeReadOnly: true as const } : {}),
     ...(resolution.suppressPlanCapture ? { modeSuppressesPlanCapture: true as const } : {}),
-    ...(input.leadsSubAgents === true ? { modeBlocksNativeSubagents: true as const } : {}),
+    ...(input.lead != null ? { modeBlocksNativeSubagents: true as const } : {}),
   };
 }
 

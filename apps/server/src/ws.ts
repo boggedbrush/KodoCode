@@ -243,6 +243,8 @@ import { commandFeatureUsage, featureUsage } from "./telemetry/FeatureUsage.ts";
 import type { TelemetryOwner } from "./telemetry/Identify.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as KodoLoopLedger from "./kodo/ledger/LoopLedger.ts"; // KODO: loop-ledger-rpc
+import { makeKodoDelegationUsageReader } from "./kodo/delegation/usageReader.ts"; // KODO: delegation-usage-rpc
+import { makeKodoSwarmService } from "./kodo/swarm/SwarmService.ts"; // KODO: orchestrator-rpc
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as TriageService from "./triage/TriageService.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
@@ -1478,6 +1480,11 @@ export const layerWsRpc = (
             );
       const usage = yield* UsageService.UsageService;
       const kodoLoopLedger = yield* KodoLoopLedger.KodoLoopLedger; // KODO: loop-ledger-rpc
+      // KODO: delegation-usage-rpc
+      const kodoDelegationUsage = makeKodoDelegationUsageReader({
+        orchestrator: orchestrationEngine,
+        price: (model, totals) => usage.priceTokens({ model, totals }),
+      });
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
@@ -1516,6 +1523,19 @@ export const layerWsRpc = (
       const databaseStorage = yield* DatabaseStorage.DatabaseStorage;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const secretResolver = yield* SecretResolver.SecretResolver;
+      // KODO: orchestrator-rpc
+      const kodoFileSystem = yield* FileSystem.FileSystem;
+      const kodoPath = yield* Path.Path;
+      const kodoSwarm = makeKodoSwarmService({
+        workspaceRoot: kodoPath.resolve(config.baseDir, "orchestrator"),
+        makeFolder: (folder) => kodoFileSystem.makeDirectory(folder, { recursive: true }),
+        projects: projectService,
+        threads: threadManagement,
+        baseModel: serverSettings.getSettings.pipe(
+          Effect.map((settings) => settings.defaultModelSelection),
+          Effect.orElseSucceed(() => null),
+        ),
+      });
       const peerLinks = yield* PeerLinks.PeerLinks;
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
@@ -2748,6 +2768,9 @@ export const layerWsRpc = (
         [WS_METHODS.serverGetUsageSummary]: (input) => usage.readSummary(input),
         [WS_METHODS.serverRefreshUsageRates]: (_input) => usage.refreshRates,
         [WS_METHODS.serverGetKodoLoopLedger]: (_input) => kodoLoopLedger.read, // KODO: loop-ledger-rpc
+        [WS_METHODS.serverGetKodoDelegationUsage]: ({ threadId }) =>
+          kodoDelegationUsage.read(threadId), // KODO: delegation-usage-rpc
+        [WS_METHODS.serverEnsureKodoOrchestrator]: () => kodoSwarm.ensure, // KODO: orchestrator-rpc
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) => resourceTelemetry.retry,
         [WS_METHODS.serverCheckOtlpEndpoint]: (input) => otlpEndpointCheck.check(input),
         [WS_METHODS.serverListTextGeneratorModels]: (input) => textGenerators.listModels(input),

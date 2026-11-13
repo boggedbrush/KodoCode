@@ -30,6 +30,8 @@ export interface McpThreadCaller {
   readonly providerInstanceId: ProviderInstanceId;
   /** A delegated child task; its parent owns the work it hands back. */
   readonly subagent?: boolean;
+  /** KODO: swarm-guard - the Orchestrator's thread, which may call only its own tools. */
+  readonly kodoSwarm?: boolean;
 }
 
 export interface McpClientCaller {

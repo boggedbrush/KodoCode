@@ -35,7 +35,11 @@ import { Tool } from "effect/ai";
 import * as McpSchema from "effect/ai/McpSchema";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
-import { kodoLeadInstructions } from "../../apps/server/src/kodo/delegation/leadInstructions.ts"; // KODO: sub-agents-eval
+import {
+  KODO_ORCHESTRATOR_INSTRUCTIONS,
+  kodoLeadInstructions,
+} from "../../apps/server/src/kodo/delegation/leadInstructions.ts"; // KODO: sub-agents-eval
+import { KODO_ORCHESTRATOR_TOOLS } from "../../apps/server/src/kodo/swarm/swarmAllowlist.ts"; // KODO: orchestrator-eval
 import { taskPrompt } from "../../apps/server/src/mcp/delegatedTaskModes.ts";
 import { KodoDelegationToolkit } from "../../apps/server/src/mcp/kodoDelegationToolkit.ts"; // KODO: sub-agents-eval
 import { KodoLoopToolkit } from "../../apps/server/src/mcp/kodoLoopToolkit.ts"; // KODO: sub-agents-eval
@@ -304,6 +308,8 @@ export const McpToolUseCase = Schema.Struct({
     kodoLead: Schema.optional(Schema.Literals(["code", "review", "plan", "ask"])),
     /** Only the sub-agent and loop tools are listed, with no lead block: a thread that does not lead. */
     kodoTools: Schema.optional(Schema.Boolean),
+    /** KODO: orchestrator-eval - the thread is the Orchestrator: its block rides in front of each user message, and only its own T3 tools are listed. */
+    kodoOrchestrator: Schema.optional(Schema.Boolean),
     /** delegate_task `role` for a delegated child. T3 builds the child's first message from it. */
     delegateRole: Schema.optional(OrchestratorMcpTaskRole),
     context: Schema.optional(Schema.String),
@@ -510,11 +516,14 @@ const hiddenWhileLinksOff = enabledWhen(McpInvocationContext.hiddenWhileLinksOff
 const visibleT3Tools = (options: {
   readonly subagent?: boolean;
   readonly links?: boolean;
-  readonly kodo?: boolean;
+  readonly kodo?: boolean | "orchestrator";
 }) =>
   t3Tools.filter(
     (tool) =>
-      (options.kodo === true || !kodoToolNames.has(tool.name)) &&
+      // KODO: orchestrator-eval - the Orchestrator is offered only its allowlist
+      (options.kodo !== "orchestrator" ||
+        KODO_ORCHESTRATOR_TOOLS.has(tool.name.slice(T3_PREFIX.length))) &&
+      (options.kodo === true || options.kodo === "orchestrator" || !kodoToolNames.has(tool.name)) &&
       (options.links === true || !hiddenWhileLinksOff.has(tool.name)) &&
       !(options.subagent === true && hiddenFromSubagents.has(tool.name)),
   );
@@ -623,7 +632,7 @@ export const buildBase = (
     readonly keepUserInstructions: boolean;
     readonly subagent?: boolean;
     readonly links?: boolean;
-    readonly kodo?: boolean;
+    readonly kodo?: boolean | "orchestrator";
     /** A native subagent starts from its task: T3 appends nothing to its system prompt. */
     readonly nativeSubagent?: boolean;
     /** false: the thread has no agent device access, so T3's text leaves devices out. */
@@ -716,7 +725,7 @@ const buildCodexBase = (
     readonly effort?: string | undefined;
     readonly subagent?: boolean;
     readonly links?: boolean;
-    readonly kodo?: boolean;
+    readonly kodo?: boolean | "orchestrator";
     /** false: the thread has no agent device access, so T3's text leaves devices out. */
     readonly deviceAccess?: boolean;
   },
@@ -987,9 +996,20 @@ export const buildMessages = (sample: Sample) => {
     if (last?.role !== role) messages.push({ role, content: blocks });
     else messages[messages.length - 1] = { role, content: [...last.content, ...blocks] };
   };
-  const { role, context, delegateRole, priorTurns = [], kodoLead } = testCase.setup;
+  const {
+    role,
+    context,
+    delegateRole,
+    priorTurns = [],
+    kodoLead,
+    kodoOrchestrator,
+  } = testCase.setup;
   const withLead = (value: string) =>
-    kodoLead === undefined ? value : `${kodoLeadInstructions(kodoLead)}\n\n${value}`;
+    kodoOrchestrator === true
+      ? `${KODO_ORCHESTRATOR_INSTRUCTIONS}\n\n${value}`
+      : kodoLead === undefined
+        ? value
+        : `${kodoLeadInstructions(kodoLead)}\n\n${value}`;
   const sideChat = testCase.setup.sideChat;
   if (testCase.prompt === "" && (role !== "top" || sideChat !== undefined)) {
     throw new Error(
@@ -2488,7 +2508,7 @@ const main = Effect.gen(function* () {
     role: McpToolUseCase["setup"]["role"],
     deviceAccess: boolean,
     links: boolean,
-    kodo: boolean,
+    kodo: boolean | "orchestrator",
   ): Effect.Effect<Base, Schema.SchemaError> =>
     codex
       ? decodeCodexCapture(template).pipe(
@@ -2524,7 +2544,7 @@ const main = Effect.gen(function* () {
         );
   // Codex has no native subagents; its cases with that role run as top-level threads.
   const baseKey = ({ setup }: McpToolUseCase) =>
-    `${codex && setup.role === "native-subagent" ? "top" : setup.role}:${setup.world?.deviceAgentAccess !== false}:${setup.linkedEnvironments === true}:${setup.kodoLead !== undefined || setup.kodoTools === true}`;
+    `${codex && setup.role === "native-subagent" ? "top" : setup.role}:${setup.world?.deviceAgentAccess !== false}:${setup.linkedEnvironments === true}:${setup.kodoOrchestrator === true ? "orchestrator" : setup.kodoLead !== undefined || setup.kodoTools === true}`;
   const base = yield* buildFor("top", true, false, false);
   const bases = new Map<string, Base>([["top:true:false:false", base]]);
   for (const testCase of selected) {
@@ -2536,7 +2556,15 @@ const main = Effect.gen(function* () {
       string,
       string,
     ];
-    bases.set(key, yield* buildFor(role, access === "true", links === "true", kodo === "true"));
+    bases.set(
+      key,
+      yield* buildFor(
+        role,
+        access === "true",
+        links === "true",
+        kodo === "orchestrator" ? "orchestrator" : kodo === "true",
+      ),
+    );
   }
   const baseFor = (testCase: McpToolUseCase) => bases.get(baseKey(testCase)) ?? base;
   const effort = flags.effort ?? base.codex?.reasoning.effort ?? "high";

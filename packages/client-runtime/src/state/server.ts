@@ -1210,6 +1210,12 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverRunStorageCleanup,
       concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
     }),
+    // KODO: orchestrator-rpc - makes the Orchestrator's project and thread the first time, then returns them
+    ensureKodoOrchestrator: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:ensure-kodo-orchestrator",
+      tag: WS_METHODS.serverEnsureKodoOrchestrator,
+      concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
+    }),
     prepareTriage: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:prepare-triage",
       tag: WS_METHODS.serverPrepareTriage,
@@ -1370,6 +1376,13 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:kodo-loop-ledger",
       tag: WS_METHODS.serverGetKodoLoopLedger,
       staleTimeMs: 0,
+    }),
+    // KODO: delegation-usage-query - a lead's spend, read on demand; the thread view re-reads it as workers finish
+    kodoDelegationUsage: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:kodo-delegation-usage",
+      tag: WS_METHODS.serverGetKodoDelegationUsage,
+      staleTimeMs: 0,
+      idleTtlMs: 0,
     }),
     resourceTelemetry: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:resource-telemetry",

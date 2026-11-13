@@ -834,6 +834,248 @@ it.live(
 );
 
 it.live(
+  "a Code lead's turns run read-only, turning sub-agents off restores writing, and on again takes it away",
+  () =>
+    withHarness("kodo-sub-agents-lead-policy", {}, ({ state, orchestrator, worker, cwd }) =>
+      Effect.gen(function* () {
+        const name = "kodo-sub-agents-lead-policy";
+        const threadId = ThreadId.make(`thread:${name}`);
+        const ctx = { state, orchestrator, worker, name, threadId };
+        yield* createThread(orchestrator, { name, threadId, cwd });
+        yield* runTurn(ctx, "code-1", selection("base-model"));
+        yield* setLead(orchestrator, name, threadId, true, 1);
+        yield* runTurn(ctx, "lead-1", selection("base-model"));
+        yield* setLead(orchestrator, name, threadId, false, 2);
+        yield* runTurn(ctx, "code-2", selection("base-model"));
+        yield* setLead(orchestrator, name, threadId, true, 3);
+        yield* runTurn(ctx, "lead-2", selection("base-model"));
+
+        const captured = yield* Ref.get(state);
+        assert.deepEqual(
+          captured.started.map((turn) => [turn.modeReadOnly, turn.sandbox]),
+          [
+            [false, undefined],
+            [true, "readOnly"],
+            [false, undefined],
+            [true, "readOnly"],
+          ],
+        );
+        // Grok fixes its policy when a session opens, so each switch reopens it.
+        assert.deepEqual(
+          captured.opened.map((session) => session.modeReadOnly),
+          [false, true, false, true],
+        );
+        // The thread still says Code: that is the mode its workers are given.
+        const projection = yield* orchestrator.getThreadProjection(threadId);
+        assert.equal(projection.thread.interactionMode, "code");
+        assert.isTrue(projection.runs.every((run) => run.interactionMode === "code"));
+      }),
+    ),
+);
+
+// KODO: swarm-guard - the Orchestrator's thread: made only by the server, read-only whatever it says, and the server's to keep.
+const ORCHESTRATOR_THREAD = ThreadId.make("kodo-orchestrator");
+const ORCHESTRATOR_PROJECT = ProjectId.make("kodo-orchestrator");
+
+const createOrchestrator = (
+  orchestrator: Orchestrator.OrchestratorV2["Service"],
+  input: {
+    readonly cwd: string;
+    readonly createdBy: "system" | "user";
+    readonly threadId?: ThreadId;
+    readonly lead?: { readonly kind: "swarm" };
+  },
+) =>
+  orchestrator.dispatch({
+    type: "thread.create",
+    createdBy: input.createdBy,
+    creationSource: input.createdBy === "system" ? "server" : "web",
+    commandId: CommandId.make(`command:swarm:${input.createdBy}:${input.threadId ?? "fixed"}`),
+    threadId: input.threadId ?? ORCHESTRATOR_THREAD,
+    projectId:
+      input.threadId === undefined ? ORCHESTRATOR_PROJECT : ProjectId.make("project:swarm"),
+    title: "Orchestrator",
+    modelSelection: selection("base-model"),
+    runtimeMode: "approval-required",
+    interactionMode: "code",
+    ...(input.lead === undefined ? {} : { kodoLead: input.lead }),
+    branch: null,
+    worktreePath: input.cwd,
+  });
+
+it.live("only the server makes the Orchestrator, under its fixed id", () =>
+  withHarness("kodo-swarm-create", {}, ({ orchestrator, cwd }) =>
+    Effect.gen(function* () {
+      const lead = { kind: "swarm" } as const;
+      // A person's client cannot make it, or put any thread in its project.
+      const byUser = yield* createOrchestrator(orchestrator, { cwd, createdBy: "user", lead }).pipe(
+        Effect.flip,
+      );
+      assert.include(String((byUser as { cause?: unknown }).cause), "managed by the server");
+      // Another thread asking for the swarm lead is made without it.
+      const other = ThreadId.make("thread:not-the-orchestrator");
+      yield* createOrchestrator(orchestrator, {
+        cwd,
+        createdBy: "system",
+        threadId: other,
+        lead,
+      });
+      assert.isNull((yield* orchestrator.getThreadShell(other))?.kodoLead ?? null);
+      yield* createOrchestrator(orchestrator, { cwd, createdBy: "system", lead });
+      assert.deepEqual((yield* orchestrator.getThreadShell(ORCHESTRATOR_THREAD))?.kodoLead, lead);
+    }),
+  ),
+);
+
+it.live("the Orchestrator cannot be changed, deleted, forked or made writable", () =>
+  withHarness("kodo-swarm-locked", {}, ({ orchestrator, cwd }) =>
+    Effect.gen(function* () {
+      yield* createOrchestrator(orchestrator, {
+        cwd,
+        createdBy: "system",
+        lead: { kind: "swarm" },
+      });
+      const refused = (command: Parameters<typeof orchestrator.dispatch>[0]) =>
+        orchestrator.dispatch(command).pipe(
+          Effect.flip,
+          Effect.map((error) => String((error as { cause?: unknown }).cause)),
+        );
+      const id = (label: string) => CommandId.make(`command:swarm-locked:${label}`);
+      for (const [label, command] of [
+        [
+          "mode",
+          {
+            type: "thread.interaction-mode.set",
+            threadId: ORCHESTRATOR_THREAD,
+            interactionMode: "ask",
+          },
+        ],
+        [
+          "runtime",
+          {
+            type: "thread.runtime-mode.set",
+            threadId: ORCHESTRATOR_THREAD,
+            runtimeMode: "full-access",
+          },
+        ],
+        ["archive", { type: "thread.archive", threadId: ORCHESTRATOR_THREAD }],
+        ["delete", { type: "thread.delete", threadId: ORCHESTRATOR_THREAD }],
+        [
+          "lead-off",
+          {
+            type: "thread.kodo-lead.set",
+            threadId: ORCHESTRATOR_THREAD,
+            lead: null,
+            createdBy: "user",
+            creationSource: "web",
+          },
+        ],
+      ] as const) {
+        const cause = yield* refused({ commandId: id(label), ...command } as never);
+        assert.match(cause, /managed by the server|always read-only/, label);
+      }
+      assert.deepEqual((yield* orchestrator.getThreadShell(ORCHESTRATOR_THREAD))?.kodoLead, {
+        kind: "swarm",
+      });
+    }),
+  ),
+);
+
+// KODO: swarm-delegate - only the Orchestrator's delegated task may start in another project.
+const delegateFromActiveRun = Effect.fnUntraced(function* (
+  input: TurnContext,
+  targetProjectId: ProjectId,
+) {
+  yield* startTurn(input, "parent", selection("base-model"));
+  const projection = yield* input.orchestrator.getThreadProjection(input.threadId);
+  const run = projection.runs[0]!;
+  yield* input.orchestrator.dispatch({
+    type: "delegated_task.request",
+    createdBy: "agent",
+    creationSource: "mcp",
+    commandId: CommandId.make(`command:${input.name}:delegate`),
+    parentThreadId: input.threadId,
+    parentRunId: run.id,
+    parentNodeId: run.rootNodeId!,
+    task: "Write notes.",
+    modelSelection: selection("base-model"),
+    runtimeMode: "approval-required",
+    interactionMode: "code",
+    kodoTargetProjectId: targetProjectId,
+  });
+  const task = (yield* input.orchestrator.getThreadProjection(input.threadId)).subagents[0]!;
+  return (yield* input.orchestrator.getThreadShell(task.childThreadId!))!.projectId;
+});
+
+it.live("a task starts in the project it names only when the Orchestrator asks for it", () =>
+  withHarness("kodo-swarm-delegate", {}, ({ state, orchestrator, worker, cwd }) =>
+    Effect.gen(function* () {
+      const other = ProjectId.make("project:named-by-the-person");
+      const orchestratorCtx = {
+        state,
+        orchestrator,
+        worker,
+        name: "kodo-swarm-delegate-orchestrator",
+        threadId: ORCHESTRATOR_THREAD,
+      };
+      yield* createOrchestrator(orchestrator, {
+        cwd,
+        createdBy: "system",
+        lead: { kind: "swarm" },
+      });
+      assert.equal(yield* delegateFromActiveRun(orchestratorCtx, other), other);
+
+      const plain = ThreadId.make("thread:kodo-swarm-delegate-plain");
+      yield* createThread(orchestrator, {
+        name: "kodo-swarm-delegate-plain",
+        threadId: plain,
+        cwd,
+      });
+      const plainCtx = {
+        state,
+        orchestrator,
+        worker,
+        name: "kodo-swarm-delegate-plain",
+        threadId: plain,
+      };
+      // Any other thread's request for another project is ignored: the task stays in its own.
+      assert.equal(
+        yield* delegateFromActiveRun(plainCtx, other),
+        ProjectId.make("project:kodo-swarm-delegate-plain"),
+      );
+    }),
+  ),
+);
+
+it.live("the Orchestrator's turns run read-only in Code mode, on the Orchestrator model", () =>
+  withHarness(
+    "kodo-swarm-policy",
+    { orchestrator: selection("orchestrator-model") },
+    ({ state, orchestrator, worker, cwd }) =>
+      Effect.gen(function* () {
+        const name = "kodo-swarm-policy";
+        yield* createOrchestrator(orchestrator, {
+          cwd,
+          createdBy: "system",
+          lead: { kind: "swarm" },
+        });
+        const ctx = { state, orchestrator, worker, name, threadId: ORCHESTRATOR_THREAD };
+        yield* runTurn(ctx, "ask-it", selection("base-model"));
+        const captured = yield* Ref.get(state);
+        // Ask enforcement: read-only sandbox, whatever the thread displays.
+        assert.deepEqual(
+          captured.started.map((turn) => [turn.model, turn.modeReadOnly, turn.sandbox]),
+          [["orchestrator-model", true, "readOnly"]],
+        );
+        assert.equal(
+          (yield* orchestrator.getThreadProjection(ORCHESTRATOR_THREAD)).thread.interactionMode,
+          "code",
+        );
+      }),
+  ),
+);
+
+it.live(
   "an Orchestrator model on a provider that cannot receive the tools falls back to the thread's own, and says why",
   () =>
     withHarness(

@@ -53,16 +53,27 @@ const RefusedInReadOnlyModes = Context.Reference<string | undefined>(
  */
 export const refuseReadOnlyCaller = (caller: {
   readonly limits: { readonly interactionMode: unknown };
+  /** A lead's own turns are read-only whatever its mode says; its workers carry no lead. */
+  readonly caller?: { readonly kodoLead?: object | null | undefined } | undefined;
 }) =>
   Effect.flatMap(RefusedInReadOnlyModes, (toolName) =>
-    toolName !== undefined && kodoInteractionModeRank(caller.limits.interactionMode) === 0
-      ? Effect.fail(
-          new OrchestratorMcpFailure({
-            code: "capability_denied",
-            message: `${toolName} changes things, and this thread is in a read-only mode (Ask, Plan or Review). Switch the thread to Code mode to use it.`,
-          }),
-        )
-      : Effect.void,
+    toolName === undefined
+      ? Effect.void
+      : kodoInteractionModeRank(caller.limits.interactionMode) === 0
+        ? Effect.fail(
+            new OrchestratorMcpFailure({
+              code: "capability_denied",
+              message: `${toolName} changes things, and this thread is in a read-only mode (Ask, Plan or Review). Switch the thread to Code mode to use it.`,
+            }),
+          )
+        : caller.caller?.kodoLead != null
+          ? Effect.fail(
+              new OrchestratorMcpFailure({
+                code: "capability_denied",
+                message: `${toolName} changes things, and this thread only delegates. Hand the work to a worker with delegate_task.`,
+              }),
+            )
+          : Effect.void,
   );
 
 /**

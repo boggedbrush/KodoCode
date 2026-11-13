@@ -574,6 +574,10 @@
     "./kodoDelegation": {
       "types": "./src/kodoDelegation.ts",
       "import": "./src/kodoDelegation.ts"
+    },
+    "./kodoOrchestrator": {
+      "types": "./src/kodoOrchestrator.ts",
+      "import": "./src/kodoOrchestrator.ts"
     }
   },
   "scripts": {

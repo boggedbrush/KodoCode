@@ -1,4 +1,6 @@
 import {
+  KODO_ORCHESTRATOR_PROJECT_ID, // KODO: orchestrator-hidden
+  KODO_ORCHESTRATOR_THREAD_ID, // KODO: orchestrator-hidden
   EnvironmentId,
   ProjectId,
   RunId,
@@ -13,6 +15,7 @@ import { Atom, AtomRegistry } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
 import { PrimaryConnectionTarget } from "../connection/model.ts";
+import { scopeThreadRef } from "../environment/scoped.ts"; // KODO: orchestrator-hidden
 import { v2Now, v2ShellSnapshot, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
 import { applyShellStreamEvent } from "./shellReducer.ts";
 import { isThreadWorking } from "./threadInbox.ts";
@@ -630,6 +633,42 @@ describe("v2 thread shell lists", () => {
       expect(harness.registry.get(listAtom)[0]?.title).toBe("Renamed");
     } finally {
       dispose();
+      harness.registry.dispose();
+    }
+  });
+
+  // KODO: orchestrator-hidden - the Orchestrator's thread is in no list, and every point read still finds it.
+  it("leaves the Orchestrator's thread out of every list but not out of a point read", () => {
+    const harness = makeHarness();
+    const orchestrator: OrchestrationV2ThreadShell = {
+      ...v2ThreadShell,
+      id: KODO_ORCHESTRATOR_THREAD_ID,
+      projectId: KODO_ORCHESTRATOR_PROJECT_ID,
+      title: "Orchestrator",
+    };
+    harness.registry.set(harness.snapshotAtom(environmentId), {
+      ...v2ShellSnapshot,
+      threads: [v2ThreadShell, orchestrator],
+    });
+    const lists = [
+      harness.threads.quietThreadShellsAtom,
+      harness.threads.visibleThreadShellsAtom,
+      harness.threads.navigationThreadShellsAtom,
+    ];
+    const disposers = lists.map((atom) => harness.registry.mount(atom));
+    try {
+      for (const atom of lists) {
+        const titles = harness.registry.get(atom).map((thread) => thread.title);
+        expect(titles).not.toContain("Orchestrator");
+        expect(titles).toHaveLength(1);
+      }
+      const ref = scopeThreadRef(environmentId, KODO_ORCHESTRATOR_THREAD_ID);
+      expect(harness.registry.get(harness.threads.threadShellAtom(ref))?.title).toBe(
+        "Orchestrator",
+      );
+      expect(harness.registry.get(harness.threads.threadShellsAtom)).toHaveLength(2);
+    } finally {
+      for (const dispose of disposers) dispose();
       harness.registry.dispose();
     }
   });

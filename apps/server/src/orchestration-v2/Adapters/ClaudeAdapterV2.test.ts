@@ -19770,12 +19770,16 @@ describe("ClaudeAdapterV2 Kodo read-only modes", () => {
           interactionMode,
           driver: "claudeAgent",
           runtimeMode: "full-access",
-          leadsSubAgents: true,
+          lead: { kind: "sub-agents" },
         }),
       });
+    // A Code lead is read-only too: edit tools denied beside the native subagent tools.
     const code = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(leadPolicy("code"));
-    assert.deepEqual(code.disallowedTools, ClaudeAdapterV2.CLAUDE_LEAD_DISALLOWED_TOOLS);
-    assert.isUndefined(code.readOnly);
+    assert.deepEqual(code.disallowedTools, [
+      ...disallowed,
+      ...ClaudeAdapterV2.CLAUDE_LEAD_DISALLOWED_TOOLS,
+    ]);
+    assert.isTrue(code.readOnly);
     const ask = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(leadPolicy("ask"));
     assert.deepEqual(ask.disallowedTools, [...disallowed, "Agent", "Task"]);
     assert.isTrue(ask.readOnly);

@@ -27,8 +27,15 @@ const make = Effect.gen(function* () {
   // thousands of loops. Nothing here scans the thread tables.
   const totals = Effect.fn("KodoLoopLedger.totals")(function* (from: string) {
     const [sums] = yield* sql<{
-      readonly loops: number;
+      readonly loops: number | null;
+      readonly workers: number | null;
       readonly rounds: number | null;
+      readonly loop_tokens: number | null;
+      readonly worker_tokens: number | null;
+      readonly loop_saved: number | null;
+      readonly worker_saved: number | null;
+      readonly loop_priced: number | null;
+      readonly worker_priced: number | null;
       readonly priced: number | null;
       readonly partial: number | null;
       readonly unpriced: number | null;
@@ -38,8 +45,15 @@ const make = Effect.gen(function* () {
       readonly no_usage: number | null;
     }>`
       SELECT
-        COUNT(*) AS loops,
-        SUM(rounds) AS rounds,
+        SUM(kind = 'loop') AS loops,
+        SUM(kind = 'sub-agents') AS workers,
+        SUM(CASE WHEN kind = 'loop' THEN rounds END) AS rounds,
+        SUM(CASE WHEN kind = 'loop' THEN tokens END) AS loop_tokens,
+        SUM(CASE WHEN kind = 'sub-agents' THEN tokens END) AS worker_tokens,
+        SUM(CASE WHEN kind = 'loop' THEN reference_usd - actual_usd END) AS loop_saved,
+        SUM(CASE WHEN kind = 'sub-agents' THEN reference_usd - actual_usd END) AS worker_saved,
+        SUM(CASE WHEN kind = 'loop' THEN priced END) AS loop_priced,
+        SUM(CASE WHEN kind = 'sub-agents' THEN priced END) AS worker_priced,
         SUM(priced) AS priced,
         SUM(partial) AS partial,
         SUM(unpriced) AS unpriced,
@@ -48,12 +62,12 @@ const make = Effect.gen(function* () {
         SUM(tokens) AS tokens,
         SUM(tokens IS NULL) AS no_usage
       FROM kodo_loop_ledger
-      WHERE kind = 'loop' AND ended_at >= ${from}
+      WHERE kind IN ('loop', 'sub-agents') AND ended_at >= ${from}
     `;
     const models = yield* sql<{ readonly model: string; readonly tokens: number }>`
       SELECT j.key AS model, SUM(j.value) AS tokens
       FROM kodo_loop_ledger AS l, json_each(l.models_json) AS j
-      WHERE l.kind = 'loop' AND l.ended_at >= ${from} AND l.models_json IS NOT NULL
+      WHERE l.kind IN ('loop', 'sub-agents') AND l.ended_at >= ${from} AND l.models_json IS NOT NULL
       GROUP BY j.key
       ORDER BY tokens DESC, model
       LIMIT ${KODO_LOOP_LEDGER_MODELS_MAX}
@@ -61,7 +75,7 @@ const make = Effect.gen(function* () {
     const references = yield* sql<{ readonly model: string }>`
       SELECT reference_model AS model
       FROM kodo_loop_ledger
-      WHERE kind = 'loop' AND ended_at >= ${from} AND reference_model IS NOT NULL
+      WHERE kind IN ('loop', 'sub-agents') AND ended_at >= ${from} AND reference_model IS NOT NULL
       GROUP BY reference_model
       ORDER BY MAX(ended_at) DESC
       LIMIT ${KODO_LOOP_LEDGER_REFERENCE_MODELS_MAX}
@@ -71,6 +85,19 @@ const make = Effect.gen(function* () {
     return {
       loops: sums?.loops ?? 0,
       rounds: sums?.rounds ?? 0,
+      workers: sums?.workers ?? 0,
+      split: {
+        loop: {
+          tokens: sums?.loop_tokens ?? 0,
+          savedUsd: sums?.loop_saved ?? 0,
+          priced: sums?.loop_priced ?? 0,
+        },
+        subAgents: {
+          tokens: sums?.worker_tokens ?? 0,
+          savedUsd: sums?.worker_saved ?? 0,
+          priced: sums?.worker_priced ?? 0,
+        },
+      },
       pricedLoops: sums?.priced ?? 0,
       partialLoops: sums?.partial ?? 0,
       unpricedLoops: sums?.unpriced ?? 0,

@@ -4,6 +4,9 @@
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import { NonNegativeInt, ThreadId } from "./baseSchemas.ts";
+import { ModelSelection } from "./modelSelection.ts";
+
 /** Live workers per lead: the setting's default, and the most the setting allows. */
 export const KODO_SUB_AGENTS_DEFAULT_MAX_WORKERS = 3;
 export const KODO_SUB_AGENTS_MAX_WORKERS_LIMIT = 6;
@@ -31,3 +34,51 @@ export const KodoSubAgentsSupport = Schema.Struct({
   note: Schema.optional(Schema.String),
 });
 export type KodoSubAgentsSupport = typeof KodoSubAgentsSupport.Type;
+
+/** What one side of a delegation spent, counted as the loop's token cap counts it. */
+export const KodoDelegationSpend = Schema.Struct({
+  tokens: NonNegativeInt,
+  /** Absent: no price for a model that ran (unlisted, or subscription-only), never zero. */
+  costUsd: Schema.optional(Schema.Number),
+  /** False when a turn reported nothing or a provider left subagent work out: the figures are a floor. */
+  complete: Schema.Boolean,
+});
+export type KodoDelegationSpend = typeof KodoDelegationSpend.Type;
+
+/** The workers' cost against the same tokens at the lead's model. An estimate at list prices. */
+export const KodoDelegationSavings = Schema.Struct({
+  actualUsd: Schema.Number,
+  referenceUsd: Schema.Number,
+  savedUsd: Schema.Number,
+  savedPct: Schema.Number,
+  referenceModel: ModelSelection,
+  /** Workers priced on both sides. */
+  pricedWorkers: NonNegativeInt,
+  /** Workers on another model that could not be priced: left out, never counted as free. */
+  unpricedWorkers: NonNegativeInt,
+  /** Workers that ran on the lead's own model: nothing to compare. */
+  sameModelWorkers: NonNegativeInt,
+});
+export type KodoDelegationSavings = typeof KodoDelegationSavings.Type;
+
+export const KodoDelegationUsage = Schema.Struct({
+  threadId: ThreadId,
+  /** The lead's own turns; absent when none reported. */
+  lead: Schema.optional(KodoDelegationSpend),
+  /** Every worker's turns together; absent when none reported. */
+  workers: Schema.optional(KodoDelegationSpend),
+  workerCount: NonNegativeInt,
+  /** Workers whose provider reported no tokens at all. */
+  unreportedWorkers: NonNegativeInt,
+  savings: Schema.optional(KodoDelegationSavings),
+});
+export type KodoDelegationUsage = typeof KodoDelegationUsage.Type;
+
+export class KodoDelegationUsageReadError extends Schema.TaggedError<KodoDelegationUsageReadError>()(
+  "KodoDelegationUsageReadError",
+  { cause: Schema.optional(Schema.Defect()) },
+) {
+  override get message(): string {
+    return "The usage of this thread's workers could not be read.";
+  }
+}

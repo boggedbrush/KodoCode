@@ -1077,15 +1077,19 @@ const make = Effect.gen(function* () {
       readonly interactionMode?: ThreadInteractionMode | "inherit" | undefined;
     },
   >(scope: McpInvocationScope, input: Input) {
-    if (scope.thread === undefined) return { input, lead: false } as const;
+    if (scope.thread === undefined) return { input, lead: false, swarm: false } as const;
     const callerThreadId = scope.thread.threadId;
     yield* kodoGuard.guardNotWorker(callerThreadId);
     const shell = yield* threadManagement
       .getThreadShell(callerThreadId)
       .pipe(Effect.mapError(threadManagementFailure));
     return shell !== null && isKodoLead(shell)
-      ? ({ input: normalizeLeadDelegation(input, shell.interactionMode), lead: true } as const)
-      : ({ input, lead: false } as const);
+      ? ({
+          input: normalizeLeadDelegation(input, shell.interactionMode),
+          lead: true,
+          swarm: shell.kodoLead?.kind === "swarm",
+        } as const)
+      : ({ input, lead: false, swarm: false } as const);
   });
 
   /** KODO: delegation-normalize - a lead's worker inherits the lead's own model, not the orchestrator model standing in for it. */
@@ -1099,6 +1103,33 @@ const make = Effect.gen(function* () {
           thread: { ...parent.thread, modelSelection: kodoThreadOwnModel(parent.thread) },
         }
       : parent;
+
+  /** KODO: swarm-delegate - the project the Orchestrator named, checked to exist and not to be its own. */
+  const kodoSwarmTargetProject = Effect.fn("OrchestratorMcpService.kodoSwarmTargetProject")(
+    function* (
+      ownProjectId: ProjectId,
+      input: {
+        readonly target?: OrchestratorMcpTarget | undefined;
+        readonly isolation?: string | undefined;
+      },
+    ) {
+      const projectId = input.target?.projectId;
+      if (projectId === undefined || projectId === ownProjectId) {
+        return yield* failure(
+          "invalid_request",
+          "Name the project to start work in: pass target.projectId from t3_project_list.",
+        );
+      }
+      if (input.isolation === "worktree") {
+        return yield* failure(
+          "invalid_request",
+          "Work started from here runs in the project's own checkout. Omit isolation.",
+        );
+      }
+      yield* requireProject(projectId);
+      return projectId;
+    },
+  );
 
   /**
    * KODO: delegation-normalize - what a lead's new worker must pass: the usage gate over every
@@ -2454,7 +2485,11 @@ const make = Effect.gen(function* () {
     delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(
       function* (callerScope, requestedInput) {
         // KODO: delegation-normalize
-        const { input, lead: kodoLead } = yield* kodoLeadStart(callerScope, requestedInput);
+        const {
+          input,
+          lead: kodoLead,
+          swarm: kodoSwarm,
+        } = yield* kodoLeadStart(callerScope, requestedInput);
         const environmentId =
           input.target === undefined
             ? undefined
@@ -2473,7 +2508,12 @@ const make = Effect.gen(function* () {
             : readTask(scope, taskId, false, true);
         }
         const { scope, parent } = yield* loadThreadCaller(callerScope, "delegate_task");
+        // KODO: swarm-delegate - the Orchestrator starts work only in a project it was told to, never in its own
+        const kodoTargetProjectId = kodoSwarm
+          ? yield* kodoSwarmTargetProject(parent.thread.projectId, input)
+          : undefined;
         if (
+          kodoTargetProjectId === undefined &&
           input.target?.projectId !== undefined &&
           input.target.projectId !== parent.thread.projectId
         ) {
@@ -2569,6 +2609,7 @@ const make = Effect.gen(function* () {
             ...(input.title === undefined ? {} : { title: input.title }),
             modelSelection: target.modelSelection,
             explicitModelSelection: target.modelNamed, // KODO: mode-models-send
+            ...(kodoTargetProjectId === undefined ? {} : { kodoTargetProjectId }), // KODO: swarm-delegate
             runtimeMode,
             interactionMode,
             ...(workspaceStrategy === undefined ? {} : { workspaceStrategy }),

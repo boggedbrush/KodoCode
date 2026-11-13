@@ -17,6 +17,7 @@ import { Atom } from "effect/reactivity";
 import type { EnvironmentThreadShell, PendingSubagentRequest } from "./models.ts";
 import { presentThreadShell, threadRuntimeIsActive } from "./models.ts";
 import { hiddenThreadKeys, NO_HIDDEN_THREADS } from "./threadTagFilter.ts";
+import { withKodoOrchestratorHidden } from "./kodoOrchestratorVisibility.ts"; // KODO: orchestrator-hidden
 import { type EnvironmentCatalogState, enabledEnvironmentIds } from "./connections.ts";
 import {
   arrayElementsEqual,
@@ -597,7 +598,7 @@ export function createEnvironmentThreadShellAtoms(input: {
   // Point reads and threadShellsAtom stay complete, so code that asks whether a thread
   // exists (outboxes, drafts, removals) never mistakes a hidden thread for a missing one.
   let previousHiddenThreadKeys: ReadonlySet<string> = NO_HIDDEN_THREADS;
-  const hiddenThreadKeysAtom = Atom.make((get) => {
+  const tagHiddenThreadKeysAtom = Atom.make((get) => {
     const environments = Array.from(
       enabledEnvironmentIds(get(input.catalogValueAtom)),
       (environmentId) => ({
@@ -625,6 +626,17 @@ export function createEnvironmentThreadShellAtoms(input: {
     previousHiddenThreadKeys = next;
     return next;
   }).pipe(Atom.withLabel("environment-hidden-thread-keys"));
+
+  // KODO: orchestrator-hidden - the Orchestrator's thread has its own pinned row, so no list carries it
+  let previousOrchestratorHidden: ReadonlySet<string> = NO_HIDDEN_THREADS;
+  const hiddenThreadKeysAtom = Atom.make((get) => {
+    previousOrchestratorHidden = withKodoOrchestratorHidden(
+      get(tagHiddenThreadKeysAtom),
+      get(threadRefsAtom),
+      previousOrchestratorHidden,
+    );
+    return previousOrchestratorHidden;
+  }).pipe(Atom.withLabel("environment-hidden-thread-keys-with-orchestrator"));
 
   const anyEnvironmentHidingAtom = Atom.make((get) =>
     Array.from(enabledEnvironmentIds(get(input.catalogValueAtom))).some(

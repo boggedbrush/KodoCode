@@ -156,7 +156,8 @@ export function assertLiveCaller({ caller, scope }: Caller) {
 export const assertFullAccess = (context: Caller, message: string) =>
   context.limits.runtimeMode === "full-access" &&
   // KODO: mode-rank - code threads store "code"; a legacy "default" reads as code too.
-  kodoInteractionModeRank(context.limits.interactionMode) === 1
+  kodoInteractionModeRank(context.limits.interactionMode) === 1 &&
+  context.caller?.kodoLead == null // KODO: delegation-policy - a lead only delegates
     ? Effect.void
     : Effect.fail(new OrchestratorMcpFailure({ code: "capability_denied", message }));
 

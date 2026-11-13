@@ -18,6 +18,7 @@ import * as Effect from "effect/Effect";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -76,6 +77,10 @@ interface World {
   readonly leadSelection: { instanceId: ProviderInstanceId; model: string };
   readonly leadOwn?: { instanceId: ProviderInstanceId; model: string };
   readonly lead?: boolean;
+  /** The kind of lead the thread is; the Orchestrator is "swarm". */
+  readonly leadKind?: "sub-agents" | "swarm";
+  /** Projects `getById` finds besides none. */
+  readonly knownProjects?: ReadonlyArray<string>;
   /** Extra threads by id, for the guard's reads. */
   readonly shells?: Record<string, Record<string, unknown>>;
   readonly children?: ReadonlyArray<string>;
@@ -121,7 +126,7 @@ const run = <A, E>(
     const leadShell = shell(leadId, {
       interactionMode: world.mode,
       modelSelection: world.leadSelection,
-      ...(world.lead === false ? {} : { kodoLead: { kind: "sub-agents" } }),
+      ...(world.lead === false ? {} : { kodoLead: { kind: world.leadKind ?? "sub-agents" } }),
       ...(world.leadOwn === undefined
         ? {}
         : { kodoModeModel: { applied: world.leadSelection, base: world.leadOwn } }),
@@ -212,7 +217,14 @@ const run = <A, E>(
             } as unknown as ProviderAdapter.ProviderAdapterV2["Service"]),
         }),
       ),
-      Layer.mock(ProjectService.ProjectService)({}),
+      Layer.mock(ProjectService.ProjectService)({
+        getById: (id) =>
+          Effect.succeed(
+            (world.knownProjects ?? []).includes(id)
+              ? Option.some({ id, title: id, workspaceRoot: `/work/${id}` } as never)
+              : Option.none(),
+          ),
+      }),
       Layer.mock(SecretRequests.SecretRequests)({}),
       Layer.mock(RemoteDelegation.RemoteDelegation)({}),
       Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
@@ -630,5 +642,101 @@ describe("limits on a lead's delegation", () => {
           assert.equal(command.modelSelection.instanceId, slotInstance);
         }),
       ),
+  );
+});
+
+// KODO: swarm-delegate - the Orchestrator starts work only in a project it names, never its own.
+describe("the Orchestrator's delegate_task", () => {
+  const world = {
+    mode: "code" as const,
+    leadKind: "swarm" as const,
+    leadSelection: { instanceId: own, model: "claude-own-model" },
+    knownProjects: ["project:other"],
+  };
+  const named = { projectId: ProjectId.make("project:other") };
+
+  it.effect(
+    "starts the worker in the project it names, on the slot model, with nothing it chose",
+    () =>
+      run(world, ({ service, dispatched }) =>
+        Effect.gen(function* () {
+          yield* delegate(service, {
+            task: "Add retries.",
+            role: "implementation",
+            mode: "async",
+            clientRequestId: "swarm-named",
+            target: { ...named, model: "slot-model", providerInstanceId: slotInstance },
+          });
+          const command = lastCommand(yield* Ref.get(dispatched));
+          assert.equal(command.type, "delegated_task.request");
+          assert.equal(command.kodoTargetProjectId, "project:other");
+          assert.equal(command.explicitModelSelection, false);
+          assert.equal(command.modelSelection.model, "claude-own-model");
+        }),
+      ),
+  );
+
+  it.effect("refuses a call that names no project, or names its own", () =>
+    run(world, ({ service, dispatched }) =>
+      Effect.gen(function* () {
+        for (const target of [undefined, { projectId: projectId }]) {
+          const failure = yield* service
+            .delegateTask(scope(leadId), {
+              task: "Go.",
+              mode: "async",
+              clientRequestId: `swarm-unnamed-${String(target?.projectId)}`,
+              ...(target === undefined ? {} : { target }),
+            })
+            .pipe(Effect.flip);
+          assert.equal(failure.code, "invalid_request");
+          assert.include(failure.message, "Name the project");
+        }
+        assert.lengthOf(yield* Ref.get(dispatched), 0);
+      }),
+    ),
+  );
+
+  it.effect("refuses a project that does not exist, and worktree isolation", () =>
+    run(world, ({ service, dispatched }) =>
+      Effect.gen(function* () {
+        const missing = yield* service
+          .delegateTask(scope(leadId), {
+            task: "Go.",
+            mode: "async",
+            clientRequestId: "swarm-missing",
+            target: { projectId: ProjectId.make("project:nowhere") },
+          })
+          .pipe(Effect.flip);
+        assert.equal(missing.code, "invalid_request");
+        const isolated = yield* service
+          .delegateTask(scope(leadId), {
+            task: "Go.",
+            mode: "async",
+            isolation: "worktree",
+            clientRequestId: "swarm-isolated",
+            target: named,
+          })
+          .pipe(Effect.flip);
+        assert.include(isolated.message, "own checkout");
+        assert.lengthOf(yield* Ref.get(dispatched), 0);
+      }),
+    ),
+  );
+
+  it.effect("does not let any other thread name a project", () =>
+    run({ ...world, lead: false }, ({ service, dispatched }) =>
+      Effect.gen(function* () {
+        const failure = yield* service
+          .delegateTask(scope(leadId), {
+            task: "Go.",
+            mode: "async",
+            clientRequestId: "plain-named",
+            target: named,
+          })
+          .pipe(Effect.flip);
+        assert.include(failure.message, "A local task runs in this thread's project");
+        assert.lengthOf(yield* Ref.get(dispatched), 0);
+      }),
+    ),
   );
 });
