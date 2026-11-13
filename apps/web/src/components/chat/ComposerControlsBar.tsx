@@ -35,6 +35,7 @@ import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
 // KODO: controls-bar-mode
 import { resolveKodoModeBlockHidden } from "../../kodo/interactionModes.logic";
 import { KodoInteractionModeChip } from "./KodoInteractionModePicker";
+import { KodoSubAgentsChip } from "../../kodo/KodoSubAgentsChip"; // KODO: sub-agents
 import { KodoModelNoteLabel } from "../../kodo/KodoModelNote"; // KODO: mode-models-composer
 import type { KodoModelNote } from "../../kodo/modeModels.logic"; // KODO: mode-models-composer
 import { kodoHoldModelOptions, kodoRouteTraitsInput } from "../../kodo/heldModelPick"; // KODO: mode-models-composer
@@ -210,6 +211,7 @@ export function ComposerControlsBar(props: {
           hidden={composerControlsHidden || kodoModeHidden}
           onInteractionModeChange={handleInteractionModeChange}
         />
+        <KodoSubAgentsChip size={controlSize} /> {/* KODO: sub-agents */}
         {kodoModelNote !== null ? (
           <KodoModelNoteLabel
             note={kodoModelNote}

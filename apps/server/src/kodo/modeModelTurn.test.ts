@@ -63,6 +63,8 @@ const run = (overrides: Partial<OrchestrationV2Run> & Pick<OrchestrationV2Run, "
 
 const projectionOf = (input: {
   readonly mode: string;
+  /** The thread leads sub-agents. */
+  readonly lead?: boolean;
   readonly modelSelection?: typeof own;
   readonly kodoModeModel?: { applied: typeof own; base: typeof own };
   readonly runs?: ReadonlyArray<OrchestrationV2Run>;
@@ -71,6 +73,7 @@ const projectionOf = (input: {
     thread: {
       projectId: "project",
       interactionMode: input.mode,
+      ...(input.lead === true ? { kodoLead: { kind: "sub-agents" } } : {}),
       modelSelection: input.modelSelection ?? own,
       ...(input.kodoModeModel === undefined ? {} : { kodoModeModel: input.kodoModeModel }),
     },
@@ -93,6 +96,72 @@ const dispatchInput = (
   queueTail: undefined,
   activeProviderThread: undefined,
   ...overrides,
+});
+
+describe("selectForDispatch for a lead", () => {
+  // KODO: delegation-lead-model - a lead's turns read the Orchestrator slot, whatever its mode has.
+  const orchestrator = sel("codex", "lead-model");
+  it.effect("runs on the Orchestrator model, not the mode's, and records the thread's own", () =>
+    Effect.gen(function* () {
+      const turn = makeTurn({ modeModelSelections: { code, orchestrator } });
+      const result = yield* turn.selectForDispatch(
+        dispatchInput(projectionOf({ mode: "code", lead: true })),
+      );
+      expect(result.modelSelection).toEqual(orchestrator);
+      expect(result.kodoRunModel).toEqual({ source: "mode-default", base: own });
+    }),
+  );
+
+  it.effect(
+    "runs on the thread's own model when no Orchestrator model is set, even if its mode has one",
+    () =>
+      Effect.gen(function* () {
+        const turn = makeTurn({ modeModelSelections: { code } });
+        const result = yield* turn.selectForDispatch(
+          dispatchInput(projectionOf({ mode: "code", lead: true })),
+        );
+        expect(result.modelSelection).toEqual(own);
+      }),
+  );
+
+  it.effect("lets a person's pick win for that message and keeps the lead model for the next", () =>
+    Effect.gen(function* () {
+      const turn = makeTurn({ modeModelSelections: { orchestrator } });
+      const pick = yield* turn.selectForDispatch(
+        dispatchInput(projectionOf({ mode: "code", lead: true }), {
+          command: { modelSelection: picked, explicitModelSelection: true },
+        }),
+      );
+      expect(pick.modelSelection).toEqual(picked);
+      expect(pick.kodoRunModel?.source).toBe("explicit");
+    }),
+  );
+
+  it.effect(
+    "falls back to the thread's own model, with the reason, when the Orchestrator model's provider cannot receive the tools",
+    () =>
+      Effect.gen(function* () {
+        const turn = makeTurn({
+          modeModelSelections: { orchestrator },
+          providers: [provider("claudeAgent"), provider("codex", { driver: "mystery" as never })],
+        });
+        const result = yield* turn.selectForDispatch(
+          dispatchInput(projectionOf({ mode: "code", lead: true })),
+        );
+        expect(result.modelSelection).toEqual(own);
+        expect(result.kodoRunModel?.unavailable?.reason).toBe(
+          "its provider cannot receive the delegation tools",
+        );
+      }),
+  );
+
+  it.effect("does not touch a thread that does not lead", () =>
+    Effect.gen(function* () {
+      const turn = makeTurn({ modeModelSelections: { code, orchestrator } });
+      const result = yield* turn.selectForDispatch(dispatchInput(projectionOf({ mode: "code" })));
+      expect(result.modelSelection).toEqual(code);
+    }),
+  );
 });
 
 describe("selectForDispatch", () => {

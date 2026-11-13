@@ -39,12 +39,17 @@ const MODE_LABEL: Record<string, string> = {
   plan: "Plan",
   code: "Code",
   review: "Review",
+  orchestrator: "Lead", // KODO: sub-agents - a lead's turns read the Orchestrator slot
 };
 
 export { kodoModeHasDefault };
 
+/** What a note says for the model of a thread that leads sub-agents ("Lead model", "Lead default"). */
+const KODO_LEAD_LABEL = MODE_LABEL.orchestrator!;
+
 export function resolveKodoComposerModel(input: {
-  readonly mode: ThreadInteractionMode | undefined;
+  /** A thread mode, or `orchestrator` while the thread leads sub-agents. */
+  readonly mode: ThreadInteractionMode | "orchestrator" | undefined;
   readonly thread: KodoModeModelThread | null | undefined;
   readonly modeModels: KodoModeModels;
   readonly providers: ReadonlyArray<ServerProvider>;
@@ -84,7 +89,10 @@ export function resolveKodoComposerModel(input: {
         : null;
     },
   });
-  const label = MODE_LABEL[kodoModeModelSlot(input.mode)] ?? "Mode";
+  const label =
+    input.mode === "orchestrator"
+      ? KODO_LEAD_LABEL
+      : (MODE_LABEL[kodoModeModelSlot(input.mode)] ?? "Mode");
   if (input.explicitPick) {
     return {
       resolved,
@@ -93,7 +101,7 @@ export function resolveKodoComposerModel(input: {
       note: {
         kind: "picked",
         label: "picked",
-        title: `You picked this model for the next message. ${label} defaults to ${resolved.selection.model}; it applies again after you send or switch mode.`,
+        title: `You picked this model for the next message. ${label} ${input.mode === "orchestrator" ? "runs on" : "defaults to"} ${resolved.selection.model}; it applies again after you send${input.mode === "orchestrator" ? "" : " or switch mode"}.`,
       },
     };
   }
@@ -104,7 +112,8 @@ export function resolveKodoComposerModel(input: {
       shown: null,
       note: {
         kind: "unavailable",
-        label: `${label} default unavailable`,
+        label:
+          input.mode === "orchestrator" ? "Lead model unavailable" : `${label} default unavailable`,
         title: `${resolved.unavailable.wanted.model} is unavailable (${resolved.unavailable.reason}), so this message uses the thread's model.`,
       },
     };
@@ -120,9 +129,12 @@ export function resolveKodoComposerModel(input: {
     shown: resolved.selection,
     note: {
       kind: "mode-default",
-      label: `${label} default`,
+      label: input.mode === "orchestrator" ? "Lead model" : `${label} default`,
       title:
-        `${label} mode runs on this model (Settings, Models by mode). Pick another model to override it for the next message.` +
+        (input.mode === "orchestrator"
+          ? "This thread leads sub-agents, so its turns run on the Orchestrator model (Settings, Models by mode)."
+          : `${label} mode runs on this model (Settings, Models by mode).`) +
+        " Pick another model to override it for the next message." +
         (providerChange === null
           ? ""
           : ` This message runs on ${providerChange.to} instead of ${providerChange.from}, and the conversation carries over as a summary.`),

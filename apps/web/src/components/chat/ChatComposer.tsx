@@ -149,6 +149,7 @@ import { ComposerSpeechButton, ComposerSpeechRecordingPill } from "./ComposerSpe
 // KODO: composer-enhance - the Enhance control
 import { KodoEnhanceControl } from "./KodoEnhanceControl";
 import { useKodoInteractionModeStatus } from "../../kodo/interactionModeStatus";
+import { useKodoSubAgentsStatus } from "../../kodo/subAgentsStatus"; // KODO: sub-agents
 import { promptEnhanceUnavailableReason } from "../../kodo/promptEnhance.logic";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { shortcutLabelForCommand } from "../../keybindings";
@@ -880,8 +881,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   // KODO: mode-models-composer - the model the thread's mode runs on, shown while no pick overrides it.
+  const kodoLeads = useKodoSubAgentsStatus()?.toggle.checked === true; // KODO: sub-agents - a lead's turns read the Orchestrator slot
   const kodoComposerModel = resolveKodoComposerModel({
-    mode: interactionMode,
+    mode: kodoLeads ? "orchestrator" : interactionMode,
     thread: activeThreadModelSelection
       ? {
           modelSelection: activeThreadModelSelection,

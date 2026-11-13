@@ -28,6 +28,9 @@ import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as Orchestrator from "./Orchestrator.ts";
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
+import { DispatchModeLimit } from "./DispatchModeLimit.ts"; // KODO: delegation-command
+import * as ThreadManagementService from "./ThreadManagementService.ts"; // KODO: delegation-command
+import type * as ServerSettings from "../serverSettings.ts"; // KODO: delegation-command
 import * as ProviderReplayHarness from "./testkit/ProviderReplayHarness.ts";
 import { checkpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
@@ -243,7 +246,9 @@ interface Harness {
  */
 const withHarness = <A, E>(
   name: string,
-  modeModelSelections: Partial<Record<"ask" | "plan" | "code", ModelSelection>>,
+  modeModelSelections: Partial<
+    Record<"ask" | "plan" | "code" | "review" | "orchestrator", ModelSelection>
+  >,
   body: (
     input: Harness,
   ) => Effect.Effect<
@@ -251,13 +256,21 @@ const withHarness = <A, E>(
     E,
     Orchestrator.OrchestratorV2 | EffectWorker.OrchestrationEffectWorkerV2 | Scope.Scope
   >,
-  options: { readonly second?: boolean } = {},
+  options: {
+    readonly second?: boolean;
+    /** What the provider catalogue says per instance, for a provider the tools cannot reach. */
+    readonly catalogue?: Readonly<Record<string, Partial<ServerProvider>>>;
+    /** Other server settings, such as the sub-agents default. */
+    readonly settings?: Parameters<typeof ServerSettings.layerTest>[0];
+  } = {},
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
       const cwd = yield* checkpointWorkspace(name);
       const state = yield* freshState;
-      const catalogue = yield* Ref.make<Readonly<Record<string, Partial<ServerProvider>>>>({});
+      const catalogue = yield* Ref.make<Readonly<Record<string, Partial<ServerProvider>>>>(
+        options.catalogue ?? {},
+      );
       const adapters = [
         makeAdapter(state),
         ...(options.second === true
@@ -285,7 +298,10 @@ const withHarness = <A, E>(
               },
             },
             ProviderAdapterRegistry.layerFromAdapters(adapters),
-            { serverSettings: { modeModelSelections }, providerCatalogue: catalogue },
+            {
+              serverSettings: { modeModelSelections, ...options.settings },
+              providerCatalogue: catalogue,
+            },
           ),
         ),
       );
@@ -727,4 +743,471 @@ it.live("a default on another provider runs through the handoff under that provi
       }),
     { second: true },
   ),
+);
+
+// KODO: delegation-command - sub-agents: the lead model, the switch's rules, and who may flip it.
+const setLead = (
+  orchestrator: Orchestrator.OrchestratorV2["Service"],
+  name: string,
+  threadId: ThreadId,
+  lead: boolean,
+  step: number,
+  as: { readonly agentFrom?: ThreadId } = {},
+) =>
+  orchestrator.dispatch({
+    type: "thread.kodo-lead.set",
+    commandId: CommandId.make(`command:${name}:lead-${step}-${lead ? "on" : "off"}`),
+    threadId,
+    lead: lead ? { kind: "sub-agents" } : null,
+    createdBy: as.agentFrom === undefined ? "user" : "agent",
+    creationSource: as.agentFrom === undefined ? "web" : "mcp",
+    ...(as.agentFrom === undefined ? {} : { senderThreadId: as.agentFrom }),
+  });
+
+it.live(
+  "a lead's turns run on the Orchestrator model, a pick wins for one message, and turning it off returns",
+  () =>
+    withHarness(
+      "kodo-sub-agents-lead-model",
+      { code: selection("code-model"), orchestrator: selection("lead-model") },
+      ({ state, orchestrator, worker, cwd }) =>
+        Effect.gen(function* () {
+          const name = "kodo-sub-agents-lead-model";
+          const threadId = ThreadId.make(`thread:${name}`);
+          const ctx = { state, orchestrator, worker, name, threadId };
+          yield* createThread(orchestrator, { name, threadId, cwd });
+          yield* setLead(orchestrator, name, threadId, true, 1);
+          // The shell mirror carries the flag, so the composer sees it without the projection.
+          assert.deepEqual((yield* orchestrator.getThreadShell(threadId))?.kodoLead, {
+            kind: "sub-agents",
+          });
+
+          // A Code lead is not put on the Code model: it runs on the Orchestrator model.
+          yield* runTurn(ctx, "lead-1", selection("base-model"));
+          let thread = (yield* orchestrator.getThreadProjection(threadId)).thread;
+          assert.equal(thread.modelSelection.model, "lead-model");
+          assert.equal(thread.kodoModeModel?.base.model, "base-model");
+
+          // A person's pick is for that message; the lead model returns after it.
+          yield* runTurn(ctx, "picked", selection("picked-model"), true);
+          yield* runTurn(ctx, "lead-2", selection("picked-model"), false);
+
+          // Off: the mode's own slot again, and the thread's own model underneath it.
+          yield* setLead(orchestrator, name, threadId, false, 2);
+          yield* runTurn(ctx, "code-1", selection("lead-model"), false);
+          thread = (yield* orchestrator.getThreadProjection(threadId)).thread;
+          assert.equal(thread.modelSelection.model, "code-model");
+          assert.equal(thread.kodoModeModel?.base.model, "base-model");
+          assert.isNull(thread.kodoLead ?? null);
+
+          assert.deepEqual(
+            (yield* Ref.get(state)).started.map((turn) => turn.model),
+            ["lead-model", "picked-model", "lead-model", "code-model"],
+          );
+        }),
+    ),
+);
+
+it.live(
+  "a lead with no Orchestrator model runs on the thread's own model, never on the Code model",
+  () =>
+    withHarness(
+      "kodo-sub-agents-lead-unset",
+      { code: selection("code-model") },
+      ({ state, orchestrator, worker, cwd }) =>
+        Effect.gen(function* () {
+          const name = "kodo-sub-agents-lead-unset";
+          const threadId = ThreadId.make(`thread:${name}`);
+          const ctx = { state, orchestrator, worker, name, threadId };
+          yield* createThread(orchestrator, { name, threadId, cwd });
+          yield* setLead(orchestrator, name, threadId, true, 1);
+          yield* runTurn(ctx, "lead", selection("base-model"));
+          assert.deepEqual(
+            (yield* Ref.get(state)).started.map((turn) => turn.model),
+            ["base-model"],
+          );
+          // Nothing displaced the thread's own model, so the run keeps no record of one.
+          const thread = (yield* orchestrator.getThreadProjection(threadId)).thread;
+          assert.isUndefined(thread.kodoModeModel);
+        }),
+    ),
+);
+
+it.live(
+  "an Orchestrator model on a provider that cannot receive the tools falls back to the thread's own, and says why",
+  () =>
+    withHarness(
+      "kodo-sub-agents-lead-slot-provider",
+      { orchestrator: selection("lead-model", otherInstanceId) },
+      ({ state, orchestrator, worker, cwd }) =>
+        Effect.gen(function* () {
+          const name = "kodo-sub-agents-lead-slot-provider";
+          const threadId = ThreadId.make(`thread:${name}`);
+          yield* createThread(orchestrator, { name, threadId, cwd });
+          // Turning it on is refused outright while the slot's provider cannot receive the tools.
+          const refused = yield* setLead(orchestrator, name, threadId, true, 1).pipe(Effect.flip);
+          assert.include(
+            String((refused as { cause?: unknown }).cause),
+            "Orchestrator model runs on",
+          );
+          void state;
+          void worker;
+        }),
+      {
+        second: true,
+        catalogue: { [otherInstanceId]: { driver: ProviderDriverKind.make("mystery") } },
+      },
+    ),
+);
+
+it.live("sub-agents cannot be switched while a turn runs, and can be once it ends", () =>
+  withHarness("kodo-sub-agents-busy", {}, ({ state, orchestrator, worker, cwd }) =>
+    Effect.gen(function* () {
+      const name = "kodo-sub-agents-busy";
+      const threadId = ThreadId.make(`thread:${name}`);
+      const ctx = { state, orchestrator, worker, name, threadId };
+      yield* createThread(orchestrator, { name, threadId, cwd });
+      yield* startTurn(ctx, "running", selection("base-model"));
+      const refused = yield* setLead(orchestrator, name, threadId, true, 1).pipe(Effect.flip);
+      assert.include(String((refused as { cause?: unknown }).cause), "A turn is running");
+      assert.isUndefined((yield* orchestrator.getThreadShell(threadId))?.kodoLead);
+      yield* finishTurn(ctx);
+      yield* setLead(orchestrator, name, threadId, true, 2);
+      assert.deepEqual((yield* orchestrator.getThreadShell(threadId))?.kodoLead, {
+        kind: "sub-agents",
+      });
+    }),
+  ),
+);
+
+it.live("sub-agents are refused on a provider whose tools cannot be delivered", () =>
+  withHarness(
+    "kodo-sub-agents-unsupported",
+    {},
+    ({ orchestrator, cwd }) =>
+      Effect.gen(function* () {
+        const name = "kodo-sub-agents-unsupported";
+        const threadId = ThreadId.make(`thread:${name}`);
+        yield* createThread(orchestrator, { name, threadId, cwd });
+        const refused = yield* setLead(orchestrator, name, threadId, true, 1).pipe(Effect.flip);
+        assert.include(String((refused as { cause?: unknown }).cause), "not known to receive");
+        // A new thread asked to start as a lead there simply starts without one.
+        const second = ThreadId.make(`thread:${name}:created`);
+        yield* orchestrator.dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`command:${name}:create-lead`),
+          threadId: second,
+          projectId: ProjectId.make(`project:${name}`),
+          title: "created as a lead",
+          modelSelection: selection("base-model"),
+          runtimeMode: "full-access",
+          interactionMode: "code",
+          kodoLead: { kind: "sub-agents" },
+          branch: null,
+          worktreePath: cwd,
+        });
+        assert.isUndefined((yield* orchestrator.getThreadShell(second))?.kodoLead);
+      }),
+    { catalogue: { [providerInstanceId]: { driver: ProviderDriverKind.make("mystery") } } },
+  ),
+);
+
+it.live(
+  "who may flip the switch: a person's client cannot forge an agent's identity, and an agent cannot lead itself",
+  () =>
+    withHarness("kodo-sub-agents-identity", {}, ({ orchestrator, cwd }) =>
+      Effect.gen(function* () {
+        const name = "kodo-sub-agents-identity";
+        const target = ThreadId.make(`thread:${name}:target`);
+        const caller = ThreadId.make(`thread:${name}:caller`);
+        yield* createThread(orchestrator, { name: `${name}-target`, threadId: target, cwd });
+        yield* createThread(orchestrator, { name: `${name}-caller`, threadId: caller, cwd });
+        // The target reads only, so a read-only sender reaches the switch's own rule rather than the mode limit before it.
+        yield* setMode(orchestrator, name, target, "plan", 1);
+
+        // What the transport does to whatever a client sends: its own actor and sender are replaced.
+        const forged = ThreadManagementService.withCreationProvenance(
+          {
+            type: "thread.kodo-lead.set",
+            commandId: CommandId.make(`command:${name}:forged`),
+            threadId: target,
+            lead: { kind: "sub-agents" },
+            createdBy: "agent",
+            creationSource: "mcp",
+            senderThreadId: caller,
+          },
+          { createdBy: "user", creationSource: "web" },
+        );
+        assert.equal((forged as { createdBy: string }).createdBy, "user");
+        assert.isFalse("senderThreadId" in forged);
+
+        // An agent cannot change its own thread, nor the lead it works for.
+        const own = yield* setLead(orchestrator, name, caller, true, 1, { agentFrom: caller }).pipe(
+          Effect.flip,
+        );
+        assert.include(String((own as { cause?: unknown }).cause), "own thread");
+
+        // An agent limited to a read-only mode cannot change another thread, in Code mode it can.
+        const limited = yield* setLead(orchestrator, name, target, true, 2, {
+          agentFrom: caller,
+        }).pipe(
+          Effect.provideService(DispatchModeLimit, {
+            runtimeMode: "full-access",
+            interactionMode: "plan",
+          }),
+          Effect.flip,
+        );
+        assert.include(String((limited as { cause?: unknown }).cause), "read-only mode");
+        yield* setLead(orchestrator, name, target, true, 3, { agentFrom: caller }).pipe(
+          Effect.provideService(DispatchModeLimit, {
+            runtimeMode: "full-access",
+            interactionMode: "code",
+          }),
+        );
+        assert.deepEqual((yield* orchestrator.getThreadShell(target))?.kodoLead, {
+          kind: "sub-agents",
+        });
+        // An agent request that names no sender is not one any honest route makes.
+        const anonymous = yield* orchestrator
+          .dispatch({
+            type: "thread.kodo-lead.set",
+            commandId: CommandId.make(`command:${name}:anonymous`),
+            threadId: caller,
+            lead: { kind: "sub-agents" },
+            createdBy: "agent",
+            creationSource: "mcp",
+          })
+          .pipe(Effect.flip);
+        assert.include(String((anonymous as { cause?: unknown }).cause), "cannot change");
+      }),
+    ),
+);
+
+it.live("a lead cannot run a loop, and a thread with a loop cannot become a lead", () =>
+  withHarness("kodo-sub-agents-loop", {}, ({ orchestrator, cwd }) =>
+    Effect.gen(function* () {
+      const name = "kodo-sub-agents-loop";
+      const lead = ThreadId.make(`thread:${name}:lead`);
+      const looping = ThreadId.make(`thread:${name}:looping`);
+      yield* createThread(orchestrator, { name: `${name}-lead`, threadId: lead, cwd });
+      yield* createThread(orchestrator, { name: `${name}-looping`, threadId: looping, cwd });
+      const start = (threadId: ThreadId, label: string) =>
+        orchestrator.dispatch({
+          type: "thread.kodo-loop.control",
+          commandId: CommandId.make(`command:${name}:loop-${label}`),
+          threadId,
+          control: {
+            type: "start",
+            request: "Do the thing",
+            requestMessageId: MessageId.make(`message:${name}:loop-${label}`),
+            maxRounds: 2,
+            planApproval: "auto",
+            budget: {},
+          },
+        });
+      yield* setLead(orchestrator, name, lead, true, 1);
+      const refused = yield* start(lead, "lead").pipe(Effect.flip);
+      assert.include(String((refused as { cause?: unknown }).cause), "Turn sub-agents off first");
+
+      yield* start(looping, "ok");
+      const blocked = yield* setLead(orchestrator, name, looping, true, 2).pipe(Effect.flip);
+      assert.include(String((blocked as { cause?: unknown }).cause), "loop is running");
+    }),
+  ),
+);
+
+const newThread = (
+  orchestrator: Orchestrator.OrchestratorV2["Service"],
+  input: {
+    readonly name: string;
+    readonly threadId: ThreadId;
+    readonly cwd: string;
+    readonly createdBy?: "user" | "agent";
+    readonly kodoLead?: { readonly kind: "sub-agents" } | null;
+  },
+) =>
+  orchestrator.dispatch({
+    type: "thread.create",
+    createdBy: input.createdBy ?? "user",
+    creationSource: input.createdBy === "agent" ? "mcp" : "web",
+    commandId: CommandId.make(`command:${input.name}:create`),
+    threadId: input.threadId,
+    projectId: ProjectId.make(`project:${input.name}`),
+    title: input.name,
+    modelSelection: selection("base-model"),
+    runtimeMode: "full-access",
+    interactionMode: "code",
+    ...(input.kodoLead === undefined ? {} : { kodoLead: input.kodoLead }),
+    branch: null,
+    worktreePath: input.cwd,
+  });
+
+it.live(
+  "a new thread takes the sub-agents default, the composer's explicit choice wins, and only a person's thread can lead",
+  () =>
+    withHarness(
+      "kodo-sub-agents-default",
+      {},
+      ({ orchestrator, cwd }) =>
+        Effect.gen(function* () {
+          const name = "kodo-sub-agents-default";
+          const leadOf = (threadId: ThreadId) =>
+            orchestrator
+              .getThreadShell(threadId)
+              .pipe(Effect.map((shell) => shell?.kodoLead ?? null));
+          const make = (label: string, extra: Partial<Parameters<typeof newThread>[1]> = {}) => {
+            const threadId = ThreadId.make(`thread:${name}:${label}`);
+            return newThread(orchestrator, {
+              name: `${name}-${label}`,
+              threadId,
+              cwd,
+              ...extra,
+            }).pipe(Effect.as(threadId));
+          };
+          // No choice made: the project's default applies, here on.
+          assert.deepEqual(yield* leadOf(yield* make("default")), { kind: "sub-agents" });
+          // The composer's explicit choice, either way, is what the thread starts with.
+          assert.isNull(yield* leadOf(yield* make("explicit-off", { kodoLead: null })));
+          assert.deepEqual(
+            yield* leadOf(yield* make("explicit-on", { kodoLead: { kind: "sub-agents" } })),
+            { kind: "sub-agents" },
+          );
+          // An agent's thread is never a lead, however it asks and whatever the default.
+          assert.isNull(
+            yield* leadOf(
+              yield* make("agent", { createdBy: "agent", kodoLead: { kind: "sub-agents" } }),
+            ),
+          );
+        }),
+      { settings: { kodoSubAgentsDefault: true } },
+    ),
+);
+
+it.live("a project's override of the sub-agents default wins over the environment's", () =>
+  withHarness(
+    "kodo-sub-agents-project-default",
+    {},
+    ({ orchestrator, cwd }) =>
+      Effect.gen(function* () {
+        const name = "kodo-sub-agents-project-default";
+        const threadId = ThreadId.make(`thread:${name}`);
+        yield* newThread(orchestrator, { name, threadId, cwd });
+        // The environment default is on, but this project turned it off.
+        assert.isNull((yield* orchestrator.getThreadShell(threadId))?.kodoLead ?? null);
+      }),
+    {
+      settings: {
+        kodoSubAgentsDefault: true,
+        projectSettingsOverrides: {
+          [ProjectId.make("project:kodo-sub-agents-project-default")]: {
+            kodoSubAgentsDefault: false,
+          },
+        },
+      },
+    },
+  ),
+);
+
+it.live(
+  "a worker runs on its mode's slot without an explicit pick, the lead's and the worker's own models stay, and an unavailable slot is recorded",
+  () =>
+    withHarness(
+      "kodo-sub-agents-worker-slot",
+      {
+        orchestrator: selection("lead-model"),
+        code: selection("code-model"),
+        review: selection("review-model", otherInstanceId),
+      },
+      ({ state, orchestrator, worker, cwd }) =>
+        Effect.gen(function* () {
+          const name = "kodo-sub-agents-worker-slot";
+          const threadId = ThreadId.make(`thread:${name}`);
+          const ctx = { state, orchestrator, worker, name, threadId };
+          yield* createThread(orchestrator, { name, threadId, cwd });
+          yield* setLead(orchestrator, name, threadId, true, 1);
+          yield* startTurn(ctx, "lead", selection("base-model"));
+          const leadRun = (yield* orchestrator.getThreadProjection(threadId)).runs.at(-1)!;
+
+          const delegate = (task: string, interactionMode: "code" | "review") =>
+            Effect.gen(function* () {
+              yield* orchestrator.dispatch({
+                type: "delegated_task.request",
+                commandId: CommandId.make(`command:${name}:delegate-${task}`),
+                parentThreadId: threadId,
+                parentRunId: leadRun.id,
+                parentNodeId: leadRun.rootNodeId!,
+                task,
+                // What the service passes for a lead: the lead's own model, named by nobody.
+                modelSelection: selection("base-model"),
+                explicitModelSelection: false,
+                runtimeMode: "full-access",
+                interactionMode,
+                completionWake: "always",
+                createdBy: "agent",
+                creationSource: "mcp",
+              });
+              yield* worker.drain();
+              const parent = yield* orchestrator.getThreadProjection(threadId);
+              const childId = parent.subagents.find(
+                (candidate) => candidate.prompt === task,
+              )!.childThreadId!;
+              return yield* orchestrator.getThreadProjection(childId);
+            });
+
+          const coder = yield* delegate("write it", "code");
+          const reviewer = yield* delegate("review it", "review");
+
+          const coderRun = coder.runs[0]!;
+          assert.equal(coderRun.modelSelection.model, "code-model");
+          assert.equal(coderRun.kodoModel?.source, "mode-default");
+          // The worker's own model is the lead's own, and the slot only stands in for it.
+          assert.equal(coder.thread.kodoModeModel?.base.model, "base-model");
+          // The Review slot's provider is turned off, so the worker runs on its own model and says why.
+          const reviewerRun = reviewer.runs[0]!;
+          assert.equal(reviewerRun.modelSelection.model, "base-model");
+          assert.equal(reviewerRun.kodoModel?.unavailable?.wanted.model, "review-model");
+          assert.include(reviewerRun.kodoModel?.unavailable?.reason ?? "", "turned off");
+          // The lead's own thread was not touched by either worker.
+          const lead = (yield* orchestrator.getThreadProjection(threadId)).thread;
+          assert.equal(lead.modelSelection.model, "lead-model");
+          assert.equal(lead.kodoModeModel?.base.model, "base-model");
+          assert.deepEqual((yield* Ref.get(state)).started.map((turn) => turn.model).toSorted(), [
+            "base-model",
+            "code-model",
+            "lead-model",
+          ]);
+
+          // A worker may not start a loop, from whatever the loop's request says it is.
+          yield* createThread(orchestrator, {
+            name: `${name}-other`,
+            threadId: ThreadId.make(`thread:${name}:other`),
+            cwd,
+          });
+          const refused = yield* orchestrator
+            .dispatch({
+              type: "thread.kodo-loop.control",
+              commandId: CommandId.make(`command:${name}:worker-loop`),
+              threadId: ThreadId.make(`thread:${name}:other`),
+              control: {
+                type: "start",
+                request: "Loop it",
+                requestMessageId: MessageId.make(`message:${name}:worker-loop`),
+                requestMessage: {
+                  text: "/loop Loop it",
+                  createdBy: "agent",
+                  creationSource: "mcp",
+                  senderThreadId: coder.thread.id,
+                },
+                maxRounds: 2,
+                planApproval: "auto",
+                budget: {},
+              },
+            })
+            .pipe(Effect.flip);
+          assert.include(String((refused as { cause?: unknown }).cause), "workers do not start");
+        }),
+      { second: true, catalogue: { [otherInstanceId]: { enabled: false } } },
+    ),
 );

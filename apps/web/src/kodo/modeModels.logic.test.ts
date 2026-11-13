@@ -38,6 +38,22 @@ const base = {
 };
 
 describe("resolveKodoComposerModel", () => {
+  // KODO: sub-agents - a lead's label reads as the lead model, from the Orchestrator slot, not its mode's slot.
+  it("reads the Orchestrator slot for a lead, whatever the thread's mode has", () => {
+    const lead = createModelSelection(ProviderInstanceId.make("claudeAgent"), "ask-model");
+    const modeModels = { ...DEFAULT_KODO_MODE_MODELS, code: own, orchestrator: lead };
+    const result = resolveKodoComposerModel({ ...base, mode: "orchestrator", modeModels })!;
+    expect(result.shown).toEqual(lead);
+    expect(result.note).toMatchObject({ kind: "mode-default", label: "Lead model" });
+    // Without an Orchestrator model a lead shows the thread's own model, even if Code has a default.
+    expect(
+      resolveKodoComposerModel({
+        ...base,
+        mode: "orchestrator",
+        modeModels: { ...DEFAULT_KODO_MODE_MODELS, code: own },
+      }),
+    ).toBeNull();
+  });
   it("shows the mode default and says so", () => {
     const result = resolveKodoComposerModel(base)!;
     expect(result.shown).toEqual(ask);

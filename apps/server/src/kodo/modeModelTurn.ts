@@ -26,6 +26,8 @@ import * as Effect from "effect/Effect";
 import type { ProviderSwitchServiceV2 } from "../orchestration-v2/ProviderSwitchService.ts";
 import type * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import type * as ServerSettings from "../serverSettings.ts";
+import { isKodoLead } from "./delegation/leadGuard.ts";
+import { kodoSubAgentsSupportForDriver } from "./delegation/leadSupport.ts";
 import { kodoLoopStageMode } from "./loop/loopState.ts";
 import { resolveKodoModeModel } from "./modeModel.ts";
 
@@ -101,6 +103,16 @@ export const makeKodoModeModelTurn = (services: KodoModeModelTurnServices) => {
     // The reasons read after the model's name on the run ("<model> not used: <reason>").
     const catalogueReason = kodoAvailabilityFromProviders(providers)(configured);
     if (catalogueReason !== null) return catalogueReason;
+    // A lead's turns need the delegation tools, so a model on a provider that cannot receive them is unavailable to it.
+    if (isKodoLead(projection.thread)) {
+      const provider = providers.find((entry) => entry.instanceId === configured.instanceId);
+      if (
+        provider !== undefined &&
+        kodoSubAgentsSupportForDriver(provider.driver).support === "none"
+      ) {
+        return "its provider cannot receive the delegation tools";
+      }
+    }
     // Turned off for this project (or the machine) in settings: a queue would hold on it forever.
     const settings = yield* services.serverSettings.getSettings.pipe(Effect.option);
     if (
@@ -189,7 +201,13 @@ export const makeKodoModeModelTurn = (services: KodoModeModelTurnServices) => {
     );
     const resolveInput = {
       // The judge reads in Review mode but answers on its own slot (judge, else review, else the thread's own).
-      mode: input.loopStage?.stage === "judge" ? "judge" : projection.thread.interactionMode,
+      // A lead runs on the Orchestrator slot whatever its mode, so a Code lead is not put on the cheap Code model.
+      mode:
+        input.loopStage?.stage === "judge"
+          ? "judge"
+          : isKodoLead(projection.thread)
+            ? "orchestrator"
+            : projection.thread.interactionMode,
       thread: projection.thread,
       settings: { modeModelSelections },
       requested: command.modelSelection,

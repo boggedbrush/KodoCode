@@ -89,6 +89,7 @@ export interface ThreadLaunchInput {
   readonly generateTitle?: boolean;
   readonly modelSelection: ModelSelection;
   readonly explicitModelSelection?: boolean; // KODO: mode-models-send
+  readonly kodoLead?: import("@t3tools/contracts").KodoLead | null | undefined; // KODO: delegation-command
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ThreadInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
@@ -956,6 +957,7 @@ const make = Effect.gen(function* () {
                 modelSelection: input.modelSelection,
                 runtimeMode: input.runtimeMode,
                 interactionMode: input.interactionMode,
+                ...(input.kodoLead === undefined ? {} : { kodoLead: input.kodoLead }), // KODO: delegation-command
                 branch: initialBranch,
                 worktreePath: initialWorktreePath,
                 ...(input.importedNativeThread === undefined

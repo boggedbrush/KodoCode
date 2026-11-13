@@ -24,8 +24,10 @@ import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as DateTime from "effect/DateTime";
+import { kodoLaunchStart } from "../../kodoLaunchStart.ts"; // KODO: delegation-normalize
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel"; // KODO: delegation-normalize
 import { resolveRuntimeMode } from "../../delegatedTaskModes.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
@@ -91,6 +93,9 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
         const scope = yield* McpInvocationContext.McpInvocationContext;
         const context = yield* readCaller();
         const { caller } = context;
+        // KODO: delegation-normalize - a worker may not launch; a lead is capped and names no model.
+        const kodoLead = yield* kodoLaunchStart(context);
+        const pickedModel = kodoLead ? undefined : input.modelSelection;
         // A retry with the same key replays the first launch: the ids derive
         // from the caller and the key, and the launch service replays a
         // command it already accepted.
@@ -188,9 +193,11 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
               )
             : undefined;
         const modelSelection =
-          input.modelSelection ??
+          pickedModel ??
           launchedModel ??
-          caller?.modelSelection ??
+          (kodoLead && caller !== undefined
+            ? kodoThreadOwnModel(caller)
+            : caller?.modelSelection) ??
           (projectDefaults
             ? resolveNewThreadModelSelection({
                 defaultSelection: projectDefaults.defaultModelSelection,
@@ -231,7 +238,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           projectId,
           title: input.title,
           modelSelection,
-          explicitModelSelection: input.modelSelection !== undefined, // KODO: mode-models-send
+          explicitModelSelection: pickedModel !== undefined, // KODO: mode-models-send
           runtimeMode: startedRuntimeMode,
           interactionMode,
           workspaceStrategy: input.workspaceStrategy ?? { type: "root" },

@@ -18,6 +18,7 @@ import * as Schema from "effect/Schema";
 
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { kodoSteerText } from "../kodo/interactionMode.ts"; // KODO: mode-instructions
+import { kodoLeadInstructions } from "../kodo/delegation/leadInstructions.ts"; // KODO: delegation-instructions
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 
@@ -386,6 +387,11 @@ export const layer: Layer.Layer<
                     threadId: input.threadId,
                     mode: steeredThread?.interactionMode,
                     driver: loaded.providerThread.driver,
+                    // KODO: delegation-instructions
+                    leadInstructions:
+                      steeredThread?.kodoLead?.kind === "sub-agents"
+                        ? kodoLeadInstructions(steeredThread.interactionMode)
+                        : undefined,
                   },
                 ), // KODO: mode-instructions
                 attachments: message.attachments,

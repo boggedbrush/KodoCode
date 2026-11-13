@@ -23,6 +23,7 @@ import {
   ResolvedKeybindingsConfig,
 } from "./keybindings.ts";
 import { EditorId, FileManagerRevealKind, RemoteOpenTarget } from "./editor.ts";
+import { KodoSubAgentsSupport } from "./kodoDelegation.ts"; // KODO: delegation-support
 import { ManagedPolicySummary } from "./managedPolicy.ts";
 import { ModelCapabilities, ProviderOptionDescriptor } from "./model.ts";
 import { RuntimeMode } from "./providerPolicy.ts";
@@ -265,6 +266,8 @@ export const ServerProvider = Schema.Struct({
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   compatibilityAdvisory: Schema.optionalKey(ServerProviderCompatibilityAdvisory),
   updateState: Schema.optionalKey(ServerProviderUpdateState),
+  /** KODO: delegation-support - whether threads on this instance can lead sub-agents; absent from older servers. */
+  kodoSubAgents: Schema.optionalKey(KodoSubAgentsSupport),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 

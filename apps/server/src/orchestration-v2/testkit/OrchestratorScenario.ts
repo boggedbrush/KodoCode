@@ -164,6 +164,8 @@ function commandThreadIds(command: OrchestrationV2Command): ReadonlyArray<Thread
     case "thread.runtime-mode.set":
     case "thread.interaction-mode.set":
     case "thread.kodo-loop.control": // KODO: loop-command
+    case "thread.kodo-lead.set": // KODO: delegation-command
+    case "thread.kodo-lead.stop-workers": // KODO: delegation-command
     case "thread.model-selection.set":
     case "provider-session.detach":
     case "message.dispatch":

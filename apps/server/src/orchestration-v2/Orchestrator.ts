@@ -19,6 +19,7 @@ import {
 import { kodoRunModeSnapshot } from "../kodo/interactionMode.ts"; // KODO: run-mode-snapshot
 import { kodoMaySteerIntoRun } from "../kodo/interactionMode.ts"; // KODO: mode-steer-guard
 import { makeKodoModeModelTurn } from "../kodo/modeModelTurn.ts"; // KODO: mode-models-turn
+import { makeKodoLeadCommands } from "../kodo/delegation/leadCommand.ts"; // KODO: delegation-command
 import {
   decideKodoLoopAdvance,
   decideKodoLoopControl,
@@ -643,6 +644,8 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.interaction-mode.set":
     case "thread.kodo-loop.control": // KODO: loop-command
     case "thread.kodo-loop.advance": // KODO: loop-command
+    case "thread.kodo-lead.set": // KODO: delegation-command
+    case "thread.kodo-lead.stop-workers": // KODO: delegation-command
     case "thread.model-selection.set":
     case "provider-session.detach":
     case "message.dispatch":
@@ -1393,6 +1396,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     providerRegistry: Option.getOrUndefined(kodoProviderRegistry),
     providerSwitchService,
     sessionHasBackgroundWork,
+  });
+
+  // KODO: delegation-command - the sub-agents switch's inputs are read in kodo/delegation/leadCommand.ts
+  const kodoLeadCommands = makeKodoLeadCommands({
+    projectionStore,
+    serverSettings,
+    providerRegistry: Option.getOrUndefined(kodoProviderRegistry),
   });
 
   // Runs in every command transaction; avoid reading thousands of finished leaf nodes.
@@ -3300,6 +3310,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
+    // KODO: delegation-command - the lead a person's new thread starts with, if any
+    const kodoLead = yield* kodoLeadCommands
+      .leadForNewThread(command)
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
     const thread: OrchestrationV2AppThread = {
       createdBy: command.createdBy,
       creationSource: command.creationSource,
@@ -3310,6 +3328,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       modelSelection: command.modelSelection,
       runtimeMode: command.runtimeMode,
       interactionMode: command.interactionMode,
+      ...(kodoLead === undefined ? {} : { kodoLead }), // KODO: delegation-command
       branch: command.branch,
       worktreePath: command.worktreePath,
       activeProviderThreadId: null,
@@ -4907,6 +4926,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         getShell: projectionStore.getThreadShell,
         control: command.control,
         target: thread.kodoLoop,
+        targetLead: thread.kodoLead, // KODO: delegation-loop
       });
       if (startRefusal !== undefined) {
         return yield* new OrchestratorDispatchError({
@@ -4977,6 +4997,52 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
     }
+  });
+
+  // KODO: delegation-command - the thread's lead state changes only through this command; the rules are in kodo/delegation/leadControl.ts.
+  const dispatchKodoLeadSet = Effect.fn("orchestrationV2.dispatch.kodoLeadSet")(function* (
+    command: Extract<OrchestrationV2ServerCommand, { readonly type: "thread.kodo-lead.set" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const projection = yield* projectionStore
+      .getThreadRecords(command.threadId, ["runs", "runtimeRequests"], { turnItemTypes: [] })
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    const { thread } = projection;
+    const refuse = (cause: string) =>
+      new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause,
+      });
+    if (thread.deletedAt !== null) return yield* refuse(`Thread ${command.threadId} is deleted.`);
+    const decided = yield* kodoLeadCommands
+      .decideSet({
+        command,
+        thread,
+        busy: threadHasUnfinishedWork(projection),
+        limit: yield* DispatchModeLimit,
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    if (!decided.ok) return yield* refuse(decided.message);
+    const now = yield* DateTime.now;
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "thread.metadata-updated",
+      threadId: command.threadId,
+      providerInstanceId: thread.providerInstanceId,
+      occurredAt: now,
+      payload: { ...thread, kodoLead: decided.lead, updatedAt: now },
+    });
   });
 
   const dispatchThreadProjectAdoptFolder = Effect.fn(
@@ -14059,6 +14125,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       case "thread.kodo-loop.advance": // KODO: loop-command
         yield* dispatchKodoLoop(command, events);
         break;
+      case "thread.kodo-lead.set": // KODO: delegation-command
+        yield* dispatchKodoLeadSet(command, events);
+        break;
+      case "thread.kodo-lead.stop-workers": // KODO: delegation-command - the workers stop; the lead's own turn goes on
+        yield* Ref.update(effects, (existing) => [...existing, delegatedTasksStopEffect(command)]);
+        break;
       case "provider-session.detach":
         yield* dispatchProviderSessionDetach(command, events, effects);
         break;
@@ -14416,6 +14488,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           command.type === "thread.background-work.settle" ||
           command.type === "thread.interrupt.unresponsive" ||
           command.type === "thread.stop" ||
+          command.type === "thread.kodo-lead.stop-workers" || // KODO: delegation-command
           command.type === "subagent.stop" ||
           // Closing a share again, or after it ended, is not an error.
           command.type === "thread.guest-share.close" ||

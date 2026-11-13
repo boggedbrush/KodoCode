@@ -2,6 +2,7 @@ import type { ComposerHandleRef } from "../../composerHandleContext";
 import type { BranchToolbarHandle } from "../BranchToolbar";
 import type { ChatComposerHandle } from "./ChatComposer";
 import type { ChatShortcutCommands } from "./useChatShortcuts";
+import { requestKodoSubAgentsToggle } from "../../kodo/subAgents.logic"; // KODO: sub-agents
 
 const openControl =
   (composerRef: ComposerHandleRef, control: Parameters<ChatComposerHandle["openControl"]>[0]) =>
@@ -27,6 +28,10 @@ export function composerShortcutCommands(
     "composer.host": openControl(composerRef, "composer.host"),
     "composer.effort": openControl(composerRef, "composer.effort"),
     "composer.mode": openControl(composerRef, "composer.mode"),
+    // KODO: sub-agents
+    "composer.subAgents": ({ event }) => {
+      if (!event.repeat) requestKodoSubAgentsToggle();
+    },
     "composer.workspace": openControl(composerRef, "composer.workspace"),
     "composer.branch": ({ event }) => {
       if (!event.repeat) branchToolbarRef.current?.openBranchPicker();

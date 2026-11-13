@@ -42,6 +42,8 @@ import {
   revertThreadCheckpoint,
   setThreadInteractionMode,
   controlKodoLoop, // KODO: loop-command
+  setKodoLead, // KODO: delegation-command
+  stopKodoWorkers, // KODO: delegation-command
   setThreadRuntimeMode,
   pinThread,
   reorderPinnedThread,
@@ -270,6 +272,19 @@ export function createThreadEnvironmentAtoms<R, E>(
     controlLoop: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:control-loop",
       execute: controlKodoLoop,
+      scheduler,
+      concurrency,
+    }),
+    // KODO: delegation-command
+    setKodoLead: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:set-kodo-lead",
+      execute: setKodoLead,
+      scheduler,
+      concurrency,
+    }),
+    stopKodoWorkers: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:stop-kodo-workers",
+      execute: stopKodoWorkers,
       scheduler,
       concurrency,
     }),

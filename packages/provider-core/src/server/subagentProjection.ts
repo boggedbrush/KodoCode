@@ -71,6 +71,7 @@ export function makeSubagentChildThread(input: {
     linkedPullRequest: null,
     pullRequests: [],
     historyOrigin: undefined,
+    kodoLead: null, // KODO: delegation-child - a worker is never a lead: it would take the lead's model slot, instructions and caps
     providerInstanceId: input.providerInstanceId,
     modelSelection: input.modelSelection,
     activeProviderThreadId: input.activeProviderThreadId,

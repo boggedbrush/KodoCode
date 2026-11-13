@@ -90,6 +90,11 @@ export function withCreationProvenance(
       const { kodoLoopStage: _stage, ...rest } = command;
       return { ...rest, ...provenance };
     }
+    case "thread.kodo-lead.set": {
+      // KODO: delegation-command - a transport's own sender is never believed; only the agent route (which builds its command from the credential) sets one.
+      const { senderThreadId: _sender, ...rest } = command;
+      return { ...rest, ...provenance };
+    }
     case "thread.fork":
     case "thread.merge_back":
     case "delegated_task.request":

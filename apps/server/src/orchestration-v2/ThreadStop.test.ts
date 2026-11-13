@@ -1834,3 +1834,78 @@ it.effect.each(["Stop", "Force stop"] as const)(
       );
     }).pipe(Effect.provide(layerTest)),
 );
+
+// KODO: delegation-stop - a lead's Stop reaches every worker, and "Stop workers" ends them without ending the lead's turn.
+const setLead = (threadId: ThreadId) =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    yield* orchestrator.dispatch({
+      type: "thread.kodo-lead.set",
+      commandId: CommandId.make(`lead:${threadId}`),
+      threadId,
+      lead: { kind: "sub-agents" },
+      createdBy: "user",
+      creationSource: "web",
+    });
+  });
+
+it.effect("Stop on a lead stops every worker it started", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const leadId = ThreadId.make("thread:lead-stop");
+    yield* createWatchingThread(leadId, 1);
+    yield* setLead(leadId);
+    yield* send(leadId, "plan the work", "start_immediately");
+    const first = yield* delegate(leadId, "worker one");
+    const second = yield* delegate(leadId, "worker two");
+    assert.deepEqual((yield* threadState(first)).runs.length, 1);
+
+    yield* orchestrator.dispatch({
+      type: "thread.stop",
+      commandId: CommandId.make("lead-stop"),
+      threadId: leadId,
+    });
+    yield* threads.stopDelegatedTasks({ threadId: leadId, commandId: CommandId.make("lead-stop") });
+
+    assert.deepEqual((yield* threadState(leadId)).runs, ["interrupted"]);
+    assert.deepEqual((yield* threadState(first)).runs, ["interrupted"]);
+    assert.deepEqual((yield* threadState(second)).runs, ["interrupted"]);
+  }).pipe(Effect.provide(layerTest)),
+);
+
+it.effect("Stop workers ends every worker and leaves the lead's own turn running", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const sql = yield* SqlClient.SqlClient;
+    const leadId = ThreadId.make("thread:lead-stop-workers");
+    yield* createWatchingThread(leadId, 1);
+    yield* setLead(leadId);
+    yield* send(leadId, "plan the work", "start_immediately");
+    const first = yield* delegate(leadId, "worker one stop-workers");
+    const second = yield* delegate(leadId, "worker two stop-workers");
+    const before = (yield* threadState(leadId)).runs;
+
+    const commandId = CommandId.make("lead-stop-workers");
+    yield* orchestrator.dispatch({
+      type: "thread.kodo-lead.stop-workers",
+      commandId,
+      threadId: leadId,
+    });
+    const effects = yield* sql<{ readonly effect_type: string }>`
+      SELECT effect_type FROM orchestration_v2_effect_outbox WHERE command_id = ${commandId}
+    `;
+    assert.deepEqual(
+      effects.map((row) => row.effect_type),
+      ["delegated-tasks.stop"],
+    );
+    yield* threads.stopDelegatedTasks({ threadId: leadId, commandId });
+
+    assert.deepEqual((yield* threadState(first)).runs, ["interrupted"]);
+    assert.deepEqual((yield* threadState(second)).runs, ["interrupted"]);
+    // The lead's own run was not touched.
+    assert.deepEqual((yield* threadState(leadId)).runs, before);
+    assert.notInclude((yield* threadState(leadId)).runs, "interrupted");
+  }).pipe(Effect.provide(layerTest)),
+);

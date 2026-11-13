@@ -294,6 +294,11 @@ export default {
           value: { types: "./src/kodoLoopView.ts", import: "./src/kodoLoopView.ts" },
           create: true,
         },
+        {
+          path: ["exports", "./kodoDelegation"],
+          value: { types: "./src/kodoDelegation.ts", import: "./src/kodoDelegation.ts" },
+          create: true,
+        },
       ],
     },
     {
@@ -340,13 +345,14 @@ export default {
       file: "apps/desktop/gnome-extension/bundle.json",
       set: [{ path: ["uuid"], value: "snap-shot@app.kodocode" }],
     },
-    // The loop's three MCP tool definitions are part of every agent's tool list. After a sync set
-    // this to upstream's value plus the loop tools' bytes (AgentContextBudget.test.ts prints the
-    // measured number); that test is in verify.testFiles, so a stale value fails the sync.
+    // The loop's three and the sub-agents' two MCP tool definitions are part of every agent's tool
+    // list. After a sync set this to upstream's value plus those tools' bytes
+    // (AgentContextBudget.test.ts prints the measured number); that test is in verify.testFiles, so
+    // a stale value fails the sync.
     {
       id: "agent-context-budget-loop-tools",
       file: "apps/server/src/provider/agentContextBudget.json",
-      set: [{ path: ["mcpToolListJsonBytes"], value: 49441 }],
+      set: [{ path: ["mcpToolListJsonBytes"], value: 50101 }],
     },
     {
       id: "root-kodo-scripts",
@@ -379,8 +385,22 @@ export default {
   // `kodo:check` warns about files with a marker that is not listed here.
   hooks: [
     {
+      file: "packages/provider-core/src/server/subagentProjection.ts",
+      hooks: ["delegation-child"],
+    },
+    { file: "apps/server/src/orchestration-v2/ThreadStop.test.ts", hooks: ["delegation-stop"] },
+    { file: "apps/server/src/provider/ProviderRegistry.ts", hooks: ["delegation-support"] },
+    { file: "apps/server/src/provider/ProviderRegistry.test.ts", hooks: ["delegation-support"] },
+    { file: "packages/contracts/src/server.ts", hooks: ["delegation-support"] },
+    { file: "packages/contracts/src/keybindings.ts", hooks: ["sub-agents"] },
+    {
+      file: "packages/client-runtime/src/operations/commands.test.ts",
+      hooks: ["delegation-command"],
+    },
+    { file: "apps/web/src/components/chat/composerShortcuts.ts", hooks: ["sub-agents"] },
+    {
       file: "apps/web/src/components/settings/settingsSearch.ts",
-      hooks: ["mode-models-search", "loop-settings-search"],
+      hooks: ["mode-models-search", "loop-settings-search", "sub-agents-search"],
     },
     { file: "apps/web/src/components/chat/useComposerSelection.ts", hooks: ["mode-models-send"] },
     {
@@ -389,27 +409,36 @@ export default {
     },
     {
       file: "apps/server/src/orchestration-v2/ProjectionStore.ts",
-      hooks: ["mode-models-state", "loop-state", "loop-ledger-write"],
+      hooks: ["mode-models-state", "loop-state", "loop-ledger-write", "delegation-state"],
     },
     {
       file: "apps/server/src/orchestration-v2/ThreadManagementService.ts",
-      hooks: ["loop-intercept", "loop-stage"],
+      hooks: ["loop-intercept", "loop-stage", "delegation-command"],
     },
     { file: "apps/server/src/orchestration-v2/runtimeLayer.ts", hooks: ["loop-worker"] },
     {
       file: "apps/server/src/orchestration-v2/testkit/OrchestratorScenario.ts",
-      hooks: ["loop-command"],
+      hooks: ["loop-command", "delegation-command"],
     },
-    { file: "apps/server/src/ws.ts", hooks: ["mode-models-send", "loop-ledger-rpc"] },
+    {
+      file: "apps/server/src/ws.ts",
+      hooks: ["mode-models-send", "loop-ledger-rpc", "delegation-command"],
+    },
     { file: "apps/server/src/ws.test.ts", hooks: ["loop-ledger-rpc"] },
-    { file: "packages/client-runtime/src/state/models.ts", hooks: ["mode-models-state"] },
+    {
+      file: "packages/client-runtime/src/state/models.ts",
+      hooks: ["mode-models-state", "delegation-state"],
+    },
     { file: "packages/shared/src/serverSettings.ts", hooks: ["mode-models-setting"] },
     { file: "apps/server/src/serverSettings.ts", hooks: ["mode-models-setting", "loop-setting"] },
-    { file: "packages/contracts/src/settings.ts", hooks: ["mode-models-setting", "loop-setting"] },
+    {
+      file: "packages/contracts/src/settings.ts",
+      hooks: ["mode-models-setting", "loop-setting", "sub-agents-setting"],
+    },
     { file: "apps/web/src/components/onboarding/WelcomePage.tsx", hooks: ["telemetry-copy"] },
     {
       file: "apps/web/src/components/settings/SettingsPanels.tsx",
-      hooks: ["telemetry-copy", "mode-models-settings", "loop-settings"],
+      hooks: ["telemetry-copy", "mode-models-settings", "loop-settings", "sub-agents-settings"],
     },
     { file: "apps/desktop/resources/installer.nsh", hooks: ["brand-product-names"] },
     { file: "apps/desktop/scripts/electron-launcher.mjs", hooks: ["brand-launcher-identity"] },
@@ -448,7 +477,7 @@ export default {
     },
     {
       file: "apps/mobile/src/features/threads/ThreadSettingsSheet.tsx",
-      hooks: ["mode-models-send"],
+      hooks: ["mode-models-send", "sub-agents-mobile"],
     },
     {
       file: "apps/mobile/src/features/threads/new-task-flow-provider.tsx",
@@ -482,7 +511,10 @@ export default {
       file: "apps/mobile/src/features/threads/ThreadDetailScreen.tsx",
       hooks: ["loop-banner-mobile"],
     },
-    { file: "apps/server/src/mcp/McpHttpServer.ts", hooks: ["loop-mcp-tools"] },
+    {
+      file: "apps/server/src/mcp/McpHttpServer.ts",
+      hooks: ["loop-mcp-tools", "delegation-mcp-tools"],
+    },
     { file: "apps/server/src/usage/UsageService.ts", hooks: ["loop-pricing"] },
     { file: "apps/server/src/usage/UsageService.test.ts", hooks: ["loop-pricing"] },
     { file: "apps/server/src/cli/thread.ts", hooks: ["loop-intercept"] },
@@ -511,9 +543,13 @@ export default {
         "mode-task-control",
         "mode-models-send",
         "loop-intercept",
+        "delegation-normalize",
       ],
     },
-    { file: "apps/server/src/mcp/toolkits/project/handlers.ts", hooks: ["mode-models-send"] },
+    {
+      file: "apps/server/src/mcp/toolkits/project/handlers.ts",
+      hooks: ["mode-models-send", "delegation-normalize"],
+    },
     {
       file: "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
       hooks: ["mode-models-send", "loop-intercept"],
@@ -547,6 +583,8 @@ export default {
         "loop-stage-model",
         "loop-stage",
         "loop-message",
+        "delegation-command",
+        "delegation-loop",
       ],
     },
     {
@@ -563,11 +601,11 @@ export default {
     },
     {
       file: "apps/server/src/orchestration-v2/ProviderTurnControlService.ts",
-      hooks: ["mode-instructions"],
+      hooks: ["mode-instructions", "delegation-instructions"],
     },
     {
       file: "apps/server/src/orchestration-v2/RunExecutionService.ts",
-      hooks: ["mode-instructions"],
+      hooks: ["mode-instructions", "delegation-instructions"],
     },
     {
       file: "apps/server/src/orchestration-v2/RuntimePolicy.test.ts",
@@ -576,7 +614,7 @@ export default {
     { file: "apps/server/src/orchestration-v2/RuntimePolicy.ts", hooks: ["mode-resolver"] },
     {
       file: "apps/server/src/orchestration-v2/ThreadLaunchService.ts",
-      hooks: ["thread-mode-type", "mode-models-send", "loop-intercept"],
+      hooks: ["thread-mode-type", "mode-models-send", "loop-intercept", "delegation-command"],
     },
     {
       file: "apps/server/src/orchestration-v2/legacy/LegacyV1ThreadImporter.ts",
@@ -620,13 +658,17 @@ export default {
         "mode-models-composer",
         "findings-card",
         "loop-card",
+        "sub-agents",
       ],
     },
     {
       file: "apps/web/src/components/chat/TimelineAssistantRows.tsx",
       hooks: ["findings-card", "inline-kodo-blocks"],
     },
-    { file: "apps/web/src/components/CommandPalette.tsx", hooks: ["usage-palette-action"] },
+    {
+      file: "apps/web/src/components/CommandPalette.tsx",
+      hooks: ["usage-palette-action", "sub-agents-palette"],
+    },
     { file: "apps/web/src/components/CommandPaletteThemeItems.tsx", hooks: ["theme-builtin-list"] },
     { file: "apps/web/src/components/GitHubStarPrompt.tsx", hooks: ["brand-star-repository"] },
     { file: "apps/web/src/components/Sidebar.logic.ts", hooks: ["thread-mode-compare"] },
@@ -651,6 +693,7 @@ export default {
         "usage-slash-select",
         "mode-models-composer",
         "loop-slash-items",
+        "sub-agents",
       ],
     },
     {
@@ -659,7 +702,7 @@ export default {
     },
     {
       file: "apps/web/src/components/chat/ComposerControlsBar.tsx",
-      hooks: ["controls-bar-mode", "mode-models-composer"],
+      hooks: ["controls-bar-mode", "mode-models-composer", "sub-agents"],
     },
     {
       file: "apps/web/src/components/chat/QueuedRunsControl.tsx",
@@ -684,6 +727,7 @@ export default {
         "usage-slash-send",
         "mode-models-send",
         "loop-query-send",
+        "sub-agents",
       ],
     },
     { file: "apps/web/src/components/chat/useMultipleModelSend.ts", hooks: ["send-mode"] },
@@ -728,9 +772,12 @@ export default {
     { file: "apps/web/vite.config.ts", hooks: ["brand-text-plugin"] },
     {
       file: "packages/client-runtime/src/operations/commands.ts",
-      hooks: ["thread-mode-type", "mode-models-send", "loop-command"],
+      hooks: ["thread-mode-type", "mode-models-send", "loop-command", "delegation-command"],
     },
-    { file: "packages/client-runtime/src/state/threadCommands.ts", hooks: ["loop-command"] },
+    {
+      file: "packages/client-runtime/src/state/threadCommands.ts",
+      hooks: ["loop-command", "delegation-command"],
+    },
     {
       file: "packages/client-runtime/src/handoff.ts",
       hooks: ["mode-models-notice", "inline-kodo-blocks"],
@@ -744,6 +791,7 @@ export default {
         "mode-models-setting",
         "loop-contract",
         "loop-ledger-contract",
+        "delegation-contract",
       ],
     },
     {
@@ -755,6 +803,8 @@ export default {
         "loop-state",
         "loop-command",
         "loop-stage",
+        "delegation-state",
+        "delegation-command",
       ],
     },
     {
@@ -813,7 +863,10 @@ export default {
         "brand-homepage-author",
       ],
     },
-    { file: "apps/server/src/mcp/OrchestratorMcpService.test.ts", hooks: ["mode-task-control"] },
+    {
+      file: "apps/server/src/mcp/OrchestratorMcpService.test.ts",
+      hooks: ["mode-task-control", "delegation-normalize"],
+    },
     { file: "apps/server/src/mcp/delegatedTaskModes.test.ts", hooks: ["mode-child-limit"] },
     { file: "apps/server/src/mcp/toolkits/orchestrator/tools.ts", hooks: ["mode-read-only-tools"] },
     { file: "apps/server/src/mcp/toolkits/preview/tools.ts", hooks: ["mode-read-only-tools"] },
@@ -905,6 +958,30 @@ export default {
     },
     { path: "apps/server/src/mcp/kodoLoopToolkit.test.ts" },
     { path: "apps/web/src/components/settings/KodoModeModelsSettings.tsx" },
+    {
+      path: "packages/contracts/src/kodoDelegation.ts",
+      why: "Sub-agents: lead field, provider support value, caps",
+    },
+    {
+      path: "packages/shared/src/kodoDelegation.ts",
+      why: "Sub-agents switch rules shared by web and mobile",
+    },
+    { path: "packages/shared/src/kodoDelegation.test.ts" },
+    {
+      path: "apps/server/src/mcp/kodoDelegationToolkit.ts",
+      why: "Agent tools to set and read sub-agents",
+    },
+    { path: "apps/server/src/mcp/kodoDelegationToolkit.test.ts" },
+    {
+      path: "apps/server/src/mcp/kodoLaunchStart.ts",
+      why: "The lead guard for t3_thread_launch",
+    },
+    { path: "apps/server/src/mcp/kodoDelegation.test.ts" },
+    { path: "apps/web/src/components/settings/KodoSubAgentsSettings.tsx" },
+    {
+      path: "apps/mobile/src/features/threads/KodoSubAgentsRow.tsx",
+      why: "Mobile sub-agents switch in the thread settings sheet",
+    },
     { path: "apps/server/src/orchestration-v2/KodoModeModels.integration.test.ts" },
     { path: "apps/server/src/orchestration-v2/KodoLoop.integration.test.ts" },
     { path: "packages/contracts/src/kodoPromptEnhance.ts", why: "Prompt enhance contract" },
@@ -1123,6 +1200,20 @@ export default {
       "packages/shared/src/kodoLoopOutput.test.ts",
       "packages/shared/src/kodoLoopLimits.test.ts",
       "packages/shared/src/kodoLoopView.test.ts",
+      "apps/server/src/kodo/subAgentsSettings.test.ts",
+      "apps/server/src/provider/ProviderRegistry.test.ts",
+      "apps/server/src/kodo/delegation/leadControl.test.ts",
+      "apps/server/src/kodo/delegation/leadDelegation.test.ts",
+      "apps/server/src/kodo/delegation/leadGuard.test.ts",
+      "apps/server/src/kodo/delegation/leadSupport.test.ts",
+      "apps/server/src/kodo/delegation/limits.test.ts",
+      "apps/server/src/kodo/delegation/workerLimitGate.test.ts",
+      "apps/server/src/mcp/kodoDelegation.test.ts",
+      "apps/server/src/mcp/kodoDelegationToolkit.test.ts",
+      "apps/server/src/orchestration-v2/ThreadStop.test.ts",
+      "apps/web/src/kodo/subAgents.logic.test.ts",
+      "packages/client-runtime/src/operations/commands.test.ts",
+      "packages/shared/src/kodoDelegation.test.ts",
       "apps/server/src/kodo/loop/stageUsage.test.ts",
       "apps/server/src/kodo/loop/limitReading.test.ts",
       "apps/server/src/kodo/loop/loopCaller.test.ts",

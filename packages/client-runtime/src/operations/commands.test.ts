@@ -40,7 +40,9 @@ import {
   interruptThreadTurn,
   revertThreadCheckpoint,
   resumeThreadQueue,
+  setKodoLead, // KODO: delegation-command
   startThreadTurn,
+  stopKodoWorkers, // KODO: delegation-command
 } from "./commands.ts";
 
 const layerTestRandom = Layer.succeed(
@@ -131,6 +133,117 @@ const makeSupervisor = Effect.fn("TestEnvironmentCommands.makeSupervisor")(funct
 });
 
 describe("V2 environment commands", () => {
+  // KODO: delegation-command - the same commands the web switch and the mobile sheet send.
+  it.effect(
+    "sends the sub-agents switch as a person's command, and Stop workers as its own command",
+    () =>
+      Effect.gen(function* () {
+        const commands: OrchestrationV2Command[] = [];
+        const supervisor = yield* makeSupervisor({ commands, projects: [] });
+        const threadId = ThreadId.make("thread-1");
+        const provide = Effect.provideService(
+          EnvironmentSupervisor.EnvironmentSupervisor,
+          supervisor,
+        );
+        yield* setKodoLead({
+          commandId: CommandId.make("lead-on"),
+          threadId,
+          lead: { kind: "sub-agents" },
+        }).pipe(provide);
+        yield* setKodoLead({
+          commandId: CommandId.make("lead-off"),
+          threadId,
+          lead: null,
+          creationSource: "mobile",
+        }).pipe(provide);
+        yield* stopKodoWorkers({ commandId: CommandId.make("stop-workers"), threadId }).pipe(
+          provide,
+        );
+        expect(commands).toEqual([
+          {
+            type: "thread.kodo-lead.set",
+            commandId: "lead-on",
+            threadId,
+            lead: { kind: "sub-agents" },
+            createdBy: "user",
+            creationSource: "web",
+          },
+          {
+            type: "thread.kodo-lead.set",
+            commandId: "lead-off",
+            threadId,
+            lead: null,
+            createdBy: "user",
+            creationSource: "mobile",
+          },
+          { type: "thread.kodo-lead.stop-workers", commandId: "stop-workers", threadId },
+        ]);
+      }).pipe(Effect.provide(layerTestRandom)),
+  );
+
+  it.effect(
+    "a first message carries the sub-agents choice of a new thread, and only for a new thread",
+    () =>
+      Effect.gen(function* () {
+        const launches: OrchestrationV2ThreadLaunchInput[] = [];
+        const supervisor = yield* makeSupervisor({ commands: [], projects: [], launches });
+        const provide = Effect.provideService(
+          EnvironmentSupervisor.EnvironmentSupervisor,
+          supervisor,
+        );
+        const start = (
+          name: string,
+          kodoLead: { readonly kind: "sub-agents" } | null | undefined,
+          bootstrap: boolean,
+        ) =>
+          startThreadTurn({
+            commandId: CommandId.make(`launch-${name}`),
+            threadId: v2ThreadId,
+            message: {
+              messageId: MessageId.make(`message-${name}`),
+              role: "user",
+              text: "Go",
+              attachments: [],
+            },
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            titleSeed: "Go",
+            ...(kodoLead === undefined ? {} : { kodoLead }),
+            ...(bootstrap
+              ? {
+                  bootstrap: {
+                    createThread: {
+                      projectId: ProjectId.make("project-1"),
+                      title: "Thread",
+                      modelSelection: v2Projection.thread.modelSelection,
+                      runtimeMode: "full-access" as const,
+                      interactionMode: "default" as const,
+                      branch: null,
+                      worktreePath: null,
+                      createdAt: "2026-06-20T00:00:00.000Z",
+                    },
+                  },
+                }
+              : {
+                  bootstrap: {
+                    prepareWorktree: { projectCwd: "/p", baseBranch: "main" },
+                    runSetupScript: false,
+                  },
+                }),
+          }).pipe(provide);
+        yield* start("on", { kind: "sub-agents" }, true);
+        yield* start("off", null, true);
+        yield* start("none", undefined, true);
+        yield* start("existing", { kind: "sub-agents" }, false);
+        expect(launches.map((launch) => launch.kodoLead)).toEqual([
+          { kind: "sub-agents" },
+          null,
+          undefined,
+          undefined,
+        ]);
+      }).pipe(Effect.provide(layerTestRandom)),
+  );
+
   it.effect("distinguishes sending a selected queued message from resuming queue order", () =>
     Effect.gen(function* () {
       const commands: OrchestrationV2Command[] = [];

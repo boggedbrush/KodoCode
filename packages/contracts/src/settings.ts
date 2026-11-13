@@ -35,6 +35,10 @@ import {
 import { ModelSelection } from "./modelSelection.ts";
 import { KodoModeModelsSetting, KodoModeModelsPatch } from "./kodoModeModels.ts"; // KODO: mode-models-setting
 import { KodoLoopSetting, KodoLoopSettingsPatch } from "./kodoLoop.ts"; // KODO: loop-setting
+import {
+  KODO_SUB_AGENTS_DEFAULT_MAX_WORKERS,
+  KODO_SUB_AGENTS_MAX_WORKERS_LIMIT,
+} from "./kodoDelegation.ts"; // KODO: sub-agents-setting
 import { ProjectScript, type ProjectMutation } from "./project.ts";
 import { DEFAULT_RUNTIME_MODE, RuntimeMode } from "./providerPolicy.ts";
 import { BrowserProfile, BrowserProfileId, DEFAULT_BROWSER_PROFILE_ID } from "./browserProfile.ts";
@@ -1179,6 +1183,7 @@ export const PROJECT_SCOPED_SERVER_SETTING_KEYS = [
   "continueThreadsAfterServerUpdate",
   "responseStreamingMode",
   "speechProjectCustomWords",
+  "kodoSubAgentsDefault", // KODO: sub-agents-setting
 ] as const;
 export type ProjectScopedServerSettingKey = (typeof PROJECT_SCOPED_SERVER_SETTING_KEYS)[number];
 
@@ -1217,6 +1222,7 @@ export const ProjectSettingsOverrides = Schema.Struct({
   continueThreadsAfterServerUpdate: Schema.optionalKey(Schema.Boolean),
   responseStreamingMode: Schema.optionalKey(ResponseStreamingMode),
   speechProjectCustomWords: Schema.optionalKey(SpeechCustomWords),
+  kodoSubAgentsDefault: Schema.optionalKey(Schema.Boolean), // KODO: sub-agents-setting
   providerInstances: Schema.optionalKey(
     Schema.Record(ProviderInstanceId, ProjectProviderInstanceOverride),
   ),
@@ -1403,6 +1409,12 @@ export const ServerSettings = Schema.Struct({
   ),
   modeModelSelections: KodoModeModelsSetting, // KODO: mode-models-setting - per-mode default models
   loop: KodoLoopSetting, // KODO: loop-setting - /loop defaults and budget
+  // KODO: sub-agents-setting - a new thread's default for "Delegate to sub-agents" (project-scoped), and the live-worker cap.
+  kodoSubAgentsDefault: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  // Stored as a plain number so a hand-edited value never fails the whole settings file; readers clamp it.
+  kodoSubAgentsMaxWorkers: Schema.Finite.pipe(
+    Schema.withDecodingDefault(Effect.succeed(KODO_SUB_AGENTS_DEFAULT_MAX_WORKERS)),
+  ),
   defaultRuntimeMode: RuntimeMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
   ),
@@ -1842,6 +1854,10 @@ export const ServerSettingsPatch = Schema.Struct({
   fallbackModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   modeModelSelections: Schema.optionalKey(KodoModeModelsPatch), // KODO: mode-models-setting
   loop: Schema.optionalKey(KodoLoopSettingsPatch), // KODO: loop-setting
+  kodoSubAgentsDefault: Schema.optionalKey(Schema.Boolean), // KODO: sub-agents-setting
+  kodoSubAgentsMaxWorkers: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: KODO_SUB_AGENTS_MAX_WORKERS_LIMIT })),
+  ), // KODO: sub-agents-setting
   /** Replaces each project's override set; null removes it. Omitted providerInstances retains its stored value. */
   projectSettingsOverrides: Schema.optionalKey(
     Schema.Record(

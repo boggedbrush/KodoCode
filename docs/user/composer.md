@@ -100,7 +100,8 @@ By default every mode runs on the thread's model. To give a mode its own, open
 **Settings → Threads → Models by mode** and pick a model (and reasoning effort)
 for Ask, Plan, Code or Review. **Use the thread's model** clears a mode. Judge appears
 below them as a role: a [loop](#loops)'s judging stage uses it, and it follows the Review
-model until you set it. Orchestrator is saved but nothing uses it yet.
+model until you set it. **Lead / Orchestrator** is the model of a thread that has
+[Sub-agents](#sub-agents) on; it follows the thread's own model until you set it.
 
 - The composer shows the model the current mode will use, labelled "Ask default"
   (or the mode's name), and updates as you switch modes. Hover the label for the
@@ -301,6 +302,42 @@ Agents can use `t3_loop_start`, `t3_loop_stop` and `t3_loop_status`. Start and s
 refused when the calling thread is in Ask, Plan or Review mode; reading status is allowed. A
 thread cannot loop while its own turn is running, so `t3_loop_start` needs another idle thread
 named in `threadId`, and is meant for when you ask for a loop.
+
+## Sub-agents
+
+Turn on **Sub-agents** (the chip beside the mode picker) and a thread leads instead of doing the
+work itself. The lead plans, hands each piece to a worker with `delegate_task`, waits for the
+result and checks it before it tells you it is done. Workers are ordinary threads: they show
+inline in the lead's conversation, and you can open one to see what it did or to pick its model.
+
+- **Models.** The lead runs on the **Lead / Orchestrator** model in **Settings → Threads →
+  Models by mode**, or on the thread's own model when that is unset. A worker runs on the model
+  of its own mode: a Code worker on the Code model, a Review worker on the Review model. The lead
+  cannot choose a worker's model, whatever it asks for. A model you pick for a message still wins
+  for that message. A worker whose mode has no model set runs on the lead thread's own model.
+- **What workers may do.** A Code thread's lead can start Code workers (they write) and Review
+  workers (they only read). A thread in Ask, Plan or Review never gets a worker that can write:
+  its workers are read-only too. A worker never has a broader runtime mode than its thread.
+  Workers cannot start workers, threads or loops.
+- **Limits.** At most three workers run at once for a lead (change it in Settings, up to six),
+  and a turn starts at most eight. Before it starts a worker T3 Code checks the usage limit of
+  the worker's provider against the same "Stop at usage limit" setting a loop uses, and refuses
+  with a message the lead passes on to you.
+- **Turning it on.** The chip is disabled, with the reason on hover, while a turn or a loop runs,
+  while workers are running, and when the thread's provider cannot receive the delegation tools.
+  It is also in the command palette (**Toggle sub-agents**, which you can bind to a key under
+  `composer.subAgents`) and, on mobile, in the thread's settings sheet. **Settings → Threads →
+  Delegate to sub-agents** sets the default for new threads, and a project can override it.
+  Each thread keeps its own switch, so changing the default does not change threads that
+  already exist. A thread that has Sub-agents on cannot run `/loop`; turn it off first.
+- **Stop.** Stop on the lead stops every worker. **Stop workers**, in the banner above the
+  composer while workers run, ends them and leaves the lead's turn going.
+
+A loop is cheaper for multi-round work (implement, review, fix until clean), because it runs
+those rounds without lead turns. The lead is told to prefer starting a loop on another idle
+thread for that kind of work. Agents can read and change the switch of another idle thread with
+`t3_sub_agents_status` and `t3_sub_agents_set`; they cannot change their own thread's, and a
+caller in Ask, Plan or Review cannot change any.
 
 ## Custom models
 

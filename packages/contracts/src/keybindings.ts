@@ -98,6 +98,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "composer.increaseEffort",
   "composer.decreaseEffort",
   "composer.mode",
+  "composer.subAgents", // KODO: sub-agents - toggles sub-agents for the thread on screen; no default binding
   "composer.workspace",
   "composer.previousWorktree",
   "composer.branch",

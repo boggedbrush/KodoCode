@@ -48,9 +48,9 @@ export interface KodoResolvedModel {
 export const kodoModeModelSlot = (mode: unknown): KodoModeModelSlot =>
   normalizeKodoInteractionMode(mode);
 
-/** Whether a mode (or role) has a configured default model. */
+/** Whether a mode (or role: `orchestrator` for a lead) has a configured default model. */
 export const kodoModeHasDefault = (modeModels: KodoModeModels, mode: unknown): boolean =>
-  modeModels[kodoModeModelSlot(mode)] !== null;
+  modeModels[mode === "orchestrator" || mode === "judge" ? mode : kodoModeModelSlot(mode)] !== null;
 
 /** The model the thread has by itself: its selection, unless a mode default is standing in for it. */
 export function kodoThreadOwnModel(thread: KodoModeModelThread): ModelSelection {

@@ -59,6 +59,7 @@ import {
   BugIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
+  NetworkIcon, // KODO: sub-agents-palette
   ChevronRightIcon,
   CornerLeftUpIcon,
   FileSearchIcon,
@@ -87,6 +88,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useSyncExternalStore, // KODO: sub-agents-palette
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -269,6 +271,12 @@ import { readPullRequestListPreferences } from "~/components/pullRequest/pullReq
 import { useThreadRouteTarget } from "../hooks/useThreadRouteTarget";
 // KODO: usage-palette-action
 import { openKodoUsageLimits } from "../kodo/usageOpen";
+// KODO: sub-agents-palette
+import {
+  hasKodoSubAgentsToggle,
+  requestKodoSubAgentsToggle,
+  subscribeKodoSubAgentsToggle,
+} from "../kodo/subAgents.logic";
 import { threadRecentUse } from "@t3tools/shared/paletteSearch";
 
 const EMPTY_BROWSE_ENTRIES: FilesystemBrowseResult["entries"] = [];
@@ -1264,6 +1272,12 @@ function OpenCommandPaletteDialog(props: {
     if (firstOption) startNewProject(firstOption.environmentId, null);
   };
 
+  // KODO: sub-agents-palette
+  const kodoSubAgentsToggleMounted = useSyncExternalStore(
+    subscribeKodoSubAgentsToggle,
+    hasKodoSubAgentsToggle,
+    () => false,
+  );
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
@@ -1648,6 +1662,21 @@ function OpenCommandPaletteDialog(props: {
       await navigate({ to: "/usage" });
     },
   });
+
+  // KODO: sub-agents-palette - flips the switch of the thread on screen; offered only while a composer is mounted
+  if (kodoSubAgentsToggleMounted) {
+    actionItems.push({
+      kind: "action",
+      value: "action:toggle-sub-agents",
+      searchTerms: ["sub-agents", "subagents", "workers", "delegate", "lead", "orchestrator"],
+      title: "Toggle sub-agents",
+      icon: <NetworkIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "composer.subAgents",
+      run: async () => {
+        requestKodoSubAgentsToggle();
+      },
+    });
+  }
 
   // KODO: usage-palette-action - jumps straight to the subscription limits view
   actionItems.push({

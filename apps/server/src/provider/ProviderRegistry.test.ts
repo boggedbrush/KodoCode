@@ -2794,13 +2794,14 @@ it.layer(
           const registry = yield* ProviderRegistry.ProviderRegistry;
 
           assert.deepStrictEqual(yield* registry.getProviders, [
-            withBundledCompatibility(cachedProvider),
+            // KODO: delegation-support - every listed provider says whether it can lead sub-agents
+            { ...withBundledCompatibility(cachedProvider), kodoSubAgents: { support: "full" } },
           ]);
           assert.deepStrictEqual(yield* registry.refresh(codexDriver), [
-            withBundledCompatibility(cachedProvider),
+            { ...withBundledCompatibility(cachedProvider), kodoSubAgents: { support: "full" } },
           ]);
           assert.deepStrictEqual(yield* registry.refreshInstance(codexInstanceId), [
-            withBundledCompatibility(cachedProvider),
+            { ...withBundledCompatibility(cachedProvider), kodoSubAgents: { support: "full" } },
           ]);
         }).pipe(Effect.provide(runtimeServices));
       }),

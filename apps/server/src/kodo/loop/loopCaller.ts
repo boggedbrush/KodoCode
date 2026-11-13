@@ -5,10 +5,13 @@
 import type { KodoLoopControl, KodoLoopStatus, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
+import { KODO_WORKER_DEPTH_REFUSAL } from "../delegation/limits.ts"; // KODO: delegation-loop
+import { kodoThreadUnderLead } from "../delegation/leadGuard.ts"; // KODO: delegation-loop
 import { kodoLoopStartRefusal } from "./loopControl.ts";
 
 interface CallerShell {
   readonly kodoLoopStatus?: { readonly status: KodoLoopStatus } | undefined;
+  readonly kodoLead?: { readonly kind: string } | null | undefined;
   readonly lineage: { readonly parentThreadId: ThreadId | null };
   readonly delegatedFrom?: { readonly threadId: ThreadId } | undefined;
 }
@@ -41,15 +44,29 @@ export const callerRunsLoop = Effect.fn("KodoLoopCaller.callerRunsLoop")(functio
 
 /** The refusal for a start request, or undefined when it may go ahead. */
 export const kodoLoopStartRefusalFor = Effect.fn("KodoLoopCaller.startRefusal")(function* <
-  E,
+  E extends { readonly _tag: string },
 >(input: {
   readonly getShell: (threadId: ThreadId) => Effect.Effect<CallerShell | null, E>;
   readonly control: Extract<KodoLoopControl, { readonly type: "start" }>;
   readonly target:
     | { readonly status: KodoLoopStatus; readonly stopReason?: string | undefined }
     | undefined;
+  /** The thread the loop would run on, when it leads sub-agents. */
+  readonly targetLead?: { readonly kind: string } | null | undefined;
 }) {
   const sender = input.control.requestMessage?.senderThreadId;
+  // KODO: delegation-loop - a lead delegates; a loop would run its stages without that
+  if (input.targetLead?.kind === "sub-agents") {
+    return "This thread delegates to sub-agents, and a loop would run its stages without that. Turn sub-agents off first, or start the loop on another thread.";
+  }
+  // KODO: delegation-loop - a worker does not start loops
+  if (
+    sender !== undefined &&
+    // A read that fails counts as a worker: an unverified caller does not start a loop.
+    (yield* kodoThreadUnderLead(input.getShell, sender).pipe(Effect.orElseSucceed(() => true)))
+  ) {
+    return KODO_WORKER_DEPTH_REFUSAL;
+  }
   return kodoLoopStartRefusal({
     requestedBy: input.control.requestMessage?.createdBy,
     target: input.target,

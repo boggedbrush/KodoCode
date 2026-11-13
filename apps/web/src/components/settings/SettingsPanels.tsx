@@ -62,6 +62,7 @@ import { scopedIdleCompaction } from "./scopedSettings";
 import { ProjectDefaultsSettings } from "./ProjectDefaultsSettings";
 import { KodoModeModelsSettings } from "./KodoModeModelsSettings"; // KODO: mode-models-settings
 import { KodoLoopSettings } from "./KodoLoopSettings"; // KODO: loop-settings
+import { KodoSubAgentsSettings } from "./KodoSubAgentsSettings"; // KODO: sub-agents-settings
 import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
 import { SnoozePresetsRow } from "./SnoozePresetsSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
@@ -1709,6 +1710,7 @@ export function ThreadsSettingsPanel() {
       <ProjectDefaultsSettings category="general" />
       {!isProjectScope ? <KodoModeModelsSettings /> : null} {/* KODO: mode-models-settings */}
       {!isProjectScope ? <KodoLoopSettings /> : null} {/* KODO: loop-settings */}
+      <KodoSubAgentsSettings isProjectScope={isProjectScope} /> {/* KODO: sub-agents-settings */}
       {!isProjectScope ? (
         <SettingsSection id="snooze" title="Snooze">
           <SnoozePresetsRow />

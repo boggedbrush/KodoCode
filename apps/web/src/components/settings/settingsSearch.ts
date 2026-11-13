@@ -321,6 +321,23 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["loop rounds plan approval budget cost cap token cap usage limit savings judge"],
     environmentOnly: true,
   },
+  // KODO: sub-agents-search
+  {
+    id: "sub-agents",
+    title: "Delegate to sub-agents",
+    to: "/settings/threads",
+    scope: "project-defaults",
+    searchTerms: ["sub-agents subagents workers lead delegate orchestrator new thread default"],
+  },
+  // KODO: sub-agents-search
+  {
+    id: "sub-agents-max-workers",
+    title: "Live workers per lead",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["sub-agents workers limit concurrent cap lead delegate"],
+    environmentOnly: true,
+  },
   {
     id: "default-permissions",
     title: "Permissions",

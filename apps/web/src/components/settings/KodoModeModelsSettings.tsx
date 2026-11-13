@@ -41,8 +41,9 @@ const ROLE_SLOTS: ReadonlyArray<{
 }> = [
   {
     slot: "orchestrator",
-    title: "Orchestrator",
-    description: "Coordinates other agents. Stored now; nothing uses it yet.",
+    title: "Lead / Orchestrator",
+    description:
+      "The model a thread runs on while Sub-agents is on: it plans, delegates and verifies, and its workers use the Code and Review models. Follows the thread's own model until set.",
   },
   {
     slot: "judge",

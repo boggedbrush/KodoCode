@@ -64,6 +64,7 @@ import {
   layer as KodoLoopHandlers,
   layerService as KodoLoopToolsService,
 } from "./kodoLoopToolkit.ts"; // KODO: loop-mcp-tools
+import { KodoDelegationToolkit, layer as KodoDelegationHandlers } from "./kodoDelegationToolkit.ts"; // KODO: delegation-mcp-tools
 import * as PreviewHandlers from "./toolkits/preview/handlers.ts";
 import {
   PreviewSnapshotTool,
@@ -1186,6 +1187,12 @@ export const layerKodoLoopToolkit = toolkitRegistration(KodoLoopToolkit, KodoLoo
   Layer.provide(KodoLoopToolsService),
 );
 
+// KODO: delegation-mcp-tools - turn sub-agents on or off for another thread, and read a thread's workers.
+export const layerKodoDelegationToolkit = toolkitRegistration(
+  KodoDelegationToolkit,
+  KodoDelegationHandlers,
+);
+
 const layerWorktreeToolkitRegistration = toolkitRegistration(
   WorktreeToolkit,
   WorktreeHandlers.layer,
@@ -1263,6 +1270,7 @@ export const layerTools = Layer.mergeAll(
   layerOrchestratorToolkit,
   layerThreadToolkit,
   layerKodoLoopToolkit, // KODO: loop-mcp-tools
+  layerKodoDelegationToolkit, // KODO: delegation-mcp-tools
   layerAttachmentToolkit,
   layerProjectRegistration,
   layerEnvironmentToolkit,

@@ -84,6 +84,7 @@ import {
   KodoLoopShellStatus,
   KodoLoopStageRef,
 } from "./kodoLoop.ts"; // KODO: loop-state
+import { KodoLead, LenientKodoLead } from "./kodoDelegation.ts"; // KODO: delegation-state
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 import {
@@ -463,6 +464,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   kodoModeModel: Schema.optional(KodoThreadModeModel),
   /** KODO: loop-state - the plan, code, review, judge loop running or last run on this thread. */
   kodoLoop: Schema.optional(KodoLoop),
+  /** KODO: delegation-state - set while this thread leads sub-agent workers. */
+  kodoLead: Schema.optional(LenientKodoLead),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -2128,6 +2131,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   interactionMode: ThreadInteractionMode,
   kodoModeModel: Schema.optional(KodoThreadModeModel), // KODO: mode-models-state
   kodoLoopStatus: Schema.optional(KodoLoopShellStatus), // KODO: loop-state
+  kodoLead: Schema.optional(LenientKodoLead), // KODO: delegation-state
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -2974,6 +2978,12 @@ export const OrchestrationV2Command = Schema.Union([
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ThreadInteractionMode,
+    /**
+     * KODO: delegation-command - a person's thread starts as a lead (`{kind}`) or explicitly not
+     * (null). Absent, a person's new thread takes the sub-agents default of its project. The server
+     * ignores it from any other creator, and drops it where the provider cannot lead.
+     */
+    kodoLead: Schema.optional(Schema.NullOr(KodoLead)),
     branch: Schema.NullOr(TrimmedNonEmptyString),
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
     /** Only the server sets this; a client's thread.create never carries one. */
@@ -3203,6 +3213,24 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     control: KodoLoopControl,
+  }),
+  /**
+   * KODO: delegation-command - turn sub-agents on (`lead`) or off (null) for a thread. The server
+   * stamps `createdBy` and `senderThreadId`: a client's own values never reach the rules.
+   */
+  Schema.Struct({
+    type: Schema.Literal("thread.kodo-lead.set"),
+    ...OrchestrationV2CreationFields,
+    commandId: CommandId,
+    threadId: ThreadId,
+    lead: Schema.NullOr(KodoLead),
+    senderThreadId: Schema.optional(ThreadId),
+  }),
+  /** KODO: delegation-command - cancel the thread's running workers without ending its own turn. */
+  Schema.Struct({
+    type: Schema.Literal("thread.kodo-lead.stop-workers"),
+    commandId: CommandId,
+    threadId: ThreadId,
   }),
   Schema.Struct({
     type: Schema.Literal("provider-session.detach"),
@@ -3739,6 +3767,8 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   modelSelection: ModelSelection,
   /** KODO: mode-models-send - see message.dispatch. */
   explicitModelSelection: Schema.optional(Schema.Boolean),
+  /** KODO: delegation-command - see thread.create. */
+  kodoLead: Schema.optional(Schema.NullOr(KodoLead)),
   runtimeMode: RuntimeMode,
   interactionMode: ThreadInteractionMode,
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,

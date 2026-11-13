@@ -29,7 +29,7 @@ import {
   type UploadChatAttachment,
   type GuestMessageId,
 } from "@t3tools/contracts";
-import type { KodoLoopControl } from "@t3tools/contracts"; // KODO: loop-command
+import type { KodoLead, KodoLoopControl } from "@t3tools/contracts"; // KODO: loop-command
 import { derivePendingBackgroundWork } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -152,6 +152,13 @@ export interface ControlKodoLoopInput extends ThreadCommandInput {
   readonly control: Exclude<KodoLoopControl, { readonly type: "start" }>;
 }
 
+/** KODO: delegation-command - turn sub-agents on (`lead`) or off (null). The server stamps who asked. */
+export interface SetKodoLeadInput extends ThreadCommandInput {
+  readonly lead: KodoLead | null;
+  readonly creationSource?: "web" | "mobile";
+}
+export type StopKodoWorkersInput = ThreadCommandInput;
+
 interface StartThreadBootstrap {
   readonly createThread?: {
     readonly projectId: ProjectId;
@@ -186,6 +193,8 @@ export interface StartThreadTurnInput extends ThreadCommandInput {
   readonly modelSelection?: ModelSelection;
   /** KODO: mode-models-send - the user picked `modelSelection` for this message, so a mode default must not replace it. */
   readonly explicitModelSelection?: boolean;
+  /** KODO: delegation-command - the first message of a new thread starts it as a sub-agents lead (null: explicitly not). */
+  readonly kodoLead?: KodoLead | null;
   readonly titleSeed?: string;
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ThreadInteractionMode;
@@ -689,6 +698,29 @@ export const controlKodoLoop = Effect.fn("EnvironmentCommands.controlKodoLoop")(
   });
 });
 
+export const setKodoLead = Effect.fn("EnvironmentCommands.setKodoLead")(function* (
+  input: SetKodoLeadInput,
+) {
+  return yield* dispatch({
+    type: "thread.kodo-lead.set",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    lead: input.lead,
+    createdBy: "user",
+    creationSource: input.creationSource ?? "web",
+  });
+});
+
+export const stopKodoWorkers = Effect.fn("EnvironmentCommands.stopKodoWorkers")(function* (
+  input: StopKodoWorkersInput,
+) {
+  return yield* dispatch({
+    type: "thread.kodo-lead.stop-workers",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+  });
+});
+
 export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(function* (
   input: StartThreadTurnInput,
 ) {
@@ -744,6 +776,10 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       ...(input.explicitModelSelection === undefined
         ? {}
         : { explicitModelSelection: input.explicitModelSelection }),
+      // KODO: delegation-command - a new thread starts as a lead only when the composer says so
+      ...(bootstrap === undefined || input.kodoLead === undefined
+        ? {}
+        : { kodoLead: input.kodoLead }),
       runtimeMode: input.runtimeMode,
       interactionMode: input.interactionMode,
       workspaceStrategy,

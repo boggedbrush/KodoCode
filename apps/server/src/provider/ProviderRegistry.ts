@@ -26,6 +26,7 @@ import * as Semaphore from "effect/Semaphore";
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import * as ModelManifest from "./ModelManifest.ts";
 import { applyProviderCompatibility } from "./providerCompatibility.ts";
+import { withKodoSubAgents } from "../kodo/delegation/leadSupport.ts"; // KODO: delegation-support
 import * as ServerConfig from "../config.ts";
 import * as ProviderInstanceRegistry from "./ProviderInstanceRegistry.ts";
 import * as ProviderInstanceRegistryMutator from "./ProviderInstanceRegistryMutator.ts";
@@ -432,10 +433,13 @@ export const layer = Layer.effect(
       provider: ServerProvider,
       manifest: ModelManifest.ModelManifestData,
     ) =>
-      applyProviderCompatibility(
-        provider,
-        manifest.compatibility,
-        ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
+      // KODO: delegation-support - every snapshot says whether its provider can lead sub-agents
+      withKodoSubAgents(
+        applyProviderCompatibility(
+          provider,
+          manifest.compatibility,
+          ModelManifest.BUNDLED_MODEL_MANIFEST.compatibility,
+        ),
       );
     const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>(
       cachedProviders.map((provider) => classifyCompatibility(provider, initialManifest)),
@@ -460,7 +464,12 @@ export const layer = Layer.effect(
         cacheDir: config.providerStatusCacheDir,
         instanceId: key,
       }).pipe(Effect.provideService(Path.Path, path));
-      const { workspaceSnapshots: _workspaceSnapshots, ...machineProvider } = provider;
+      // KODO: delegation-support - derived on every read, so the cache file stays as upstream writes it
+      const {
+        workspaceSnapshots: _workspaceSnapshots,
+        kodoSubAgents: _kodoSubAgents,
+        ...machineProvider
+      } = provider;
       yield* writeProviderStatusCache({ filePath, provider: machineProvider }).pipe(
         Effect.provideService(FileSystem.FileSystem, fileSystem),
         Effect.provideService(Path.Path, path),

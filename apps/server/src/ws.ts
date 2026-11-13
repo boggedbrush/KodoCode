@@ -2263,6 +2263,8 @@ export const layerWsRpc = (
                     ...(input.explicitModelSelection === undefined
                       ? {}
                       : { explicitModelSelection: input.explicitModelSelection }),
+                    // KODO: delegation-command
+                    ...(input.kodoLead === undefined ? {} : { kodoLead: input.kodoLead }),
                     runtimeMode: input.runtimeMode,
                     interactionMode: input.interactionMode,
                     workspaceStrategy: input.workspaceStrategy,

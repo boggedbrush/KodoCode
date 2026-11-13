@@ -60,6 +60,7 @@ import { type ChatMessage } from "../../types";
 import { isKodoLoopQuery } from "../../kodo/loopCommand.logic"; // KODO: loop-query-send
 // KODO: send-mode
 import { parseKodoModeSlashCommand } from "../../kodo/interactionModes.logic";
+import { clearKodoDraftSubAgents, getKodoDraftSubAgents } from "../../kodo/subAgentsDraft"; // KODO: sub-agents
 // KODO: usage-slash-send
 import { parseKodoUsageSlashCommand } from "../../kodo/usageMeter.logic";
 import { openKodoUsageLimits } from "../../kodo/usageOpen";
@@ -1310,9 +1311,18 @@ export function useComposerSend(input: ComposerSendInput) {
           dispatchMode: turnDispatchMode,
           ...(freshArm === undefined ? {} : { freshContext: true }),
           ...(bootstrap ? { bootstrap } : {}),
+          // KODO: sub-agents - a new thread starts as the draft's switch says; no choice made sends nothing, so the server applies the project's default
+          ...(isLocalDraftThread && getKodoDraftSubAgents(routeThreadKey) !== undefined
+            ? {
+                kodoLead: getKodoDraftSubAgents(routeThreadKey)
+                  ? { kind: "sub-agents" as const }
+                  : null,
+              }
+            : {}),
           createdAt: messageCreatedAt,
         },
       });
+      if (isLocalDraftThread) clearKodoDraftSubAgents(routeThreadKey); // KODO: sub-agents
       if (backgroundThreadRef) {
         try {
           backgroundDraftOpened = Boolean(

@@ -1,6 +1,7 @@
 // Kodo: resolves a thread's mode (ask/plan/code/review) into what adapters get. Adapters only ever
 // see upstream's "default" | "plan" wire mode; the read-only modes (ask, plan, review) use the
 // strongest mechanism per driver (see ENFORCEMENT_BY_DRIVER) plus instruction text.
+import { KODO_SUB_AGENTS_OFF_INSTRUCTIONS } from "./delegation/leadInstructions.ts";
 import {
   isRuntimeModeAbove,
   normalizeKodoInteractionMode,
@@ -457,6 +458,8 @@ const MAX_TRACKED_THREADS = 4096;
  */
 export function makeKodoModeAnnouncer() {
   const delivered = new Map<string, KodoInteractionMode>();
+  // Threads whose model was last told it leads sub-agents, so turning them off is announced once.
+  const ledByThread = new Set<string>();
   const remember = (threadId: string, mode: KodoInteractionMode) => {
     delivered.delete(threadId);
     delivered.set(threadId, mode);
@@ -479,6 +482,8 @@ export function makeKodoModeAnnouncer() {
         readonly mode: unknown;
         readonly instructions: string | undefined;
         readonly hasPriorTurns: boolean;
+        /** The sub-agents block, while the thread leads them. */
+        readonly leadInstructions?: string | undefined;
       },
     ): Message {
       if (isNativeSlashMessage(message)) return message;
@@ -495,10 +500,24 @@ export function makeKodoModeAnnouncer() {
               ? KODO_CODE_MODE_INSTRUCTIONS
               : undefined;
       remember(input.threadId, mode);
-      return withKodoModeInstructions(message, instructions);
+      // The sub-agents block rides with every message of a lead thread; its end is said once.
+      const lead =
+        input.leadInstructions !== undefined
+          ? input.leadInstructions
+          : ledByThread.has(input.threadId)
+            ? KODO_SUB_AGENTS_OFF_INSTRUCTIONS
+            : undefined;
+      if (input.leadInstructions !== undefined) ledByThread.add(input.threadId);
+      else ledByThread.delete(input.threadId);
+      const combined =
+        instructions === undefined || lead === undefined
+          ? (instructions ?? lead)
+          : `${instructions}\n\n${lead}`;
+      return withKodoModeInstructions(message, combined);
     },
     forget: (threadId: string) => {
       delivered.delete(threadId);
+      ledByThread.delete(threadId);
     },
   };
 }
@@ -560,7 +579,13 @@ export const kodoModeAnnouncer = makeKodoModeAnnouncer();
  */
 export function kodoSteerText(
   text: string,
-  input: { readonly threadId: string; readonly mode: unknown; readonly driver: string | undefined },
+  input: {
+    readonly threadId: string;
+    readonly mode: unknown;
+    readonly driver: string | undefined;
+    /** The sub-agents block for a thread that leads them. */
+    readonly leadInstructions?: string | undefined;
+  },
 ): string {
   return kodoModeAnnouncer.apply(
     { text },
@@ -568,6 +593,7 @@ export function kodoSteerText(
       threadId: input.threadId,
       mode: input.mode,
       instructions: resolveKodoInteractionMode(input).instructions,
+      leadInstructions: input.leadInstructions,
       // The turn being steered announced the mode when it started; a steer never opens a cold thread.
       hasPriorTurns: false,
     },

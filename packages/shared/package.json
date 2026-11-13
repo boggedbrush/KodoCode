@@ -570,6 +570,10 @@
     "./kodoLoopView": {
       "types": "./src/kodoLoopView.ts",
       "import": "./src/kodoLoopView.ts"
+    },
+    "./kodoDelegation": {
+      "types": "./src/kodoDelegation.ts",
+      "import": "./src/kodoDelegation.ts"
     }
   },
   "scripts": {
