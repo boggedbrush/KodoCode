@@ -42,6 +42,15 @@ describe("RPC authorization scopes", () => {
     );
   });
 
+  it("keeps the loop savings ledger behind the same diagnostics scope as the usage reads", () => {
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverGetKodoLoopLedger)).toBe(
+      requiredScopeForRpcMethod(WS_METHODS.serverGetUsageSummary),
+    );
+    expect(requiredScopeForRpcMethod(WS_METHODS.serverGetKodoLoopLedger)).toBe(
+      AuthDiagnosticsReadScope,
+    );
+  });
+
   it("keeps webhook delivery logs, which hold request bodies, behind operate scope", () => {
     for (const method of [
       WS_METHODS.scheduledTasksListWebhookDeliveries,
@@ -477,5 +486,50 @@ it.effect("denies manual cleanup before the handler without settings permission"
       requiredPermission: AuthSettingsWriteScope,
     });
     expect(handled).toBe(false);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("rejects the loop savings ledger without diagnostics read before its handler runs", () =>
+  Effect.gen(function* () {
+    const tested = WS_METHODS.serverGetKodoLoopLedger;
+    const group = WsRpcGroup.omit(
+      ...[...WsRpcGroup.requests.keys()].filter(
+        (tag): tag is Exclude<keyof typeof RPC_REQUIRED_SCOPES, typeof tested> => tag !== tested,
+      ),
+    );
+    let handled = 0;
+    const handler = group.toLayerHandler(tested, () =>
+      Effect.sync(() => {
+        handled++;
+        const totals = {
+          loops: 0,
+          rounds: 0,
+          pricedLoops: 0,
+          partialLoops: 0,
+          unpricedLoops: 0,
+          actualUsd: 0,
+          referenceUsd: 0,
+          savedUsd: 0,
+          tokens: 0,
+          noUsageLoops: 0,
+          tokensByModel: [],
+          referenceModels: [],
+        };
+        return { readAt: "2026-01-01T00:00:00.000Z", allTime: totals, last30Days: totals };
+      }),
+    );
+    const denied = yield* RpcTest.makeClient(group).pipe(
+      Effect.provide(Layer.merge(handler, RpcAuthorization.layer([AuthOrchestrationReadScope]))),
+    );
+    expect(yield* denied[tested]({}).pipe(Effect.flip)).toMatchObject({
+      _tag: "EnvironmentAuthorizationError",
+      requiredPermission: AuthDiagnosticsReadScope,
+    });
+    expect(handled).toBe(0);
+    const granted = yield* RpcTest.makeClient(group).pipe(
+      Effect.provide(Layer.merge(handler, RpcAuthorization.layer([AuthDiagnosticsReadScope]))),
+    );
+    yield* granted[tested]({});
+    expect(handled).toBe(1);
   }).pipe(Effect.scoped),
 );

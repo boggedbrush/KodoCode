@@ -389,7 +389,7 @@ export default {
     },
     {
       file: "apps/server/src/orchestration-v2/ProjectionStore.ts",
-      hooks: ["mode-models-state", "loop-state"],
+      hooks: ["mode-models-state", "loop-state", "loop-ledger-write"],
     },
     {
       file: "apps/server/src/orchestration-v2/ThreadManagementService.ts",
@@ -400,7 +400,8 @@ export default {
       file: "apps/server/src/orchestration-v2/testkit/OrchestratorScenario.ts",
       hooks: ["loop-command"],
     },
-    { file: "apps/server/src/ws.ts", hooks: ["mode-models-send"] },
+    { file: "apps/server/src/ws.ts", hooks: ["mode-models-send", "loop-ledger-rpc"] },
+    { file: "apps/server/src/ws.test.ts", hooks: ["loop-ledger-rpc"] },
     { file: "packages/client-runtime/src/state/models.ts", hooks: ["mode-models-state"] },
     { file: "packages/shared/src/serverSettings.ts", hooks: ["mode-models-setting"] },
     { file: "apps/server/src/serverSettings.ts", hooks: ["mode-models-setting", "loop-setting"] },
@@ -592,7 +593,7 @@ export default {
       file: "apps/server/src/peer/RemoteDelegation.ts",
       hooks: ["mode-peer-limit", "mode-child-limit"],
     },
-    { file: "apps/server/src/server.ts", hooks: ["prompt-enhance-http"] },
+    { file: "apps/server/src/server.ts", hooks: ["prompt-enhance-http", "loop-ledger-rpc"] },
     { file: "apps/server/src/telemetry/AnalyticsService.ts", hooks: ["telemetry-endpoint"] },
     { file: "apps/server/vite.config.ts", hooks: ["telemetry-endpoint"] },
     {
@@ -704,7 +705,15 @@ export default {
       hooks: ["brand-sidebar-text", "usage-sidebar-meter"],
     },
     { file: "apps/web/src/components/usage/UsageLimitsPooled.tsx", hooks: ["usage-no-limit-data"] },
-    { file: "apps/web/src/components/usage/UsagePage.tsx", hooks: ["usage-open-limits"] },
+    {
+      file: "apps/web/src/components/usage/UsagePage.tsx",
+      hooks: ["usage-open-limits", "usage-loop-ledger"],
+    },
+    { file: "apps/server/src/persistence/Sqlite.ts", hooks: ["loop-ledger-table"] },
+    { file: "apps/server/src/auth/RpcAuthorization.ts", hooks: ["loop-ledger-rpc"] },
+    { file: "apps/server/src/observability/RpcInstrumentation.ts", hooks: ["loop-ledger-rpc"] },
+    { file: "packages/contracts/src/rpc.ts", hooks: ["loop-ledger-rpc"] },
+    { file: "packages/client-runtime/src/state/server.ts", hooks: ["loop-ledger-query"] },
     { file: "apps/web/src/components/ui/standalone-page.tsx", hooks: ["brand-lockup"] },
     { file: "apps/web/src/composer-logic.ts", hooks: ["mode-slash-type", "loop-slash-items"] },
     {
@@ -734,6 +743,7 @@ export default {
         "prompt-enhance-contract",
         "mode-models-setting",
         "loop-contract",
+        "loop-ledger-contract",
       ],
     },
     {
@@ -868,6 +878,10 @@ export default {
       why: "Loop state, review and verdict schemas, loop settings",
     },
     { path: "packages/contracts/src/kodoLoop.test.ts" },
+    {
+      path: "packages/contracts/src/kodoLoopLedger.ts",
+      why: "Read contract of the loop savings ledger",
+    },
     {
       path: "packages/shared/src/kodoLoopOutput.ts",
       why: "Parser for the loop's kodo-verdict and kodo-review blocks",
@@ -1131,6 +1145,9 @@ export default {
       "apps/web/src/kodo/inlineBlocks.logic.test.ts",
       "apps/web/src/kodo/loopCard.logic.test.ts",
       "apps/server/src/kodo/loop/loopMachine.test.ts",
+      "apps/server/src/kodo/ledger/loopLedger.test.ts",
+      "apps/server/src/ws.test.ts",
+      "apps/web/src/kodo/loopLedger.logic.test.ts",
       "apps/server/src/kodo/loop/loopState.test.ts",
       "apps/server/src/kodo/loopSettings.test.ts",
       "apps/web/src/kodo/reviewFindings.logic.test.ts",

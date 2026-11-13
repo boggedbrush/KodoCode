@@ -115,6 +115,7 @@ import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts"
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as UsageLimitSources from "./usage/UsageLimitSources.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import * as KodoLoopLedger from "./kodo/ledger/LoopLedger.ts"; // KODO: loop-ledger-rpc
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
@@ -843,6 +844,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(ThreadManagement.ThreadManagementService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({}),
   Layer.mock(UsageService.UsageService)({}),
+  Layer.mock(KodoLoopLedger.KodoLoopLedger)({}), // KODO: loop-ledger-rpc
   Layer.mock(VcsProvisioningService.VcsProvisioningService)({}),
   Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({}),
   Layer.mock(WorkspaceEntries.WorkspaceEntries)({}),

@@ -1,6 +1,7 @@
 import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwareness";
 import { pendingGuestMessageCount } from "@t3tools/contracts";
 import { kodoLoopShellStatus } from "@t3tools/contracts"; // KODO: loop-state
+import { recordEndedKodoLoop } from "../kodo/ledger/loopLedgerStore.ts"; // KODO: loop-ledger-write
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
@@ -2093,6 +2094,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             case "thread.model-selection-updated":
             case "thread.provider-switched":
             case "thread.guest-share-updated": {
+              // KODO: loop-ledger-write - an ended loop's figures are kept in the same transaction
+              yield* recordEndedKodoLoop(sql, event.payload, event.occurredAt);
               const payloadJson = yield* encodeThreadPayload(event.payload);
               const payload = parseEncodedPayload(payloadJson);
               yield* sql`

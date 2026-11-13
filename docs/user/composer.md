@@ -289,6 +289,13 @@ overrides only the rounds.
   cost. No "quota saved" figure is shown. If no Judge or Review model is set there is nothing
   to compare against and only token share is shown; if Code ran on the reference model itself
   it says "Nothing to compare".
+- **Savings on the Usage page.** The **Loop savings** section of the Usage page adds up the
+  estimates of every loop that has ended on that environment, for the last 30 days and all
+  time. It keeps counting after you delete a thread or project, and there is no way to clear
+  it. It reads "at least" when a loop's figure leaves a stage out, counts loops that could not
+  be priced apart (never as zero), and reads "Cost about $X more" when the total went the
+  other way. Loops are recorded when they end, so loops that ended before this version
+  are not included.
 
 Agents can use `t3_loop_start`, `t3_loop_stop` and `t3_loop_status`. Start and stop are
 refused when the calling thread is in Ask, Plan or Review mode; reading status is allowed. A

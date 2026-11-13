@@ -23,6 +23,7 @@ export * from "./usageLimitSourceId.ts";
 export * from "./providerPolicy.ts";
 export * from "./kodoInteractionMode.ts"; // KODO: thread-mode-type
 export * from "./kodoLoop.ts"; // KODO: loop-contract
+export * from "./kodoLoopLedger.ts"; // KODO: loop-ledger-contract
 export * from "./kodoModeModels.ts"; // KODO: mode-models-setting
 export * from "./kodoPromptEnhance.ts"; // KODO: prompt-enhance-contract
 export * from "./modelSelection.ts";

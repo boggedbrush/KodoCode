@@ -91,6 +91,7 @@ import {
 } from "./usageBreakdown";
 // KODO: usage-open-limits
 import { useKodoUsageLimitsRequest } from "../../kodo/usageOpen";
+import { KodoLoopLedgerSection } from "../../kodo/KodoLoopLedgerSection"; // KODO: usage-loop-ledger
 import {
   METRIC_OPTIONS,
   WINDOW_OPTIONS,
@@ -1024,6 +1025,8 @@ function UsageOverview({
           </div>
         )}
       </section>
+      {/* KODO: usage-loop-ledger - loop savings kept after the loops' threads are gone */}
+      <KodoLoopLedgerSection environments={selectedEnvironments} />
     </div>
   );
 }

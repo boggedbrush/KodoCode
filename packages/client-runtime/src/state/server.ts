@@ -1365,6 +1365,12 @@ export function createServerEnvironmentAtoms<R, E>(
           ),
         ),
     }),
+    // KODO: loop-ledger-query - read when the Usage page opens; staleTime 0 re-reads on each open
+    kodoLoopLedger: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:kodo-loop-ledger",
+      tag: WS_METHODS.serverGetKodoLoopLedger,
+      staleTimeMs: 0,
+    }),
     resourceTelemetry: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:resource-telemetry",
       tag: WS_METHODS.subscribeResourceTelemetry,

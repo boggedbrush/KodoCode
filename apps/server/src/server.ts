@@ -46,6 +46,7 @@ import * as SpeechService from "./speech/SpeechService.ts";
 import * as CloudSpeech from "./speech/CloudSpeech.ts";
 import { speechHttpApiLayer } from "./speech/http.ts";
 import { promptEnhanceHttpApiLayer } from "./kodo/promptEnhanceHttp.ts"; // KODO: prompt-enhance-http
+import * as KodoLoopLedger from "./kodo/ledger/LoopLedger.ts"; // KODO: loop-ledger-rpc
 import { speechStreamRouteLayer } from "./speech/stream.ts";
 import * as PullRequestProviderRegistry from "./pullRequest/PullRequestProviderRegistry.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
@@ -758,6 +759,7 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
 
 const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
   Layer.provideMerge(layerUsage),
+  Layer.provideMerge(KodoLoopLedger.layer), // KODO: loop-ledger-rpc
   Layer.provideMerge(layerBackground),
   Layer.provideMerge(layerResourceDiagnostics),
   Layer.provideMerge(TraceDiagnostics.layer),

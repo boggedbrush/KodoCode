@@ -355,6 +355,7 @@ import {
   ProviderConsumeResetCreditResult,
 } from "./providerUsageLimits.ts";
 import { UsagePricing, UsageReadError, UsageSummary, UsageSummaryInput } from "./usage.ts";
+import { KodoLoopLedgerReadError, KodoLoopLedgerSummary } from "./kodoLoopLedger.ts"; // KODO: loop-ledger-rpc
 import {
   StorageCleanupReport,
   DatabaseReclaimError,
@@ -547,6 +548,7 @@ export const WS_METHODS = {
   serverReportClientActivity: "server.reportClientActivity",
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
+  serverGetKodoLoopLedger: "server.getKodoLoopLedger", // KODO: loop-ledger-rpc
 
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1004,6 +1006,12 @@ const WsServerRefreshUsageRatesRpc = Rpc.make(WS_METHODS.serverRefreshUsageRates
   payload: Schema.Struct({}),
   success: UsagePricing,
   error: EnvironmentAuthorizationError,
+});
+
+const WsServerGetKodoLoopLedgerRpc = Rpc.make(WS_METHODS.serverGetKodoLoopLedger, {
+  payload: Schema.Struct({}),
+  success: KodoLoopLedgerSummary,
+  error: Schema.Union([EnvironmentAuthorizationError, KodoLoopLedgerReadError]),
 });
 
 const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
@@ -2123,6 +2131,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerPrepareTriageRpc,
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
+  WsServerGetKodoLoopLedgerRpc, // KODO: loop-ledger-rpc
   WsServerSignalProcessRpc,
   WsScheduledTasksSubscribeRpc,
   WsScheduledTasksUpsertRpc,
