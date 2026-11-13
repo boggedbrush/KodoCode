@@ -1,6 +1,12 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { kodoSubAgentsToggle, kodoThreadLeads, kodoThreadModelSlotMode } from "./kodoDelegation.ts";
+import {
+  kodoChildThreadFields,
+  kodoForkThreadFields,
+  kodoSubAgentsToggle,
+  kodoThreadLeads,
+  kodoThreadModelSlotMode,
+} from "./kodoDelegation.ts";
 
 const FULL = { kodoSubAgents: { support: "full" as const } };
 const NONE = {
@@ -63,5 +69,22 @@ describe("whether the sub-agents switch can be flipped", () => {
     expect(
       kodoSubAgentsToggle({ ...off, provider: NONE, lead: { kind: "sub-agents" } }).disabled,
     ).toBe(false);
+  });
+});
+
+describe("what a copied thread does not inherit", () => {
+  it("never carries a lead, a loop or an applied model into a child", () => {
+    expect(kodoChildThreadFields()).toEqual({
+      kodoLead: null,
+      kodoLoop: undefined,
+      kodoModeModel: undefined,
+    });
+  });
+
+  it("never carries a loop into a fork, and a lead only into a fork a person made", () => {
+    expect(kodoForkThreadFields("user")).toEqual({ kodoLoop: undefined });
+    for (const createdBy of ["agent", "system"] as const) {
+      expect(kodoForkThreadFields(createdBy)).toEqual({ kodoLead: null, kodoLoop: undefined });
+    }
   });
 });

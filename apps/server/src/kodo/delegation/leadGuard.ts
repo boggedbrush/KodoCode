@@ -1,6 +1,6 @@
 // The service-layer guard for starting work from a thread that leads sub-agents or is one of their
 // workers. It reads the server's own record of the threads, never what the caller says about
-// itself; delegate_task, create_threads and t3_thread_launch all ask it, and the loop start rules
+// itself; delegate_task, create_threads, t3_thread_launch and t3_thread_transfer ask it, and the loop start rules
 // read the same ancestry.
 import {
   isLiveSubagentShell,
@@ -9,8 +9,15 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Semaphore from "effect/Semaphore";
 
-import { kodoMaxWorkers, kodoWorkerCapRefusal, KODO_WORKER_DEPTH_REFUSAL } from "./limits.ts";
+import {
+  KODO_LEAD_THREAD_REFUSAL,
+  KODO_WORKER_DEPTH_REFUSAL,
+  KODO_WORKER_MESSAGING_REFUSAL,
+  kodoMaxWorkers,
+  kodoWorkerCapRefusal,
+} from "./limits.ts";
 
 type LiveShell = Parameters<typeof isLiveSubagentShell>[0];
 type KodoReadError = { readonly _tag: string };
@@ -35,7 +42,10 @@ export interface KodoLeadShell extends LiveShell, KodoAncestryShell {
 
 /** How far up the delegation chain a thread's ancestry is read. */
 const MAX_ANCESTRY_DEPTH = 6;
-/** The newest workers read when counting; older ones are long finished. */
+/**
+ * The newest workers read when counting. The store lists unfinished workers after finished ones, so
+ * the newest end of the list holds every live worker (and the ones started this turn).
+ */
 const MAX_WORKERS_READ = 64;
 
 export const isKodoLead = (shell: {
@@ -120,30 +130,15 @@ export const kodoWorkerCounts = Effect.fn("KodoDelegation.workerCounts")(functio
 const failure = (message: string) =>
   new OrchestratorMcpFailure({ code: "capability_denied", message });
 
-/**
- * Threads a lead has created this turn (create_threads, t3_thread_launch), which no worker record
- * lists. Kept in memory per turn and bounded: a restart forgets it, and the live-worker cap, which is
- * read from the store, is unaffected.
- */
-export function makeKodoCreatedTally(limit = 256) {
-  const created = new Map<string, number>();
-  return {
-    get: (key: string) => created.get(key) ?? 0,
-    add: (key: string, count: number) => {
-      const next = (created.get(key) ?? 0) + count;
-      created.delete(key);
-      created.set(key, next);
-      for (const oldest of created.keys()) {
-        if (created.size <= limit) break;
-        created.delete(oldest);
-      }
-    },
-  };
-}
-export type KodoCreatedTally = ReturnType<typeof makeKodoCreatedTally>;
+const guardReadFailure = Effect.mapError((error: { readonly _tag: string }) =>
+  error._tag === "OrchestratorMcpFailure"
+    ? (error as OrchestratorMcpFailure)
+    : failure(
+        "Sub-agent limits could not be checked, so nothing was started. Try again in a moment.",
+      ),
+);
 
 export interface KodoDelegationGuardDeps<E extends KodoReadError> {
-  readonly tally: KodoCreatedTally;
   readonly getShell: GetShell<E>;
   readonly listChildIds: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<ThreadId>, E>;
   readonly toMillis: (value: OrchestrationV2ThreadShell["createdAt"]) => number;
@@ -152,9 +147,10 @@ export interface KodoDelegationGuardDeps<E extends KodoReadError> {
 }
 
 /**
- * Refuses a start from a worker, or from a lead that is at a cap. A caller that is neither a lead nor
- * a worker is not this guard's business. A read that fails refuses (a limit that cannot be checked
- * is not a limit that is kept).
+ * Refuses a delegation from a worker, or from a lead that is at a cap. A caller that is neither a
+ * lead nor a worker is not this guard's business. A read that fails refuses (a limit that cannot be
+ * checked is not a limit that is kept). The caller holds the lead's lock (`withLeadLock`) from here
+ * until the worker is written, so two calls cannot both see room for one.
  */
 export const kodoGuardWorkerStart = Effect.fn("KodoDelegation.guardStart")(function* <
   E extends KodoReadError,
@@ -162,10 +158,8 @@ export const kodoGuardWorkerStart = Effect.fn("KodoDelegation.guardStart")(funct
   deps: KodoDelegationGuardDeps<E>,
   input: {
     readonly callerThreadId: ThreadId;
-    /** How many workers or threads this call would add. */
+    /** How many workers this call would add. */
     readonly adding: number;
-    /** `delegate` adds workers, which the store lists; `thread` adds top-level threads, which only the tally knows. */
-    readonly route: "delegate" | "thread";
   },
 ) {
   return yield* Effect.gen(function* () {
@@ -184,21 +178,86 @@ export const kodoGuardWorkerStart = Effect.fn("KodoDelegation.guardStart")(funct
       turnStartedAtMs: turnStart === undefined ? undefined : deps.toMillis(turnStart),
       toMillis: deps.toMillis,
     });
-    const tallyKey = `${input.callerThreadId}:${turnStart === undefined ? "" : deps.toMillis(turnStart)}`;
     const refusal = kodoWorkerCapRefusal({
-      counts: { live: counts.live, thisTurn: counts.thisTurn + deps.tally.get(tallyKey) },
+      counts,
       maxWorkers: kodoMaxWorkers(yield* deps.maxWorkersSetting),
       adding: input.adding,
     });
     if (refusal !== undefined) return yield* failure(refusal);
-    if (input.route === "thread") deps.tally.add(tallyKey, input.adding);
-  }).pipe(
-    Effect.mapError((error) =>
-      error._tag === "OrchestratorMcpFailure"
-        ? (error as OrchestratorMcpFailure)
-        : failure(
-            "Sub-agent limits could not be checked, so nothing was started. Try again in a moment.",
-          ),
-    ),
-  );
+  }).pipe(guardReadFailure);
 });
+
+/** Refuses a caller that is a worker of a lead: workers start nothing. */
+export const kodoGuardNotWorker = Effect.fn("KodoDelegation.guardNotWorker")(function* <
+  E extends KodoReadError,
+>(deps: Pick<KodoDelegationGuardDeps<E>, "getShell">, callerThreadId: ThreadId) {
+  return yield* Effect.gen(function* () {
+    if (yield* kodoThreadUnderLead(deps.getShell, callerThreadId)) {
+      return yield* failure(KODO_WORKER_DEPTH_REFUSAL);
+    }
+  }).pipe(guardReadFailure);
+});
+
+/** Refuses a worker of a lead that forks itself or sends to another thread. */
+export const kodoGuardWorkerMessaging = Effect.fn("KodoDelegation.guardWorkerMessaging")(function* <
+  E extends KodoReadError,
+>(deps: Pick<KodoDelegationGuardDeps<E>, "getShell">, callerThreadId: ThreadId) {
+  return yield* Effect.gen(function* () {
+    if (yield* kodoThreadUnderLead(deps.getShell, callerThreadId)) {
+      return yield* failure(KODO_WORKER_MESSAGING_REFUSAL);
+    }
+  }).pipe(guardReadFailure);
+});
+
+/**
+ * Refuses a thread start (create_threads, t3_thread_launch) from a lead or a worker: a lead hands
+ * work over with delegate_task only, and a worker starts nothing.
+ */
+export const kodoGuardThreadStart = Effect.fn("KodoDelegation.guardThreadStart")(function* <
+  E extends KodoReadError,
+>(deps: Pick<KodoDelegationGuardDeps<E>, "getShell">, callerThreadId: ThreadId) {
+  return yield* Effect.gen(function* () {
+    const caller = yield* deps.getShell(callerThreadId);
+    if (caller === null) return;
+    if (yield* kodoThreadUnderLead(deps.getShell, callerThreadId)) {
+      return yield* failure(KODO_WORKER_DEPTH_REFUSAL);
+    }
+    if (isKodoLead(caller)) return yield* failure(KODO_LEAD_THREAD_REFUSAL);
+  }).pipe(guardReadFailure);
+});
+
+/** One lock per lead thread, dropped when nobody holds or waits for it. */
+export function makeKodoLeadLocks() {
+  const locks = new Map<string, { readonly lock: Semaphore.Semaphore; users: number }>();
+  return {
+    /**
+     * Takes the lead's lock for the surrounding scope and returns an effect that gives it back early
+     * (once; the scope gives it back otherwise). Calls for the same lead run one after another
+     * between taking and giving back.
+     */
+    hold: (key: string) =>
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const entry = locks.get(key) ?? { lock: Semaphore.makeUnsafe(1), users: 0 };
+          entry.users += 1;
+          locks.set(key, entry);
+          const leave = Effect.sync(() => {
+            entry.users -= 1;
+            if (entry.users === 0 && locks.get(key) === entry) locks.delete(key);
+          });
+          // Waiting is interruptible; an interrupted waiter only drops its place.
+          yield* restore(entry.lock.take(1)).pipe(Effect.onInterrupt(() => leave));
+          let released = false;
+          const giveBack = Effect.suspend(() => {
+            if (released) return Effect.void;
+            released = true;
+            return Effect.andThen(entry.lock.release(1), leave);
+          });
+          yield* Effect.addFinalizer(() => giveBack);
+          return giveBack;
+        }),
+      ),
+    size: () => locks.size,
+  };
+}
+export type KodoLeadLocks = ReturnType<typeof makeKodoLeadLocks>;

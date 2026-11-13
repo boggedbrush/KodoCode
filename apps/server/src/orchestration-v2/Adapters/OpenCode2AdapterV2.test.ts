@@ -6845,6 +6845,18 @@ const providerTurnId = Effect.gen(function* () {
   });
 }).pipe(Effect.provide(IdAllocator.layer));
 
+// KODO: mode-read-only-opencode - a thread that leads sub-agents does not get OpenCode's own task tool.
+it("denies the task tool last for a thread that leads sub-agents, and only for one", () => {
+  const policy = { runtimeMode: "full-access", interactionMode: "default" } as const;
+  const effectOf = (rules: ReturnType<typeof sessionRules>) =>
+    rules.findLast((rule) => rule.action === "task")?.effect;
+  assert.equal(
+    effectOf(sessionRules({ ...policy, modeBlocksNativeSubagents: true }, [], [], null)),
+    "deny",
+  );
+  assert.isUndefined(effectOf(sessionRules(policy, [], [], null)));
+});
+
 // KODO: mode-read-only-opencode - Kodo's modes over OpenCode v2's session rules (last match wins).
 it("denies edits and shell last in Ask and Plan, so no grant or agent path rule re-allows them", () => {
   const effectOf = (rules: ReturnType<typeof sessionRules>, action: string) =>

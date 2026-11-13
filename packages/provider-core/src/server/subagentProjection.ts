@@ -18,6 +18,7 @@ import type {
   ThreadId,
   TurnItemId,
 } from "@t3tools/contracts";
+import { kodoChildThreadFields } from "@t3tools/shared/kodoDelegation"; // KODO: delegation-child
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { runRanAfter } from "@t3tools/shared/orchestrationV2ThreadError";
 import * as DateTime from "effect/DateTime";
@@ -71,7 +72,7 @@ export function makeSubagentChildThread(input: {
     linkedPullRequest: null,
     pullRequests: [],
     historyOrigin: undefined,
-    kodoLead: null, // KODO: delegation-child - a worker is never a lead: it would take the lead's model slot, instructions and caps
+    ...kodoChildThreadFields(), // KODO: delegation-child - a child is never a lead and inherits no loop or applied model: it would take the lead's slot, instructions, caps and ledger row
     providerInstanceId: input.providerInstanceId,
     modelSelection: input.modelSelection,
     activeProviderThreadId: input.activeProviderThreadId,

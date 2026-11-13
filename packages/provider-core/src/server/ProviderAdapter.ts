@@ -73,6 +73,12 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
    * that is not Plan (ask, review), so a plan the agent proposes there is not captured as one.
    */
   modeSuppressesPlanCapture: Schema.optional(Schema.Boolean),
+  /**
+   * KODO: mode-policy-fields - true when the thread leads sub-agents, so the provider's own
+   * subagent or task tool is withheld (it would let the lead pick a model and bypass the caps).
+   * Adapters that can withhold one read it; the rest rely on the lead's instructions.
+   */
+  modeBlocksNativeSubagents: Schema.optional(Schema.Boolean),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 

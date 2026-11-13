@@ -586,6 +586,70 @@ it.effect("a client caller targets any thread within its ceiling and cannot act 
   ),
 );
 
+// KODO: delegation-normalize - a worker of a lead forks and merges nothing
+it.effect("a worker of a lead is refused t3_thread_transfer, and another thread is not", () => {
+  const leadId = ThreadId.make("thread:transfer-lead");
+  const shellOf = (id: ThreadId) => {
+    const base = McpToolAccessTestkit.liveThreadShell(id);
+    return id === leadId
+      ? ({ ...base, kodoLead: { kind: "sub-agents" } } as never)
+      : ({
+          ...base,
+          lineage: {
+            rootThreadId: leadId,
+            parentThreadId: leadId,
+            relationshipToParent: "subagent",
+          },
+        } as never);
+  };
+  const dispatched: Array<unknown> = [];
+  return Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const fork = (caller: McpInvocationContext.McpInvocationScope) =>
+      server
+        .callTool({
+          name: "t3_thread_transfer",
+          arguments: { action: "fork", sourcePoint: { type: "latest_stable" } },
+        })
+        .pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, caller),
+          Effect.provideService(McpSchema.McpServerClient, client),
+        );
+    const asThread = (id: ThreadId): McpInvocationContext.McpInvocationScope => ({
+      ...scope,
+      thread: { ...scope.thread!, threadId: id },
+    });
+    const refused = yield* fork(asThread(threadId));
+    expect(declaredFailure(refused)).toMatchObject({
+      code: "capability_denied",
+      message: expect.stringContaining("does not fork itself"),
+    });
+    expect(dispatched).toEqual([]);
+    // The lead itself forks as before.
+    const allowed = yield* fork(asThread(leadId));
+    expect(allowed.isError).toBe(false);
+    expect(dispatched).toHaveLength(1);
+  }).pipe(
+    Effect.provide(
+      layerThreadToolkit.pipe(
+        Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
+        Layer.provide(NodeCrypto.layer),
+        Layer.provide(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadShell: (id) => Effect.succeed(shellOf(id)),
+            getProjectThreadRecords: ({ threadId: id }) =>
+              Effect.succeed(McpToolAccessTestkit.idleThreadProjection(shellOf(id))),
+            dispatch: (command) => {
+              dispatched.push(command);
+              return Effect.succeed({ sequence: 7, storedEvents: [] });
+            },
+          }),
+        ),
+      ),
+    ),
+  );
+});
+
 it.effect("a read-only client reads threads and is refused every write before it runs", () =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;

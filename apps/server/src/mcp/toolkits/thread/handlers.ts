@@ -22,6 +22,7 @@ import {
 import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as ScheduledTasks from "../../../scheduledTasks/ScheduledTaskService.ts";
 import { queuedRunsInDeliveryOrder } from "../../../orchestration-v2/QueuedRunOrder.ts";
+import { kodoRefuseWorkerMessaging } from "../../kodoLaunchStart.ts"; // KODO: delegation-normalize
 import { ThreadToolkit } from "./tools.ts";
 
 function queueEntry(
@@ -160,6 +161,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
       (input) => [input.threadId, input.targetThreadId],
       (input) =>
         Effect.gen(function* () {
+          yield* kodoRefuseWorkerMessaging(yield* readCaller()); // KODO: delegation-normalize - a worker forks and merges nothing
           const sourcePoint = input.sourcePoint ?? { type: "latest_stable" as const };
           const { threads, projection } = yield* readThread(input.threadId);
           const commandId = yield* newCommandId();

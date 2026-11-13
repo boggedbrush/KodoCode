@@ -1,7 +1,7 @@
 // The text a lead thread's model is given with each message. It is model-facing: changes here need
-// the evals in evals/README.md (the cases to add are listed in the Sub-agents section of the
-// release notes). The block rides in front of the person's text like a mode block, so it holds
-// for the whole thread; one short block says when sub-agents are turned off again.
+// the evals in evals/README.md (evals/mcp-tool-use/cases/sub-agents.ndjson). The block rides in
+// front of the person's text like a mode block, so it holds for the whole thread; one short block
+// says when sub-agents are turned off again.
 import { normalizeKodoInteractionMode, type KodoInteractionMode } from "@t3tools/contracts";
 
 const WORKERS_BY_MODE: Readonly<Record<KodoInteractionMode, string>> = {
@@ -27,6 +27,7 @@ ${WORKERS_BY_MODE[normalized]}
 - Give each worker one self-contained task with the files, the goal and what done looks like. Use mode "wait" when this turn needs the result.
 - A worker's result is a claim, not proof. Read what it reports and check the changed files or the diff with read-only commands before you tell the person it is done. Send fixes back to a worker.
 - Do not use your provider's built-in subagents or Task tool: they bypass the models the person chose.
+- Do not create or launch other threads (\`create_threads\`, \`t3_thread_launch\`): they are refused for a lead. Hand work over with \`delegate_task\` only.
 - Workers cannot start workers. A few run at once at most; if \`delegate_task\` is refused (a cap or a usage limit), tell the person why instead of doing the work yourself.
 - For work that needs several rounds (implement, review, fix until clean), prefer \`t3_loop_start\` on another idle thread: a loop runs without lead turns, so it costs less.
 

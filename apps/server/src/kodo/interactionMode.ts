@@ -311,6 +311,8 @@ export function kodoRuntimePolicyOverlay(input: {
   readonly interactionMode: unknown;
   readonly driver: string | undefined;
   readonly runtimeMode: RuntimeMode;
+  /** The thread leads sub-agents. */
+  readonly leadsSubAgents?: boolean | undefined;
 }): {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
@@ -319,6 +321,7 @@ export function kodoRuntimePolicyOverlay(input: {
   readonly modeInstructions?: string;
   readonly modeReadOnly?: true;
   readonly modeSuppressesPlanCapture?: true;
+  readonly modeBlocksNativeSubagents?: true;
 } {
   const resolution = resolveKodoInteractionMode({
     mode: input.interactionMode,
@@ -334,6 +337,7 @@ export function kodoRuntimePolicyOverlay(input: {
     ...(resolution.instructions === undefined ? {} : { modeInstructions: resolution.instructions }),
     ...(resolution.readOnly ? { modeReadOnly: true as const } : {}),
     ...(resolution.suppressPlanCapture ? { modeSuppressesPlanCapture: true as const } : {}),
+    ...(input.leadsSubAgents === true ? { modeBlocksNativeSubagents: true as const } : {}),
   };
 }
 
@@ -407,6 +411,7 @@ export function kodoSessionPolicyKey(policy: {
   readonly approvalPolicy?: unknown;
   readonly modeReadOnly?: boolean | undefined;
   readonly modeSuppressesPlanCapture?: boolean | undefined;
+  readonly modeBlocksNativeSubagents?: boolean | undefined;
 }): string {
   const sandbox = policy.sandboxPolicy;
   return JSON.stringify([
@@ -416,6 +421,7 @@ export function kodoSessionPolicyKey(policy: {
     policy.approvalPolicy ?? null,
     policy.modeReadOnly === true,
     policy.modeSuppressesPlanCapture === true,
+    policy.modeBlocksNativeSubagents === true,
   ]);
 }
 
@@ -459,7 +465,16 @@ const MAX_TRACKED_THREADS = 4096;
 export function makeKodoModeAnnouncer() {
   const delivered = new Map<string, KodoInteractionMode>();
   // Threads whose model was last told it leads sub-agents, so turning them off is announced once.
+  // Bounded like `delivered`: the oldest are forgotten, and a forgotten one is simply not told.
   const ledByThread = new Set<string>();
+  const rememberLed = (threadId: string) => {
+    ledByThread.delete(threadId);
+    ledByThread.add(threadId);
+    for (const oldest of ledByThread) {
+      if (ledByThread.size <= MAX_TRACKED_THREADS) break;
+      ledByThread.delete(oldest);
+    }
+  };
   const remember = (threadId: string, mode: KodoInteractionMode) => {
     delivered.delete(threadId);
     delivered.set(threadId, mode);
@@ -507,7 +522,7 @@ export function makeKodoModeAnnouncer() {
           : ledByThread.has(input.threadId)
             ? KODO_SUB_AGENTS_OFF_INSTRUCTIONS
             : undefined;
-      if (input.leadInstructions !== undefined) ledByThread.add(input.threadId);
+      if (input.leadInstructions !== undefined) rememberLed(input.threadId);
       else ledByThread.delete(input.threadId);
       const combined =
         instructions === undefined || lead === undefined

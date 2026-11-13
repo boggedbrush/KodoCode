@@ -1,7 +1,7 @@
 // The usage-limit gate before a worker starts, built from the loop's own limit reading: the fullest
 // window of the provider the worker will run on, read fresh, against the loop's "stop at" percent.
-// A window that cannot be read (missing or stale) does not stop work, as in the loop; an error while
-// reading refuses, so a limit that cannot be checked is not skipped.
+// A provider that reports no windows does not stop work; a reading that is stale, or an error while
+// reading, refuses, so a limit that cannot be checked is not skipped.
 import { OrchestratorMcpFailure, type ServerProvider } from "@t3tools/contracts";
 import { fullestKodoLimitWindow } from "@t3tools/shared/kodoLoopLimits";
 import * as Effect from "effect/Effect";
@@ -38,6 +38,12 @@ export const kodoGuardWorkerLimit = Effect.fn("KodoDelegation.guardLimit")(funct
         ),
       refresh: deps.refreshLimits?.(instanceId),
     });
+    if (reading.state === "stale") {
+      return yield* new OrchestratorMcpFailure({
+        code: "capability_denied",
+        message: KODO_WORKER_LIMIT_UNREADABLE,
+      });
+    }
     const fullest = fullestKodoLimitWindow(reading);
     if (fullest === null) return;
     const refusal = kodoWorkerLimitRefusal({

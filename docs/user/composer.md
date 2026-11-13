@@ -318,11 +318,15 @@ inline in the lead's conversation, and you can open one to see what it did or to
 - **What workers may do.** A Code thread's lead can start Code workers (they write) and Review
   workers (they only read). A thread in Ask, Plan or Review never gets a worker that can write:
   its workers are read-only too. A worker never has a broader runtime mode than its thread.
-  Workers cannot start workers, threads or loops.
+  Workers cannot start workers, threads or loops, fork themselves or message other threads. A
+  lead hands work over only with `delegate_task`, in its own environment: it cannot create or
+  launch other threads. Where the provider allows it (Claude and OpenCode), the provider's own
+  subagent tool is turned off for a lead, because it would let the lead pick a model; on other
+  providers the lead is only instructed not to use it.
 - **Limits.** At most three workers run at once for a lead (change it in Settings, up to six),
   and a turn starts at most eight. Before it starts a worker T3 Code checks the usage limit of
   the worker's provider against the same "Stop at usage limit" setting a loop uses, and refuses
-  with a message the lead passes on to you.
+  with a message the lead passes on to you. It refuses the same way when the limit cannot be read.
 - **Turning it on.** The chip is disabled, with the reason on hover, while a turn or a loop runs,
   while workers are running, and when the thread's provider cannot receive the delegation tools.
   It is also in the command palette (**Toggle sub-agents**, which you can bind to a key under

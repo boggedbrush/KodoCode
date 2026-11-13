@@ -3,7 +3,9 @@ import { ProviderInstanceId } from "@t3tools/contracts";
 
 import { ENFORCEMENT_BY_DRIVER } from "../interactionMode.ts";
 import {
+  KODO_NATIVE_SUBAGENTS_BY_DRIVER,
   KODO_SUB_AGENTS_SUPPORT_BY_DRIVER,
+  kodoDriversMissingNativeSubagents,
   kodoDriversMissingSubAgentsSupport,
   kodoLeadSupportRefusal,
   kodoSubAgentsSupportForDriver,
@@ -16,6 +18,21 @@ describe("which providers can lead sub-agents", () => {
     expect(Object.keys(KODO_SUB_AGENTS_SUPPORT_BY_DRIVER).toSorted()).toEqual(
       Object.keys(ENFORCEMENT_BY_DRIVER).toSorted(),
     );
+  });
+
+  it("says for every driver whether its own subagent tool is withheld from a lead", () => {
+    expect(kodoDriversMissingNativeSubagents()).toEqual([]);
+    expect(Object.keys(KODO_NATIVE_SUBAGENTS_BY_DRIVER).toSorted()).toEqual(
+      Object.keys(ENFORCEMENT_BY_DRIVER).toSorted(),
+    );
+    const withheld = Object.entries(KODO_NATIVE_SUBAGENTS_BY_DRIVER)
+      .filter(([, entry]) => entry.withheld)
+      .map(([driver]) => driver);
+    expect(withheld.toSorted()).toEqual(["claudeAgent", "opencode"]);
+    for (const [driver, entry] of Object.entries(KODO_NATIVE_SUBAGENTS_BY_DRIVER)) {
+      expect(entry.note.length, driver).toBeGreaterThan(0);
+      if (!entry.withheld) expect(entry.note, driver).toMatch(/instruction-only/);
+    }
   });
 
   it("says a driver it does not know cannot, with the reason", () => {

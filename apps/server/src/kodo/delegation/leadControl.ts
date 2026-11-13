@@ -31,6 +31,8 @@ export interface KodoLeadSetInput {
     readonly senderThreadId?: ThreadId | undefined;
     /** The sender is the target thread or a thread it runs under. */
     readonly senderIsTargetOrAncestor: boolean;
+    /** The sender is itself a worker of a lead. */
+    readonly senderUnderLead?: boolean | undefined;
   };
   /** The mode ceiling of an agent caller (DispatchModeLimit), when there is one. */
   readonly limit?: { readonly interactionMode: unknown } | undefined;
@@ -45,6 +47,11 @@ export function decideKodoLeadSet(input: KodoLeadSetInput): KodoLeadSetResult {
     if (actor.senderThreadId === undefined || actor.senderIsTargetOrAncestor) {
       return refuse(
         "An agent cannot change sub-agents for its own thread or for the lead it works for. Ask the person to use the Sub-agents switch.",
+      );
+    }
+    if (actor.senderUnderLead === true) {
+      return refuse(
+        "A worker cannot change sub-agents for any thread. Ask the lead or the person.",
       );
     }
     if (

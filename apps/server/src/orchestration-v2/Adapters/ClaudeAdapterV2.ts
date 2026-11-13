@@ -521,6 +521,12 @@ export const CLAUDE_READ_ONLY_MODE_DISALLOWED_TOOLS = [
   "NotebookEdit",
 ] as const;
 
+/**
+ * KODO: mode-read-only-claude - withheld from a thread that leads sub-agents: the model a native
+ * subagent runs on is the lead's choice, and its work is outside the caps and the stop button.
+ */
+export const CLAUDE_LEAD_DISALLOWED_TOOLS = ["Agent", "Task"] as const;
+
 function claudeAgentSdkQueryToolsForSdk(
   tools: ClaudeAgentSdkQueryTools,
 ): NonNullable<ClaudeQueryOptions["tools"]> {
@@ -2939,10 +2945,14 @@ export function claudeRuntimeQueryPolicyForRuntimePolicy(
 
   // KODO: mode-read-only-claude - Ask, Plan and Review: T3 MCP pre-approvals narrow to the
   // read-only tools, and edit tools are denied outright.
-  const modeReadOnly =
-    runtimePolicy.modeReadOnly === true
-      ? { readOnly: true as const, disallowedTools: CLAUDE_READ_ONLY_MODE_DISALLOWED_TOOLS }
-      : {};
+  const modeDisallowed = [
+    ...(runtimePolicy.modeReadOnly === true ? CLAUDE_READ_ONLY_MODE_DISALLOWED_TOOLS : []),
+    ...(runtimePolicy.modeBlocksNativeSubagents === true ? CLAUDE_LEAD_DISALLOWED_TOOLS : []),
+  ];
+  const modeReadOnly = {
+    ...(runtimePolicy.modeReadOnly === true ? { readOnly: true as const } : {}),
+    ...(modeDisallowed.length === 0 ? {} : { disallowedTools: modeDisallowed }),
+  };
 
   if (permissionMode === "plan") {
     return {

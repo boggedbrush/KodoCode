@@ -6,6 +6,7 @@ import {
   kodoWorkerInstanceIds,
   normalizeLeadDelegation,
 } from "../kodo/delegation/leadDelegation.ts"; // KODO: delegation-normalize
+import { KODO_LEAD_REMOTE_REFUSAL } from "../kodo/delegation/limits.ts"; // KODO: delegation-normalize
 import { kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel"; // KODO: delegation-normalize
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts"; // KODO: delegation-normalize
 import {
@@ -1065,9 +1066,9 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * KODO: delegation-normalize - every start from a thread passes here first. A worker is refused,
-   * a lead over its caps is refused, and a lead's call loses any model it named and gets its role
-   * turned into a mode. Anyone else's call is returned as it was.
+   * KODO: delegation-normalize - a delegation passes here first. A worker is refused, and a lead's
+   * call loses any model it named and gets its role turned into a mode. Anyone else's call is
+   * returned as it was. The lead's caps are checked later, under its lock (`kodoStartWorker`).
    */
   const kodoLeadStart = Effect.fn("OrchestratorMcpService.kodoLeadStart")(function* <
     Input extends {
@@ -1075,10 +1076,10 @@ const make = Effect.gen(function* () {
       readonly role?: OrchestratorMcpTaskRole | undefined;
       readonly interactionMode?: ThreadInteractionMode | "inherit" | undefined;
     },
-  >(scope: McpInvocationScope, input: Input, adding: number, route: "delegate" | "thread") {
+  >(scope: McpInvocationScope, input: Input) {
     if (scope.thread === undefined) return { input, lead: false } as const;
     const callerThreadId = scope.thread.threadId;
-    yield* kodoGuard.guardStart({ callerThreadId, adding, route });
+    yield* kodoGuard.guardNotWorker(callerThreadId);
     const shell = yield* threadManagement
       .getThreadShell(callerThreadId)
       .pipe(Effect.mapError(threadManagementFailure));
@@ -1099,22 +1100,31 @@ const make = Effect.gen(function* () {
         }
       : parent;
 
-  /** KODO: delegation-normalize - the usage gate over every provider a lead's worker could run on. */
-  const kodoGuardWorkerProviders = Effect.fn("OrchestratorMcpService.kodoGuardWorkerProviders")(
-    function* (mode: ThreadInteractionMode, inherited: ModelSelection) {
-      const modeModels = yield* serverSettings.getSettings.pipe(
-        Effect.map((settings) => settings.modeModelSelections),
-        Effect.orElseSucceed(() => DEFAULT_KODO_MODE_MODELS),
-      );
-      for (const instanceId of kodoWorkerInstanceIds({
-        modeModels,
-        mode,
-        inherited: inherited.instanceId,
-      })) {
-        yield* kodoGuard.guardLimit(instanceId);
-      }
-    },
-  );
+  /**
+   * KODO: delegation-normalize - what a lead's new worker must pass: the usage gate over every
+   * provider it could run on, then the caps under the lead's lock. Returns the effect that gives the
+   * lock back; the call makes it once the worker is written, so a second call sees this one's worker.
+   */
+  const kodoStartWorker = Effect.fn("OrchestratorMcpService.kodoStartWorker")(function* (
+    callerThreadId: ThreadId,
+    mode: ThreadInteractionMode,
+    inherited: ModelSelection,
+  ) {
+    const modeModels = yield* serverSettings.getSettings.pipe(
+      Effect.map((settings) => settings.modeModelSelections),
+      Effect.orElseSucceed(() => DEFAULT_KODO_MODE_MODELS),
+    );
+    for (const instanceId of kodoWorkerInstanceIds({
+      modeModels,
+      mode,
+      inherited: inherited.instanceId,
+    })) {
+      yield* kodoGuard.guardLimit(instanceId);
+    }
+    const release = yield* kodoGuard.holdLead(callerThreadId);
+    yield* kodoGuard.guardStart({ callerThreadId, adding: 1 });
+    return release;
+  });
 
   const requireProject = (projectId: ProjectId) =>
     projects.getById(projectId).pipe(
@@ -2444,12 +2454,7 @@ const make = Effect.gen(function* () {
     delegateTask: Effect.fn("OrchestratorMcpService.delegateTask")(
       function* (callerScope, requestedInput) {
         // KODO: delegation-normalize
-        const { input, lead: kodoLead } = yield* kodoLeadStart(
-          callerScope,
-          requestedInput,
-          1,
-          "delegate",
-        );
+        const { input, lead: kodoLead } = yield* kodoLeadStart(callerScope, requestedInput);
         const environmentId =
           input.target === undefined
             ? undefined
@@ -2458,6 +2463,7 @@ const make = Effect.gen(function* () {
           yield* requireCapability(callerScope);
           const scope = yield* requireThreadScope(callerScope, "delegate_task");
           // The task's child runs as an ordinary thread there; this thread keeps the task.
+          if (kodoLead) return yield* failure("capability_denied", KODO_LEAD_REMOTE_REFUSAL); // KODO: delegation-normalize
           const { taskId } = yield* remoteDelegation.delegate(scope, {
             ...input,
             target: { ...input.target, environmentId },
@@ -2513,9 +2519,10 @@ const make = Effect.gen(function* () {
           input.interactionMode,
         ); // KODO: mode-child-limit
         // KODO: delegation-normalize - a retry of a delegation already accepted starts nothing new
-        if (kodoLead && !isRetryOfAcceptedDelegation) {
-          yield* kodoGuardWorkerProviders(interactionMode, target.modelSelection);
-        }
+        const kodoRelease: Effect.Effect<void> =
+          kodoLead && !isRetryOfAcceptedDelegation
+            ? yield* kodoStartWorker(scope.thread.threadId, interactionMode, target.modelSelection)
+            : Effect.void;
         let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
         if (input.isolation === "worktree" && !isRetryOfAcceptedDelegation) {
           const project = yield* requireProject(parent.thread.projectId);
@@ -2580,6 +2587,7 @@ const make = Effect.gen(function* () {
                   ),
             ),
           );
+        yield* kodoRelease; // KODO: delegation-normalize
         const taskEvent = result.storedEvents.find(
           (stored) =>
             stored.event.type === "subagent.updated" && stored.event.payload.origin === "app_owned",
@@ -2654,6 +2662,7 @@ const make = Effect.gen(function* () {
           );
         return yield* readTask(scope, taskId, Option.isNone(waited), true);
       },
+      Effect.scoped, // KODO: delegation-normalize - holds the lead's lock until the worker is written
     ),
     taskStatus: Effect.fn("OrchestratorMcpService.taskStatus")(function* (callerScope, taskId) {
       const scope = yield* requireThreadScope(callerScope, "task_status");
@@ -2874,8 +2883,7 @@ const make = Effect.gen(function* () {
     createThreads: Effect.fn("OrchestratorMcpService.createThreads")(
       function* (callerScope, input) {
         const { scope, parent } = yield* loadThreadCaller(callerScope, "create_threads");
-        // KODO: delegation-normalize - the same depth rule, caps and usage gate as a delegation
-        const leadStart = yield* kodoLeadStart(callerScope, {}, input.threads.length, "thread");
+        yield* kodoGuard.guardThreadStart(scope.thread.threadId); // KODO: delegation-normalize - a lead delegates instead; a worker starts nothing
         const parentRun = ThreadManagementService.latestActiveRun(parent);
         if (
           parentRun === undefined ||
@@ -2911,17 +2919,13 @@ const make = Effect.gen(function* () {
                     .getThreadShell(threadId)
                     .pipe(Effect.mapError(threadManagementFailure))
                 : null;
-              // KODO: delegation-normalize - a lead's thread request loses any model it named
-              const asked = leadStart.lead
-                ? normalizeLeadDelegation(request, parent.thread.interactionMode)
-                : request;
               const target = yield* resolveTargetRechecking({
-                parent: kodoInheritingParent(parent, leadStart.lead), // KODO: delegation-normalize
+                parent,
                 target:
                   committedThread === null
-                    ? asked.target
+                    ? request.target
                     : {
-                        ...asked.target,
+                        ...request.target,
                         providerInstanceId: committedThread.modelSelection.instanceId,
                       },
                 providers,
@@ -2929,16 +2933,13 @@ const make = Effect.gen(function* () {
               });
               const runtimeMode = yield* resolveRuntimeMode(
                 parent.thread.runtimeMode,
-                asked.runtimeMode,
+                request.runtimeMode,
                 target,
               );
               const interactionMode = yield* resolveChildInteractionMode(
                 parent.thread.interactionMode,
-                asked.interactionMode,
+                request.interactionMode,
               ); // KODO: mode-child-limit
-              if (leadStart.lead && !isRetryOfAcceptedCreation) {
-                yield* kodoGuardWorkerProviders(interactionMode, target.modelSelection); // KODO: delegation-normalize
-              }
               yield* assertTargetEnabledForProject(parent, commandId, target);
               const title = threadTitle({
                 parentTitle: parent.thread.title,
@@ -3217,6 +3218,7 @@ const make = Effect.gen(function* () {
       } satisfies OrchestratorMcpThreadReadResult;
     }),
     sendToThread: Effect.fn("OrchestratorMcpService.sendToThread")(function* (scope, input) {
+      if (scope.thread !== undefined) yield* kodoGuard.guardWorkerMessaging(scope.thread.threadId); // KODO: delegation-normalize
       const { parent, limits, target } = yield* loadScopedThread(scope, input.threadId, ["runs"]);
       yield* assertLiveCallerForOtherThread(scope, parent, target);
       yield* resolveRuntimeMode(limits.runtimeMode, target.thread.runtimeMode);

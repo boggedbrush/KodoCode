@@ -18,6 +18,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
+import { testLoop } from "../kodo/loop/testing.ts";
 import * as ThreadForkService from "./ThreadForkService.ts";
 
 const sourceThreadId = ThreadId.make("thread:fork-snoozed-source");
@@ -112,7 +113,7 @@ function makeSourceProjection(sourceRun: OrchestrationV2Run): OrchestrationV2Thr
 const planFork = (
   sourceRun: OrchestrationV2Run,
   sourceProjection = makeSourceProjection(sourceRun),
-  options: { readonly sideChat?: boolean } = {},
+  options: { readonly sideChat?: boolean; readonly createdBy?: "user" | "agent" } = {},
 ) =>
   Effect.gen(function* () {
     const service = yield* ThreadForkService.ThreadForkServiceV2;
@@ -128,7 +129,7 @@ const planFork = (
       targetThreadId,
       title: "Awake fork",
       ...options,
-      createdBy: "user",
+      createdBy: options.createdBy ?? "user",
       creationSource: "mobile",
       createdAt: forkCreatedAt,
     });
@@ -188,6 +189,30 @@ it.effect("resets a fork's pin, snooze, settle and delegation state but keeps it
       threadId: sourceThreadId,
       runId: sourceRunId,
     });
+  }),
+);
+
+// KODO: delegation-child - a fork never inherits a loop, and a lead only from a person's fork
+it.effect("never carries a loop into a fork, and carries a lead only into a person's", () =>
+  Effect.gen(function* () {
+    const sourceRun = makeSourceRun("completed");
+    const kodoModeModel = { applied: modelSelection, base: modelSelection };
+    const projection = {
+      ...makeSourceProjection(sourceRun),
+      thread: {
+        ...makeSourceThread(),
+        kodoLead: { kind: "sub-agents" as const },
+        kodoLoop: testLoop({ status: "active" }),
+        kodoModeModel,
+      },
+    };
+    const byPerson = yield* planFork(sourceRun, projection);
+    assert.isUndefined(byPerson.targetThread.kodoLoop);
+    assert.deepEqual(byPerson.targetThread.kodoLead, { kind: "sub-agents" });
+    assert.deepEqual(byPerson.targetThread.kodoModeModel, kodoModeModel);
+    const byAgent = yield* planFork(sourceRun, projection, { createdBy: "agent" });
+    assert.isUndefined(byAgent.targetThread.kodoLoop);
+    assert.isNull(byAgent.targetThread.kodoLead);
   }),
 );
 

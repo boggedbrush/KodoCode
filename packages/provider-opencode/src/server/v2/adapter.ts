@@ -372,7 +372,11 @@ type TurnTerminal =
 type Rule = Permission.Rule;
 type RulesPolicy = Pick<
   ProviderAdapter.ProviderAdapterV2RuntimePolicy,
-  "runtimeMode" | "interactionMode" | "approvalPolicy" | "modeReadOnly"
+  | "runtimeMode"
+  | "interactionMode"
+  | "approvalPolicy"
+  | "modeReadOnly"
+  | "modeBlocksNativeSubagents"
 >;
 type NativeForm = EventOf<"form.created">["data"]["form"];
 
@@ -450,6 +454,8 @@ export const sessionRules = (
   ...(policy.interactionMode === "plan" ? [rule("edit", "deny")] : []),
   ...paths,
   ...readOnlyModeRules(policy), // KODO: mode-read-only-opencode
+  // KODO: mode-read-only-opencode - a thread that leads sub-agents does not get OpenCode's own task tool
+  ...(policy.modeBlocksNativeSubagents === true ? [rule("task", "deny")] : []),
   ...mcpRules(mcpServerName),
 ];
 

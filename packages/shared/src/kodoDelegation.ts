@@ -2,7 +2,12 @@
 // whether the switch can be flipped now (and the reason when it cannot). The server makes the same
 // decisions with the same reasons in apps/server/src/kodo/delegation; this is only the preview, so a
 // switch is never offered that the server would refuse for a reason the client already knows.
-import type { KodoLead, KodoModeModelSlot, ServerProvider } from "@t3tools/contracts";
+import type {
+  KodoLead,
+  KodoModeModelSlot,
+  OrchestrationV2Actor,
+  ServerProvider,
+} from "@t3tools/contracts";
 
 export const kodoThreadLeads = (
   thread: { readonly kodoLead?: KodoLead | null | undefined } | null | undefined,
@@ -52,3 +57,21 @@ export function kodoSubAgentsToggle(input: {
   }
   return { checked, disabled: false, reason: null };
 }
+
+/**
+ * The Kodo state a thread must not inherit from the one it was copied from. A child (a worker or a
+ * provider's own subagent) is a new thread of its own: it never leads, runs no loop of its own, and
+ * its model is the one it was given, not the lead's applied one. Spread over the copy.
+ */
+export const kodoChildThreadFields = () =>
+  ({ kodoLead: null, kodoLoop: undefined, kodoModeModel: undefined }) as const;
+
+/**
+ * The same for a fork. A fork never inherits a loop, and one an agent made never leads (only a
+ * person turns sub-agents on); its model selection is copied, so the record of which model is the
+ * thread's own stays with it.
+ */
+export const kodoForkThreadFields = (createdBy: OrchestrationV2Actor) =>
+  createdBy === "user"
+    ? ({ kodoLoop: undefined } as const)
+    : ({ kodoLead: null, kodoLoop: undefined } as const);

@@ -34,6 +34,7 @@ function makeThread(input: {
   readonly worktreePath: string | null;
   readonly runtimeMode?: RuntimeMode;
   readonly interactionMode?: OrchestrationV2AppThread["interactionMode"];
+  readonly kodoLead?: OrchestrationV2AppThread["kodoLead"];
 }): OrchestrationV2AppThread {
   const threadId = ThreadId.make("thread:runtime-policy");
   return {
@@ -62,6 +63,7 @@ function makeThread(input: {
     settledAt: null,
     lastVisitedAt: null,
     deletedAt: null,
+    ...(input.kodoLead === undefined ? {} : { kodoLead: input.kodoLead }),
   };
 }
 
@@ -193,6 +195,21 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
       assert.equal(grokCode.runtimeMode, "full-access");
       assert.isUndefined(grokCode.modeInstructions);
       assert.isUndefined(grokCode.modeReadOnly);
+    }),
+  );
+
+  // KODO: mode-resolver - a thread that leads sub-agents resolves a policy that withholds native subagents
+  it.effect("marks the policy of a thread that leads sub-agents", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const resolve = (kodoLead: OrchestrationV2AppThread["kodoLead"]) =>
+        policy.resolve({
+          thread: makeThread({ now, worktreePath: null, interactionMode: "code", kodoLead }),
+          modelSelection,
+        });
+      assert.isTrue((yield* resolve({ kind: "sub-agents" })).modeBlocksNativeSubagents);
+      assert.isUndefined((yield* resolve(null)).modeBlocksNativeSubagents);
     }),
   );
 

@@ -35,7 +35,10 @@ import { Tool } from "effect/ai";
 import * as McpSchema from "effect/ai/McpSchema";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
+import { kodoLeadInstructions } from "../../apps/server/src/kodo/delegation/leadInstructions.ts"; // KODO: sub-agents-eval
 import { taskPrompt } from "../../apps/server/src/mcp/delegatedTaskModes.ts";
+import { KodoDelegationToolkit } from "../../apps/server/src/mcp/kodoDelegationToolkit.ts"; // KODO: sub-agents-eval
+import { KodoLoopToolkit } from "../../apps/server/src/mcp/kodoLoopToolkit.ts"; // KODO: sub-agents-eval
 import * as McpInvocationContext from "../../apps/server/src/mcp/McpInvocationContext.ts";
 import { advertisedJsonSchema } from "../../apps/server/src/mcp/advertisedJsonSchema.ts";
 import * as Contracts from "@t3tools/contracts";
@@ -294,6 +297,13 @@ export const McpToolUseCase = Schema.Struct({
     harness: Schema.optional(Schema.Literals(["claude", "codex"])),
     /** The Linked environments beta is on, so T3 lists its link tools. */
     linkedEnvironments: Schema.optional(Schema.Boolean),
+    /**
+     * Kodo sub-agents are on for this thread, which is in this mode: T3's lead block rides in front of
+     * each user message, and the sub-agent and loop tools are listed.
+     */
+    kodoLead: Schema.optional(Schema.Literals(["code", "review", "plan", "ask"])),
+    /** Only the sub-agent and loop tools are listed, with no lead block: a thread that does not lead. */
+    kodoTools: Schema.optional(Schema.Boolean),
     /** delegate_task `role` for a delegated child. T3 builds the child's first message from it. */
     delegateRole: Schema.optional(OrchestratorMcpTaskRole),
     context: Schema.optional(Schema.String),
@@ -441,7 +451,16 @@ const t3SourceTools: ReadonlyArray<Tool.Any> = [
   PreviewToolkit,
   DeviceToolkit,
   HtmlToolkit,
+  KodoDelegationToolkit,
+  KodoLoopToolkit,
 ].flatMap((toolkit): ReadonlyArray<Tool.Any> => Object.values(toolkit.tools));
+// KODO: sub-agents-eval - Kodo's sub-agent and loop tools are listed only for a case that sets `setup.kodoLead`, so every
+// other case keeps the tool list it was written against.
+const kodoToolNames = new Set(
+  [KodoDelegationToolkit, KodoLoopToolkit].flatMap((toolkit) =>
+    Object.keys(toolkit.tools).map((name) => `${T3_PREFIX}${name}`),
+  ),
+);
 // McpHttpServer decodes arguments with each tool's JSON codec, which drops undeclared keys.
 const t3InputDecoders = new Map(
   t3SourceTools.map((tool) => [
@@ -488,9 +507,14 @@ const pastedSecret = (name: string, input: Readonly<Record<string, unknown>>) =>
 const hiddenFromSubagents = enabledWhen(McpInvocationContext.hiddenFromSubagents);
 // The Linked environments beta starts off, and T3 lists its tools only while it is on.
 const hiddenWhileLinksOff = enabledWhen(McpInvocationContext.hiddenWhileLinksOff);
-const visibleT3Tools = (options: { readonly subagent?: boolean; readonly links?: boolean }) =>
+const visibleT3Tools = (options: {
+  readonly subagent?: boolean;
+  readonly links?: boolean;
+  readonly kodo?: boolean;
+}) =>
   t3Tools.filter(
     (tool) =>
+      (options.kodo === true || !kodoToolNames.has(tool.name)) &&
       (options.links === true || !hiddenWhileLinksOff.has(tool.name)) &&
       !(options.subagent === true && hiddenFromSubagents.has(tool.name)),
   );
@@ -599,6 +623,7 @@ export const buildBase = (
     readonly keepUserInstructions: boolean;
     readonly subagent?: boolean;
     readonly links?: boolean;
+    readonly kodo?: boolean;
     /** A native subagent starts from its task: T3 appends nothing to its system prompt. */
     readonly nativeSubagent?: boolean;
     /** false: the thread has no agent device access, so T3's text leaves devices out. */
@@ -691,6 +716,7 @@ const buildCodexBase = (
     readonly effort?: string | undefined;
     readonly subagent?: boolean;
     readonly links?: boolean;
+    readonly kodo?: boolean;
     /** false: the thread has no agent device access, so T3's text leaves devices out. */
     readonly deviceAccess?: boolean;
   },
@@ -961,7 +987,9 @@ export const buildMessages = (sample: Sample) => {
     if (last?.role !== role) messages.push({ role, content: blocks });
     else messages[messages.length - 1] = { role, content: [...last.content, ...blocks] };
   };
-  const { role, context, delegateRole, priorTurns = [] } = testCase.setup;
+  const { role, context, delegateRole, priorTurns = [], kodoLead } = testCase.setup;
+  const withLead = (value: string) =>
+    kodoLead === undefined ? value : `${kodoLeadInstructions(kodoLead)}\n\n${value}`;
   const sideChat = testCase.setup.sideChat;
   if (testCase.prompt === "" && (role !== "top" || sideChat !== undefined)) {
     throw new Error(
@@ -1015,7 +1043,7 @@ export const buildMessages = (sample: Sample) => {
           : (sample.priorResults.get(prior) ?? result);
       push("user", toolResult(id, replayed));
     }
-    if (turn.text) push(turn.role, text(turn.text));
+    if (turn.text) push(turn.role, text(turn.role === "user" ? withLead(turn.text) : turn.text));
   }
   const userText =
     testCase.promptContext === undefined
@@ -1025,7 +1053,7 @@ export const buildMessages = (sample: Sample) => {
     sideChatContext === undefined ? userText : withInlineContext(sideChatContext, userText);
   const childPrompt = () => taskPrompt({ task: prompt, role: delegateRole });
   if (testCase.prompt !== "")
-    push("user", text(role === "delegated-child" ? childPrompt() : prompt));
+    push("user", text(role === "delegated-child" ? childPrompt() : withLead(prompt)));
   // Claude Code gives a subagent its SubagentStart hooks' context as a reminder after the task.
   if (native && base.subagentContext) {
     push("user", reminder(`SubagentStart hook additional context: ${base.subagentContext}`));
@@ -2460,6 +2488,7 @@ const main = Effect.gen(function* () {
     role: McpToolUseCase["setup"]["role"],
     deviceAccess: boolean,
     links: boolean,
+    kodo: boolean,
   ): Effect.Effect<Base, Schema.SchemaError> =>
     codex
       ? decodeCodexCapture(template).pipe(
@@ -2470,6 +2499,7 @@ const main = Effect.gen(function* () {
               effort: flags.effort,
               subagent: role === "delegated-child",
               links,
+              kodo,
               deviceAccess,
             }),
           ),
@@ -2482,6 +2512,7 @@ const main = Effect.gen(function* () {
               subagent: role === "delegated-child",
               nativeSubagent: role === "native-subagent",
               links,
+              kodo,
               deviceAccess,
             });
             return role === "native-subagent"
@@ -2493,18 +2524,19 @@ const main = Effect.gen(function* () {
         );
   // Codex has no native subagents; its cases with that role run as top-level threads.
   const baseKey = ({ setup }: McpToolUseCase) =>
-    `${codex && setup.role === "native-subagent" ? "top" : setup.role}:${setup.world?.deviceAgentAccess !== false}:${setup.linkedEnvironments === true}`;
-  const base = yield* buildFor("top", true, false);
-  const bases = new Map<string, Base>([["top:true:false", base]]);
+    `${codex && setup.role === "native-subagent" ? "top" : setup.role}:${setup.world?.deviceAgentAccess !== false}:${setup.linkedEnvironments === true}:${setup.kodoLead !== undefined || setup.kodoTools === true}`;
+  const base = yield* buildFor("top", true, false, false);
+  const bases = new Map<string, Base>([["top:true:false:false", base]]);
   for (const testCase of selected) {
     const key = baseKey(testCase);
     if (bases.has(key)) continue;
-    const [role = "top", access, links] = key.split(":") as [
+    const [role = "top", access, links, kodo] = key.split(":") as [
       McpToolUseCase["setup"]["role"],
       string,
       string,
+      string,
     ];
-    bases.set(key, yield* buildFor(role, access === "true", links === "true"));
+    bases.set(key, yield* buildFor(role, access === "true", links === "true", kodo === "true"));
   }
   const baseFor = (testCase: McpToolUseCase) => bases.get(baseKey(testCase)) ?? base;
   const effort = flags.effort ?? base.codex?.reasoning.effort ?? "high";

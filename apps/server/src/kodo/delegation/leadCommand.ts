@@ -115,6 +115,7 @@ export const makeKodoLeadCommands = (services: KodoLeadCommandServices) => {
         senderThreadId: sender,
         senderIsTargetOrAncestor:
           sender !== undefined && (yield* kodoThreadRunsUnder(getShell, sender, thread.id)),
+        senderUnderLead: sender !== undefined && (yield* kodoThreadUnderLead(getShell, sender)),
       },
       limit: input.limit,
     });

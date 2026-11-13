@@ -259,3 +259,20 @@ After the change, the first reference to a file is an absolute link. The remaini
 2. From `evals/`, run `pnpm mcp-tool-use:trim-capture <claude|codex> <capture.json> mcp-tool-use/templates/<claude|codex>.json.gz`. It keeps only what `run.ts` reads, and removes user instructions, the user's own skills and agents, account ids, and home paths.
 3. Read the output for user data before you commit it: `zcat <file> | less`.
 4. Run the full eval on the old and new templates, and compare.
+
+## Sub-agent cases
+
+`cases/sub-agents.ndjson` covers Kodo's sub-agent mode: the lead block in front of each user message (`setup.kodoLead` sets the thread's mode and lists the sub-agent and loop tools) and the descriptions of `t3_sub_agents_set` and `t3_sub_agents_status` (`setup.kodoTools` lists the tools with no lead block). Other cases do not list these tools. All scenarios use authored Acme data.
+
+| Case                                 | Kind    | What it checks                                                                                                                                        |
+| ------------------------------------ | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| sa-delegates-by-role                 | guard   | A Code lead hands a change to `delegate_task`, names no model, provider or option in `target`, and does not edit files itself.                        |
+| sa-lead-ignores-asked-for-model      | bad     | The user names a model for the worker; the lead still names none.                                                                                     |
+| sa-prefers-loop-for-multi-round-work | guard   | Implement, review and fix rounds go to `t3_loop_start` on the idle thread. The tool says to use it only when asked, so this measures which text wins. |
+| sa-relays-cap-refusal                | bad     | A live-worker cap refusal is reported, and the lead does not do the work itself.                                                                      |
+| sa-relays-usage-refusal              | bad     | A usage-limit refusal is reported, not retried, and the lead does not do the work itself.                                                             |
+| sa-no-native-subagents               | bad     | A Review lead uses review workers, not the provider's own `Agent` tool.                                                                               |
+| sa-status-reads-own-thread           | control | `t3_sub_agents_status` with no `threadId` answers a question about its own workers.                                                                   |
+| sa-set-on-another-idle-thread        | guard   | `t3_sub_agents_set` is used on the named idle thread.                                                                                                 |
+
+These cases were written with the increment and have not been run (no provider keys). Run each on the text before and after a change to `apps/server/src/kodo/delegation/leadInstructions.ts` or the two tool descriptions.

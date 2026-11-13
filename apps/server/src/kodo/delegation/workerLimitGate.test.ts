@@ -65,10 +65,12 @@ describe("the usage-limit gate before a worker starts", () => {
     }),
   );
 
-  it.effect("does not stop work on a limit it cannot see, as the loop does not", () =>
+  it.effect("refuses on a stale reading, and allows a provider that reports no windows", () =>
     Effect.gen(function* () {
       const stale = provider(99, { checkedAt: NOW - 60 * 60_000 });
-      expect(yield* run(deps({ providers: Effect.succeed([stale]) }))).toBe("allowed");
+      expect(yield* run(deps({ providers: Effect.succeed([stale]) }))).toMatch(
+        /could not be read, so no worker was started/,
+      );
       const none = { ...provider(0), usageLimits: undefined };
       expect(yield* run(deps({ providers: Effect.succeed([none as never]) }))).toBe("allowed");
     }),

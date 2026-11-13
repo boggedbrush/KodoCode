@@ -14,11 +14,19 @@ import * as Option from "effect/Option";
 import type * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegistry.ts";
 import type * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import type * as ServerSettings from "../../serverSettings.ts";
-import { kodoGuardWorkerStart, makeKodoCreatedTally, type KodoLeadShell } from "./leadGuard.ts";
-
-// One tally for every service that starts work: a turn is one turn whichever tool made the thread.
-const createdTally = makeKodoCreatedTally();
+import {
+  kodoGuardNotWorker,
+  kodoGuardThreadStart,
+  kodoGuardWorkerMessaging,
+  kodoGuardWorkerStart,
+  makeKodoLeadLocks,
+  type KodoLeadShell,
+} from "./leadGuard.ts";
 import { kodoGuardWorkerLimit } from "./workerLimitGate.ts";
+
+// One lock set for every guard: the cap is read from the store, so two calls for one lead must not
+// read it at the same time, whichever service built the guard.
+const leadLocks = makeKodoLeadLocks();
 
 export interface KodoDelegationGuardServices {
   readonly threads: {
@@ -39,7 +47,6 @@ export interface KodoDelegationGuardServices {
 export const makeKodoDelegationGuard = (services: KodoDelegationGuardServices) => {
   const settings = services.serverSettings.getSettings;
   const deps = {
-    tally: createdTally,
     getShell: (threadId: ThreadId) =>
       services.threads.getThreadShell(threadId) as Effect.Effect<
         KodoLeadShell | null,
@@ -84,12 +91,21 @@ export const makeKodoDelegationGuard = (services: KodoDelegationGuardServices) =
       : {}),
   };
   return {
-    /** Refuses a start from a worker, or from a lead over a cap. `adding` is how many the call makes. */
-    guardStart: (input: {
-      readonly callerThreadId: ThreadId;
-      readonly adding: number;
-      readonly route: "delegate" | "thread";
-    }) => kodoGuardWorkerStart(deps, input),
+    /** Refuses a caller that is a worker, before anything of the call is read. */
+    guardNotWorker: (callerThreadId: ThreadId) => kodoGuardNotWorker(deps, callerThreadId),
+    /** Refuses a delegation from a worker, or from a lead over a cap. */
+    guardStart: (input: { readonly callerThreadId: ThreadId; readonly adding: number }) =>
+      kodoGuardWorkerStart(deps, input),
+    /** Refuses t3_thread_send and t3_thread_transfer from a worker. */
+    guardWorkerMessaging: (callerThreadId: ThreadId) =>
+      kodoGuardWorkerMessaging(deps, callerThreadId),
+    /** Refuses create_threads and t3_thread_launch from a lead or a worker. */
+    guardThreadStart: (callerThreadId: ThreadId) => kodoGuardThreadStart(deps, callerThreadId),
+    /**
+     * Holds the lead's lock for the surrounding scope, to be taken before `guardStart` and given
+     * back (the returned effect) once the worker is written, so the count it read stays true.
+     */
+    holdLead: (leadThreadId: ThreadId) => leadLocks.hold(leadThreadId),
     /** Refuses when the worker's provider is at the person's usage-limit threshold. */
     guardLimit: (instanceId: string) => kodoGuardWorkerLimit(limitDeps, instanceId),
   } as const;

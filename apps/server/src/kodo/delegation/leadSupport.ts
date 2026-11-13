@@ -33,6 +33,43 @@ export const KODO_SUB_AGENTS_SUPPORT_BY_DRIVER: Readonly<Record<string, KodoSubA
   antigravity: ACP_AGENT,
 };
 
+export interface KodoNativeSubagents {
+  /** The provider's own subagent or task tool is turned off for a thread that leads. */
+  readonly withheld: boolean;
+  readonly note: string;
+}
+
+const INSTRUCTION_ONLY: KodoNativeSubagents = {
+  withheld: false,
+  note: "Not withheld, instruction-only: this provider has no per-turn switch for its own subagent tool, so the lead's instructions are the only guard.",
+};
+
+/**
+ * What a lead's provider does about its own subagent or task tool, which would let the lead pick a
+ * model and run outside the worker caps. One entry per driver (a test keeps them in step). The
+ * policy field `modeBlocksNativeSubagents` is read by the adapters that can act on it.
+ */
+export const KODO_NATIVE_SUBAGENTS_BY_DRIVER: Readonly<Record<string, KodoNativeSubagents>> = {
+  claudeAgent: { withheld: true, note: "The Agent and Task tools are disallowed for the turn." },
+  opencode: { withheld: true, note: "The task permission is denied for the session." },
+  codex: INSTRUCTION_ONLY,
+  cursor: INSTRUCTION_ONLY,
+  pi: INSTRUCTION_ONLY,
+  muse: INSTRUCTION_ONLY,
+  acp: INSTRUCTION_ONLY,
+  acpRegistry: INSTRUCTION_ONLY,
+  grok: INSTRUCTION_ONLY,
+  kiro: INSTRUCTION_ONLY,
+  fx: INSTRUCTION_ONLY,
+  antigravity: INSTRUCTION_ONLY,
+};
+
+/** A server's drivers that read-only enforcement knows and the native-subagent table does not. */
+export const kodoDriversMissingNativeSubagents = (): ReadonlyArray<string> =>
+  Object.keys(ENFORCEMENT_BY_DRIVER).filter(
+    (driver) => KODO_NATIVE_SUBAGENTS_BY_DRIVER[driver] === undefined,
+  );
+
 const KODO_SUB_AGENTS_UNKNOWN_DRIVER: KodoSubAgentsSupport = {
   support: "none",
   reason:

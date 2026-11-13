@@ -379,6 +379,20 @@ describe("makeKodoModeAnnouncer", () => {
       },
     ).text;
 
+  it("remembers a bounded number of leading threads, forgetting the oldest", () => {
+    const announcer = makeKodoModeAnnouncer();
+    const send = (threadId: string, leadInstructions: string | undefined) =>
+      announcer.apply(
+        { text: "go" },
+        { threadId, mode: "code", instructions: undefined, hasPriorTurns: false, leadInstructions },
+      ).text;
+    send("first", "LEAD");
+    for (let n = 0; n < 4096; n += 1) send(`other-${n}`, "LEAD");
+    // The newest leading thread is still told when it stops leading; the forgotten one is not.
+    expect(send("other-4095", undefined)).toMatch(/Sub-agents are off/);
+    expect(send("first", undefined)).toBe("go");
+  });
+
   it("puts the restriction on every message of a read-only thread", () => {
     const announcer = makeKodoModeAnnouncer();
     expect(apply(announcer, "why?", "ask", false)).toBe(`${KODO_ASK_MODE_INSTRUCTIONS}\n\nwhy?`);
@@ -532,6 +546,37 @@ describe("provider session policy", () => {
     kodoSessionPolicyKey(
       kodoRuntimePolicyOverlay({ interactionMode: mode, driver, runtimeMode: "full-access" }),
     );
+
+  it("differs when a thread leads sub-agents, so a policy change reopens a session that fixes it at open", () => {
+    const lead = (driver: string) =>
+      kodoSessionPolicyKey(
+        kodoRuntimePolicyOverlay({
+          interactionMode: "code",
+          driver,
+          runtimeMode: "full-access",
+          leadsSubAgents: true,
+        }),
+      );
+    for (const driver of ["grok", "cursor", "codex", "claudeAgent", "opencode"]) {
+      expect(lead(driver), driver).not.toBe(policyFor("code", driver));
+    }
+    expect(
+      kodoRuntimePolicyOverlay({
+        interactionMode: "code",
+        driver: "claudeAgent",
+        runtimeMode: "full-access",
+        leadsSubAgents: true,
+      }),
+    ).toMatchObject({ modeBlocksNativeSubagents: true });
+    expect(
+      kodoRuntimePolicyOverlay({
+        interactionMode: "code",
+        driver: "claudeAgent",
+        runtimeMode: "full-access",
+        leadsSubAgents: false,
+      }),
+    ).not.toHaveProperty("modeBlocksNativeSubagents");
+  });
 
   it("differs between Code and every read-only mode, and between Ask and Review on launch drivers", () => {
     for (const driver of ["grok", "kiro", "cursor", "pi", "muse", "codex", "claudeAgent"]) {

@@ -19762,6 +19762,33 @@ describe("ClaudeAdapterV2 Kodo read-only modes", () => {
     }
   });
 
+  it("withholds the Agent and Task tools from a thread that leads sub-agents, in any mode", () => {
+    const leadPolicy = (interactionMode: string) =>
+      ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        cwd: "/workspace",
+        ...kodoRuntimePolicyOverlay({
+          interactionMode,
+          driver: "claudeAgent",
+          runtimeMode: "full-access",
+          leadsSubAgents: true,
+        }),
+      });
+    const code = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(leadPolicy("code"));
+    assert.deepEqual(code.disallowedTools, ClaudeAdapterV2.CLAUDE_LEAD_DISALLOWED_TOOLS);
+    assert.isUndefined(code.readOnly);
+    const ask = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(leadPolicy("ask"));
+    assert.deepEqual(ask.disallowedTools, [...disallowed, "Agent", "Task"]);
+    assert.isTrue(ask.readOnly);
+    // The policy key follows, so a live query opened before the switch is not reused after it.
+    assert.notEqual(
+      ClaudeAdapterV2.claudeEffectiveQueryPolicyKey(code, {}),
+      ClaudeAdapterV2.claudeEffectiveQueryPolicyKey(
+        ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(policyFor("code")),
+        {},
+      ),
+    );
+  });
+
   it("runs Ask without approvals on the read-only tool list, Review on approvals, Plan in plan mode", () => {
     const ask = ClaudeAdapterV2.claudeRuntimeQueryPolicyForRuntimePolicy(policyFor("ask"));
     assert.equal(ask.permissionMode, "dontAsk");

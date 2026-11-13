@@ -11,6 +11,15 @@ import {
 export const KODO_WORKER_DEPTH_REFUSAL =
   "This thread is a worker of a lead, and workers do not start workers, threads or loops. Do the task yourself and report back, or say what you need from the lead.";
 
+export const KODO_LEAD_THREAD_REFUSAL =
+  "A thread that leads sub-agents does not create or launch other threads in this version. Use delegate_task (with a role) to hand work to a worker, or tell the person what other thread is needed.";
+
+export const KODO_LEAD_REMOTE_REFUSAL =
+  "A thread that leads sub-agents runs its workers in its own environment only. Omit target.environmentId and use delegate_task with a role.";
+
+export const KODO_WORKER_MESSAGING_REFUSAL =
+  "This thread is a worker of a lead. It does not fork itself or send messages to other threads; finish the task and report the result, which goes back to the lead.";
+
 /** The setting's value as a usable cap: a whole number from 1 to the most the setting allows. */
 export function kodoMaxWorkers(setting: unknown): number {
   return typeof setting === "number" && Number.isFinite(setting)

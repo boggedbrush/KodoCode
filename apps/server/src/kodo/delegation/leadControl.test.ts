@@ -87,6 +87,14 @@ describe("who may switch it", () => {
     );
   });
 
+  it("refuses a sender that is itself a worker, for any thread and in either direction", () => {
+    const worker = agent({ senderUnderLead: true });
+    expect(refusal({ actor: worker, limit: { interactionMode: "code" } })).toMatch(
+      /A worker cannot/,
+    );
+    expect(refusal({ actor: worker, requested: null })).toMatch(/A worker cannot/);
+  });
+
   it("refuses an agent request that names no sender thread, which no honest route sends", () => {
     expect(refusal({ actor: { createdBy: "agent", senderIsTargetOrAncestor: false } })).toMatch(
       /cannot change/,

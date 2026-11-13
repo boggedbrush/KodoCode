@@ -1731,7 +1731,8 @@ const commandReadsSkipSettledLeafNodes = Effect.gen(function* () {
   assert.strictEqual(yield* store.getSubagentCount(threadId), subagents.length);
   assert.deepEqual(
     [...(yield* store.listAppOwnedChildThreadIds(threadId))],
-    [childThreadIds.delivered, childThreadIds["no-delivery"]],
+    // child-a has a running follow-up, so it comes last, after the child whose tasks all ended.
+    [childThreadIds["no-delivery"], childThreadIds.delivered],
   );
 });
 

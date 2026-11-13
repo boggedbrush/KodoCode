@@ -15,8 +15,11 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as TestClock from "effect/testing/TestClock";
 
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -79,6 +82,12 @@ interface World {
   readonly settings?: Parameters<typeof ServerSettings.layerTest>[0];
   readonly usageLimits?: ServerProvider["usageLimits"];
   readonly callerId?: ThreadId;
+  /** The delegation was already accepted once: its receipt exists. */
+  readonly accepted?: boolean;
+  /** Runs after each read of the lead's workers, with the list the read returned. */
+  readonly onChildrenRead?: Effect.Effect<void>;
+  /** Runs inside each dispatch, before the worker is recorded; may add the worker to `children` and `shells`. */
+  readonly onDispatch?: (shells: Record<string, unknown>) => Effect.Effect<void>;
 }
 
 const shell = (id: ThreadId, fields: Record<string, unknown> = {}) => ({
@@ -152,12 +161,15 @@ const run = <A, E>(
       NodeServices.layer,
       NodeCrypto.layer,
       Layer.mock(ThreadManagementService.ThreadManagementService)({
-        hasReceipt: () => Effect.succeed(false),
+        hasReceipt: () => Effect.succeed(world.accepted === true),
         assertProviderInstanceEnabled: () => Effect.void,
         isProviderInstanceEnabledForProject: () => Effect.succeed(true),
         getThreadShell: (id) => Effect.succeed((shells[id] ?? null) as never),
         listAppOwnedChildThreadIds: () =>
-          Effect.succeed((world.children ?? []).map((child) => ThreadId.make(child))),
+          Effect.suspend(() => {
+            const read = (world.children ?? []).map((child) => ThreadId.make(child));
+            return (world.onChildrenRead ?? Effect.void).pipe(Effect.as(read));
+          }),
         getThreadRecords: (id) =>
           Effect.succeed(
             (id === leadId
@@ -171,7 +183,8 @@ const run = <A, E>(
                 } as never)) as never,
           ),
         dispatch: (command) =>
-          Ref.update(dispatched, (all) => [...all, command as never]).pipe(
+          (world.onDispatch?.(shells) ?? Effect.void).pipe(
+            Effect.andThen(Ref.update(dispatched, (all) => [...all, command as never])),
             Effect.as({
               sequence: 1,
               storedEvents: [
@@ -372,6 +385,61 @@ describe("limits on a lead's delegation", () => {
     ),
   );
 
+  it.effect("lets exactly one of two concurrent delegations through at a cap of one", () =>
+    Effect.gen(function* () {
+      const inFirstDispatch = yield* Deferred.make<void>();
+      const secondRead = yield* Deferred.make<void>();
+      const children: Array<string> = [];
+      let reads = 0;
+      let dispatches = 0;
+      const outcomes = yield* run(
+        {
+          mode: "code",
+          leadSelection: selection,
+          children,
+          settings: { kodoSubAgentsMaxWorkers: 1 },
+          // Without the lead's lock the second call reads its (empty) list while the first is held.
+          onChildrenRead: Effect.suspend(() => {
+            reads += 1;
+            return reads === 2 ? Deferred.succeed(secondRead, undefined) : Effect.void;
+          }),
+          onDispatch: (shells) =>
+            Effect.gen(function* () {
+              dispatches += 1;
+              if (dispatches === 1) {
+                // Held inside the window: the cap was read, the worker is not recorded yet. It goes on
+                // when the second call has read the cap, or, if that call is held back, a moment later.
+                yield* Deferred.succeed(inFirstDispatch, undefined);
+                yield* Effect.race(Deferred.await(secondRead), Effect.sleep("1 second"));
+              }
+              const name = `w${dispatches}`;
+              children.push(name);
+              shells[name] = live(name);
+            }),
+        },
+        ({ service }) =>
+          Effect.gen(function* () {
+            const call = (key: string) =>
+              Effect.forkChild(
+                delegate(service, { task: "Go.", mode: "async", clientRequestId: key }).pipe(
+                  Effect.result,
+                ),
+              );
+            const first = yield* call("first");
+            yield* Deferred.await(inFirstDispatch);
+            const second = yield* call("second");
+            yield* TestClock.adjust("1 second");
+            return [yield* Fiber.join(first), yield* Fiber.join(second)];
+          }),
+      );
+      assert.deepEqual(
+        outcomes.map((result) => result._tag),
+        ["Success", "Failure"],
+      );
+      assert.equal(dispatches, 1);
+    }),
+  );
+
   it.effect("takes the cap from settings", () =>
     run(
       {
@@ -385,6 +453,104 @@ describe("limits on a lead's delegation", () => {
         delegate(service, { task: "Fourth.", mode: "async", clientRequestId: "cap-4" }).pipe(
           Effect.asVoid,
         ),
+    ),
+  );
+
+  it.effect("refuses create_threads from a lead, and says to use delegate_task", () =>
+    run({ mode: "code", leadSelection: selection }, ({ service, dispatched }) =>
+      Effect.gen(function* () {
+        const error = yield* service
+          .createThreads(scope(leadId), {
+            threads: [{ prompt: "Another thread.", target: { providerInstanceId: slotInstance } }],
+            clientRequestId: "lead-threads",
+          })
+          .pipe(Effect.flip);
+        assert.equal(error.code, "capability_denied");
+        assert.include(error.message, "delegate_task");
+        assert.deepEqual(yield* Ref.get(dispatched), []);
+      }),
+    ),
+  );
+
+  it.effect("keeps create_threads for a thread that does not lead", () =>
+    run({ mode: "code", leadSelection: selection, lead: false }, ({ service, dispatched }) =>
+      Effect.gen(function* () {
+        yield* service
+          .createThreads(scope(leadId), {
+            threads: [{ prompt: "Another thread." }],
+            clientRequestId: "plain-threads",
+          })
+          // Reading the new thread back is not modelled; the dispatch is what shows it went ahead.
+          .pipe(Effect.ignoreCause);
+        assert.isAbove((yield* Ref.get(dispatched)).length, 0);
+      }),
+    ),
+  );
+
+  it.effect(
+    "refuses a delegation aimed at another environment, which no cap or gate would see",
+    () =>
+      run({ mode: "code", leadSelection: selection }, ({ service, dispatched }) =>
+        Effect.gen(function* () {
+          const error = yield* delegate(service, {
+            task: "Go.",
+            mode: "async",
+            clientRequestId: "remote",
+            target: { environmentId: EnvironmentId.make("environment:other") },
+          }).pipe(Effect.flip);
+          assert.equal(error.code, "capability_denied");
+          assert.include(error.message, "own environment");
+          assert.deepEqual(yield* Ref.get(dispatched), []);
+        }),
+      ),
+  );
+
+  it.effect("replays a delegation that was already accepted, even with the lead at its cap", () =>
+    run(
+      {
+        mode: "code",
+        leadSelection: selection,
+        accepted: true,
+        children: ["w1", "w2", "w3"],
+        shells: { w1: live("w1"), w2: live("w2"), w3: live("w3") },
+      },
+      ({ service, dispatched }) =>
+        Effect.gen(function* () {
+          yield* delegate(service, { task: "Again.", mode: "async", clientRequestId: "retry" });
+          assert.lengthOf(yield* Ref.get(dispatched), 1);
+        }),
+    ),
+  );
+
+  it.effect("refuses a worker's t3_thread_send", () =>
+    run(
+      {
+        mode: "code",
+        leadSelection: selection,
+        callerId: ThreadId.make("thread:worker"),
+        shells: {
+          "thread:worker": shell(ThreadId.make("thread:worker"), {
+            lineage: {
+              parentThreadId: leadId,
+              relationshipToParent: "subagent",
+              rootThreadId: leadId,
+            },
+          }),
+        },
+      },
+      ({ service, dispatched }) =>
+        Effect.gen(function* () {
+          const error = yield* service
+            .sendToThread(scope(ThreadId.make("thread:worker")), {
+              threadId: leadId,
+              message: "Hello lead.",
+              clientRequestId: "worker-send",
+            })
+            .pipe(Effect.flip);
+          assert.equal(error.code, "capability_denied");
+          assert.include(error.message, "does not fork itself or send messages");
+          assert.deepEqual(yield* Ref.get(dispatched), []);
+        }),
     ),
   );
 

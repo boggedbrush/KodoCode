@@ -96,6 +96,7 @@ export const layerForDriver = (
           interactionMode: input.thread.interactionMode,
           driver: typeof driver === "function" ? driver(input.modelSelection.instanceId) : driver,
           runtimeMode: input.thread.runtimeMode,
+          leadsSubAgents: input.thread.kodoLead?.kind === "sub-agents",
         }),
       });
     }),
@@ -206,6 +207,7 @@ export const layerFromProjectStore: Layer.Layer<
             interactionMode: input.thread.interactionMode,
             driver: instance?.driverKind,
             runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
+            leadsSubAgents: input.thread.kodoLead?.kind === "sub-agents",
           }),
           ...(maxRuntimeMode === undefined ? {} : { maxRuntimeMode }),
         });

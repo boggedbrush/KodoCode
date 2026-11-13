@@ -161,7 +161,6 @@ import { KodoInteractionModeStatusProvider } from "../kodo/interactionModeStatus
 import { useKodoLoop } from "../kodo/useKodoLoop"; // KODO: loop-card
 import { isKodoLoopRunning } from "../kodo/loopCard.logic"; // KODO: loop-card
 import { useKodoSubAgents } from "../kodo/useKodoSubAgents"; // KODO: sub-agents
-import { KodoSubAgentsStatusProvider } from "../kodo/subAgentsStatus"; // KODO: sub-agents
 import { resolveProjectSettings as resolveKodoProjectSettings } from "@t3tools/shared/projectSettings"; // KODO: sub-agents
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useTheme } from "../hooks/useTheme";
@@ -3709,182 +3708,175 @@ export default function ChatView(props: ChatViewProps) {
                               <KodoInteractionModeStatusProvider
                                 appliesNextTurn={modeAppliesNextTurn}
                                 locked={kodoLoopRunning}
+                                subAgents={kodoSubAgents.status} // KODO: sub-agents
                               >
-                                <KodoSubAgentsStatusProvider value={kodoSubAgents.status}>
-                                  <ChatComposer
-                                    canOperateThread={canOperateThread}
-                                    reportedModelSelection={reportedModelSelection}
-                                    multipleModelSelections={multipleModelSelections}
-                                    supportsMultipleModels={
-                                      serverConfig?.environment.capabilities
-                                        .requiredWorktreeBootstrap === true
-                                    }
-                                    onMultipleModelSelectionsChange={
-                                      setMultipleModelSelectionsStable
-                                    }
-                                    composerRef={composerRef}
-                                    composerDraftTarget={composerDraftTarget}
-                                    environmentId={environmentId}
-                                    attachmentUploadsCapabilityKnown={
-                                      attachmentUploadsCapabilityKnown
-                                    }
-                                    supportsAttachmentUploads={supportsAttachmentUploads}
-                                    supportsQuestionAttachments={supportsQuestionAttachments}
-                                    maxFileAttachmentBytes={maxFileAttachmentBytes}
-                                    routeKind={routeKind}
-                                    routeThreadRef={routeThreadRef}
-                                    draftId={draftId}
-                                    activeThreadId={activeThreadId}
-                                    activeThread={activeThread}
-                                    activeThreadRuns={serverProjection?.runs ?? EMPTY_RUNS}
-                                    promptHistoryEntries={timelineEntries}
-                                    forceExpandedOnMobile={
-                                      forceExpandedMobileComposer && isDraftHeroState
-                                    }
-                                    projectSelectionRequired={
-                                      isLocalDraftThread && activeProject === null
-                                    }
-                                    phase={phase}
-                                    isCompacting={isCompacting}
-                                    canInterrupt={canInterruptRunningThread}
-                                    isSendBusy={
-                                      (isSendBusy && !sendQueuesBehindSetup) ||
-                                      (setupQueueSendThreadKey !== null &&
-                                        setupQueueSendThreadKey === activeThreadKey) ||
-                                      queuedRunEdit.isSaving ||
-                                      isResuming
-                                    }
-                                    canResume={resumableRunId !== null || hasHeldQueuedRuns}
-                                    isRevertingCheckpoint={isRevertingCheckpoint}
-                                    sendDisabledReason={
-                                      !canOperateThread
-                                        ? "This connection cannot change threads."
-                                        : isEnvironmentChanging
-                                          ? "Preparing machine"
-                                          : isRevertingCheckpoint
-                                            ? "Rewinding conversation"
-                                            : feedbackUploading
-                                              ? "Sending feedback"
-                                              : threadDetailLoading
-                                                ? "Messages loading"
-                                                : worktreeSetupBlocksSend
-                                                  ? "Preparing worktree"
-                                                  : projectCloneSendBlockReason
-                                    }
-                                    isPreparingWorktree={
-                                      isPreparingWorktree && !sendQueuesBehindSetup
-                                    }
-                                    bannerItems={
-                                      isDraftHeroState || composerBannerItems.length === 0
-                                        ? EMPTY_COMPOSER_BANNER_ITEMS
-                                        : composerBannerItems
-                                    }
-                                    resumeCompactionTokens={resumeCompactionTokens}
-                                    keepFullHistory={keepFullHistory}
-                                    onToggleKeepFullHistory={toggleKeepFullHistoryStable}
-                                    sideChatAvailable={sideChat.available}
-                                    sideChatDisabledReason={sideChatDisabledReason}
-                                    onFreshSession={
-                                      freshSessionCommandAvailable
-                                        ? armFreshSessionStable
-                                        : undefined
-                                    }
-                                    onUsageLimitsCommand={
-                                      usageLimitsOffered &&
-                                      usageLimitsKey !== null &&
-                                      !composerHasNonPromptContent
-                                        ? openUsageLimits
-                                        : undefined
-                                    }
-                                    environmentUnavailable={activeEnvironmentUnavailableState}
-                                    activePendingApproval={activePendingApproval}
-                                    pendingApprovals={pendingApprovals}
-                                    onHeldRequestIdsChange={onHeldRequestIdsChange}
-                                    pendingUserInputs={pendingUserInputs}
-                                    activePendingProgress={activePendingProgress}
-                                    activePendingResolvedAnswers={activePendingResolvedAnswers}
-                                    activePendingIsResponding={activePendingIsResponding}
-                                    activePendingDraftAnswers={activePendingDraftAnswers}
-                                    activePendingQuestionIndex={activePendingQuestionIndex}
-                                    respondingRequestIds={respondingRequestIds}
-                                    runtimeMode={runtimeMode}
-                                    // KODO: chat-mode-state
-                                    interactionMode={interactionMode}
-                                    defaultRuntimeMode={defaultRuntimeMode}
-                                    lockedProvider={modelPickerLockedProvider}
-                                    providerStatuses={providerStatuses as ServerProvider[]}
-                                    providerCatalogKnown={serverConfig !== null}
-                                    activeProjectDefaultModelSelection={
-                                      activeProjectDefaultModelSelection
-                                    }
-                                    activeThreadModelSelection={
-                                      activeThread ? kodoThreadOwnModel(activeThread) : undefined
-                                    } // KODO: mode-models-composer
-                                    activeProjectId={activeProject?.id ?? null}
-                                    projectName={activeProject?.title}
-                                    compactThreadUnavailable={compactThreadUnavailable}
-                                    compactDisabled={compactDisabled}
-                                    resolvedTheme={resolvedTheme}
-                                    settings={settings}
-                                    keybindings={keybindings}
-                                    terminalOpen={Boolean(terminalUiState.terminalOpen)}
-                                    gitCwd={gitCwd}
-                                    pullRequestProjectId={
-                                      supportsPullRequests ? (activeProject?.id ?? null) : null
-                                    }
-                                    pullRequestRepository={
-                                      supportsPullRequests ? activeProjectRepository : null
-                                    }
-                                    threadPullRequests={
-                                      (activeThreadShell ?? activeThread)?.pullRequests
-                                    }
-                                    onComposerOverlayHeightChange={
-                                      publishComposerOverlayHeightStable
-                                    }
-                                    permissionsShownInStrip={
-                                      showComposerContextStrip && !isServerThread
-                                    }
-                                    promptRef={promptRef}
-                                    composerImagesRef={composerImagesRef}
-                                    composerFilesRef={composerFilesRef}
-                                    composerTerminalContextsRef={composerTerminalContextsRef}
-                                    onPageScrollKeyDown={onComposerPageScrollKeyDownStable}
-                                    onPageScrollKeyUp={onComposerPageScrollKeyUpStable}
-                                    onPageScrollRelease={onComposerPageScrollReleaseStable}
-                                    onCompactContext={onComposerCompactContextStable}
-                                    onSend={onComposerSendStable}
-                                    onResume={onComposerResumeStable}
-                                    onInterrupt={onInterruptStable}
-                                    onSelectActivePendingUserInputOption={
-                                      onSelectActivePendingUserInputOptionStable
-                                    }
-                                    onAdvanceActivePendingUserInput={
-                                      onAdvanceActivePendingUserInputStable
-                                    }
-                                    onDismissActivePendingUserInput={onDismissUserInputStable}
-                                    onPreviousActivePendingUserInputQuestion={
-                                      onPreviousActivePendingUserInputQuestionStable
-                                    }
-                                    onChangeActivePendingUserInputCustomAnswer={
-                                      onChangeActivePendingUserInputCustomAnswer
-                                    }
-                                    onProviderModelSelect={onProviderModelSelectStable}
-                                    onOpenProviderSetup={openProviderSetupStable}
-                                    getModelDisabledReason={getModelDisabledReason}
-                                    handleRuntimeModeChange={handleRuntimeModeChangeStable}
-                                    handleInteractionModeChange={handleInteractionModeChange}
-                                    toggleInteractionMode={toggleInteractionMode}
-                                    focusComposer={focusComposerStable}
-                                    scheduleComposerFocus={scheduleComposerFocusStable}
-                                    setThreadError={setThreadError}
-                                    onExpandImage={onExpandTimelineImageStable}
-                                    onFileOpen={openFileAttachmentStable}
-                                    editingQueuedAttachments={queuedRunEdit.editingAttachments}
-                                    onRemoveEditingQueuedAttachment={
-                                      queuedRunEdit.removeEditingAttachment
-                                    }
-                                  />
-                                </KodoSubAgentsStatusProvider>
+                                <ChatComposer
+                                  canOperateThread={canOperateThread}
+                                  reportedModelSelection={reportedModelSelection}
+                                  multipleModelSelections={multipleModelSelections}
+                                  supportsMultipleModels={
+                                    serverConfig?.environment.capabilities
+                                      .requiredWorktreeBootstrap === true
+                                  }
+                                  onMultipleModelSelectionsChange={setMultipleModelSelectionsStable}
+                                  composerRef={composerRef}
+                                  composerDraftTarget={composerDraftTarget}
+                                  environmentId={environmentId}
+                                  attachmentUploadsCapabilityKnown={
+                                    attachmentUploadsCapabilityKnown
+                                  }
+                                  supportsAttachmentUploads={supportsAttachmentUploads}
+                                  supportsQuestionAttachments={supportsQuestionAttachments}
+                                  maxFileAttachmentBytes={maxFileAttachmentBytes}
+                                  routeKind={routeKind}
+                                  routeThreadRef={routeThreadRef}
+                                  draftId={draftId}
+                                  activeThreadId={activeThreadId}
+                                  activeThread={activeThread}
+                                  activeThreadRuns={serverProjection?.runs ?? EMPTY_RUNS}
+                                  promptHistoryEntries={timelineEntries}
+                                  forceExpandedOnMobile={
+                                    forceExpandedMobileComposer && isDraftHeroState
+                                  }
+                                  projectSelectionRequired={
+                                    isLocalDraftThread && activeProject === null
+                                  }
+                                  phase={phase}
+                                  isCompacting={isCompacting}
+                                  canInterrupt={canInterruptRunningThread}
+                                  isSendBusy={
+                                    (isSendBusy && !sendQueuesBehindSetup) ||
+                                    (setupQueueSendThreadKey !== null &&
+                                      setupQueueSendThreadKey === activeThreadKey) ||
+                                    queuedRunEdit.isSaving ||
+                                    isResuming
+                                  }
+                                  canResume={resumableRunId !== null || hasHeldQueuedRuns}
+                                  isRevertingCheckpoint={isRevertingCheckpoint}
+                                  sendDisabledReason={
+                                    !canOperateThread
+                                      ? "This connection cannot change threads."
+                                      : isEnvironmentChanging
+                                        ? "Preparing machine"
+                                        : isRevertingCheckpoint
+                                          ? "Rewinding conversation"
+                                          : feedbackUploading
+                                            ? "Sending feedback"
+                                            : threadDetailLoading
+                                              ? "Messages loading"
+                                              : worktreeSetupBlocksSend
+                                                ? "Preparing worktree"
+                                                : projectCloneSendBlockReason
+                                  }
+                                  isPreparingWorktree={
+                                    isPreparingWorktree && !sendQueuesBehindSetup
+                                  }
+                                  bannerItems={
+                                    isDraftHeroState || composerBannerItems.length === 0
+                                      ? EMPTY_COMPOSER_BANNER_ITEMS
+                                      : composerBannerItems
+                                  }
+                                  resumeCompactionTokens={resumeCompactionTokens}
+                                  keepFullHistory={keepFullHistory}
+                                  onToggleKeepFullHistory={toggleKeepFullHistoryStable}
+                                  sideChatAvailable={sideChat.available}
+                                  sideChatDisabledReason={sideChatDisabledReason}
+                                  onFreshSession={
+                                    freshSessionCommandAvailable ? armFreshSessionStable : undefined
+                                  }
+                                  onUsageLimitsCommand={
+                                    usageLimitsOffered &&
+                                    usageLimitsKey !== null &&
+                                    !composerHasNonPromptContent
+                                      ? openUsageLimits
+                                      : undefined
+                                  }
+                                  environmentUnavailable={activeEnvironmentUnavailableState}
+                                  activePendingApproval={activePendingApproval}
+                                  pendingApprovals={pendingApprovals}
+                                  onHeldRequestIdsChange={onHeldRequestIdsChange}
+                                  pendingUserInputs={pendingUserInputs}
+                                  activePendingProgress={activePendingProgress}
+                                  activePendingResolvedAnswers={activePendingResolvedAnswers}
+                                  activePendingIsResponding={activePendingIsResponding}
+                                  activePendingDraftAnswers={activePendingDraftAnswers}
+                                  activePendingQuestionIndex={activePendingQuestionIndex}
+                                  respondingRequestIds={respondingRequestIds}
+                                  runtimeMode={runtimeMode}
+                                  // KODO: chat-mode-state
+                                  interactionMode={interactionMode}
+                                  defaultRuntimeMode={defaultRuntimeMode}
+                                  lockedProvider={modelPickerLockedProvider}
+                                  providerStatuses={providerStatuses as ServerProvider[]}
+                                  providerCatalogKnown={serverConfig !== null}
+                                  activeProjectDefaultModelSelection={
+                                    activeProjectDefaultModelSelection
+                                  }
+                                  activeThreadModelSelection={
+                                    activeThread ? kodoThreadOwnModel(activeThread) : undefined
+                                  } // KODO: mode-models-composer
+                                  activeProjectId={activeProject?.id ?? null}
+                                  projectName={activeProject?.title}
+                                  compactThreadUnavailable={compactThreadUnavailable}
+                                  compactDisabled={compactDisabled}
+                                  resolvedTheme={resolvedTheme}
+                                  settings={settings}
+                                  keybindings={keybindings}
+                                  terminalOpen={Boolean(terminalUiState.terminalOpen)}
+                                  gitCwd={gitCwd}
+                                  pullRequestProjectId={
+                                    supportsPullRequests ? (activeProject?.id ?? null) : null
+                                  }
+                                  pullRequestRepository={
+                                    supportsPullRequests ? activeProjectRepository : null
+                                  }
+                                  threadPullRequests={
+                                    (activeThreadShell ?? activeThread)?.pullRequests
+                                  }
+                                  onComposerOverlayHeightChange={publishComposerOverlayHeightStable}
+                                  permissionsShownInStrip={
+                                    showComposerContextStrip && !isServerThread
+                                  }
+                                  promptRef={promptRef}
+                                  composerImagesRef={composerImagesRef}
+                                  composerFilesRef={composerFilesRef}
+                                  composerTerminalContextsRef={composerTerminalContextsRef}
+                                  onPageScrollKeyDown={onComposerPageScrollKeyDownStable}
+                                  onPageScrollKeyUp={onComposerPageScrollKeyUpStable}
+                                  onPageScrollRelease={onComposerPageScrollReleaseStable}
+                                  onCompactContext={onComposerCompactContextStable}
+                                  onSend={onComposerSendStable}
+                                  onResume={onComposerResumeStable}
+                                  onInterrupt={onInterruptStable}
+                                  onSelectActivePendingUserInputOption={
+                                    onSelectActivePendingUserInputOptionStable
+                                  }
+                                  onAdvanceActivePendingUserInput={
+                                    onAdvanceActivePendingUserInputStable
+                                  }
+                                  onDismissActivePendingUserInput={onDismissUserInputStable}
+                                  onPreviousActivePendingUserInputQuestion={
+                                    onPreviousActivePendingUserInputQuestionStable
+                                  }
+                                  onChangeActivePendingUserInputCustomAnswer={
+                                    onChangeActivePendingUserInputCustomAnswer
+                                  }
+                                  onProviderModelSelect={onProviderModelSelectStable}
+                                  onOpenProviderSetup={openProviderSetupStable}
+                                  getModelDisabledReason={getModelDisabledReason}
+                                  handleRuntimeModeChange={handleRuntimeModeChangeStable}
+                                  handleInteractionModeChange={handleInteractionModeChange}
+                                  toggleInteractionMode={toggleInteractionMode}
+                                  focusComposer={focusComposerStable}
+                                  scheduleComposerFocus={scheduleComposerFocusStable}
+                                  setThreadError={setThreadError}
+                                  onExpandImage={onExpandTimelineImageStable}
+                                  onFileOpen={openFileAttachmentStable}
+                                  editingQueuedAttachments={queuedRunEdit.editingAttachments}
+                                  onRemoveEditingQueuedAttachment={
+                                    queuedRunEdit.removeEditingAttachment
+                                  }
+                                />
                               </KodoInteractionModeStatusProvider>
                             )}
                           </div>

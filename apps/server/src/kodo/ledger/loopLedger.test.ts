@@ -1,6 +1,7 @@
 import {
   EventId,
   MessageId,
+  NodeId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -10,6 +11,7 @@ import {
   type OrchestrationV2AppThread,
 } from "@t3tools/contracts";
 import { assert, describe, expect, it } from "@effect/vitest";
+import { makeSubagentChildThread } from "@t3tools/provider-core/server/subagentProjection";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -23,6 +25,7 @@ import { computeLoopSavings } from "../loop/loopSpend.ts";
 import { testLoop, testRecord } from "../loop/testing.ts";
 import * as KodoLoopLedger from "./LoopLedger.ts";
 import { loopLedgerRow } from "./loopLedgerRow.ts";
+import { isTrackedLoopEvent } from "../loop/loopEvents.ts";
 import { ensureKodoLoopLedger } from "./loopLedgerStore.ts";
 
 const instanceId = ProviderInstanceId.make("claude-main");
@@ -701,6 +704,61 @@ describe("the ledger totals", () => {
       const summary = yield* read;
       assert.equal(summary.allTime.loops, 1);
       assert.equal(summary.allTime.rounds, 1);
+    }).pipe(Effect.provide(layerTest)),
+  );
+});
+
+describe("a thread made from a thread that has a loop", () => {
+  const childOf = (parent: OrchestrationV2AppThread, id: string) =>
+    makeSubagentChildThread({
+      parentThread: parent,
+      childThreadId: ThreadId.make(id),
+      parentNodeId: NodeId.make("node-1"),
+      activeProviderThreadId: null,
+      providerInstanceId,
+      modelSelection: select("small"),
+      title: "Worker",
+      now: at("2026-05-02T00:00:00.000Z"),
+      createdBy: "agent",
+      creationSource: "mcp",
+    });
+
+  it.effect("carries no loop: it is not tracked, and it writes no ledger row", () =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const ended = endedLoop([code(1, "small", 1, 10)], { revision: 3 });
+      yield* applyThread({
+        threadId: "lead",
+        states: [{ loop: ended, at: "2026-05-01T00:00:00.000Z" }],
+      });
+      const before = yield* ledgerRows;
+      expect(before.map((entry) => entry.thread_id)).toEqual(["lead"]);
+
+      const parentWithLoop = providerThread(
+        ThreadId.make("lead"),
+        ProjectId.make("p1"),
+        at("2026-05-01T00:00:00.000Z"),
+        { kodoLoop: testLoop({ status: "active", revision: 9 }) },
+      );
+      const child = childOf(parentWithLoop, "worker");
+      expect(child.kodoLoop).toBeUndefined();
+      expect(
+        isTrackedLoopEvent({
+          type: "thread.metadata-updated",
+          payload: child,
+        } as never),
+      ).toBe(false);
+
+      // Even the ended loop of the lead is not copied to the worker, so its creation back-fills nothing.
+      const endedChild = childOf({ ...parentWithLoop, kodoLoop: ended }, "worker-2");
+      yield* store.apply({
+        id: EventId.make(`event-${eventCount++}`),
+        type: "thread.created",
+        threadId: endedChild.id,
+        occurredAt: at("2026-05-03T00:00:00.000Z"),
+        payload: { ...endedChild, kodoLoop: endedChild.kodoLoop },
+      });
+      expect(yield* ledgerRows).toEqual(before);
     }).pipe(Effect.provide(layerTest)),
   );
 });

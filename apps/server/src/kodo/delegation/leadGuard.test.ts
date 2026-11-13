@@ -1,14 +1,19 @@
 import { describe, expect, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Scope from "effect/Scope";
 
 import {
   type KodoLeadShell,
+  kodoGuardThreadStart,
+  kodoGuardWorkerMessaging,
   kodoGuardWorkerStart,
   kodoThreadRunsUnder,
   kodoThreadUnderLead,
-  makeKodoCreatedTally,
+  makeKodoLeadLocks,
 } from "./leadGuard.ts";
 
 const id = (name: string) => ThreadId.make(name);
@@ -59,7 +64,6 @@ const world = (threads: Record<string, Fixture>) => {
       ),
     toMillis: DateTime.toEpochMillis,
     maxWorkersSetting: Effect.succeed<unknown>(3),
-    tally: makeKodoCreatedTally(),
   };
 };
 
@@ -133,13 +137,14 @@ describe("whether a thread is a worker of a lead", () => {
   );
 });
 
-const guard = (
-  w: ReturnType<typeof world>,
-  caller: string,
-  adding = 1,
-  route: "delegate" | "thread" = "delegate",
-) =>
-  kodoGuardWorkerStart(w, { callerThreadId: id(caller), adding, route }).pipe(
+const guard = (w: ReturnType<typeof world>, caller: string, adding = 1) =>
+  kodoGuardWorkerStart(w, { callerThreadId: id(caller), adding }).pipe(
+    Effect.map(() => "allowed" as const),
+    Effect.catch((error) => Effect.succeed(error.message)),
+  );
+
+const threadStart = (w: ReturnType<typeof world>, caller: string) =>
+  kodoGuardThreadStart(w, id(caller)).pipe(
     Effect.map(() => "allowed" as const),
     Effect.catch((error) => Effect.succeed(error.message)),
   );
@@ -149,7 +154,33 @@ describe("starting work from a thread", () => {
     Effect.gen(function* () {
       const w = world({ lead: { lead: true }, w: { parent: "lead" } });
       expect(yield* guard(w, "w")).toMatch(/workers do not start workers, threads or loops/);
-      expect(yield* guard(w, "w", 1, "thread")).toMatch(/workers do not start/);
+      expect(yield* threadStart(w, "w")).toMatch(/workers do not start/);
+    }),
+  );
+
+  it.effect(
+    "refuses create_threads and t3_thread_launch from a lead, and leaves other threads alone",
+    () =>
+      Effect.gen(function* () {
+        const w = world({ lead: { lead: true }, p: {}, gone: { parent: "p" } });
+        expect(yield* threadStart(w, "lead")).toMatch(/does not create or launch other threads/);
+        expect(yield* threadStart(w, "lead")).toMatch(/delegate_task/);
+        expect(yield* threadStart(w, "p")).toBe("allowed");
+        expect(yield* threadStart(w, "nobody")).toBe("allowed");
+      }),
+  );
+
+  it.effect("refuses a worker's fork and send, and nobody else's", () =>
+    Effect.gen(function* () {
+      const w = world({ lead: { lead: true }, w: { parent: "lead" }, p: {} });
+      const messaging = (caller: string) =>
+        kodoGuardWorkerMessaging(w, id(caller)).pipe(
+          Effect.map(() => "allowed" as const),
+          Effect.catch((error) => Effect.succeed(error.message)),
+        );
+      expect(yield* messaging("w")).toMatch(/does not fork itself or send messages/);
+      expect(yield* messaging("lead")).toBe("allowed");
+      expect(yield* messaging("p")).toBe("allowed");
     }),
   );
 
@@ -227,21 +258,6 @@ describe("starting work from a thread", () => {
       }),
   );
 
-  it.effect(
-    "counts threads a lead creates against the same turn, which no worker record lists",
-    () =>
-      Effect.gen(function* () {
-        const w = {
-          ...world({ lead: { lead: true, turnStartedAt: 5 } }),
-          maxWorkersSetting: Effect.succeed<unknown>(6),
-        };
-        for (let n = 0; n < 6; n += 1) expect(yield* guard(w, "lead", 1, "thread")).toBe("allowed");
-        // Two more fit under the turn's eight, a third does not; an earlier turn's tally is separate.
-        expect(yield* guard(w, "lead", 2, "thread")).toBe("allowed");
-        expect(yield* guard(w, "lead", 1, "thread")).toMatch(/8 is the most/);
-      }),
-  );
-
   it.effect("refuses, rather than allows, when its reads fail", () =>
     Effect.gen(function* () {
       const w = world({ lead: { lead: true } });
@@ -254,6 +270,42 @@ describe("starting work from a thread", () => {
       );
       const noShell = { ...w, getShell: () => Effect.fail({ _tag: "ProjectionStoreReadError" }) };
       expect(yield* guard(noShell as never, "lead")).toMatch(/could not be checked/);
+    }),
+  );
+});
+
+describe("the lead's lock", () => {
+  it.effect("hands over to the next holder when the first gives it back, once", () =>
+    Effect.gen(function* () {
+      const locks = makeKodoLeadLocks();
+      const scopeA = yield* Scope.make();
+      const scopeB = yield* Scope.make();
+      const giveBackA = yield* locks.hold("lead").pipe(Scope.provide(scopeA));
+      // Another lead is not held up by this one.
+      yield* locks.hold("other").pipe(Effect.scoped, Effect.asVoid);
+      const acquiredB = yield* Deferred.make<void>();
+      yield* locks.hold("lead").pipe(
+        Scope.provide(scopeB),
+        Effect.tap(() => Deferred.succeed(acquiredB, undefined)),
+        Effect.forkChild,
+      );
+      yield* giveBackA;
+      yield* Deferred.await(acquiredB);
+      // Giving back again, and closing the first scope, must not give back the second holder's lock.
+      yield* giveBackA;
+      yield* Scope.close(scopeA, Exit.void);
+      expect(locks.size()).toBe(1);
+      yield* Scope.close(scopeB, Exit.void);
+      expect(locks.size()).toBe(0);
+    }),
+  );
+
+  it.effect("gives the lock back when its scope closes without an explicit give-back", () =>
+    Effect.gen(function* () {
+      const locks = makeKodoLeadLocks();
+      yield* locks.hold("lead").pipe(Effect.scoped, Effect.asVoid);
+      yield* locks.hold("lead").pipe(Effect.scoped, Effect.asVoid);
+      expect(locks.size()).toBe(0);
     }),
   );
 });

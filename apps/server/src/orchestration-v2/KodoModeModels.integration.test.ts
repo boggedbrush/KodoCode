@@ -1207,6 +1207,20 @@ it.live(
             })
             .pipe(Effect.flip);
           assert.include(String((refused as { cause?: unknown }).cause), "workers do not start");
+
+          // Nor may a worker turn sub-agents on for another thread and then hand it work.
+          const workerSet = yield* setLead(
+            orchestrator,
+            name,
+            ThreadId.make(`thread:${name}:other`),
+            true,
+            3,
+            { agentFrom: coder.thread.id },
+          ).pipe(Effect.flip);
+          assert.include(
+            String((workerSet as { cause?: unknown }).cause),
+            "A worker cannot change",
+          );
         }),
       { second: true, catalogue: { [otherInstanceId]: { enabled: false } } },
     ),

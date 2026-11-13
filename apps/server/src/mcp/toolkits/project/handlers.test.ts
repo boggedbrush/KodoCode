@@ -53,6 +53,8 @@ const clientLaunchHarness = (input: {
   readonly hostedAppUrl?: string;
   /** The orchestrator refuses the new thread's mode, as under a managed ceiling. */
   readonly refusedByCeiling?: true;
+  /** The launch is made from this thread, whose shell (and those it runs under) the harness knows. */
+  readonly caller?: { readonly id: ThreadId; readonly shells: Record<string, unknown> };
 }) => {
   const projectId = ProjectId.make("project:client-target");
   const modelSelection = {
@@ -84,19 +86,31 @@ const clientLaunchHarness = (input: {
     Layer.succeed(McpInvocationContext.McpInvocationContext, {
       environmentId: EnvironmentId.make("environment"),
       requestNamespace: "client:session-1",
-      thread: undefined,
-      client: {
-        sessionId: "session-1",
-        label: "Claude Code",
-        access: input.runtimeModeCeiling,
-        hostedAppUrl: input.hostedAppUrl,
-      },
+      thread:
+        input.caller === undefined
+          ? undefined
+          : {
+              threadId: input.caller.id,
+              providerSessionId: "session-1",
+              providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+            },
+      client:
+        input.caller === undefined
+          ? {
+              sessionId: "session-1",
+              label: "Claude Code",
+              access: input.runtimeModeCeiling,
+              hostedAppUrl: input.hostedAppUrl,
+            }
+          : undefined,
       issuedAt: 0,
       capabilities: new Set(["orchestration" as const]),
     }),
     Layer.mock(ThreadManagement.ThreadManagementService)({
       // A thread exists once a launch started it.
       getThreadShell: (threadId) => {
+        const known = input.caller?.shells[threadId];
+        if (known !== undefined) return Effect.succeed(known as OrchestrationV2ThreadShell);
         const launch = input.launched.find((candidate) => candidate.threadId === threadId);
         return Effect.succeed(
           launch === undefined
@@ -273,6 +287,71 @@ it.effect(
         code: "invalid_request",
         message: "Example Corp limits threads to Supervised.",
       });
+    }),
+);
+
+// KODO: delegation-normalize - a lead delegates and a worker starts nothing, so neither may launch a thread
+it.effect(
+  "a launch from a thread that leads sub-agents, or from one of its workers, is refused",
+  () =>
+    Effect.gen(function* () {
+      const lead = ThreadId.make("thread:lead");
+      const worker = ThreadId.make("thread:worker");
+      const shell = (id: ThreadId, extra: Record<string, unknown>) => ({
+        id,
+        projectId: ProjectId.make("project:client-target"),
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: "m" },
+        runtimeMode: "full-access",
+        interactionMode: "code",
+        lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: id },
+        archivedAt: null,
+        deletedAt: null,
+        activeRunId: "run",
+        pendingBackgroundTasks: [],
+        ...extra,
+      });
+      const shells = {
+        [lead]: shell(lead, { kodoLead: { kind: "sub-agents" } }),
+        [worker]: shell(worker, {
+          lineage: { parentThreadId: lead, relationshipToParent: "subagent", rootThreadId: lead },
+        }),
+        "thread:plain": shell(ThreadId.make("thread:plain"), {}),
+      };
+      const launchFrom = Effect.fn(function* (callerId: string) {
+        const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+        const { projectId, dependencies } = clientLaunchHarness({
+          runtimeModeCeiling: "auto",
+          launched,
+          caller: { id: ThreadId.make(callerId), shells },
+        });
+        const toolkit = yield* ProjectToolkit.pipe(
+          Effect.provide(
+            McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+              Layer.provide(dependencies),
+            ),
+          ),
+        );
+        const result = yield* toolkit
+          .handle("t3_thread_launch", { title: "Fix", projectId, message: "Fix it" })
+          .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+        return { result: result.at(-1)?.result, launched };
+      });
+
+      const fromLead = yield* launchFrom(lead);
+      expect(fromLead.result).toMatchObject({
+        code: "capability_denied",
+        message: expect.stringContaining("delegate_task"),
+      });
+      expect(fromLead.launched).toHaveLength(0);
+      const fromWorker = yield* launchFrom(worker);
+      expect(fromWorker.result).toMatchObject({
+        code: "capability_denied",
+        message: expect.stringContaining("workers do not start"),
+      });
+      expect(fromWorker.launched).toHaveLength(0);
+      // Any other thread launches as before.
+      expect((yield* launchFrom("thread:plain")).launched).toHaveLength(1);
     }),
 );
 
