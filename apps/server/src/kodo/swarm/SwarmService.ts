@@ -260,7 +260,7 @@ export const makeKodoSwarmService = (deps: KodoSwarmDeps) => {
     const holds = yield* findSeries().pipe(
       Effect.flatMap(({ live }) =>
         live === undefined
-          ? Effect.succeed(undefined)
+          ? Effect.undefined
           : deps.threads
               .liveWorkers(live.threadId)
               .pipe(

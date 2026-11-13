@@ -48,11 +48,9 @@ export function kodoSwarmCommandRefusal(command: Command): string | undefined {
 }
 
 /**
- * Why a delegated task may not be made, or undefined. The Orchestrator's workers are made only by
- * its own approved start (an "agent"'s command naming a project), whatever else a client sends. Only
- * its task starts in another project, and only in one that exists, that is not its own scratch
- * project and that is not archived: a client may send this command, so the decision is made here,
- * not at the MCP door.
+ * Why a delegated task may not be made, or undefined. The Orchestrator's workers come only from its
+ * approved start (an "agent"'s command naming an existing, active project of the person's). A client
+ * may send this command, so the decision is made here, not at the MCP door.
  */
 export function kodoSwarmTaskTargetRefusal(input: {
   readonly targetProjectId: string | undefined;

@@ -235,7 +235,7 @@ describe("asking before the Orchestrator starts work", () => {
     },
     {
       name: "only a provider's own approval is open",
-      stored: [request({ id: "provider-approval" })],
+      stored: [request({ id: "provider-approval" } as never)],
       expected: "asked",
     },
     {

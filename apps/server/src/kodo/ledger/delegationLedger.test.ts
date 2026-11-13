@@ -507,6 +507,9 @@ describe("the worker events of the ledger", () => {
     payload: { turnTokenUsage: {} },
   } as never;
 
+  const settle = (fiber: Fiber.Fiber<unknown> | undefined) =>
+    fiber === undefined ? Effect.void : Fiber.join(fiber);
+
   /** The look as the layer builds it, one at a time per thread; each call follows the script and says when it starts. */
   const events = (
     script: ReadonlyArray<{ readonly gate?: Deferred.Deferred<void>; readonly found: boolean }>,
@@ -544,16 +547,16 @@ describe("the worker events of the ledger", () => {
           yield* Queue.take(started);
           const late = yield* handle(lateUsage);
           // Its own look ends at once, leaving the running one a mark to go round again.
-          if (late !== undefined) yield* Fiber.join(late);
+          if (late !== undefined) yield* settle(late);
           yield* Deferred.succeed(gate, undefined);
-          yield* Fiber.join(look);
+          yield* settle(look);
           expect(yield* Ref.get(calls)).toBe(2);
         }),
       ),
   );
 
   it.effect(
-    "a finish that arrives during a look is remembered, and an older look that finds nothing does not forget it",
+    "a finish that arrives while a look runs is remembered at once, and the running look goes round again",
     () =>
       Effect.scoped(
         Effect.gen(function* () {
@@ -567,21 +570,30 @@ describe("the worker events of the ledger", () => {
           yield* handle(restarted);
           // The look is running, so this event starts none of its own; the running look goes round again.
           const second = yield* handle(finished);
-          yield* Fiber.join(second);
+          yield* settle(second);
           expect(memory.lateUsageWorkerOf(lateUsage)).toBe(workerId);
           yield* Deferred.succeed(gate, undefined);
-          yield* Fiber.join(first);
+          yield* settle(first);
           expect(yield* Ref.get(calls)).toBe(2);
           expect(memory.lateUsageWorkerOf(lateUsage)).toBe(workerId);
         }),
       ),
   );
 
+  it("a look's way out of an older finish does not drop the memory of a newer one", () => {
+    const memory = makeFinishedWorkerMemory();
+    const forgetOlder = memory.remember(workerId);
+    memory.forgetIfRestarted(restarted);
+    memory.remember(workerId);
+    forgetOlder();
+    expect(memory.lateUsageWorkerOf(lateUsage)).toBe(workerId);
+  });
+
   it.effect("a look that finds nothing forgets the worker it was asked about", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const { handle, memory } = yield* events([{ found: false }]);
-        yield* Fiber.join(yield* handle(finished));
+        yield* settle(yield* handle(finished));
         expect(memory.lateUsageWorkerOf(lateUsage)).toBeUndefined();
       }),
     ),
@@ -598,7 +610,7 @@ describe("the worker events of the ledger", () => {
           yield* Queue.take(started);
           yield* handle(restarted);
           yield* Deferred.succeed(gate, undefined);
-          yield* Fiber.join(look);
+          yield* settle(look);
           expect(memory.lateUsageWorkerOf(lateUsage)).toBeUndefined();
         }),
       ),

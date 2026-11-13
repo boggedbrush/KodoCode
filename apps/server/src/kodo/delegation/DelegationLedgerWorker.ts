@@ -160,7 +160,7 @@ export const makeDelegationLedgerEvents =
       );
     }
     const late = memory.lateUsageWorkerOf(event);
-    return late === undefined ? Effect.void : look(late).pipe(Effect.forkScoped);
+    return late === undefined ? Effect.undefined : look(late).pipe(Effect.forkScoped);
   };
 
 export const layer = Layer.effectDiscard(
