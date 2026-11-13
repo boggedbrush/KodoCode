@@ -1,10 +1,15 @@
 // Reads a provider's usage-limit windows for the loop's budget gate and its per-stage record. Pure:
 // the caller passes the clock. A reading that is missing or out of date never stops a loop, but it
-// is said so, because a limit setting that cannot see the limit is not protecting anything.
+// is said so, because a limit setting that cannot see the limit is not protecting anything. Any of
+// a provider's windows can stop a loop: the gate takes the fullest.
 import type { ServerProviderUsageLimits } from "@t3tools/contracts";
 
-/** Provider health refreshes about once a minute; a reading this old means refreshes are failing. */
-const STALE_AFTER_MS = 30 * 60_000;
+/**
+ * The oldest a reading may be for the gate to act on it. Provider health refreshes every five
+ * minutes, and only while a client is watching, so the gate asks the provider for a fresh reading
+ * first; a reading older than this after that ask is "could not check", not a number to trust.
+ */
+export const KODO_LIMIT_MAX_AGE_MS = 2 * 60_000;
 
 export interface KodoLimitWindow {
   /** The provider's own window id, stable across readings. */
@@ -15,8 +20,12 @@ export interface KodoLimitWindow {
 }
 
 export type KodoLimitReading =
-  /** At least one live window. */
-  | { readonly state: "ok"; readonly windows: ReadonlyArray<KodoLimitWindow> }
+  /** At least one live window, read at `checkedAtMs` (within the freshness bound when it was taken). */
+  | {
+      readonly state: "ok";
+      readonly checkedAtMs: number;
+      readonly windows: ReadonlyArray<KodoLimitWindow>;
+    }
   /** Windows exist but the reading is old, a probe failed, or every window has already reset. */
   | { readonly state: "stale" }
   /** The provider reports no limit windows (or none are known). */
@@ -30,9 +39,12 @@ function windowName(window: {
   readonly windowDurationMins?: number | undefined;
 }) {
   const mins = window.windowDurationMins;
-  if (mins === WEEK_MINS) return "weekly";
+  // A scoped window ("Weekly · Opus") keeps its scope, so two weekly windows are never both "weekly".
+  const scope = window.label.split(" · ")[1]?.trim();
+  const suffix = scope === undefined || scope.length === 0 ? "" : ` ${scope}`;
+  if (mins === WEEK_MINS) return `weekly${suffix}`;
   if (mins !== undefined && mins > 0 && mins % HOUR_MINS === 0 && mins <= 48 * HOUR_MINS) {
-    return `${mins / HOUR_MINS}-hour`;
+    return `${mins / HOUR_MINS}-hour${suffix}`;
   }
   return window.label;
 }
@@ -50,7 +62,7 @@ export function readKodoLimitWindows(
   const checkedAt = Date.parse(limits.checkedAt);
   const old =
     !Number.isFinite(checkedAt) ||
-    nowMs - checkedAt > STALE_AFTER_MS ||
+    nowMs - checkedAt > KODO_LIMIT_MAX_AGE_MS ||
     limits.unavailable?.reason === "probeFailed";
   // A reset that already passed means the stored percentage describes the previous window.
   const live = limits.windows.filter((window) => {
@@ -60,6 +72,7 @@ export function readKodoLimitWindows(
   if (old || live.length === 0) return { state: "stale" };
   return {
     state: "ok",
+    checkedAtMs: checkedAt,
     windows: live.map((window) => ({
       id: window.id,
       name: windowName(window),
@@ -81,12 +94,14 @@ export function fullestKodoLimitWindow(reading: KodoLimitReading): KodoLimitWind
 /**
  * Each window the provider reported both before and after a stage, as the change observed over that
  * time. Other work on the same account moves the same windows, so this is never a cost of the stage.
+ * Two readings taken at the same moment are one reading twice: they say nothing about the stage.
  */
 export function observedKodoLimitChange(
   before: KodoLimitReading,
   after: KodoLimitReading,
 ): ReadonlyArray<{ readonly window: string; readonly before: number; readonly after: number }> {
   if (before.state !== "ok" || after.state !== "ok") return [];
+  if (after.checkedAtMs <= before.checkedAtMs) return [];
   return after.windows.flatMap((window) => {
     const earlier = before.windows.find((candidate) => candidate.id === window.id);
     return earlier === undefined

@@ -3,6 +3,7 @@ import type { ServerProviderUsageLimits } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 
 import {
+  KODO_LIMIT_MAX_AGE_MS,
   fullestKodoLimitWindow,
   observedKodoLimitChange,
   readKodoLimitWindows,
@@ -14,7 +15,7 @@ const minutesAgo = (mins: number) => at(NOW - mins * 60_000);
 const inMinutes = (mins: number) => at(NOW + mins * 60_000);
 
 const limits = (over: Partial<ServerProviderUsageLimits> = {}): ServerProviderUsageLimits => ({
-  checkedAt: minutesAgo(2),
+  checkedAt: minutesAgo(1),
   windows: [
     {
       id: "session",
@@ -34,6 +35,7 @@ describe("reading limit windows", () => {
     const reading = readKodoLimitWindows(limits(), NOW);
     expect(reading).toEqual({
       state: "ok",
+      checkedAtMs: NOW - 60_000,
       windows: [
         { id: "session", name: "5-hour", usedPercent: 92 },
         { id: "weekly", name: "weekly", usedPercent: 40 },
@@ -56,6 +58,7 @@ describe("reading limit windows", () => {
       "stale",
     ],
     ["a reading from long ago", limits({ checkedAt: minutesAgo(45) }), "stale"],
+    ["a reading a little older than the bound", limits({ checkedAt: minutesAgo(3) }), "stale"],
     [
       "a failed probe over old windows",
       limits({ unavailable: { reason: "probeFailed" } }),
@@ -72,6 +75,36 @@ describe("reading limit windows", () => {
     ],
   ] as const)("is %s: %s", (_name, input, state) => {
     expect(readKodoLimitWindows(input, NOW).state).toBe(state);
+  });
+
+  it("takes a reading at the freshness bound as fresh, and one just past it as stale", () => {
+    expect(KODO_LIMIT_MAX_AGE_MS).toBe(2 * 60_000);
+    const at = (age: number) => readKodoLimitWindows(limits({ checkedAt: minutesAgo(age / 60_000) }), NOW);
+    expect(at(KODO_LIMIT_MAX_AGE_MS).state).toBe("ok");
+    expect(at(KODO_LIMIT_MAX_AGE_MS + 1_000).state).toBe("stale");
+  });
+
+  it("tells two weekly windows apart by the scope in the provider's label", () => {
+    const reading = readKodoLimitWindows(
+      limits({
+        windows: [
+          { id: "seven_day", kind: "weekly", label: "Weekly", usedPercent: 40, windowDurationMins: 10_080 },
+          {
+            id: "seven_day_opus",
+            kind: "weekly",
+            label: "Weekly · Opus",
+            usedPercent: 95,
+            windowDurationMins: 10_080,
+          },
+        ],
+      }),
+      NOW,
+    );
+    expect(reading.state === "ok" && reading.windows.map((window) => window.name)).toEqual([
+      "weekly",
+      "weekly Opus",
+    ]);
+    expect(fullestKodoLimitWindow(reading)?.name).toBe("weekly Opus");
   });
 
   it("drops a window that has reset but keeps the live ones", () => {
@@ -97,9 +130,10 @@ describe("reading limit windows", () => {
 });
 
 describe("the change seen around a stage", () => {
-  const ok = (session: number, extra: Array<[string, number]> = []) =>
+  const ok = (session: number, extra: Array<[string, number]> = [], checkedMinutesAgo = 1) =>
     readKodoLimitWindows(
       limits({
+        checkedAt: minutesAgo(checkedMinutesAgo),
         windows: [
           {
             id: "session",
@@ -119,10 +153,15 @@ describe("the change seen around a stage", () => {
       NOW,
     );
 
-  it("lists each window reported both times", () => {
-    expect(observedKodoLimitChange(ok(40, [["weekly", 5]]), ok(46))).toEqual([
+  it("lists each window reported both times, when the readings were taken at different times", () => {
+    expect(observedKodoLimitChange(ok(40, [["weekly", 5]], 1.5), ok(46, [], 0.5))).toEqual([
       { window: "5-hour", before: 40, after: 46 },
     ]);
+  });
+
+  it("says nothing when both readings are the same reading, rather than show identical numbers", () => {
+    expect(observedKodoLimitChange(ok(40), ok(40))).toEqual([]);
+    expect(observedKodoLimitChange(ok(40, [], 1), ok(46, [], 1.5))).toEqual([]);
   });
 
   it("says nothing when either reading cannot be used", () => {

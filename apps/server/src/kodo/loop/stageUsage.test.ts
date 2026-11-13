@@ -109,7 +109,10 @@ describe("a stage's usage from its provider turns", () => {
   it.each([
     ["a turn that reported nothing beside one that did", [turn(complete()), turn(undefined)]],
     ["a partial turn", [turn(complete({ usageStatus: "partial" }))]],
-    ["a turn with subagents, whose tokens are not here", [turn(complete({ hasSubagents: true }))]],
+    [
+      "a turn with subagents whose tokens the provider did not report",
+      [turn(complete({ hasSubagents: true }))],
+    ],
   ])("is incomplete for %s", (_name, turns) => {
     expect(summarizeStageUsage(turns, "base")?.usage.complete).toBe(false);
   });
@@ -127,5 +130,46 @@ describe("a stage's usage from its provider turns", () => {
       outputTokens: 1,
       complete: true,
     });
+  });
+
+  it("counts the subagent and compaction tokens a provider reported, apart from the ones it can price", () => {
+    const summary = summarizeStageUsage(
+      [
+        turn(
+          complete({
+            inputTokens: 100_000,
+            cachedInputTokens: 80_000,
+            outputTokens: 40_000,
+            otherUsage: { inputTokens: 900_000, outputTokens: 5_000 },
+          }),
+        ),
+      ],
+      "base",
+    );
+    expect(summary?.usage).toMatchObject({
+      uncachedInputTokens: 20_000,
+      cachedInputTokens: 80_000,
+      outputTokens: 40_000,
+      otherTokens: 905_000,
+    });
+    // Only the main agent's tokens have a model to price at.
+    expect(summary?.byModel).toHaveLength(1);
+  });
+
+  it("is complete when the provider's own ledger accounts for the subagent and compaction work", () => {
+    const compactionOnly = summarizeStageUsage(
+      [turn(complete({ otherUsage: { inputTokens: 500, outputTokens: 50 } }))],
+      "base",
+    );
+    expect(compactionOnly?.usage.complete).toBe(true);
+    const subagents = summarizeStageUsage(
+      [turn(complete({ hasSubagents: true, otherUsage: { inputTokens: 500, outputTokens: 50 } }))],
+      "base",
+    );
+    expect(subagents?.usage.complete).toBe(true);
+  });
+
+  it("reports no other tokens when there were none", () => {
+    expect(summarizeStageUsage([turn(complete())], "base")?.usage.otherTokens).toBeUndefined();
   });
 });

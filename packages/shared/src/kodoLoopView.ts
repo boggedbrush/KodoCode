@@ -214,6 +214,7 @@ export function formatKodoUsd(usd: number): string {
 export function kodoLoopStageLine(record: KodoLoopStageRecord): string {
   const said = record.conclusion;
   const failed = record.status === "failed";
+  if (record.status === "interrupted") return "Interrupted: the loop ended while this stage was running.";
   switch (record.stage) {
     case "plan":
       return failed
@@ -300,31 +301,71 @@ export interface KodoLoopSummary {
   /** Earliest first; the card expands the last and folds the rest. */
   readonly rounds: ReadonlyArray<KodoLoopSummaryRound>;
   readonly stopText: string | null;
-  /** Tokens the providers reported over all stages; null when none reported any. */
+  /**
+   * Tokens the providers reported over all stages, as the token cap counts them (cache reads are
+   * apart, in `cacheReadTokens`); null when none reported any.
+   */
   readonly tokens: number | null;
+  /** Cache reads, which the cap does not count; null when no stage reported any usage. */
+  readonly cacheReadTokens: number | null;
+  /** Something is known to be missing from `tokens`: it is a floor and reads "At least". */
+  readonly tokensAtLeast: boolean;
   readonly byModel: ReadonlyArray<KodoLoopModelShare>;
   /** Priced cost of the stages that have a price; null when none has. */
   readonly costUsd: number | null;
+  /** Something is known to be missing from `costUsd`: it is a floor and reads "at least". */
+  readonly costAtLeast: boolean;
   /** Stages that have tokens but no price: their cost is not in `costUsd`. */
   readonly unpricedStages: ReadonlyArray<string>;
   /** Stages whose provider reported no token usage at all. */
   readonly unreportedStages: ReadonlyArray<string>;
   /** Some stage reported only part of its tokens, so the totals are lower bounds. */
   readonly partial: boolean;
+  /** The stage that was running when the loop ended and has not been recorded yet; its spend is missing. */
+  readonly pendingStage: string | null;
+  /** The one line of totals: tokens and cost, with "At least" wherever something is missing. */
+  readonly totalsLine: string;
+  /** Plain sentences about what the totals could not count. */
+  readonly usageNotes: ReadonlyArray<string>;
   /** Plain sentences about what the budget could and could not count. */
   readonly budgetNotes: ReadonlyArray<string>;
   readonly savings: KodoLoopSavingsView;
+  /** The savings estimate in one sentence, or null when there is no estimate to show. */
+  readonly savingsHeadline: string | null;
   readonly limitChanges: ReadonlyArray<KodoLoopLimitChange>;
 }
 
-const stageTokens = (usage: NonNullable<KodoLoopStageRecord["usage"]>) =>
+/**
+ * What the token cap counts for a stage: uncached input, cache writes, output (reasoning is a part of
+ * it) and the subagent and compaction tokens a provider reported. Cache reads are left out: they are
+ * most of a long conversation's input and say little about how much new work was done.
+ */
+export const kodoLoopStageTokens = (
+  usage: Pick<
+    NonNullable<KodoLoopStageRecord["usage"]>,
+    "uncachedInputTokens" | "cacheCreationTokens" | "outputTokens" | "otherTokens"
+  >,
+) =>
   usage.uncachedInputTokens +
-  usage.cachedInputTokens +
   usage.cacheCreationTokens +
-  usage.outputTokens;
+  usage.outputTokens +
+  (usage.otherTokens ?? 0);
 
+/** The models a stage ran on, as the provider named them; the model it was asked for when it named none. */
 const modelOf = (record: KodoLoopStageRecord) =>
-  record.usage?.models?.[0] ?? record.model?.model ?? "unknown model";
+  record.usage?.models !== undefined && record.usage.models.length > 0
+    ? record.usage.models.join(" + ")
+    : (record.model?.model ?? "unknown model");
+
+/** The estimate in a sentence. Negative savings say what it cost extra, never "$X more savings". */
+export function kodoLoopSavingsHeadline(savings: KodoLoopSavingsView): string | null {
+  if (savings.kind !== "estimate") return null;
+  const amount = formatKodoUsd(Math.abs(savings.savedUsd));
+  const percent = `${Math.round(Math.abs(savings.savedPct))}%`;
+  return savings.savedUsd < 0
+    ? `Cost ${amount} more than ${savings.referenceModel} would have (${percent}, estimate)`
+    : `Saved about ${amount} (${percent}) against ${savings.referenceModel} (estimate)`;
+}
 
 function savingsView(loop: KodoLoop): KodoLoopSavingsView {
   const { savings } = loop;
@@ -372,6 +413,8 @@ export function summarizeKodoLoop(loop: KodoLoop): KodoLoopSummary {
   }));
 
   let tokens = 0;
+  let cacheReads = 0;
+  let otherTokens = 0;
   let reported = 0;
   let costUsd = 0;
   let priced = 0;
@@ -386,8 +429,10 @@ export function summarizeKodoLoop(loop: KodoLoop): KodoLoopSummary {
       continue;
     }
     reported += 1;
-    const count = stageTokens(usage);
+    const count = kodoLoopStageTokens(usage);
     tokens += count;
+    cacheReads += usage.cachedInputTokens;
+    otherTokens += usage.otherTokens ?? 0;
     perModel.set(modelOf(record), (perModel.get(modelOf(record)) ?? 0) + count);
     if (!usage.complete) partial = true;
     if (usage.costUsd === undefined) unpricedStages.push(stageName(record.round, record.stage));
@@ -395,6 +440,30 @@ export function summarizeKodoLoop(loop: KodoLoop): KodoLoopSummary {
       costUsd += usage.costUsd;
       priced += 1;
     }
+  }
+  const pendingStage =
+    isKodoLoopRunning(loop) || loop.cleanup?.record !== true
+      ? null
+      : stageName(loop.round, loop.stage);
+  const tokensAtLeast = partial || unreportedStages.length > 0 || pendingStage !== null;
+  const costAtLeast = tokensAtLeast || unpricedStages.length > 0 || otherTokens > 0;
+
+  const usageNotes: string[] = [];
+  if (reported > 0 && unreportedStages.length > 0) {
+    usageNotes.push(`No usage reported for ${unreportedStages.join(", ")}.`);
+  }
+  if (reported > 0 && unpricedStages.length > 0) {
+    usageNotes.push(`No price for ${unpricedStages.join(", ")}; not in the cost.`);
+  }
+  if (otherTokens > 0) {
+    usageNotes.push(
+      `Includes ${formatKodoTokens(otherTokens)} tokens of subagent or compaction work, which have no price.`,
+    );
+  }
+  if (pendingStage !== null) {
+    usageNotes.push(
+      `${pendingStage[0]!.toUpperCase()}${pendingStage.slice(1)} was running when the loop ended; its usage is added once it finishes.`,
+    );
   }
 
   const budgetNotes: string[] = [];
@@ -409,18 +478,32 @@ export function summarizeKodoLoop(loop: KodoLoop): KodoLoopSummary {
     );
   }
   if (loop.limitCheck !== undefined) {
+    const stages = loop.limitCheck.unchecked?.length ?? 1;
+    const count = `${stages} stage${stages === 1 ? "" : "s"}`;
     budgetNotes.push(
       loop.limitCheck.state === "missing"
-        ? `${loop.limitCheck.provider} reports no usage-limit windows, so the limit setting could not stop this loop.`
-        : `${loop.limitCheck.provider}'s usage-limit reading was out of date, so the limit setting could not stop this loop.`,
+        ? `${loop.limitCheck.provider} reports no usage-limit windows, so the limit setting could not stop this loop before ${count}.`
+        : `No recent usage-limit reading was available for ${loop.limitCheck.provider}, so the limit setting could not stop this loop before ${count}.`,
     );
   }
+
+  const totalsLine =
+    reported === 0
+      ? "Token usage was not reported by the provider."
+      : `${tokensAtLeast ? "At least " : ""}${formatKodoTokens(tokens)} tokens${
+          priced === 0
+            ? ", no price available."
+            : `, ${costAtLeast ? "at least " : ""}${formatKodoUsd(costUsd)} at API prices.`
+        }`;
+  const savings = savingsView(loop);
 
   return {
     roundsRun: roundNumbers.length === 0 ? 0 : (roundNumbers.at(-1) ?? 0),
     rounds,
     stopText: kodoLoopStopText(loop),
     tokens: reported === 0 ? null : tokens,
+    cacheReadTokens: reported === 0 ? null : cacheReads,
+    tokensAtLeast,
     byModel: [...perModel]
       .map(([model, count]) => ({
         model,
@@ -429,11 +512,16 @@ export function summarizeKodoLoop(loop: KodoLoop): KodoLoopSummary {
       }))
       .sort((a, b) => b.tokens - a.tokens),
     costUsd: priced === 0 ? null : costUsd,
+    costAtLeast,
     unpricedStages,
     unreportedStages,
     partial,
+    pendingStage,
+    totalsLine,
+    usageNotes,
     budgetNotes,
-    savings: savingsView(loop),
+    savings,
+    savingsHeadline: kodoLoopSavingsHeadline(savings),
     limitChanges: records.flatMap((record) =>
       record.limits === undefined || record.limits.length === 0
         ? []

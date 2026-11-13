@@ -28,7 +28,7 @@ import {
   kodoLoopModeSetRefusal,
 } from "../kodo/loop/loopControl.ts"; // KODO: loop-command
 import { buildKodoLoopRequestMessage } from "../kodo/loop/loopRequestMessage.ts"; // KODO: loop-command
-import type { KodoThreadModeModel } from "@t3tools/contracts"; // KODO: mode-models-turn
+import type { KodoLoopStageRef, KodoThreadModeModel } from "@t3tools/contracts"; // KODO: mode-models-turn, loop-stage-model
 import { kodoThreadModeModelFor } from "@t3tools/shared/kodoModeModel"; // KODO: mode-models-turn
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts"; // KODO: mode-models-turn
 import { threadPullRequestsOf } from "../sourceControl/threadPullRequests.ts";
@@ -405,6 +405,11 @@ export interface OrchestratorV2Shape {
     taskId?: NodeId,
   ) => Effect.Effect<boolean, OrchestratorProjectionError>;
   readonly restartContinuationPending: (run: OrchestrationV2Run) => Effect.Effect<boolean>;
+  // KODO: loop-stage-model - the model a loop stage will really run on, for the budget gate.
+  readonly kodoLoopStageSelection: (
+    threadId: ThreadId,
+    stage: KodoLoopStageRef,
+  ) => Effect.Effect<ModelSelection, OrchestratorV2Error>;
   /** Declined continuations emit no thread event; this still wakes waiters. */
   readonly awaitRestartContinuation: (run: OrchestrationV2Run) => Effect.Effect<void>;
   readonly dispatch: (
@@ -14919,6 +14924,13 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     recoverDelegatedTasks,
     recoverDelegatedTask,
     delegatedTaskResultPending,
+    // KODO: loop-stage-model
+    kodoLoopStageSelection: Effect.fn("OrchestratorV2.kodoLoopStageSelection")(
+      function* (threadId, stage) {
+        const projection = yield* readCommandProjection(threadId);
+        return yield* kodoModeModelTurn.selectForLoopStage({ projection, stage });
+      },
+    ),
     restartContinuationPending: Effect.fn("OrchestratorV2.restartContinuationPending")(
       function (run) {
         return awaitsRestartContinuation(run).pipe(Effect.orElseSucceed(() => false));

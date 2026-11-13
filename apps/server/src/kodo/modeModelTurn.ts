@@ -26,6 +26,7 @@ import * as Effect from "effect/Effect";
 import type { ProviderSwitchServiceV2 } from "../orchestration-v2/ProviderSwitchService.ts";
 import type * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import type * as ServerSettings from "../serverSettings.ts";
+import { kodoLoopStageMode } from "./loop/loopState.ts";
 import { resolveKodoModeModel } from "./modeModel.ts";
 
 export interface KodoModeModelTurnServices {
@@ -222,6 +223,34 @@ export const makeKodoModeModelTurn = (services: KodoModeModelTurnServices) => {
   });
 
   /**
+   * The model a loop's next stage will run on: the resolution its message goes through at dispatch,
+   * availability fallback included, asked before the thread has been put in the stage's mode. The
+   * budget gate reads the limit windows of this provider, so it must not guess a different one.
+   */
+  const selectForLoopStage = Effect.fn("KodoModeModelTurn.selectForLoopStage")(function* (input: {
+    readonly projection: OrchestrationV2ThreadProjection;
+    readonly stage: KodoLoopStageRef;
+  }) {
+    const { projection } = input;
+    const inStageMode = {
+      ...projection,
+      thread: { ...projection.thread, interactionMode: kodoLoopStageMode(input.stage.stage) },
+    };
+    const selected = yield* selectForDispatch({
+      projection: inStageMode,
+      command: {},
+      modelSelection: projection.thread.modelSelection,
+      followsCurrentConversation: false,
+      loopStage: input.stage,
+      queueTail: undefined,
+      activeProviderThread: projection.providerThreads.find(
+        (candidate) => candidate.id === projection.thread.activeProviderThreadId,
+      ),
+    });
+    return selected.modelSelection;
+  });
+
+  /**
    * A queued run starts with what the thread is by then: the thread's own model is read again (it
    * may have been changed while the run waited), and a mode default that can no longer run falls
    * back to the thread's own model with the notice, as it would have at dispatch.
@@ -276,7 +305,7 @@ export const makeKodoModeModelTurn = (services: KodoModeModelTurnServices) => {
     },
   );
 
-  return { selectForDispatch, reconcileQueuedStart, unavailableReason };
+  return { selectForDispatch, selectForLoopStage, reconcileQueuedStart, unavailableReason };
 };
 
 export type KodoModeModelTurn = ReturnType<typeof makeKodoModeModelTurn>;

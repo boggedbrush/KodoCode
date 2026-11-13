@@ -89,9 +89,15 @@ export type KodoLoopServerOp =
   | (KodoLoopServerOpBase & { readonly type: "release" })
   | (KodoLoopServerOpBase & {
       readonly type: "limit-check";
-      readonly limitCheck?: KodoLoop["limitCheck"];
+      readonly limitCheck: Pick<NonNullable<KodoLoop["limitCheck"]>, "state" | "provider">;
     })
   | (KodoLoopServerOpBase & { readonly type: "cleaned" })
+  | (KodoLoopServerOpBase & {
+      readonly type: "record-stage";
+      /** The stage that was running when the loop ended, once its run settled; absent when it had no run. */
+      readonly record?: KodoLoopStageRecord;
+      readonly savings?: KodoLoopSavings;
+    })
   | (KodoLoopServerOpBase & {
       readonly type: "advance";
       /** The settled stage; the loop moves to its successor. */
@@ -106,6 +112,7 @@ export type KodoLoopServerOp =
       readonly reason: KodoLoopStopReason;
       readonly detail?: string;
       readonly record?: KodoLoopStageRecord;
+      readonly repriced?: ReadonlyArray<KodoLoopStageRecord>;
       readonly summary?: string;
       readonly savings?: KodoLoopSavings;
     });
@@ -175,9 +182,10 @@ function running(
 }
 
 /**
- * What an ended loop still owes the thread: its own runs ended after a stop, and the start mode back
- * when the loop left the thread in another stage mode (unless `restoredNow` already did). A mode that
- * is not a stage mode is one a person chose, and is left alone.
+ * What an ended loop still owes the thread: its own runs ended after a stop, the start mode back
+ * when the loop left the thread in another stage mode (unless `restoredNow` already did), and the
+ * record of the stage that was running when a person ended the loop, once its run settles. A mode
+ * that is not a stage mode is one a person chose, and is left alone.
  */
 function endCleanup(
   loop: KodoLoop,
@@ -189,11 +197,16 @@ function endCleanup(
   const leftMode =
     !restoredNow && mode !== loop.startMode && KODO_LOOP_STAGE_MODES.has(mode) ? mode : undefined;
   const interrupt = reason === "user_stop";
-  if (leftMode === undefined && !interrupt) return {};
+  // A person's stop or message can land while a stage runs; a loop waiting for plan approval has none.
+  const record =
+    (reason === "user_stop" || reason === "user_message") &&
+    !(loop.status === "held" && loop.hold === "plan_approval");
+  if (leftMode === undefined && !interrupt && !record) return {};
   return {
     cleanup: {
       ...(leftMode === undefined ? {} : { leftMode }),
       ...(interrupt ? { interrupt: true as const } : {}),
+      ...(record ? { record: true as const } : {}),
     },
   };
 }
@@ -281,12 +294,13 @@ function applyClientOp(
         return refuse("not_active", "The loop has nothing to clean up.");
       }
       const { cleanup: _owed, ...rest } = loop;
+      const { leftMode: _given, ...stillOwed } = loop.cleanup;
       return {
         ok: true,
         loop: {
           ...rest,
           revision: loop.revision + 1,
-          ...(loop.cleanup.interrupt === true ? { cleanup: { interrupt: true as const } } : {}),
+          ...(Object.keys(stillOwed).length === 0 ? {} : { cleanup: stillOwed }),
         },
       };
     }
@@ -348,6 +362,26 @@ function applyServerOp(
     const { cleanup: _owed, ...rest } = loop;
     return { ok: true, loop: { ...rest, revision: loop.revision + 1 } };
   }
+  if (op.type === "record-stage") {
+    if (!isKodoLoopTerminal(loop.status) || loop.cleanup?.record !== true) {
+      return refuse("not_active", "The loop has no stage left to record.");
+    }
+    if (op.record !== undefined && (op.record.round !== loop.round || op.record.stage !== loop.stage)) {
+      return refuse("invalid", "That stage is not the one the loop ended in.");
+    }
+    const { cleanup: _owed, ...rest } = loop;
+    const { record: _recorded, ...stillOwed } = loop.cleanup;
+    return {
+      ok: true,
+      loop: {
+        ...rest,
+        revision: loop.revision + 1,
+        ...(Object.keys(stillOwed).length === 0 ? {} : { cleanup: stillOwed }),
+        ...(op.record === undefined ? {} : { stages: withRecord(loop.stages, op.record) }),
+        ...(op.savings === undefined ? {} : { savings: op.savings }),
+      },
+    };
+  }
   if (isKodoLoopTerminal(loop.status)) return refuse("not_active", "The loop is not running.");
   const revision = loop.revision + 1;
   switch (op.type) {
@@ -360,13 +394,22 @@ function applyServerOp(
         ? { ok: true, loop: { ...running(loop), revision, status: "active" } }
         : refuse("not_held", "The loop is not waiting on a request.");
     case "limit-check": {
-      const { limitCheck: _previous, ...rest } = loop;
+      // Sticky: each stage the gate could not check is kept, and a later good reading does not erase it.
+      const unchecked = loop.limitCheck?.unchecked ?? [];
+      const here = { round: loop.round, stage: loop.stage };
+      const known = unchecked.some(
+        (position) => position.round === here.round && position.stage === here.stage,
+      );
       return {
         ok: true,
         loop: {
-          ...rest,
+          ...loop,
           revision,
-          ...(op.limitCheck === undefined ? {} : { limitCheck: op.limitCheck }),
+          limitCheck: {
+            state: op.limitCheck.state,
+            provider: op.limitCheck.provider,
+            unchecked: known ? unchecked : [...unchecked, here].slice(-MAX_STAGE_RECORDS),
+          },
         },
       };
     }
@@ -411,7 +454,14 @@ function applyServerOp(
           stopReason: op.reason,
           ...(op.detail === undefined ? {} : { stopDetail: op.detail }),
           ...endCleanup(loop, op.reason, context.threadMode),
-          ...(op.record === undefined ? {} : { stages: withRecord(loop.stages, op.record) }),
+          ...(op.record === undefined && op.repriced === undefined
+            ? {}
+            : {
+                stages: [...(op.repriced ?? []), ...(op.record === undefined ? [] : [op.record])].reduce(
+                  withRecord,
+                  loop.stages,
+                ),
+              }),
           ...(op.summary === undefined ? {} : { summary: op.summary }),
           ...(op.savings === undefined ? {} : { savings: op.savings }),
         },

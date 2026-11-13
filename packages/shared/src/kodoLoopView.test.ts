@@ -5,6 +5,7 @@ import {
   formatKodoTokens,
   formatKodoUsd,
   kodoLoopBanner,
+  kodoLoopSavingsHeadline,
   kodoLoopStageLine,
   summarizeKodoLoop,
 } from "./kodoLoopView.ts";
@@ -196,14 +197,18 @@ describe("the loop summary", () => {
         ],
       }),
     );
-    expect(summary.tokens).toBe(2_000);
+    // 700 each: cache reads (300 each) are shown apart and are not what the cap counts.
+    expect(summary.tokens).toBe(1_400);
+    expect(summary.cacheReadTokens).toBe(600);
     expect(summary.costUsd).toBe(0.5);
     expect(summary.unpricedStages).toEqual(["round 1 code"]);
     expect(summary.unreportedStages).toEqual(["round 1 review"]);
     expect(summary.byModel).toEqual([
-      { model: "cheap", tokens: 1_000, sharePct: 50 },
-      { model: "other", tokens: 1_000, sharePct: 50 },
+      { model: "cheap", tokens: 700, sharePct: 50 },
+      { model: "other", tokens: 700, sharePct: 50 },
     ]);
+    // A stage reported nothing and one has no price: both totals are floors.
+    expect(summary.totalsLine).toBe("At least 1,400 tokens, at least $0.50 at API prices.");
   });
 
   it("has no token or cost totals when no provider reported", () => {
@@ -211,6 +216,7 @@ describe("the loop summary", () => {
     expect(summary.tokens).toBeNull();
     expect(summary.costUsd).toBeNull();
     expect(summary.byModel).toEqual([]);
+    expect(summary.totalsLine).toBe("Token usage was not reported by the provider.");
   });
 
   it("says when usage was only partly reported", () => {
@@ -218,13 +224,76 @@ describe("the loop summary", () => {
       loop({ stages: [record({ round: 1, stage: "plan", usage: usage({ complete: false }) })] }),
     );
     expect(summary.partial).toBe(true);
+    expect(summary.totalsLine).toMatch(/^At least /);
+  });
+
+  it("reads exact when every stage reported and was priced", () => {
+    const summary = summarizeKodoLoop(
+      loop({ stages: [record({ round: 1, stage: "plan", usage: usage({ costUsd: 0.25 }) })] }),
+    );
+    expect(summary.totalsLine).toBe("700 tokens, $0.25 at API prices.");
+  });
+
+  it("counts subagent and compaction tokens, and says their cost is not in the price", () => {
+    const summary = summarizeKodoLoop(
+      loop({
+        stages: [
+          record({ round: 1, stage: "code", usage: usage({ costUsd: 1, otherTokens: 5_000 }) }),
+        ],
+      }),
+    );
+    expect(summary.tokens).toBe(5_700);
+    expect(summary.totalsLine).toBe("5,700 tokens, at least $1.00 at API prices.");
+    expect(summary.usageNotes).toEqual([
+      "Includes 5,000 tokens of subagent or compaction work, which have no price.",
+    ]);
+  });
+
+  it("reads 'At least' while the stage the loop ended in is not recorded yet", () => {
+    const summary = summarizeKodoLoop(
+      loop({
+        status: "stopped",
+        stopReason: "user_stop",
+        round: 1,
+        stage: "code",
+        cleanup: { record: true },
+        stages: [record({ round: 1, stage: "plan", usage: usage({ costUsd: 0.5 }) })],
+      }),
+    );
+    expect(summary.pendingStage).toBe("round 1 code");
+    expect(summary.totalsLine).toBe("At least 700 tokens, at least $0.50 at API prices.");
+    expect(summary.usageNotes[0]).toContain("Round 1 code was running when the loop ended");
+  });
+
+  it("shows an interrupted stage as such, with its usage counted", () => {
+    const interrupted = record({
+      round: 1,
+      stage: "code",
+      status: "interrupted",
+      usage: usage({ costUsd: 2 }),
+    });
+    expect(kodoLoopStageLine(interrupted)).toBe(
+      "Interrupted: the loop ended while this stage was running.",
+    );
+    const summary = summarizeKodoLoop(
+      loop({ status: "stopped", stopReason: "user_stop", stages: [interrupted] }),
+    );
+    expect(summary.pendingStage).toBeNull();
+    expect(summary.totalsLine).toBe("700 tokens, $2.00 at API prices.");
   });
 
   it("says what each budget could not count, and when the limit could not be seen", () => {
     const summary = summarizeKodoLoop(
       loop({
         budget: { maxCostUsd: 1, maxTokens: 100 },
-        limitCheck: { state: "stale", provider: "Claude" },
+        limitCheck: {
+          state: "stale",
+          provider: "Claude",
+          unchecked: [
+            { round: 1, stage: "plan" as const },
+            { round: 1, stage: "code" as const },
+          ],
+        },
         stages: [
           record({ round: 1, stage: "plan", usage: usage() }),
           record({ round: 1, stage: "code" }),
@@ -234,7 +303,7 @@ describe("the loop summary", () => {
     expect(summary.budgetNotes).toEqual([
       "The cost cap counted only stages with a price. It could not count round 1 plan.",
       "The token cap could not count round 1 code: the provider reported no usage.",
-      "Claude's usage-limit reading was out of date, so the limit setting could not stop this loop.",
+      "No recent usage-limit reading was available for Claude, so the limit setting could not stop this loop before 2 stages.",
     ]);
   });
 
@@ -275,6 +344,31 @@ describe("the loop summary", () => {
     ["nothing before Code ran", {}, "none"],
   ] as const)("savings: %s", (_name, over, kind) => {
     expect(summarizeKodoLoop(loop(over as Partial<KodoLoop>)).savings.kind).toBe(kind);
+  });
+
+  it("words a negative estimate as extra cost, never as savings", () => {
+    const view = (savedUsd: number, savedPct: number) =>
+      kodoLoopSavingsHeadline({
+        kind: "estimate",
+        referenceModel: "big",
+        actualUsd: 2,
+        referenceUsd: 1,
+        savedUsd,
+        savedPct,
+        pricedStages: 1,
+        unpricedStages: [],
+      });
+    expect(view(9, 90)).toBe("Saved about $9.00 (90%) against big (estimate)");
+    expect(view(-1, -100)).toBe("Cost $1.00 more than big would have (100%, estimate)");
+  });
+
+  it("names every model a stage ran on rather than the first", () => {
+    const summary = summarizeKodoLoop(
+      loop({
+        stages: [record({ round: 1, stage: "code", usage: usage({ models: ["a", "b"] }) })],
+      }),
+    );
+    expect(summary.byModel.map((entry) => entry.model)).toEqual(["a + b"]);
   });
 
   it("lists the limit readings seen around each stage", () => {

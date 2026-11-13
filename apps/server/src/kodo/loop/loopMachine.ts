@@ -116,7 +116,7 @@ export interface LoopStageOutcome {
   readonly stage: KodoLoopStage;
   readonly messageId: string;
   readonly runId: string;
-  readonly status: "completed" | "failed";
+  readonly status: "completed" | "failed" | "interrupted";
   readonly verdict?: KodoLoopVerdict;
   readonly review?: KodoReviewResult;
   readonly reviewParse?: "ok" | "failed";
@@ -139,8 +139,11 @@ export type LoopStep =
     }
   | { readonly kind: "hold"; readonly hold: "runtime_request" }
   | { readonly kind: "release" }
-  /** Record what the budget gate could not see of the limit windows (or that it sees them again). */
-  | { readonly kind: "limit-check"; readonly limitCheck?: KodoLoop["limitCheck"] }
+  /** Record that the budget gate could not see the limit windows before this stage. */
+  | {
+      readonly kind: "limit-check";
+      readonly limitCheck: Pick<NonNullable<KodoLoop["limitCheck"]>, "state" | "provider">;
+    }
   | {
       readonly kind: "advance";
       readonly outcome: LoopStageOutcome;
@@ -155,6 +158,11 @@ export type LoopStep =
     }
   /** After a stop: end the loop's own run that is still spending. */
   | { readonly kind: "interrupt"; readonly runId: string }
+  /**
+   * After a person ended the loop: the stage that was running has settled, so record what it spent
+   * (`outcome` absent: it never had a run).
+   */
+  | { readonly kind: "record-stage"; readonly outcome?: LoopStageOutcome }
   /** After the loop: put the thread back in the mode it started in. */
   | { readonly kind: "restore-mode"; readonly mode: KodoInteractionMode }
   /** After the loop: nothing is left to do, or what is left cannot be done. */
@@ -399,13 +407,10 @@ function budgetTrip(loop: KodoLoop, budget: LoopBudgetObservation): string | nul
     return `The loop's cost reached ${formatUsd(totals.costUsd)}, at the ${formatUsd(loop.budget.maxCostUsd)} cap${totals.unpricedStages.length > 0 ? " (stages without a price are not counted)" : ""}.`;
   }
   if (loop.budget.maxTokens !== undefined && totals.tokens >= loop.budget.maxTokens) {
-    return `The loop used ${totals.tokens.toLocaleString("en-US")} tokens, at the ${loop.budget.maxTokens.toLocaleString("en-US")} cap.`;
+    return `The loop used ${totals.tokens.toLocaleString("en-US")} tokens (cache reads are not counted), at the ${loop.budget.maxTokens.toLocaleString("en-US")} cap.`;
   }
   return null;
 }
-
-const sameLimitCheck = (a: KodoLoop["limitCheck"], b: KodoLoop["limitCheck"]) =>
-  a === undefined || b === undefined ? a === b : a.state === b.state && a.provider === b.provider;
 
 /**
  * After the loop ended: end the loop's own runs a person's stop left running, wait until nothing runs
@@ -424,6 +429,25 @@ function cleanupStep(
       (run) => members.has(run.runId) && ACTIVE_RUN_STATUSES.has(run.status),
     );
     if (spending !== undefined) return { kind: "interrupt", runId: spending.runId };
+  }
+  if (owed.record === true) {
+    // A person ended the loop while a stage may have been running: it is recorded once its run settles.
+    const messageId = kodoLoopStageMessageId(loop, loop.round, loop.stage);
+    const stage = stageRun(observation.runs, messageId);
+    if (stage === undefined) return { kind: "record-stage" };
+    if (ACTIVE_RUN_STATUSES.has(stage.status) || stage.continuationPending === true) {
+      return { kind: "idle" };
+    }
+    return {
+      kind: "record-stage",
+      outcome: {
+        round: loop.round,
+        stage: loop.stage,
+        messageId,
+        runId: stage.runId,
+        status: "interrupted",
+      },
+    };
   }
   // Another turn (a person's, or a wake) may be running in the mode the loop left; wait for it.
   if (observation.runs.some((run) => ACTIVE_RUN_STATUSES.has(run.status))) return { kind: "idle" };
@@ -476,14 +500,17 @@ export function decideLoopStep(loop: KodoLoop, observation: LoopObservation): Lo
     }
     const detail = budgetTrip(loop, budget);
     if (detail !== null) return { kind: "finish", status: "stopped", reason: "budget", detail };
-    // A limit that cannot be seen does not stop the loop, but the loop records that it could not look.
-    if (budget.limit.state !== "unchecked") {
-      const seen =
-        budget.limit.state === "ok"
-          ? undefined
-          : { state: budget.limit.state, provider: budget.limit.provider };
-      if (!sameLimitCheck(loop.limitCheck, seen)) {
-        return { kind: "limit-check", ...(seen === undefined ? {} : { limitCheck: seen }) };
+    // A limit that cannot be seen does not stop the loop, but the loop records, once per stage, that
+    // it could not look. The record stays: a later good reading does not undo an unchecked stage.
+    if (budget.limit.state === "missing" || budget.limit.state === "stale") {
+      const recorded = loop.limitCheck?.unchecked?.some(
+        (position) => position.round === loop.round && position.stage === loop.stage,
+      );
+      if (recorded !== true) {
+        return {
+          kind: "limit-check",
+          limitCheck: { state: budget.limit.state, provider: budget.limit.provider },
+        };
       }
     }
   }

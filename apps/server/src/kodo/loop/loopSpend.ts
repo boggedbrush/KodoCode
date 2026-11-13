@@ -8,6 +8,7 @@ import type {
   KodoLoopStageUsage,
   ModelSelection,
 } from "@t3tools/contracts";
+import { kodoLoopStageTokens } from "@t3tools/shared/kodoLoopView";
 import * as Effect from "effect/Effect";
 
 import {
@@ -55,16 +56,55 @@ export const priceStageUsage = Effect.fn("KodoLoopSpend.priceStageUsage")(functi
   } satisfies KodoLoopStageUsage;
 });
 
-/** The ids a stage ran on: what the provider reported, else the model it was asked to run. */
-const stageModelIds = (record: KodoLoopStageRecord): ReadonlyArray<string> =>
-  record.usage?.models !== undefined && record.usage.models.length > 0
-    ? record.usage.models
-    : record.model === null
-      ? []
-      : [record.model.model];
+/** The stage ran on the reference model itself: judged by the configured selection, never the provider's reported id. */
+const ranOnReference = (record: KodoLoopStageRecord, reference: ModelSelection) =>
+  record.model !== null &&
+  record.model.instanceId === reference.instanceId &&
+  record.model.model === reference.model;
+
+/**
+ * A settled stage that has tokens but no price, priced again now: the price table may have loaded
+ * since it settled. Only a stage that ran on one model can be (the stored counts are not split by
+ * model). Undefined when nothing changed.
+ */
+export const repriceStageRecord = Effect.fn("KodoLoopSpend.repriceStageRecord")(function* (
+  record: KodoLoopStageRecord,
+  input: { readonly reference: ModelSelection | null; readonly price: PriceTokens },
+) {
+  const { usage } = record;
+  if (usage === undefined || usage.costUsd !== undefined) return undefined;
+  if ((usage.models?.length ?? 0) > 1) return undefined;
+  const model = usage.models?.[0] ?? record.model?.model;
+  if (model === undefined) return undefined;
+  const { costUsd: _cost, referenceCostUsd: _reference, ...counts } = usage;
+  const priced = yield* priceStageUsage(
+    {
+      usage: counts,
+      byModel: [
+        {
+          model,
+          totals: {
+            uncachedInputTokens: usage.uncachedInputTokens,
+            cachedInputTokens: usage.cachedInputTokens,
+            cacheCreationTokens: usage.cacheCreationTokens,
+            outputTokens: usage.outputTokens,
+            reasoningTokens: usage.reasoningTokens,
+          },
+        },
+      ],
+    },
+    input,
+  );
+  return priced.costUsd === undefined
+    ? undefined
+    : ({ ...record, usage: priced } satisfies KodoLoopStageRecord);
+});
 
 export interface LoopTotals {
-  /** Every counted token (uncached and cached input, cache writes, output), over stages that reported. */
+  /**
+   * Every token the cap counts, over stages that reported: uncached input, cache writes, output and
+   * subagent or compaction tokens. Cache reads are not counted.
+   */
   readonly tokens: number;
   /** Priced cost of the stages that have a price; null when none has. */
   readonly costUsd: number | null;
@@ -90,11 +130,7 @@ export function loopTotals(stages: ReadonlyArray<KodoLoopStageRecord>): LoopTota
       unreportedStages.push(record);
       continue;
     }
-    tokens +=
-      usage.uncachedInputTokens +
-      usage.cachedInputTokens +
-      usage.cacheCreationTokens +
-      usage.outputTokens;
+    tokens += kodoLoopStageTokens(usage);
     if (usage.costUsd === undefined) unpricedStages.push(record);
     else {
       costUsd += usage.costUsd;
@@ -128,9 +164,7 @@ export function computeLoopSavings(
   const unpricedStages: Array<{ round: number; stage: KodoLoopStageRecord["stage"] }> = [];
   for (const record of stages) {
     if (record.runId === null || (record.stage !== "code" && record.stage !== "plan")) continue;
-    const ids = stageModelIds(record);
-    const onReference = ids.length > 0 && ids.every((id) => id === reference.model);
-    if (onReference) {
+    if (ranOnReference(record, reference)) {
       if (record.stage === "code") sameModelStages += 1;
       continue;
     }

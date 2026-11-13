@@ -134,10 +134,17 @@ export function decideKodoLoopAdvance(input: {
       return applyKodoLoopOp(input.thread.kodoLoop, {
         ...base,
         type: "limit-check",
-        ...(step.limitCheck === undefined ? {} : { limitCheck: step.limitCheck }),
+        limitCheck: step.limitCheck,
       });
     case "cleaned":
       return applyKodoLoopOp(input.thread.kodoLoop, { ...base, type: "cleaned" });
+    case "record-stage":
+      return applyKodoLoopOp(input.thread.kodoLoop, {
+        ...base,
+        type: "record-stage",
+        ...(step.record === undefined ? {} : { record: step.record }),
+        ...(step.savings === undefined ? {} : { savings: step.savings }),
+      });
     case "advance":
       return applyKodoLoopOp(input.thread.kodoLoop, {
         ...base,
@@ -156,6 +163,7 @@ export function decideKodoLoopAdvance(input: {
           reason: step.reason,
           ...(step.detail === undefined ? {} : { detail: step.detail }),
           ...(step.record === undefined ? {} : { record: step.record }),
+          ...(step.repriced === undefined ? {} : { repriced: step.repriced }),
           ...(step.summary === undefined ? {} : { summary: step.summary }),
           ...(step.savings === undefined ? {} : { savings: step.savings }),
         },

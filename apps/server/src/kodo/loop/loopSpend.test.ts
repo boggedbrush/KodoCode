@@ -2,7 +2,13 @@ import { describe, expect, it } from "@effect/vitest";
 import type { KodoLoopStageRecord, ModelSelection } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
-import { computeLoopSavings, loopTotals, priceStageUsage, type PriceTokens } from "./loopSpend.ts";
+import {
+  computeLoopSavings,
+  loopTotals,
+  priceStageUsage,
+  repriceStageRecord,
+  type PriceTokens,
+} from "./loopSpend.ts";
 import { summarizeStageUsage, type StageTokenTotals } from "./stageUsage.ts";
 import { testRecord } from "./testing.ts";
 
@@ -24,7 +30,9 @@ const price: PriceTokens = (model, totals: StageTokenTotals) =>
           1_000_000,
   );
 
-const tokens = (over: Partial<StageTokenTotals> = {}) => ({
+const tokens = (
+  over: Partial<StageTokenTotals> & { otherTokens?: number; models?: ReadonlyArray<string> } = {},
+) => ({
   uncachedInputTokens: 600_000,
   cachedInputTokens: 300_000,
   cacheCreationTokens: 0,
@@ -96,6 +104,30 @@ describe("pricing a stage", () => {
   );
 });
 
+describe("pricing a settled stage again", () => {
+  it.effect("prices a stage that had no price once its model has one, and leaves the rest alone", () =>
+    Effect.gen(function* () {
+      const record = stage(1, "code", "small", tokens({ models: ["small"] }));
+      const priced = yield* repriceStageRecord(record, { reference, price });
+      expect(priced?.usage?.costUsd).toBeCloseTo(1, 6);
+      expect(priced?.usage?.referenceCostUsd).toBeCloseTo(10, 6);
+      expect(priced?.usage?.models).toEqual(["small"]);
+      // Already priced, still unpriced, or run on several models: nothing to change.
+      expect(yield* repriceStageRecord(priced!, { reference, price })).toBeUndefined();
+      expect(
+        yield* repriceStageRecord(stage(1, "code", "local", tokens()), { reference, price }),
+      ).toBeUndefined();
+      expect(
+        yield* repriceStageRecord(stage(1, "code", "small", tokens({ models: ["a", "b"] })), {
+          reference,
+          price,
+        }),
+      ).toBeUndefined();
+      expect(yield* repriceStageRecord(stage(1, "review", "small", undefined), { reference, price })).toBeUndefined();
+    }),
+  );
+});
+
 describe("loop totals", () => {
   it("counts tokens of the stages that reported, prices only those with a price, and lists the rest", () => {
     const totals = loopTotals([
@@ -103,11 +135,17 @@ describe("loop totals", () => {
       stage(1, "code", "local", tokens()),
       stage(1, "review", "big", undefined),
     ]);
-    expect(totals.tokens).toBe(2_000_000);
+    // The cap counts uncached input, cache writes and output; cache reads (300k per stage) are left out.
+    expect(totals.tokens).toBe(1_400_000);
     expect(totals.costUsd).toBe(2);
     expect(totals.pricedStages).toBe(1);
     expect(totals.unpricedStages.map((record) => record.stage)).toEqual(["code"]);
     expect(totals.unreportedStages.map((record) => record.stage)).toEqual(["review"]);
+  });
+
+  it("counts the subagent and compaction tokens a provider reported", () => {
+    const totals = loopTotals([stage(1, "code", "small", tokens({ otherTokens: 250_000 }))]);
+    expect(totals.tokens).toBe(700_000 + 250_000);
   });
 
   it("has no cost when nothing has a price", () => {
@@ -222,11 +260,28 @@ describe("estimated savings", () => {
     expect(computeLoopSavings([], reference)).toBeUndefined();
   });
 
-  it("uses the model the provider reported over the one it was asked for", () => {
+  it("compares the configured model, so a dated id the provider reported cannot hide a same-model stage", () => {
     const savings = computeLoopSavings(
-      [stage(1, "code", "small", { ...priced("small"), models: ["big"] })],
+      [stage(1, "code", "big", { ...priced("big"), models: ["big-20261001"] })],
       reference,
     );
-    expect(savings?.sameModelStages).toBe(1);
+    expect(savings).toMatchObject({ pricedStages: 0, sameModelStages: 1, unpricedStages: [] });
+  });
+
+  it("does not take a stage run on another provider for the reference model because the ids match", () => {
+    const elsewhere = { instanceId: "other" as ModelSelection["instanceId"], model: "big" };
+    const savings = computeLoopSavings(
+      [
+        testRecord({
+          round: 1,
+          stage: "code",
+          model: elsewhere,
+          usage: priced("small"),
+        }),
+      ],
+      reference,
+    );
+    expect(savings?.pricedStages).toBe(1);
+    expect(savings?.sameModelStages).toBe(0);
   });
 });

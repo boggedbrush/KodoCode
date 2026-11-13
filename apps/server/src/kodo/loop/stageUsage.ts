@@ -1,6 +1,7 @@
 // What a stage spent, from the provider-turn ledger. Pure: the stepper reads the stage run's turns and
 // asks here. Providers that report nothing are unavailable (no usage), never zero, and a stage whose
-// turns only partly reported says so (`complete: false`) so no total passes for a full count.
+// turns only partly reported, or known to have run subagents the provider did not account for, says so
+// (`complete: false`) so no total passes for a full count.
 import {
   KODO_LOOP_USAGE_MODELS_MAX,
   type KodoLoopStageUsage,
@@ -30,6 +31,7 @@ export interface StageUsageSummary {
     | "cacheCreationTokens"
     | "outputTokens"
     | "reasoningTokens"
+    | "otherTokens"
     | "complete"
     | "models"
   >;
@@ -67,6 +69,7 @@ export function summarizeStageUsage(
   const reported = new Set<string>();
   let measured = 0;
   let complete = true;
+  let otherTokens = 0;
   for (const turn of turns) {
     const usage = turn.turnTokenUsage;
     // A local command's counters describe its result, not model work.
@@ -79,7 +82,12 @@ export function summarizeStageUsage(
       continue;
     }
     measured += 1;
-    if (usage.usageStatus !== "complete" || usage.hasSubagents) complete = false;
+    // Subagent and compaction work is counted when the provider's ledger reports it; only subagents
+    // the ledger did not account for leave something known to be missing.
+    if (usage.usageStatus !== "complete" || (usage.hasSubagents && usage.otherUsage === undefined)) {
+      complete = false;
+    }
+    otherTokens += (usage.otherUsage?.inputTokens ?? 0) + (usage.otherUsage?.outputTokens ?? 0);
     // Input includes cache reads and writes; reasoning is a part of output.
     const input = usage.inputTokens ?? 0;
     const cached = Math.min(usage.cachedInputTokens ?? 0, input);
@@ -103,7 +111,12 @@ export function summarizeStageUsage(
   const total = byModel.reduce((sum, entry) => addStageTotals(sum, entry.totals), NO_TOKENS);
   const models = [...reported].slice(0, KODO_LOOP_USAGE_MODELS_MAX);
   return {
-    usage: { ...total, complete, ...(models.length === 0 ? {} : { models }) },
+    usage: {
+      ...total,
+      complete,
+      ...(otherTokens === 0 ? {} : { otherTokens }),
+      ...(models.length === 0 ? {} : { models }),
+    },
     byModel,
   };
 }

@@ -1557,6 +1557,7 @@ it.live(
               return ctx.orchestrator.getThreadRecords(threadId, fields, filter);
             },
             restartContinuationPending: ctx.orchestrator.restartContinuationPending,
+            kodoLoopStageSelection: ctx.orchestrator.kodoLoopStageSelection,
           },
           dispatch: ctx.orchestrator.dispatch,
           readDiff: () => Effect.succeed({ kind: "unavailable", reason: "none" }),

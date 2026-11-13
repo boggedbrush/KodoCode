@@ -76,6 +76,10 @@ describe("stale writers", () => {
     ["release", { ...server(), type: "release" }],
     ["advance", { ...server(), type: "advance", record: testRecord({ round: 1, stage: "plan" }) }],
     ["finish", { ...server(), type: "finish", status: "stopped", reason: "budget" }],
+    [
+      "limit-check",
+      { ...server(), type: "limit-check", limitCheck: { state: "stale", provider: "Claude" } },
+    ],
   ];
 
   it.each(ops)("a %s from an older revision is refused and changes nothing", (_name, op) => {
@@ -402,14 +406,20 @@ describe("what an ended loop still owes the thread", () => {
     expect(result.ok && result.loop).toMatchObject({
       status: "stopped",
       stopReason: "user_stop",
-      cleanup: { leftMode: "code", interrupt: true },
+      cleanup: { leftMode: "code", interrupt: true, record: true },
     });
     const idle = applyKodoLoopOp(
       testLoop({ startMode: "ask" }),
       { type: "stop" },
       { threadMode: "ask" },
     );
-    expect(idle.ok && idle.loop.cleanup).toEqual({ interrupt: true });
+    expect(idle.ok && idle.loop.cleanup).toEqual({ interrupt: true, record: true });
+  });
+
+  it("a loop waiting for plan approval has no stage in flight, so a stop owes no record", () => {
+    const waiting = testLoop({ status: "held", hold: "plan_approval", stage: "code" });
+    const result = applyKodoLoopOp(waiting, { type: "stop" }, { threadMode: "plan" });
+    expect(result.ok && result.loop.cleanup).toEqual({ leftMode: "plan", interrupt: true });
   });
 
   it("a person's message ends the loop as user_message; the mode is owed only when it was not given back with the message", () => {
@@ -422,14 +432,14 @@ describe("what an ended loop still owes the thread", () => {
     expect(steer.ok && steer.loop).toMatchObject({
       status: "stopped",
       stopReason: "user_message",
-      cleanup: { leftMode: "code" },
+      cleanup: { leftMode: "code", record: true },
     });
     const queued = applyKodoLoopOp(
       loop,
       { type: "user_message", restoredNow: true },
       { threadMode: "code" },
     );
-    expect(queued.ok && queued.loop.cleanup).toBeUndefined();
+    expect(queued.ok && queued.loop.cleanup).toEqual({ record: true });
     expect(
       refusal(testLoop({ status: "done" }), { type: "user_message", restoredNow: false }),
     ).toBe("not_active");
@@ -459,6 +469,54 @@ describe("what an ended loop still owes the thread", () => {
     });
     const result = applyKodoLoopOp(owed, { type: "mode_restored" });
     expect(result.ok && result.loop.cleanup).toEqual({ interrupt: true });
+  });
+
+  it("records the stage that was running once, from the writer that read the revision, and then owes nothing", () => {
+    const owed = testLoop({
+      status: "stopped",
+      stopReason: "user_stop",
+      stage: "code",
+      cleanup: { record: true },
+    });
+    const record = testRecord({ round: 1, stage: "code", status: "interrupted" });
+    const recorded = applyKodoLoopOp(owed, { ...server(owed), type: "record-stage", record });
+    expect(recorded.ok && recorded.loop.stages).toEqual([record]);
+    expect(recorded.ok && recorded.loop.cleanup).toBeUndefined();
+    expect(recorded.ok && recorded.loop.status).toBe("stopped");
+    // The same write again, or one for another stage, is refused.
+    if (!recorded.ok) return;
+    expect(refusal(recorded.loop, { ...server(recorded.loop), type: "record-stage", record })).toBe(
+      "not_active",
+    );
+    expect(
+      refusal(owed, {
+        ...server(owed),
+        type: "record-stage",
+        record: testRecord({ round: 1, stage: "review", status: "interrupted" }),
+      }),
+    ).toBe("invalid");
+  });
+
+  it("keeps what else the loop owes when it records the stage, and can settle with no record at all", () => {
+    const owed = testLoop({
+      status: "stopped",
+      stopReason: "user_stop",
+      stage: "code",
+      cleanup: { leftMode: "code", interrupt: true, record: true },
+    });
+    const none = applyKodoLoopOp(owed, { ...server(owed), type: "record-stage" });
+    expect(none.ok && none.loop.cleanup).toEqual({ leftMode: "code", interrupt: true });
+    expect(none.ok && none.loop.stages).toEqual([]);
+  });
+
+  it("a message that gave the mode back keeps the record the loop still owes", () => {
+    const owed = testLoop({
+      status: "stopped",
+      stopReason: "user_message",
+      cleanup: { leftMode: "code", record: true },
+    });
+    const result = applyKodoLoopOp(owed, { type: "mode_restored" });
+    expect(result.ok && result.loop.cleanup).toEqual({ record: true });
   });
 
   it("resuming a loop drops what the ended one owed", () => {
@@ -506,7 +564,7 @@ describe("what the budget gate and the savings leave on the loop", () => {
     expect(finished.ok && finished.loop.savings).toEqual(savings);
   });
 
-  it("a limit check records what could not be seen, replaces it, and clears it when the reading returns", () => {
+  it("a limit check records the stage it could not check and stays: a later good reading does not erase it", () => {
     const loop = testLoop();
     const noted = applyKodoLoopOp(loop, {
       ...server(loop),
@@ -515,17 +573,47 @@ describe("what the budget gate and the savings leave on the loop", () => {
     });
     expect(noted.ok && noted.loop).toMatchObject({
       revision: 2,
-      limitCheck: { state: "stale", provider: "Claude" },
+      limitCheck: { state: "stale", provider: "Claude", unchecked: [{ round: 1, stage: "plan" }] },
     });
     if (!noted.ok) return;
-    const cleared = applyKodoLoopOp(noted.loop, { ...server(noted.loop), type: "limit-check" });
-    expect(cleared.ok && cleared.loop.limitCheck).toBeUndefined();
+    // The next stage is unchecked on another provider: both stages are counted, the latest cause stays.
+    const later = { ...noted.loop, stage: "code" as const };
+    const second = applyKodoLoopOp(later, {
+      ...server(later),
+      type: "limit-check",
+      limitCheck: { state: "missing", provider: "Cursor" },
+    });
+    expect(second.ok && second.loop.limitCheck).toEqual({
+      state: "missing",
+      provider: "Cursor",
+      unchecked: [
+        { round: 1, stage: "plan" },
+        { round: 1, stage: "code" },
+      ],
+    });
+  });
+
+  it("the same stage is counted once however often the gate looks", () => {
+    const loop = testLoop({
+      limitCheck: { state: "stale", provider: "Claude", unchecked: [{ round: 1, stage: "plan" }] },
+    });
+    const again = applyKodoLoopOp(loop, {
+      ...server(loop),
+      type: "limit-check",
+      limitCheck: { state: "stale", provider: "Claude" },
+    });
+    expect(again.ok && again.loop.limitCheck?.unchecked).toEqual([{ round: 1, stage: "plan" }]);
   });
 
   it("a stale limit check is refused like any other server write", () => {
     const loop = testLoop({ revision: 5 });
-    expect(refusal(loop, { loopId: loop.loopId, expectedRevision: 4, type: "limit-check" })).toBe(
-      "stale_revision",
-    );
+    expect(
+      refusal(loop, {
+        loopId: loop.loopId,
+        expectedRevision: 4,
+        type: "limit-check",
+        limitCheck: { state: "stale", provider: "Claude" },
+      }),
+    ).toBe("stale_revision");
   });
 });

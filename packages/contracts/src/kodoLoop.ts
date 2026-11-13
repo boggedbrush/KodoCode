@@ -135,6 +135,11 @@ export const KodoLoopStageUsage = Schema.Struct({
   outputTokens: NonNegativeInt,
   reasoningTokens: NonNegativeInt,
   complete: Schema.Boolean,
+  /**
+   * Input and output tokens of subagent and compaction work the provider reported without a model.
+   * They count toward the token cap and the totals but have no price, so the stage's cost is a floor.
+   */
+  otherTokens: Schema.optional(NonNegativeInt),
   /** The models the provider says ran; absent when it did not say, and the stage's own model stands. */
   models: Schema.optional(
     Schema.Array(cappedNonEmpty(120)).check(Schema.isMaxLength(KODO_LOOP_USAGE_MODELS_MAX)),
@@ -179,7 +184,8 @@ export const KodoLoopStageRecord = Schema.Struct({
   stage: KodoLoopStage,
   messageId: MessageId,
   runId: Schema.NullOr(RunId),
-  status: Schema.Literals(["running", "completed", "failed"]),
+  /** `interrupted`: the loop ended while this stage ran; its usage is what the run spent before it stopped. */
+  status: Schema.Literals(["running", "completed", "failed", "interrupted"]),
   model: Schema.NullOr(ModelSelection),
   startedAt: IsoDateTime,
   completedAt: Schema.NullOr(IsoDateTime),
@@ -250,6 +256,18 @@ const tolerantField = <T>(schema: Schema.Codec<T, T>, fallback: T) => {
   );
 };
 
+/** The stages a limit check could not be made for, and why the latest one could not. */
+export const KodoLoopLimitCheck = Schema.Struct({
+  state: Schema.Literals(["missing", "stale"]),
+  provider: capped(80),
+  unchecked: Schema.optional(
+    Schema.Array(KodoLoopStagePosition).check(
+      Schema.isMaxLength(KODO_LOOP_MAX_ROUNDS * KODO_LOOP_STAGES_PER_ROUND),
+    ),
+  ),
+});
+export type KodoLoopLimitCheck = typeof KodoLoopLimitCheck.Type;
+
 export const KodoLoop = Schema.Struct({
   loopId: Schema.String.check(Schema.isNonEmpty()),
   /** Bumped by every operation; a writer that read an older one is refused. */
@@ -286,15 +304,11 @@ export const KodoLoop = Schema.Struct({
   summary: Schema.optional(capped(8_000)),
   savings: Schema.optional(KodoLoopSavings),
   /**
-   * Set while the limit setting cannot do its job: the provider the next stage uses reported no
-   * limit windows, or only an out-of-date reading. The loop goes on; the summary says so.
+   * Set once the limit setting could not do its job before a stage: the provider the stage used
+   * reported no limit windows, or no reading newer than the freshness bound. It stays for the rest
+   * of the loop, so the summary can say how many stages ran unchecked. The loop goes on.
    */
-  limitCheck: Schema.optional(
-    Schema.Struct({
-      state: Schema.Literals(["missing", "stale"]),
-      provider: capped(80),
-    }),
-  ),
+  limitCheck: Schema.optional(KodoLoopLimitCheck),
   /**
    * What an ended loop still owes the thread, until it has been done: end its own runs that still
    * run (a stop), and give the start mode back once no turn runs. Absent while the loop runs and
@@ -305,6 +319,8 @@ export const KodoLoop = Schema.Struct({
       /** The mode the loop left the thread in; given back unless a person changed it since. */
       leftMode: Schema.optional(KodoInteractionMode),
       interrupt: Schema.optional(Schema.Literal(true)),
+      /** A stage may still have been running when the loop ended; it is recorded once its run settles. */
+      record: Schema.optional(Schema.Literal(true)),
     }),
   ),
 });
@@ -401,12 +417,16 @@ export type KodoLoopControl = typeof KodoLoopControl.Type;
 export const KodoLoopAdvanceStep = Schema.Union([
   Schema.Struct({ type: Schema.Literal("hold"), hold: Schema.Literal("runtime_request") }),
   Schema.Struct({ type: Schema.Literal("release") }),
-  /** What the budget gate saw of the limit windows, when that changed; absent `limitCheck` means a fresh reading. */
+  /** The budget gate could not see the limit windows before the current stage. */
   Schema.Struct({
     type: Schema.Literal("limit-check"),
-    limitCheck: Schema.optional(
-      Schema.Struct({ state: Schema.Literals(["missing", "stale"]), provider: capped(80) }),
-    ),
+    limitCheck: Schema.Struct({ state: Schema.Literals(["missing", "stale"]), provider: capped(80) }),
+  }),
+  /** The stage that was running when the loop ended has settled: record it (when it has a run) and stop owing it. */
+  Schema.Struct({
+    type: Schema.Literal("record-stage"),
+    record: Schema.optional(KodoLoopStageRecord),
+    savings: Schema.optional(KodoLoopSavings),
   }),
   /** An ended loop's clean-up is done, or given up on. */
   Schema.Struct({ type: Schema.Literal("cleaned") }),
@@ -422,6 +442,12 @@ export const KodoLoopAdvanceStep = Schema.Union([
     reason: KodoLoopStopReason,
     detail: Schema.optional(capped(2_000)),
     record: Schema.optional(KodoLoopStageRecord),
+    /** Earlier stages that had no price when they settled and have one now, replacing their records. */
+    repriced: Schema.optional(
+      Schema.Array(KodoLoopStageRecord).check(
+        Schema.isMaxLength(KODO_LOOP_MAX_ROUNDS * KODO_LOOP_STAGES_PER_ROUND),
+      ),
+    ),
     summary: Schema.optional(capped(8_000)),
     savings: Schema.optional(KodoLoopSavings),
   }),
