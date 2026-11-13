@@ -73,18 +73,23 @@ describe("whether the sub-agents switch can be flipped", () => {
 });
 
 describe("what a copied thread does not inherit", () => {
-  it("never carries a lead, a loop or an applied model into a child", () => {
+  it("never carries a lead, a loop, an applied model or the Orchestrator origin into a child", () => {
     expect(kodoChildThreadFields()).toEqual({
       kodoLead: null,
       kodoLoop: undefined,
       kodoModeModel: undefined,
+      kodoOrigin: undefined,
     });
   });
 
   it("never carries a loop into a fork, and a lead only into a fork a person made", () => {
-    expect(kodoForkThreadFields("user")).toEqual({ kodoLoop: undefined });
+    expect(kodoForkThreadFields("user")).toEqual({ kodoLoop: undefined, kodoOrigin: undefined });
     for (const createdBy of ["agent", "system"] as const) {
-      expect(kodoForkThreadFields(createdBy)).toEqual({ kodoLead: null, kodoLoop: undefined });
+      expect(kodoForkThreadFields(createdBy)).toEqual({
+        kodoLead: null,
+        kodoLoop: undefined,
+        kodoOrigin: undefined,
+      });
     }
   });
 });

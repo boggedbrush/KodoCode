@@ -25,6 +25,7 @@ import * as ServerSettings from "../../../serverSettings.ts";
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import * as DateTime from "effect/DateTime";
 import { kodoLaunchStart } from "../../kodoLaunchStart.ts"; // KODO: delegation-normalize
+import { kodoWithoutOrchestratorProject } from "../../../kodo/swarm/swarmTarget.ts"; // KODO: swarm-guard
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveRuntimeMode } from "../../delegatedTaskModes.ts";
@@ -294,16 +295,26 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
     Effect.gen(function* () {
       const projects = yield* access;
       // Identities are resolved: linked environments find this side's project by repository.
-      return yield* projects
+      const page = yield* projects
         .listPage({ cursor: input.cursor ?? 0, limit: input.limit ?? 20 })
         .pipe(Effect.mapError(unavailable));
+      // KODO: swarm-guard - the Orchestrator's scratch project is on no other agent's list
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      return {
+        ...page,
+        projects: kodoWithoutOrchestratorProject(scope.thread?.threadId, page.projects),
+      };
     }),
   ),
   t3_project_read: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const projects = yield* access;
       const result = yield* projects.getById(input.projectId).pipe(Effect.mapError(unavailable));
-      if (Option.isNone(result))
+      const scope = yield* McpInvocationContext.McpInvocationContext; // KODO: swarm-guard
+      if (
+        Option.isNone(result) ||
+        kodoWithoutOrchestratorProject(scope.thread?.threadId, [result.value]).length === 0
+      )
         return yield* new OrchestratorMcpFailure({
           code: "invalid_request",
           message: "The project was not found.",

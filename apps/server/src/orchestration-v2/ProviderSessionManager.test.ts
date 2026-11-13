@@ -5,6 +5,7 @@ import { assert, it } from "@effect/vitest";
 import { AgentScope } from "@t3tools/shared/AgentScope";
 import {
   EnvironmentId,
+  KODO_ORCHESTRATOR_THREAD_ID, // KODO: swarm-guard
   type ModelSelection,
   type OrchestrationV2AppThread,
   type OrchestrationV2DomainEvent,
@@ -2088,11 +2089,15 @@ it.effect(
 it.effect.each([
   { relationshipToParent: null, subagent: false, kodoSwarm: false },
   { relationshipToParent: "subagent", subagent: true, kodoSwarm: false },
-  // KODO: swarm-guard - the Orchestrator's credential is marked, and reaches orchestration alone
+  // KODO: swarm-guard - the Orchestrator's credential is marked by its id, and reaches orchestration alone
   { relationshipToParent: null, subagent: false, kodoSwarm: true },
+  // ...and by nothing else: a thread that merely says it leads as the Orchestrator does is not marked
+  { relationshipToParent: null, subagent: false, kodoSwarm: false, claimsSwarm: true },
+  // ...and it fails closed: with its thread unreadable it is still marked, since the id alone says what it is
+  { relationshipToParent: null, subagent: false, kodoSwarm: true, unreadable: true },
 ] as const)(
   "ProviderSessionManagerV2 marks MCP credentials of delegated children ($relationshipToParent, Orchestrator $kodoSwarm)",
-  ({ relationshipToParent, subagent, kodoSwarm }) =>
+  ({ relationshipToParent, subagent, kodoSwarm, ...rest }) =>
     Effect.gen(function* () {
       const state = yield* Ref.make(emptyState);
       const mcpConfigs = yield* Ref.make<
@@ -2104,7 +2109,9 @@ it.effect.each([
         const manager = yield* ProviderSessionManager.ProviderSessionManagerV2;
         const registry = yield* McpSessionRegistry.McpSessionRegistry;
         const now = yield* DateTime.now;
-        const threadId = ThreadId.make("thread-provider-session-manager-mcp-lineage");
+        const threadId = kodoSwarm
+          ? KODO_ORCHESTRATOR_THREAD_ID // KODO: swarm-guard
+          : ThreadId.make("thread-provider-session-manager-mcp-lineage");
         const providerSessionId = yield* idAllocator.allocate.providerSession({
           providerInstanceId: modelSelection.instanceId,
           threadId,
@@ -2112,19 +2119,24 @@ it.effect.each([
         const created = yield* makeThreadCreatedEvent({ idAllocator, threadId, now });
         const parentThreadId = ThreadId.make("thread-provider-session-manager-mcp-parent");
         yield* eventSink.write({
-          events: [
-            {
-              ...created,
-              payload: {
-                ...created.payload,
-                ...(kodoSwarm ? { kodoLead: { kind: "swarm" as const } } : {}),
-                lineage:
-                  relationshipToParent === null
-                    ? created.payload.lineage
-                    : { parentThreadId, relationshipToParent, rootThreadId: parentThreadId },
-              },
-            },
-          ],
+          events:
+            "unreadable" in rest
+              ? []
+              : [
+                  {
+                    ...created,
+                    payload: {
+                      ...created.payload,
+                      ...(kodoSwarm || "claimsSwarm" in rest
+                        ? { kodoLead: { kind: "swarm" as const } }
+                        : {}),
+                      lineage:
+                        relationshipToParent === null
+                          ? created.payload.lineage
+                          : { parentThreadId, relationshipToParent, rootThreadId: parentThreadId },
+                    },
+                  },
+                ],
         });
         yield* manager.open({ threadId, providerSessionId, modelSelection, runtimePolicy });
 
@@ -2138,7 +2150,7 @@ it.effect.each([
         assert.equal(resolved?.thread.kodoSwarm === true, kodoSwarm);
         assert.equal(resolved?.capabilities.has("worktree"), !kodoSwarm);
         assert.isTrue(resolved?.capabilities.has("orchestration"));
-        yield* manager.close(providerSessionId);
+        if (!("unreadable" in rest)) yield* manager.close(providerSessionId);
       });
 
       yield* effect.pipe(Effect.provide(layerTest({ state, idleTimeoutMs: 1_000, mcpConfigs })));

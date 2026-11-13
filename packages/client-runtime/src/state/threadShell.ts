@@ -17,6 +17,7 @@ import { Atom } from "effect/reactivity";
 import type { EnvironmentThreadShell, PendingSubagentRequest } from "./models.ts";
 import { presentThreadShell, threadRuntimeIsActive } from "./models.ts";
 import { hiddenThreadKeys, NO_HIDDEN_THREADS } from "./threadTagFilter.ts";
+import { isKodoOrchestratorWorkerLineage } from "@t3tools/shared/kodoOrchestrator"; // KODO: orchestrator-hidden
 import { withKodoOrchestratorHidden } from "./kodoOrchestratorVisibility.ts"; // KODO: orchestrator-hidden
 import { type EnvironmentCatalogState, enabledEnvironmentIds } from "./connections.ts";
 import {
@@ -67,7 +68,10 @@ export function isShownUnderParent(
   lineage: OrchestrationV2ThreadShell["lineage"],
   delegatedUnderParent: ReadonlySet<string>,
 ): boolean {
-  return !isListedThreadLineage(lineage) || delegatedUnderParent.has(threadKey(ref));
+  return (
+    (!isListedThreadLineage(lineage) && !isKodoOrchestratorWorkerLineage(lineage)) || // KODO: orchestrator-hidden - the Orchestrator's workers are listed
+    delegatedUnderParent.has(threadKey(ref))
+  );
 }
 
 /** Provider-native

@@ -22,6 +22,24 @@ import { priceWorker } from "./delegationUsage.ts";
 
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted"]);
 
+/** Finished workers remembered, so usage that arrives after their last task is picked up. */
+const MAX_REMEMBERED_WORKERS = 2048;
+
+/**
+ * A worker already recorded whose provider turn changed after its task finished (a provider's final
+ * token report can land later). Only a thread seen finishing is asked about, so no other thread's
+ * turn events cost a read.
+ */
+export const lateUsageWorkerOf = (
+  event: OrchestrationV2DomainEvent,
+  finished: ReadonlySet<ThreadId>,
+): ThreadId | undefined =>
+  event.type === "provider-turn.updated" &&
+  finished.has(event.threadId) &&
+  (event.payload.turnTokenUsage !== undefined || event.payload.tokenUsage !== undefined)
+    ? event.threadId
+    : undefined;
+
 /** The worker thread a finished delegated task points at, or undefined for any other event. */
 export const finishedWorkerOf = (event: OrchestrationV2DomainEvent): ThreadId | undefined =>
   event.type === "subagent.updated" &&
@@ -45,8 +63,8 @@ export const makeDelegationLedgerLook = (deps: {
       worker?.lineage.relationshipToParent === "subagent" ? worker.lineage.parentThreadId : null;
     if (worker === null || leadId === null) return;
     const lead = yield* orchestrator.getThreadShell(leadId);
-    // Only a person's sub-agents lead is recorded; the Orchestrator's work is its own threads.
-    if (lead?.kodoLead?.kind !== "sub-agents") return;
+    // A person's sub-agents lead and the Orchestrator both record their workers, as sub-agent workers.
+    if (lead?.kodoLead == null) return;
     const { subagents } = yield* orchestrator.getThreadRecords(leadId, ["subagents"]);
     const tasks = subagents.filter(
       (task) => task.origin === "app_owned" && task.childThreadId === workerThreadId,
@@ -67,7 +85,8 @@ export const makeDelegationLedgerLook = (deps: {
       workerLedgerRow({
         worker: priced,
         leadThreadId: leadId,
-        projectId: lead.projectId,
+        // The project the work ran in: the lead's own, or the one the Orchestrator started it in.
+        projectId: worker.projectId,
         endedAt: DateTime.formatIso(finished.completedAt ?? finished.updatedAt),
         tasks: tasks.length,
         stopReason: finished.status,
@@ -97,9 +116,15 @@ export const layer = Layer.effectDiscard(
         ),
       ),
     );
+    const finished = new Set<ThreadId>();
     yield* forkParked(
       Stream.runForEach(orchestrator.streamDomainEvents, (event) => {
-        const worker = finishedWorkerOf(event);
+        const done = finishedWorkerOf(event);
+        if (done !== undefined) {
+          if (finished.size >= MAX_REMEMBERED_WORKERS) finished.clear();
+          finished.add(done);
+        }
+        const worker = done ?? lateUsageWorkerOf(event, finished);
         return worker === undefined ? Effect.void : guarded(worker).pipe(Effect.forkScoped);
       }).pipe(
         Effect.catchCause((cause) =>

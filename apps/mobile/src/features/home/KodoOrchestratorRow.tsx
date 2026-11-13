@@ -1,22 +1,25 @@
 import {
   AuthOrchestrationOperateScope,
-  KODO_ORCHESTRATOR_THREAD_ID,
   type EnvironmentId,
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   KODO_ORCHESTRATOR_STATE_LABEL,
   kodoOrchestratorState,
+  kodoOrchestratorWorkerActivity,
+  latestKodoOrchestratorThreadId,
   type KodoOrchestratorState,
 } from "@t3tools/shared/kodoOrchestrator";
 import { useAtomValue } from "@effect/atom-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import * as Dialog from "../../components/ui/Dialog";
 import { useQuietThreadShell } from "../../state/entities";
+import { environmentThreadShells } from "../../state/threads";
 import { serverEnvironment } from "../../state/server";
 import { readEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -49,11 +52,32 @@ function EnvironmentOrchestratorRow(props: {
   const enabled = useAtomValue(
     serverEnvironment.settingsValueAtom(environmentId),
   )?.kodoOrchestratorEnabled;
-  const shell = useQuietThreadShell(scopeThreadRef(environmentId, KODO_ORCHESTRATOR_THREAD_ID));
+  // The conversation is the newest of its series that this client holds; a reset starts the next.
+  const refs = useAtomValue(environmentThreadShells.threadRefsAtom);
+  const threadId = useMemo(
+    () =>
+      latestKodoOrchestratorThreadId(
+        refs.filter((ref) => ref.environmentId === environmentId).map((ref) => ref.threadId),
+      ) as ThreadId | undefined,
+    [environmentId, refs],
+  );
+  const shell = useQuietThreadShell(
+    threadId === undefined ? null : scopeThreadRef(environmentId, threadId),
+  );
+  // Its workers are listed in their own projects; a live or asking one is the Orchestrator's work too.
+  const shells = useAtomValue(environmentThreadShells.quietThreadShellsAtom);
+  const workers = useMemo(
+    () =>
+      kodoOrchestratorWorkerActivity(
+        shells.filter((candidate) => candidate.environmentId === environmentId),
+        threadId,
+      ),
+    [environmentId, shells, threadId],
+  );
   const ensure = useAtomCommand(serverEnvironment.ensureKodoOrchestrator, { reportFailure: false });
   const [opening, setOpening] = useState(false);
   if (enabled === false) return null;
-  const state = kodoOrchestratorState(shell);
+  const state = kodoOrchestratorState(shell, workers);
   const label = KODO_ORCHESTRATOR_STATE_LABEL[state];
 
   const open = async () => {
@@ -72,7 +96,12 @@ function EnvironmentOrchestratorRow(props: {
       props.onOpen(environmentId, result.value.threadId);
       return;
     }
-    Dialog.alert("The Orchestrator could not be opened", "Try again in a moment.");
+    // The server's own reason: a missing default model, a provider that cannot receive the tools, a setting that is off.
+    const error = result._tag === "Failure" ? squashAtomCommandFailure(result) : undefined;
+    Dialog.alert(
+      "The Orchestrator could not be opened",
+      error instanceof Error && error.message.length > 0 ? error.message : "Try again in a moment.",
+    );
   };
 
   return (

@@ -12,7 +12,7 @@ import { formatKodoTokens, formatKodoUsd } from "@t3tools/shared/kodoLoopView";
 
 import { kodoInteractionModeOption } from "./interactionModes.logic";
 
-/** The thread is a worker of a thread that leads sub-agents. */
+/** The thread is a worker of a thread that leads: a person's sub-agents lead, or the Orchestrator. */
 export const kodoWorkerOf = (input: {
   readonly relationshipToParent: string | null | undefined;
   readonly parent: {
@@ -20,7 +20,7 @@ export const kodoWorkerOf = (input: {
     readonly kodoLead?: KodoLead | null | undefined;
   } | null;
 }): { readonly leadTitle: string } | null =>
-  input.relationshipToParent === "subagent" && input.parent?.kodoLead?.kind === "sub-agents"
+  input.relationshipToParent === "subagent" && input.parent?.kodoLead != null
     ? { leadTitle: input.parent.title }
     : null;
 

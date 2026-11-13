@@ -1,3 +1,4 @@
+import { TriangleAlertIcon } from "lucide-react";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../components/ui/tooltip";
 import {
@@ -26,19 +27,36 @@ export function KodoOrchestratorRow() {
   const orchestrator = useKodoOrchestrator();
   if (!orchestrator.visible) return null;
   const label = KODO_ORCHESTRATOR_STATE_LABEL[orchestrator.state];
+  const button = (
+    <SidebarMenuButton
+      isActive={orchestrator.active}
+      disabled={orchestrator.opening}
+      aria-label={`Orchestrator, ${label}`}
+      onClick={orchestrator.open}
+    >
+      <KodoOrchestratorDot state={orchestrator.state} />
+      <span className="min-w-0 flex-1 truncate">Orchestrator</span>
+      {orchestrator.unavailable === null ? null : (
+        <TriangleAlertIcon
+          aria-hidden
+          data-kodo-orchestrator-unavailable
+          className="size-3.5 shrink-0 text-warning"
+        />
+      )}
+      <span className="sr-only">{label}</span>
+    </SidebarMenuButton>
+  );
   return (
     <SidebarMenu data-kodo-orchestrator-row>
       <SidebarMenuItem>
-        <SidebarMenuButton
-          isActive={orchestrator.active}
-          disabled={orchestrator.opening}
-          aria-label={`Orchestrator, ${label}`}
-          onClick={orchestrator.open}
-        >
-          <KodoOrchestratorDot state={orchestrator.state} />
-          <span className="min-w-0 flex-1 truncate">Orchestrator</span>
-          <span className="sr-only">{label}</span>
-        </SidebarMenuButton>
+        {orchestrator.unavailable === null ? (
+          button
+        ) : (
+          <Tooltip>
+            <TooltipTrigger render={button} />
+            <TooltipPopup side="right">{orchestrator.unavailable}</TooltipPopup>
+          </Tooltip>
+        )}
       </SidebarMenuItem>
     </SidebarMenu>
   );

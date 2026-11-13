@@ -190,6 +190,8 @@ function makeHarness(options: HarnessOptions = {}) {
       bootstrap: () => Effect.die("unused"),
       update: () => Effect.die("unused"),
       delete: () => Effect.die("unused"),
+      ensureKodoOrchestratorProject: () => Effect.die("unused"), // KODO: swarm-project
+      deleteKodoOrchestratorThread: () => Effect.die("unused"), // KODO: swarm-project
       listPage: () => Effect.die("unused"),
       getById: (id) =>
         Effect.succeed(

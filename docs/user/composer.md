@@ -300,9 +300,10 @@ overrides only the rounds.
   are not included.
 
 Agents can use `t3_loop_start`, `t3_loop_stop` and `t3_loop_status`. Start and stop are
-refused when the calling thread is in Ask, Plan or Review mode; reading status is allowed. A
-thread cannot loop while its own turn is running, so `t3_loop_start` needs another idle thread
-named in `threadId`, and is meant for when you ask for a loop.
+refused when the calling thread is in Ask, Plan or Review mode, and for a thread that leads
+sub-agents; reading status is allowed. A thread cannot loop while its own turn is running, so
+`t3_loop_start` needs another idle thread named in `threadId`, and is meant for when you ask for a
+loop.
 
 ## Sub-agents
 
@@ -326,7 +327,8 @@ inline in the lead's conversation, and you can open one to see what it did or to
   its workers are read-only too. A worker never has a broader runtime mode than its thread.
   Workers cannot start workers, threads or loops, fork themselves or message other threads. A
   lead hands work over only with `delegate_task`, in its own environment: it cannot create or
-  launch other threads. Where the provider allows it (Claude and OpenCode), the provider's own
+  launch other threads, and what it starts or messages through the other tools (a scheduled task, a
+  message, a queued run) is held to the read-only floor, never to the Code mode it displays. Where the provider allows it (Claude and OpenCode), the provider's own
   subagent tool is turned off for a lead, because it would let the lead pick a model; on other
   providers the lead is only instructed not to use it.
 - **Limits.** At most three workers run at once for a lead (change it in Settings, up to six),
@@ -351,10 +353,10 @@ inline in the lead's conversation, and you can open one to see what it did or to
   composer while workers run, ends them and leaves the lead's turn going.
 
 A loop is cheaper for multi-round work (implement, review, fix until clean), because it runs
-those rounds without lead turns. The lead is told to prefer starting a loop on another idle
-thread for that kind of work. Agents can read and change the switch of another idle thread with
-`t3_sub_agents_status` and `t3_sub_agents_set`; they cannot change their own thread's, and a
-caller in Ask, Plan or Review cannot change any.
+those rounds without lead turns. You can run `/loop` on a thread that is not leading; a lead does
+not start loops itself, and sends fixes back to a worker. Agents can read and change the switch of
+another idle thread with `t3_sub_agents_status` and `t3_sub_agents_set`; they cannot change their
+own thread's, and a caller in Ask, Plan or Review, or a lead, cannot change any.
 
 ## Custom models
 

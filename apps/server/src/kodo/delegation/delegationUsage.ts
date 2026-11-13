@@ -143,7 +143,10 @@ export const summarizeDelegation = Effect.fn("KodoDelegationUsage.summarize")(fu
   readonly lead: DelegationSide;
   readonly workers: ReadonlyArray<DelegationSide>;
   readonly price: PriceTokens;
+  /** Older workers the lead has that were not read: counted, and every figure says it is a floor. */
+  readonly omittedWorkers?: number;
 }) {
+  const omitted = input.omittedWorkers ?? 0;
   const leadUsage = (yield* priced(input.lead, null, input.price))?.usage;
   const pricedWorkers = yield* Effect.forEach(input.workers, (worker) =>
     priceWorker(worker, input.lead.model, input.price),
@@ -152,13 +155,18 @@ export const summarizeDelegation = Effect.fn("KodoDelegationUsage.summarize")(fu
     worker.usage === undefined ? [] : [worker.usage],
   );
   const lead = leadUsage === undefined ? undefined : spendOf([leadUsage]);
-  const workers = spendOf(reported);
-  const savings = delegationSavings(pricedWorkers, input.lead.model);
+  const read = spendOf(reported);
+  const workers = read !== undefined && omitted > 0 ? { ...read, complete: false } : read;
+  const counted = delegationSavings(pricedWorkers, input.lead.model);
+  const savings =
+    counted !== undefined && omitted > 0
+      ? { ...counted, unpricedWorkers: counted.unpricedWorkers + omitted }
+      : counted;
   return {
     threadId: input.lead.threadId,
     ...(lead === undefined ? {} : { lead }),
     ...(workers === undefined ? {} : { workers }),
-    workerCount: input.workers.length,
+    workerCount: input.workers.length + omitted,
     unreportedWorkers: pricedWorkers.length - reported.length,
     ...(savings === undefined ? {} : { savings }),
   } satisfies KodoDelegationUsage;

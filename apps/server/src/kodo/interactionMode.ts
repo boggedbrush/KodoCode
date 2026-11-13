@@ -187,6 +187,16 @@ export const kodoPolicyMode = (
     ? normalizeKodoInteractionMode(mode)
     : kodoMoreRestrictiveMode(mode, LEAD_POLICY_FLOOR[lead.kind]);
 
+/**
+ * The mode an agent caller's limits are built from: its stored mode as it is, or, for a lead, the
+ * lead's read-only floor, so that nothing it starts or messages through the T3 tools goes above it.
+ * Only `delegate_task` reads a lead's displayed mode, to give a worker its own.
+ */
+export const kodoLimitMode = <Mode>(
+  mode: Mode,
+  lead: Pick<KodoLead, "kind"> | null | undefined,
+): Mode | KodoInteractionMode => (lead == null ? mode : kodoPolicyMode(mode, lead));
+
 export interface KodoInteractionModeResolution {
   /** The normalized Kodo mode. */
   readonly mode: KodoInteractionMode;

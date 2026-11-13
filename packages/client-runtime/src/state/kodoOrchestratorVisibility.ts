@@ -1,5 +1,5 @@
 // The Orchestrator has its own pinned row, so its thread and its project stay out of every ordinary
-// list. Both have fixed ids, which says what they are from a ref alone: no shell has to be read, so
+// list (the workers it starts are listed in their own projects). Both have fixed ids, which says what they are from a ref alone: no shell has to be read, so
 // streaming ticks cost nothing here and the keys only change when a thread or project is added.
 import {
   isKodoOrchestratorProjectId,

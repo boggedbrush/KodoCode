@@ -2990,7 +2990,9 @@ export default function ChatView(props: ChatViewProps) {
     scheduleComposerFocus,
     kodoHoldModelPick: kodoModeHasDefault(
       settings.modeModelSelections,
-      kodoSubAgents.status.toggle.checked ? "orchestrator" : interactionMode, // KODO: sub-agents
+      kodoSubAgents.status.toggle.checked || kodoThreadIsOrchestrator
+        ? "orchestrator"
+        : interactionMode, // KODO: sub-agents
     ), // KODO: mode-models-send
   });
   const { onResume, isResuming } = useComposerResume({
@@ -3730,7 +3732,10 @@ export default function ChatView(props: ChatViewProps) {
                               <KodoInteractionModeStatusProvider
                                 appliesNextTurn={modeAppliesNextTurn}
                                 locked={kodoLoopRunning || kodoThreadIsOrchestrator} // KODO: orchestrator-lock
-                                subAgents={kodoSubAgents.status} // KODO: sub-agents
+                                orchestrator={kodoThreadIsOrchestrator} // KODO: orchestrator-lock
+                                subAgents={
+                                  kodoThreadIsOrchestrator ? undefined : kodoSubAgents.status
+                                } // KODO: sub-agents
                               >
                                 <ChatComposer
                                   canOperateThread={canOperateThread}

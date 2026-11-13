@@ -606,7 +606,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onRemoveEditingQueuedAttachment,
   } = props;
   // KODO: chat-mode-state - a mode picked mid-turn must not steer into the turn that predates it
-  const { appliesNextTurn: modeAppliesNextTurn } = useKodoInteractionModeStatus();
+  const kodoModeStatus = useKodoInteractionModeStatus();
+  const { appliesNextTurn: modeAppliesNextTurn } = kodoModeStatus;
   const steerBlocked = isCompacting || modeAppliesNextTurn;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const composerDraftTargetKey = composerTargetKey(composerDraftTarget);
@@ -881,7 +882,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   ]);
 
   // KODO: mode-models-composer - the model the thread's mode runs on, shown while no pick overrides it.
-  const kodoLeads = useKodoSubAgentsStatus()?.toggle.checked === true; // KODO: sub-agents - a lead's turns read the Orchestrator slot
+  // KODO: sub-agents - a lead's turns, and the Orchestrator's, read the Orchestrator slot
+  const kodoLeads =
+    useKodoSubAgentsStatus()?.toggle.checked === true || kodoModeStatus.orchestrator;
   const kodoComposerModel = resolveKodoComposerModel({
     mode: kodoLeads ? "orchestrator" : interactionMode,
     thread: activeThreadModelSelection

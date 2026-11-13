@@ -23,6 +23,7 @@ import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
 import * as ScheduledTasks from "../../../scheduledTasks/ScheduledTaskService.ts";
 import { queuedRunsInDeliveryOrder } from "../../../orchestration-v2/QueuedRunOrder.ts";
 import { kodoRefuseWorkerMessaging } from "../../kodoLaunchStart.ts"; // KODO: delegation-normalize
+import { kodoWithoutOrchestratorThread } from "../../../kodo/swarm/swarmTarget.ts"; // KODO: swarm-guard
 import { ThreadToolkit } from "./tools.ts";
 
 function queueEntry(
@@ -133,7 +134,12 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
         .searchThreads({ ...input, projectId: input.projectId ?? caller?.projectId })
         .pipe(Effect.mapError(unavailable));
       return {
-        matches: matches.map((match) => ({
+        // KODO: swarm-guard - the Orchestrator's conversation is not in other agents' search results
+        matches: kodoWithoutOrchestratorThread(
+          scope.thread?.threadId,
+          matches,
+          (match) => match.threadId,
+        ).map((match) => ({
           ...match,
           link: McpInvocationContext.threadLinkFor(scope, match.threadId, match.title),
         })),

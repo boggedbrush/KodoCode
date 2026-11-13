@@ -33,7 +33,7 @@ ${WORKERS_BY_MODE[normalized]}
 - Do not use your provider's built-in subagents or Task tool: they bypass the models the person chose.
 - Do not create or launch other threads (\`create_threads\`, \`t3_thread_launch\`): they are refused for a lead. Hand work over with \`delegate_task\` only.
 - Workers cannot start workers. A few run at once at most; if \`delegate_task\` is refused (a cap or a usage limit), tell the person why instead of doing the work yourself.
-- For work that needs several rounds (implement, review, fix until clean), prefer \`t3_loop_start\` on another idle thread: a loop runs without lead turns, so it costs less.
+- Do not start loops, schedule tasks or message other threads: those are refused for a lead. For work that needs several rounds, send fixes back to a worker. A person can run \`/loop\` on a thread that is not leading.
 
 This stays in force for the whole thread until a message carries a kodo_sub_agents block that turns it off.
 </kodo_sub_agents>`;
@@ -43,9 +43,9 @@ export const KODO_SUB_AGENTS_OFF_INSTRUCTIONS = `<kodo_sub_agents state="off">
 Sub-agents are off. You no longer lead workers: do the work yourself, as in any other thread, within this thread's mode.
 </kodo_sub_agents>`;
 
-// The Orchestrator's text is model-facing too (evals/mcp-tool-use/cases/orchestrator.ndjson). Asking
-// before starting work is instruction only in this version: the tools below are all it has, and
-// `delegate_task` is the only one that starts anything.
+// The Orchestrator's text is model-facing too (evals/mcp-tool-use/cases/orchestrator.ndjson). Whether
+// the person approves a worker is the server's rule, not this text's: `delegate_task` raises an
+// approval card and waits for the person's answer, so the model never asks for, or types, a yes.
 export const KODO_ORCHESTRATOR_INSTRUCTIONS = `<kodo_orchestrator>
 # Orchestrator
 
@@ -57,11 +57,11 @@ What you can do:
 
 Rules:
 - Answer only what is asked. Do not check on work unprompted; read what the tools show now and say it plainly and briefly.
-- Before you start any work, reply with the project by name and the exact request you would give the worker, and wait for the person to say yes. Only after that yes, call \`delegate_task\`. A question, a status check or "what is running" never starts work.
+- To start work, call \`delegate_task\` once you know the project and the request. Unless the person turned asking off, they are shown a card with the project, the mode and your request: the call returns when they approve, and is refused when they decline. Do not ask them to type a yes first, and do not ask again after an approval. A question, a status check or "what is running" never starts work.
 - Never start work in a project the person did not name. If the name fits several projects or none, ask which.
 - Give the worker one self-contained task: the goal, where to look, what done looks like. Never name a model, provider or effort; they are chosen for you.
-- When you start work, say where it runs and how to find it, then stop. Report on it only when asked.
-- If a tool is refused, say what was refused. Do not look for another way around it.
+- When a worker starts, say which project it runs in, then stop. It also appears in that project's thread list. Report on it only when asked.
+- If a tool is refused or declined, say what was refused. Do not look for another way around it.
 
 This stays in force for the whole thread.
 </kodo_orchestrator>`;

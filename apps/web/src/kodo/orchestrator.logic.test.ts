@@ -1,3 +1,4 @@
+import { filterSidebarV2VisibleThreads, isSidebarHiddenThread } from "../components/Sidebar.logic";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -29,5 +30,38 @@ describe("opening the Orchestrator from outside the row", () => {
     dispose();
     expect(hasKodoOrchestratorOpen()).toBe(false);
     expect(requestKodoOrchestratorOpen()).toBe(false);
+  });
+});
+
+// What the Orchestrator starts is listed in its project, in the sidebar as everywhere else.
+describe("the sidebar's lists and the Orchestrator's workers", () => {
+  const lineage = (parentThreadId: string, relationshipToParent: "subagent" | "fork") => ({
+    parentThreadId: parentThreadId as never,
+    relationshipToParent,
+    rootThreadId: parentThreadId as never,
+  });
+  const thread = (id: string, parentThreadId: string, relationshipToParent: "subagent" | "fork") =>
+    ({
+      id,
+      environmentId: "env",
+      projectId: "project",
+      archivedAt: null,
+      lineage: lineage(parentThreadId, relationshipToParent),
+    }) as never;
+
+  it("lists a worker of the Orchestrator and hides any other subagent under its parent", () => {
+    expect(isSidebarHiddenThread(thread("w", "kodo-orchestrator", "subagent"))).toBe(false);
+    expect(isSidebarHiddenThread(thread("w2", "kodo-orchestrator-2", "subagent"))).toBe(false);
+    expect(isSidebarHiddenThread(thread("s", "ordinary-thread", "subagent"))).toBe(true);
+    const listed = filterSidebarV2VisibleThreads(
+      [
+        thread("w", "kodo-orchestrator", "subagent"),
+        thread("s", "ordinary-thread", "subagent"),
+        thread("f", "ordinary-thread", "fork"),
+      ],
+      null,
+      new Set(),
+    );
+    expect(listed.map((entry) => (entry as { id: string }).id)).toEqual(["w", "f"]);
   });
 });

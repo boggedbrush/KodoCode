@@ -145,6 +145,7 @@ export interface EnvironmentThreadShell {
   readonly interactionMode: OrchestrationV2ThreadShell["interactionMode"];
   readonly kodoModeModel?: OrchestrationV2ThreadShell["kodoModeModel"]; // KODO: mode-models-state
   readonly kodoLead?: OrchestrationV2ThreadShell["kodoLead"]; // KODO: delegation-state
+  readonly kodoOrigin?: OrchestrationV2ThreadShell["kodoOrigin"]; // KODO: swarm-delegate
   readonly branch: string | null;
   readonly worktreePath: string | null;
   readonly lineage: OrchestrationV2ThreadShell["lineage"];
@@ -296,6 +297,7 @@ export function presentThreadShell(
     ...(thread.kodoModeModel === undefined ? {} : { kodoModeModel: thread.kodoModeModel }),
     // KODO: delegation-state
     ...(thread.kodoLead == null ? {} : { kodoLead: thread.kodoLead }),
+    ...(thread.kodoOrigin === undefined ? {} : { kodoOrigin: thread.kodoOrigin }), // KODO: swarm-delegate
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     pullRequests: threadPullRequestsOf(thread),

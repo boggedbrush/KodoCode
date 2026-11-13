@@ -3,6 +3,7 @@
 import { assert, it } from "@effect/vitest";
 import {
   CommandId,
+  EventId,
   MessageId,
   type ModelSelection,
   type OrchestrationV2ProviderCapabilities,
@@ -14,12 +15,14 @@ import {
   ProviderInstanceId,
   ProviderThreadId,
   ProviderTurnId,
+  RuntimeRequestId, // KODO: swarm-delegate
   ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Queue from "effect/Queue";
+import * as Result from "effect/Result"; // KODO: swarm-delegate
 import * as Ref from "effect/Ref";
 import type * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -27,6 +30,8 @@ import * as Stream from "effect/Stream";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
 import * as EffectWorker from "./EffectWorker.ts";
 import * as Orchestrator from "./Orchestrator.ts";
+import * as EventSink from "./EventSink.ts"; // KODO: swarm-delegate
+import { planProjectCommand } from "./ProjectCommands.ts"; // KODO: swarm-delegate
 import * as ProviderAdapterRegistry from "./ProviderAdapterRegistry.ts";
 import { DispatchModeLimit } from "./DispatchModeLimit.ts"; // KODO: delegation-command
 import * as ThreadManagementService from "./ThreadManagementService.ts"; // KODO: delegation-command
@@ -70,6 +75,8 @@ interface AdapterState {
   readonly started: ReadonlyArray<StartedTurn>;
   readonly steered: number;
   readonly closed: number;
+  /** Answers handed to the provider (KODO: swarm-delegate: the Orchestrator's own question never is). */
+  readonly responded: number;
   readonly finishActive: Effect.Effect<void> | null;
 }
 
@@ -214,7 +221,8 @@ const makeAdapter = (
           steerTurn: () =>
             Ref.update(state, (current) => ({ ...current, steered: current.steered + 1 })),
           interruptTurn: () => Effect.void,
-          respondToRuntimeRequest: () => Effect.void,
+          respondToRuntimeRequest: () =>
+            Ref.update(state, (current) => ({ ...current, responded: current.responded + 1 })),
           readThreadSnapshot: () => Effect.die("unused readThreadSnapshot"),
           rollbackThread: () => Effect.die("unused rollbackThread"),
           forkThread: () => Effect.die("unused forkThread"),
@@ -228,6 +236,7 @@ const freshState = Ref.make<AdapterState>({
   started: [],
   steered: 0,
   closed: 0,
+  responded: 0,
   finishActive: null,
 });
 
@@ -236,6 +245,8 @@ interface Harness {
   readonly orchestrator: Orchestrator.OrchestratorV2["Service"];
   readonly worker: EffectWorker.OrchestrationEffectWorkerV2["Service"];
   readonly cwd: string;
+  /** Makes a project the Orchestrator may start work in (KODO: swarm-delegate). */
+  readonly seedProject: (projectId: ProjectId) => Effect.Effect<void>;
   /** What the provider catalogue reports per instance; change it mid-test to take a provider away. */
   readonly catalogue: Ref.Ref<Readonly<Record<string, Partial<ServerProvider>>>>;
 }
@@ -249,12 +260,13 @@ const withHarness = <A, E>(
   modeModelSelections: Partial<
     Record<"ask" | "plan" | "code" | "review" | "orchestrator", ModelSelection>
   >,
-  body: (
-    input: Harness,
-  ) => Effect.Effect<
+  body: (input: Harness) => Effect.Effect<
     A,
     E,
-    Orchestrator.OrchestratorV2 | EffectWorker.OrchestrationEffectWorkerV2 | Scope.Scope
+    | Orchestrator.OrchestratorV2
+    | EffectWorker.OrchestrationEffectWorkerV2
+    | EventSink.EventSinkV2 // KODO: swarm-delegate
+    | Scope.Scope
   >,
   options: {
     readonly second?: boolean;
@@ -285,7 +297,34 @@ const withHarness = <A, E>(
       return yield* Effect.gen(function* () {
         const orchestrator = yield* Orchestrator.OrchestratorV2;
         const worker = yield* EffectWorker.OrchestrationEffectWorkerV2;
-        return yield* body({ state, orchestrator, worker, cwd, catalogue });
+        const eventSink = yield* EventSink.EventSinkV2;
+        // The project is made as the server makes one, so the orchestrator's own check finds it.
+        const seedProject = (projectId: ProjectId) =>
+          Effect.gen(function* () {
+            const now = yield* DateTime.now;
+            const commandId = CommandId.make(`command:seed:${projectId}`);
+            const planned = planProjectCommand({
+              command: {
+                type: "project.create",
+                commandId,
+                projectId,
+                title: String(projectId),
+                workspaceRoot: `/work/${projectId}`,
+              },
+              state: { project: undefined, workspaceOwner: undefined },
+              eventId: EventId.make(`event:seed:${projectId}`),
+              now,
+            });
+            if (Result.isFailure(planned)) return yield* Effect.die(planned.failure);
+            yield* eventSink.commitProjectCommand({
+              commandId,
+              projectId,
+              commandType: "project.create",
+              acceptedAt: now,
+              event: planned.success,
+            });
+          }).pipe(Effect.orDie);
+        return yield* body({ state, orchestrator, worker, cwd, seedProject, catalogue });
       }).pipe(
         Effect.provide(
           ProviderReplayHarness.layerWithRegistry(
@@ -985,15 +1024,19 @@ it.live("the Orchestrator cannot be changed, deleted, forked or made writable", 
 const delegateFromActiveRun = Effect.fnUntraced(function* (
   input: TurnContext,
   targetProjectId: ProjectId,
+  label = "delegate",
 ) {
-  yield* startTurn(input, "parent", selection("base-model"));
+  // One turn is enough: a second call (another label) uses the run the first started.
+  if ((yield* input.orchestrator.getThreadProjection(input.threadId)).runs.length === 0) {
+    yield* startTurn(input, "parent", selection("base-model"));
+  }
   const projection = yield* input.orchestrator.getThreadProjection(input.threadId);
   const run = projection.runs[0]!;
   yield* input.orchestrator.dispatch({
     type: "delegated_task.request",
     createdBy: "agent",
     creationSource: "mcp",
-    commandId: CommandId.make(`command:${input.name}:delegate`),
+    commandId: CommandId.make(`command:${input.name}:${label}`),
     parentThreadId: input.threadId,
     parentRunId: run.id,
     parentNodeId: run.rootNodeId!,
@@ -1004,18 +1047,200 @@ const delegateFromActiveRun = Effect.fnUntraced(function* (
     kodoTargetProjectId: targetProjectId,
   });
   const task = (yield* input.orchestrator.getThreadProjection(input.threadId)).subagents[0]!;
-  return (yield* input.orchestrator.getThreadShell(task.childThreadId!))!.projectId;
+  return (yield* input.orchestrator.getThreadShell(task.childThreadId!))!;
 });
 
-it.live("a task starts in the project it names only when the Orchestrator asks for it", () =>
-  withHarness("kodo-swarm-delegate", {}, ({ state, orchestrator, worker, cwd }) =>
+it.live(
+  "a task starts in the project it names only when the Orchestrator asks for it, and is stamped as its own",
+  () =>
+    withHarness("kodo-swarm-delegate", {}, ({ state, orchestrator, worker, cwd, seedProject }) =>
+      Effect.gen(function* () {
+        const other = ProjectId.make("project:named-by-the-person");
+        yield* seedProject(other);
+        const orchestratorCtx = {
+          state,
+          orchestrator,
+          worker,
+          name: "kodo-swarm-delegate-orchestrator",
+          threadId: ORCHESTRATOR_THREAD,
+        };
+        yield* createOrchestrator(orchestrator, {
+          cwd,
+          createdBy: "system",
+          lead: { kind: "swarm" },
+        });
+        const started = yield* delegateFromActiveRun(orchestratorCtx, other);
+        assert.equal(started.projectId, other);
+        assert.equal(started.kodoOrigin, "orchestrator");
+
+        const plain = ThreadId.make("thread:kodo-swarm-delegate-plain");
+        yield* createThread(orchestrator, {
+          name: "kodo-swarm-delegate-plain",
+          threadId: plain,
+          cwd,
+        });
+        const plainCtx = {
+          state,
+          orchestrator,
+          worker,
+          name: "kodo-swarm-delegate-plain",
+          threadId: plain,
+        };
+        // No other thread starts work in another project, whatever a client sends.
+        const refused = yield* delegateFromActiveRun(plainCtx, other).pipe(Effect.flip);
+        assert.include(String((refused as { cause?: unknown }).cause), "Only the Orchestrator");
+      }),
+    ),
+);
+
+it.live(
+  "the Orchestrator's task is refused in a project that does not exist, is archived, or is its own",
+  () =>
+    withHarness("kodo-swarm-target", {}, ({ state, orchestrator, worker, cwd, seedProject }) =>
+      Effect.gen(function* () {
+        const ctx = {
+          state,
+          orchestrator,
+          worker,
+          name: "kodo-swarm-target",
+          threadId: ORCHESTRATOR_THREAD,
+        };
+        yield* createOrchestrator(orchestrator, {
+          cwd,
+          createdBy: "system",
+          lead: { kind: "swarm" },
+        });
+        yield* seedProject(ORCHESTRATOR_PROJECT);
+        const refusal = (projectId: ProjectId, label: string) =>
+          delegateFromActiveRun(ctx, projectId, label).pipe(
+            Effect.flip,
+            Effect.map((error) => String((error as { cause?: unknown }).cause)),
+          );
+        assert.include(
+          yield* refusal(ProjectId.make("project:nowhere"), "missing"),
+          "does not exist",
+        );
+        assert.include(yield* refusal(ORCHESTRATOR_PROJECT, "own"), "never its own");
+      }),
+    ),
+);
+
+it.live(
+  "the Orchestrator keeps its title: a first message with a seed neither renames it nor asks for a generated one",
+  () =>
+    withHarness("kodo-swarm-title", {}, ({ orchestrator, cwd }) =>
+      Effect.gen(function* () {
+        yield* createOrchestrator(orchestrator, {
+          cwd,
+          createdBy: "system",
+          lead: { kind: "swarm" },
+        });
+        yield* orchestrator.dispatch({
+          type: "message.dispatch",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make("command:kodo-swarm-title:first"),
+          threadId: ORCHESTRATOR_THREAD,
+          messageId: MessageId.make("message:kodo-swarm-title:first"),
+          text: "Fix the build in acme-api",
+          titleSeed: "Fix the build in acme-api",
+          attachments: [],
+          dispatchMode: { type: "defer_start" },
+        });
+        const { thread } = yield* orchestrator.getThreadProjection(ORCHESTRATOR_THREAD);
+        assert.equal(thread.title, "Orchestrator");
+        assert.isNotOk(thread.titleRegeneration);
+      }),
+    ),
+);
+
+// KODO: swarm-delegate - the start question is an approval on the Orchestrator's run, answered only by a person.
+const raiseStartQuestion = Effect.fnUntraced(function* (input: TurnContext, label: string) {
+  yield* startTurn(input, label, selection("base-model"));
+  const run = (yield* input.orchestrator.getThreadProjection(input.threadId)).runs[0]!;
+  const requestId = RuntimeRequestId.make(`kodo-start:command:${label}`);
+  const record = (outcome: "pending" | "cancelled") =>
+    input.orchestrator.dispatch({
+      type: "kodo.start-request.record",
+      commandId: CommandId.make(`command:${label}:record:${outcome}`),
+      threadId: input.threadId,
+      runId: run.id,
+      nodeId: run.rootNodeId!,
+      requestId,
+      outcome,
+      prompt: "Project: acme-api",
+      reason: "Nothing starts until you approve.",
+    });
+  yield* record("pending");
+  const respond = (decision: string, extra: Record<string, unknown> = {}) =>
+    input.orchestrator.dispatch({
+      type: "runtime-request.respond",
+      commandId: CommandId.make(`command:${label}:respond:${decision}`),
+      threadId: input.threadId,
+      requestId,
+      decision,
+      ...extra,
+    } as never);
+  return { requestId, record, respond };
+});
+
+it.live(
+  "the Orchestrator's start question needs the person: approve or decline, and nothing goes to the provider",
+  () =>
+    withHarness("kodo-swarm-confirm", {}, ({ state, orchestrator, worker, cwd }) =>
+      Effect.gen(function* () {
+        const ctx = {
+          state,
+          orchestrator,
+          worker,
+          name: "kodo-swarm-confirm",
+          threadId: ORCHESTRATOR_THREAD,
+        };
+        yield* createOrchestrator(orchestrator, {
+          cwd,
+          createdBy: "system",
+          lead: { kind: "swarm" },
+        });
+        const { requestId, respond } = yield* raiseStartQuestion(ctx, "approve");
+        // It shows as an approval waiting on a person, which is what turns the dot to "needs you".
+        const asked = yield* orchestrator.getThreadShell(ORCHESTRATOR_THREAD);
+        assert.equal(asked?.pendingRuntimeRequest?.id, requestId);
+        assert.equal(asked?.pendingRuntimeRequest?.kind, "permission");
+        // "Always" and "for this session" would outlive the one question: refused, and it stays open.
+        for (const decision of ["acceptForSession", "acceptAlways"]) {
+          const cause = String(
+            ((yield* respond(decision).pipe(Effect.flip)) as { cause?: unknown }).cause,
+          );
+          assert.include(cause, "Approve or decline");
+        }
+        assert.equal(
+          (yield* orchestrator.getThreadShell(ORCHESTRATOR_THREAD))?.pendingRuntimeRequest?.id,
+          requestId,
+        );
+        yield* respond("accept");
+        yield* worker.drain();
+        const answered = (yield* orchestrator.getThreadProjection(
+          ORCHESTRATOR_THREAD,
+        )).runtimeRequests.find((request) => request.id === requestId);
+        assert.equal(answered?.status, "resolved");
+        assert.equal(answered?.decision, "accept");
+        assert.isNull(
+          (yield* orchestrator.getThreadShell(ORCHESTRATOR_THREAD))?.pendingRuntimeRequest,
+        );
+        // It is not the provider's question, so nothing is delivered to it.
+        assert.equal((yield* Ref.get(state)).responded, 0);
+      }),
+    ),
+);
+
+it.live("a declined or withdrawn start question settles, and is answered once", () =>
+  withHarness("kodo-swarm-decline", {}, ({ state, orchestrator, worker, cwd }) =>
     Effect.gen(function* () {
-      const other = ProjectId.make("project:named-by-the-person");
-      const orchestratorCtx = {
+      const ctx = {
         state,
         orchestrator,
         worker,
-        name: "kodo-swarm-delegate-orchestrator",
+        name: "kodo-swarm-decline",
         threadId: ORCHESTRATOR_THREAD,
       };
       yield* createOrchestrator(orchestrator, {
@@ -1023,26 +1248,23 @@ it.live("a task starts in the project it names only when the Orchestrator asks f
         createdBy: "system",
         lead: { kind: "swarm" },
       });
-      assert.equal(yield* delegateFromActiveRun(orchestratorCtx, other), other);
-
-      const plain = ThreadId.make("thread:kodo-swarm-delegate-plain");
-      yield* createThread(orchestrator, {
-        name: "kodo-swarm-delegate-plain",
-        threadId: plain,
-        cwd,
-      });
-      const plainCtx = {
-        state,
-        orchestrator,
-        worker,
-        name: "kodo-swarm-delegate-plain",
-        threadId: plain,
-      };
-      // Any other thread's request for another project is ignored: the task stays in its own.
-      assert.equal(
-        yield* delegateFromActiveRun(plainCtx, other),
-        ProjectId.make("project:kodo-swarm-delegate-plain"),
-      );
+      const declined = yield* raiseStartQuestion(ctx, "decline");
+      yield* declined.respond("decline");
+      yield* worker.drain();
+      const read = (id: RuntimeRequestId) =>
+        orchestrator
+          .getThreadProjection(ORCHESTRATOR_THREAD)
+          .pipe(
+            Effect.map((projection) =>
+              projection.runtimeRequests.find((request) => request.id === id),
+            ),
+          );
+      assert.equal((yield* read(declined.requestId))?.decision, "decline");
+      // Answered once: a second answer, even the opposite, is refused and changes nothing.
+      const again = yield* declined.respond("accept").pipe(Effect.flip);
+      assert.include(String((again as { cause?: unknown }).cause), "resolved");
+      assert.equal((yield* read(declined.requestId))?.decision, "decline");
+      assert.equal((yield* Ref.get(state)).responded, 0);
     }),
   ),
 );

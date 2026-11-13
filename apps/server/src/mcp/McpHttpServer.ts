@@ -65,6 +65,8 @@ import {
   layerService as KodoLoopToolsService,
 } from "./kodoLoopToolkit.ts"; // KODO: loop-mcp-tools
 import { KodoDelegationToolkit, layer as KodoDelegationHandlers } from "./kodoDelegationToolkit.ts"; // KODO: delegation-mcp-tools
+import { isSwarmScope, swarmToolRefusalResult } from "./kodoSwarmGuard.ts"; // KODO: swarm-guard
+import { KODO_ORCHESTRATOR_TOOLS } from "../kodo/swarm/swarmAllowlist.ts"; // KODO: swarm-guard
 import * as PreviewHandlers from "./toolkits/preview/handlers.ts";
 import {
   PreviewSnapshotTool,
@@ -1051,6 +1053,33 @@ const withToolAnalytics =
     return yield* registration.pipe(Effect.provideService(McpServer.McpServer, recordingServer));
   });
 
+// KODO: swarm-guard
+/** Wraps a registration so each tool it adds is refused for the Orchestrator unless it is on the allowlist. */
+const withSwarmAllowlist = Effect.fn("McpHttpServer.withSwarmAllowlist")(function* <A, E, R>(
+  registration: Effect.Effect<A, E, R>,
+) {
+  const server = yield* McpServer.McpServer;
+  const guardedServer = McpServer.McpServer.of({
+    ...server,
+    addTool: Effect.fn("McpServer.addTool")(function (options) {
+      const name = options.tool.name;
+      if (KODO_ORCHESTRATOR_TOOLS.has(name)) return server.addTool(options);
+      return server.addTool({
+        ...options,
+        handle: (payload) =>
+          Effect.flatMap(
+            Effect.serviceOption(McpInvocationContext.McpInvocationContext),
+            (scope) =>
+              isSwarmScope(Option.getOrUndefined(scope))
+                ? Effect.succeed(swarmToolRefusalResult(name))
+                : options.handle(payload),
+          ),
+      });
+    }),
+  });
+  return yield* registration.pipe(Effect.provideService(McpServer.McpServer, guardedServer));
+});
+
 /** Each tool call gets a span named for its tool; arguments stay out, as they carry prompts and IDs. */
 const withToolSpans = Effect.fn("McpHttpServer.withToolSpans")(function* <A, E, R>(
   registration: Effect.Effect<A, E, R>,
@@ -1134,7 +1163,10 @@ export const toolkitRegistration = <Tools extends Record<string, Tool.Any>, EX, 
   Layer.effectDiscard(
     withToolAnalytics(
       withToolSpans(
-        withAdvertisedSchemas(toolkit, McpServer.registerToolkit(decodeAsAdvertised(toolkit))),
+        withSwarmAllowlist(
+          // KODO: swarm-guard - the Orchestrator reaches only its own tools
+          withAdvertisedSchemas(toolkit, McpServer.registerToolkit(decodeAsAdvertised(toolkit))),
+        ),
       ),
     ),
   ).pipe(
@@ -1151,7 +1183,8 @@ const imageToolRegistration = <Tools extends Record<string, Tool.Any>, A, E, R, 
   register: Effect.Effect<A, E, R>,
   handlers: McpToolAccess.HandlersLayer<Tools, EX, RX>,
 ) =>
-  Layer.effectDiscard(withToolAnalytics(withToolSpans(register))).pipe(
+  Layer.effectDiscard(withToolAnalytics(withToolSpans(withSwarmAllowlist(register)))).pipe(
+    // KODO: swarm-guard
     Layer.provide(McpToolAccess.HandlersLayer.layer(handlers)),
   );
 

@@ -20,7 +20,12 @@ import { kodoRunModeSnapshot } from "../kodo/interactionMode.ts"; // KODO: run-m
 import { kodoMaySteerIntoRun } from "../kodo/interactionMode.ts"; // KODO: mode-steer-guard
 import { makeKodoModeModelTurn } from "../kodo/modeModelTurn.ts"; // KODO: mode-models-turn
 import { makeKodoLeadCommands } from "../kodo/delegation/leadCommand.ts"; // KODO: delegation-command
-import { kodoSwarmCommandRefusal } from "../kodo/swarm/swarmGuard.ts"; // KODO: swarm-guard
+import { kodoSwarmCommandRefusal, kodoSwarmTaskTargetRefusal } from "../kodo/swarm/swarmGuard.ts"; // KODO: swarm-guard
+import {
+  isKodoStartRequest,
+  kodoStartRequestDecisionRefusal,
+  planKodoStartRequestRecord,
+} from "../kodo/swarm/startRequest.ts"; // KODO: swarm-delegate
 import {
   decideKodoLoopAdvance,
   decideKodoLoopControl,
@@ -98,6 +103,7 @@ import {
   TurnItemId,
   TrimmedNonEmptyString,
   managedRuntimeModeCeilingMessage,
+  isKodoOrchestratorThreadId, // KODO: swarm-guard
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { modelSwitchSince } from "./modelSwitch.ts";
@@ -684,6 +690,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
       return command.parentThreadId;
     case "secret_request.record":
     case "link_request.record":
+    case "kodo.start-request.record": // KODO: swarm-delegate
       return command.threadId;
     case "thread.fork":
     case "thread.merge_back":
@@ -6386,6 +6393,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       userMessages.length > 0 && userMessages.every(isNativeMaintenanceCommand);
     if (
       !isNativeMaintenanceCommand(command) &&
+      !isKodoOrchestratorThreadId(command.threadId) && // KODO: swarm-guard - its title is fixed: no seed and no generation
       ((command.titleSeed !== undefined &&
         (yield* projectionStore
           .getMessageCount(command.threadId)
@@ -8731,6 +8739,30 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
 
+      // KODO: swarm-delegate - a task started in another project is the Orchestrator's, and the project is checked here
+      if (command.kodoTargetProjectId !== undefined) {
+        const targetProject = yield* projects
+          .get(command.kodoTargetProjectId)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new OrchestratorProjectionError({ threadId: command.parentThreadId, cause }),
+            ),
+          );
+        const targetRefusal = kodoSwarmTaskTargetRefusal({
+          targetProjectId: command.kodoTargetProjectId,
+          parentIsSwarm: parentProjection.thread.kodoLead?.kind === "swarm",
+          target: Option.getOrUndefined(targetProject),
+        });
+        if (targetRefusal !== undefined) {
+          return yield* new OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+            cause: targetRefusal,
+          });
+        }
+      }
+
       const targetAdapter = yield* providerAdapters.get(command.modelSelection.instanceId).pipe(
         Effect.mapError(
           (cause) =>
@@ -8780,7 +8812,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         // KODO: swarm-delegate - the Orchestrator's task runs in the project it was told to, as that project's own checkout
         ...(command.kodoTargetProjectId !== undefined &&
         parentProjection.thread.kodoLead?.kind === "swarm"
-          ? { projectId: command.kodoTargetProjectId, branch: null, worktreePath: null }
+          ? {
+              projectId: command.kodoTargetProjectId,
+              branch: null,
+              worktreePath: null,
+              kodoOrigin: "orchestrator" as const,
+            }
           : {}),
       };
       const task: OrchestrationV2Subagent = {
@@ -9710,6 +9747,73 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     },
   );
 
+  // KODO: swarm-delegate - the Orchestrator's start confirmation, raised and withdrawn (kodo/swarm/startRequest.ts)
+  const dispatchKodoStartRequestRecord = Effect.fn(
+    "orchestrationV2.dispatch.kodoStartRequestRecord",
+  )(function* (
+    command: Extract<
+      OrchestrationV2InternalCommand,
+      { readonly type: "kodo.start-request.record" }
+    >,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const projection = yield* projectionStore
+      .getThreadRecords(
+        command.threadId,
+        ["runs", "attempts", "providerTurns", "providerThreads", "providerSessions"],
+        {},
+      )
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    const run = projection.runs.find((candidate) => candidate.id === command.runId);
+    if (run === undefined) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: `Run ${command.runId} was not found.`,
+      });
+    }
+    const context = yield* projectionStore
+      .getRuntimeResponseContext(command.threadId, command.requestId)
+      .pipe(mapDispatchError(command));
+    const providerThread = projection.providerThreads.find(
+      (candidate) => candidate.id === run.providerThreadId,
+    );
+    const now = yield* DateTime.now;
+    const plan = planKodoStartRequestRecord({
+      requestId: command.requestId,
+      outcome: command.outcome,
+      prompt: command.prompt,
+      reason: command.reason,
+      threadId: command.threadId,
+      run,
+      runActive: isActiveRun(run) && !(yield* stopReachedRun(command, command.threadId, run.id)),
+      commandNodeId: command.nodeId,
+      providerTurnId: providerTurnForRun(projection, run)?.id ?? null,
+      providerSessionId: providerThread?.providerSessionId ?? null,
+      turnItemId: idAllocator.derive.approvalTurnItem({ requestId: command.requestId }),
+      ordinal: yield* nextTurnItemOrdinal(projection),
+      existing:
+        context.request === undefined
+          ? undefined
+          : { request: context.request, node: context.node, item: context.item },
+      now,
+    });
+    if (!plan.ok) {
+      return yield* new OrchestratorDispatchError({
+        commandId: command.commandId,
+        commandType: command.type,
+        cause: plan.cause,
+      });
+    }
+    const emitEvent = emit(events, command)<OrchestrationV2DomainEvent>;
+    for (const event of plan.events)
+      yield* emitEvent(event as Omit<OrchestrationV2DomainEvent, "id">);
+  });
+
   const dispatchSecretRequestRecord = Effect.fn("orchestrationV2.dispatch.secretRequestRecord")(
     function* (
       command: Extract<OrchestrationV2InternalCommand, { readonly type: "secret_request.record" }>,
@@ -10164,6 +10268,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }
       }
 
+      // KODO: swarm-delegate - the Orchestrator's start confirmation is approved or declined, nothing more
+      const kodoStartRefusal = isKodoStartRequest(runtimeRequest)
+        ? kodoStartRequestDecisionRefusal({
+            decision: command.decision,
+            hasFeedback: command.feedback !== undefined,
+            hasAnswers: command.answers !== undefined,
+          })
+        : undefined;
+      if (kodoStartRefusal !== undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: kodoStartRefusal,
+        });
+      }
       const now = yield* DateTime.now;
       const resolvedRequest = {
         ...runtimeRequest,
@@ -10357,7 +10476,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         yield* dispatchMessage(answer, events, effects);
         return yield* recordSubagentFollowup(answer, events).pipe(mapDispatchError(answer));
       }
-      if (providerSessionId === null) return;
+      // KODO: swarm-delegate - nothing in a provider waits on it: the waiting delegate_task reads the answer
+      if (providerSessionId === null || isKodoStartRequest(runtimeRequest)) return;
       if (runtimeRequest.kind === "user_input" && resolvedNodeStatus === "completed") {
         const thread = yield* projectionStore
           .getThread(command.threadId)
@@ -14386,6 +14506,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "link_request.record":
         yield* dispatchLinkRequestRecord(command, events, effects);
+        break;
+      case "kodo.start-request.record": // KODO: swarm-delegate
+        yield* dispatchKodoStartRequestRecord(command, events);
         break;
       default:
         return yield* dispatchUnsupported(command);

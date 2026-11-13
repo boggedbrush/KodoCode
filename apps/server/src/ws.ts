@@ -245,6 +245,8 @@ import * as UsageService from "./usage/UsageService.ts";
 import * as KodoLoopLedger from "./kodo/ledger/LoopLedger.ts"; // KODO: loop-ledger-rpc
 import { makeKodoDelegationUsageReader } from "./kodo/delegation/usageReader.ts"; // KODO: delegation-usage-rpc
 import { makeKodoSwarmService } from "./kodo/swarm/SwarmService.ts"; // KODO: orchestrator-rpc
+import { kodoLeadProvidersRefusal } from "./kodo/delegation/leadCommand.ts"; // KODO: orchestrator-rpc
+import { kodoWorkerCounts } from "./kodo/delegation/leadGuard.ts"; // KODO: orchestrator-rpc
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as TriageService from "./triage/TriageService.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
@@ -1530,11 +1532,44 @@ export const layerWsRpc = (
         workspaceRoot: kodoPath.resolve(config.baseDir, "orchestrator"),
         makeFolder: (folder) => kodoFileSystem.makeDirectory(folder, { recursive: true }),
         projects: projectService,
-        threads: threadManagement,
-        baseModel: serverSettings.getSettings.pipe(
-          Effect.map((settings) => settings.defaultModelSelection),
-          Effect.orElseSucceed(() => null),
+        threads: {
+          getThreadShell: threadManagement.getThreadShell,
+          dispatch: threadManagement.dispatch,
+          isTombstone: (threadId) =>
+            threadManagement.getThreadRecords(threadId, []).pipe(
+              Effect.as(true),
+              Effect.orElseSucceed(() => false),
+            ),
+          deleteThread: projectService.deleteKodoOrchestratorThread,
+          liveWorkers: (threadId) =>
+            kodoWorkerCounts({
+              getShell: orchestrationEngine.getThreadShell,
+              listChildIds: orchestrationEngine.listAppOwnedChildThreadIds,
+              leadId: threadId,
+              turnStartedAtMs: undefined,
+              toMillis: DateTime.toEpochMillis,
+            }).pipe(Effect.map((counts) => counts.live)),
+        },
+        settings: serverSettings.getSettings.pipe(
+          Effect.map((settings) => ({
+            enabled: settings.kodoOrchestratorEnabled,
+            baseModel: settings.defaultModelSelection,
+          })),
+          Effect.orElseSucceed(() => ({ enabled: false, baseModel: null })),
         ),
+        supportRefusal: Effect.fn("KodoSwarm.supportRefusal")(function* (model) {
+          const providers = yield* providerRegistry.getProviders;
+          const settings = yield* serverSettings.getSettings;
+          const refusal = kodoLeadProvidersRefusal({
+            thread: { modelSelection: model, kodoModeModel: undefined },
+            providers,
+            providerInstances: settings.providerInstances,
+            orchestratorSlot: settings.modeModelSelections.orchestrator,
+          });
+          return refusal === undefined
+            ? undefined
+            : `The Orchestrator can't run on this model. ${refusal}`;
+        }),
       });
       const peerLinks = yield* PeerLinks.PeerLinks;
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
@@ -2771,6 +2806,7 @@ export const layerWsRpc = (
         [WS_METHODS.serverGetKodoDelegationUsage]: ({ threadId }) =>
           kodoDelegationUsage.read(threadId), // KODO: delegation-usage-rpc
         [WS_METHODS.serverEnsureKodoOrchestrator]: () => kodoSwarm.ensure, // KODO: orchestrator-rpc
+        [WS_METHODS.serverResetKodoOrchestrator]: () => kodoSwarm.reset, // KODO: orchestrator-rpc
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) => resourceTelemetry.retry,
         [WS_METHODS.serverCheckOtlpEndpoint]: (input) => otlpEndpointCheck.check(input),
         [WS_METHODS.serverListTextGeneratorModels]: (input) => textGenerators.listModels(input),

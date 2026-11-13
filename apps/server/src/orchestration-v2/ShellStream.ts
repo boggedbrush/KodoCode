@@ -1,3 +1,4 @@
+import { isKodoOrchestratorWorkerLineage } from "@t3tools/shared/kodoOrchestrator"; // KODO: swarm-delegate
 import type {
   ApplicationStoredEvent,
   OrchestrationProjectShell,
@@ -146,6 +147,7 @@ function omitIdleSubagentShellsWith(
     (thread) =>
       thread.lineage.relationshipToParent !== "subagent" ||
       isLiveSubagentShell(thread) ||
+      isKodoOrchestratorWorkerLineage(thread.lineage) || // KODO: swarm-delegate - listed in its project, so always sent
       facts.subagentParentIds.has(thread.id),
   );
 }
@@ -261,7 +263,10 @@ function shellSubscriberThreadIds(
   const subagents = index.filter(
     (entry) =>
       entry.lineage.relationshipToParent === "subagent" &&
-      (!options.omitIdleSubagents || entry.mayBeLive || facts.subagentParentIds.has(entry.id)),
+      (!options.omitIdleSubagents ||
+        entry.mayBeLive ||
+        isKodoOrchestratorWorkerLineage(entry.lineage) || // KODO: swarm-delegate
+        facts.subagentParentIds.has(entry.id)),
   );
   const ancestorIds = hiddenChildAncestorIds([
     ...subagents,

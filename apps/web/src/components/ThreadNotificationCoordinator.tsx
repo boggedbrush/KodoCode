@@ -6,7 +6,12 @@ import {
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import type { AnyRouter } from "@tanstack/react-router";
 import { threadKey } from "@t3tools/client-runtime/state/entities";
-import type { EnvironmentId, OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
+import {
+  isKodoOrchestratorThreadId, // KODO: orchestrator-hidden
+  type EnvironmentId,
+  type OrchestrationV2ThreadShell,
+  type ThreadId,
+} from "@t3tools/contracts";
 import { monitorHoldsWakeCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import type { ClientSettings } from "@t3tools/contracts/settings";
 import * as Option from "effect/Option";
@@ -88,12 +93,16 @@ export function startThreadNotifications(
   };
   // A notification shown before the tag filter turned on must not stay on screen. While hiding,
   // one whose thread left the live list (archived) cannot be judged, so it closes too.
+  // KODO: orchestrator-hidden - a thread key of the Orchestrator, whose notifications are never hidden
+  const isOrchestratorKey = (key: string) =>
+    isKodoOrchestratorThreadId(key.slice(key.indexOf("\u0000") + 1));
   const closeHiddenPending = () => {
     const hidden = registry.get(environmentThreadShells.hiddenThreadKeysAtom);
     const live = registry.get(environmentThreadShells.anyEnvironmentHidingAtom)
       ? new Set(registry.get(environmentThreadShells.threadRefsAtom).map(threadKey))
       : null;
-    const shouldClose = (key: string) => hidden.has(key) || (live !== null && !live.has(key));
+    const shouldClose = (key: string) =>
+      (hidden.has(key) && !isOrchestratorKey(key)) || (live !== null && !live.has(key));
     for (const [key, toastIds] of openToasts) {
       if (!shouldClose(key)) continue;
       for (const toastId of toastIds) toastManager.close(toastId);
@@ -119,7 +128,9 @@ export function startThreadNotifications(
     kind: ThreadNotificationKind,
   ) => {
     const { thread, status } = state;
+    // KODO: orchestrator-hidden - the Orchestrator is out of every list, but a question it asks must still reach the person
     if (
+      !isKodoOrchestratorThreadId(thread.id) &&
       registry
         .get(environmentThreadShells.hiddenThreadKeysAtom)
         .has(threadKey({ environmentId, threadId: thread.id }))

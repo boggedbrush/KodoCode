@@ -121,7 +121,9 @@ const refuseReadOnlyCaller = Effect.flatMap(readCaller(), (caller) =>
         new OrchestratorMcpFailure({
           code: "capability_denied",
           message:
-            "t3_sub_agents_set changes things, and this thread is in a read-only mode (Ask, Plan or Review). Switch the thread to Code mode to use it.",
+            caller.caller?.kodoLead == null
+              ? "t3_sub_agents_set changes things, and this thread is in a read-only mode (Ask, Plan or Review). Switch the thread to Code mode to use it."
+              : "t3_sub_agents_set changes things, and this thread only delegates. Ask the person to use the Sub-agents switch.",
         }),
       )
     : Effect.void,

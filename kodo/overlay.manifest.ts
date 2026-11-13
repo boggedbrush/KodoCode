@@ -399,7 +399,10 @@ export default {
       file: "apps/server/src/orchestration-v2/ThreadForkService.test.ts",
       hooks: ["delegation-child"],
     },
-    { file: "apps/server/src/mcp/toolkits/thread/handlers.ts", hooks: ["delegation-normalize"] },
+    {
+      file: "apps/server/src/mcp/toolkits/thread/handlers.ts",
+      hooks: ["delegation-normalize", "swarm-guard"],
+    },
     { file: "apps/server/src/mcp/toolkits/core.test.ts", hooks: ["delegation-normalize"] },
     {
       file: "apps/server/src/mcp/toolkits/project/handlers.test.ts",
@@ -431,11 +434,17 @@ export default {
     },
     {
       file: "apps/server/src/orchestration-v2/ProjectionStore.ts",
-      hooks: ["mode-models-state", "loop-state", "loop-ledger-write", "delegation-state"],
+      hooks: [
+        "mode-models-state",
+        "loop-state",
+        "loop-ledger-write",
+        "delegation-state",
+        "swarm-delegate",
+      ],
     },
     {
       file: "apps/server/src/orchestration-v2/ThreadManagementService.ts",
-      hooks: ["loop-intercept", "loop-stage", "delegation-command"],
+      hooks: ["loop-intercept", "loop-stage", "delegation-command", "swarm-delegate"],
     },
     {
       file: "apps/server/src/orchestration-v2/runtimeLayer.ts",
@@ -550,7 +559,7 @@ export default {
     },
     {
       file: "apps/server/src/mcp/McpHttpServer.ts",
-      hooks: ["loop-mcp-tools", "delegation-mcp-tools"],
+      hooks: ["loop-mcp-tools", "delegation-mcp-tools", "swarm-guard"],
     },
     { file: "apps/server/src/usage/UsageService.ts", hooks: ["loop-pricing"] },
     { file: "apps/server/src/usage/UsageService.test.ts", hooks: ["loop-pricing"] },
@@ -558,7 +567,24 @@ export default {
     { file: "apps/server/src/mcp/WorktreeMcpService.ts", hooks: ["loop-intercept"] },
     {
       file: "apps/server/src/orchestration-v2/ThreadLaunchService.test.ts",
-      hooks: ["loop-intercept"],
+      hooks: ["loop-intercept", "swarm-project"],
+    },
+    { file: "apps/server/src/relay/AgentAwarenessRelay.test.ts", hooks: ["swarm-project"] },
+    {
+      file: "apps/server/src/orchestration-v2/ThreadManagementService.test.ts",
+      hooks: ["swarm-delegate"],
+    },
+    {
+      file: "apps/server/src/orchestration-v2/ThreadTitleRegenerationService.ts",
+      hooks: ["swarm-guard"],
+    },
+    { file: "apps/server/src/orchestration-v2/ProjectCommands.ts", hooks: ["swarm-project"] },
+    { file: "apps/server/src/project/ProjectService.ts", hooks: ["swarm-project"] },
+    { file: "apps/server/src/orchestration-v2/ShellStream.ts", hooks: ["swarm-delegate"] },
+    { file: "apps/server/src/orchestration-v2/ShellStream.test.ts", hooks: ["swarm-delegate"] },
+    {
+      file: "apps/web/src/components/ThreadNotificationCoordinator.tsx",
+      hooks: ["orchestrator-hidden"],
     },
     {
       file: "apps/mobile/src/state/use-thread-composer-state.ts",
@@ -585,11 +611,13 @@ export default {
         "loop-intercept",
         "delegation-normalize",
         "swarm-delegate",
+        "swarm-guard",
+        "delegation-policy",
       ],
     },
     {
       file: "apps/server/src/mcp/toolkits/project/handlers.ts",
-      hooks: ["mode-models-send", "delegation-normalize"],
+      hooks: ["mode-models-send", "delegation-normalize", "swarm-guard"],
     },
     {
       file: "apps/server/src/scheduledTasks/ScheduledTaskService.ts",
@@ -1029,6 +1057,7 @@ export default {
       path: "packages/contracts/src/kodoLoopLedger.ts",
       why: "Read contract of the loop savings ledger",
     },
+    { path: "packages/contracts/src/kodoLoopLedger.test.ts" },
     {
       path: "packages/shared/src/kodoLoopOutput.ts",
       why: "Parser for the loop's kodo-verdict and kodo-review blocks",
@@ -1297,6 +1326,14 @@ export default {
       "apps/server/src/orchestration-v2/ProviderSessionManager.test.ts",
       "apps/server/src/kodo/ledger/delegationLedger.test.ts",
       "apps/server/src/kodo/swarm/swarm.test.ts",
+      "packages/contracts/src/kodoLoopLedger.test.ts",
+      "apps/server/src/kodo/swarm/startRequest.test.ts",
+      "apps/server/src/kodo/swarm/startConfirmation.test.ts",
+      "apps/server/src/kodo/swarm/projectService.test.ts",
+      "apps/server/src/kodo/delegation/usageReader.test.ts",
+      "apps/server/src/orchestration-v2/ThreadManagementService.test.ts",
+      "apps/server/src/orchestration-v2/ShellStream.test.ts",
+      "apps/server/src/relay/AgentAwarenessRelay.test.ts",
       "apps/server/src/mcp/kodoSwarmGuard.test.ts",
       "apps/server/src/mcp/McpSessionRegistry.test.ts",
       "apps/web/src/kodo/delegationBar.logic.test.ts",

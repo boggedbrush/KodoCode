@@ -13,6 +13,7 @@ import {
   type OrchestrationV2ThreadProjection,
   ProjectId,
   ProviderInstanceId,
+  NodeId, // KODO: swarm-delegate
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -147,6 +148,54 @@ it.effect(
       );
       expect(error).toMatchObject({ projectId, instanceId });
       expect(dispatched).toEqual([]);
+    }).pipe(Effect.provide(layerTest));
+  },
+);
+
+// KODO: swarm-delegate - the Orchestrator's worker is checked against the project it starts in, not the scratch project.
+it.effect(
+  "the dispatch chokepoint checks a delegated task that starts in another project against that project",
+  () => {
+    const targetProjectId = ProjectId.make("project:thread-management:named");
+    const instanceId = ProviderInstanceId.make("codex_work");
+    const dispatched: Array<string> = [];
+    const layerTest = layerDispatchChokepointTest(
+      ServerSettings.layerTest({
+        providerInstances: { [instanceId]: { driver: "codex", enabled: true } },
+        projectSettingsOverrides: {
+          [targetProjectId]: { providerInstances: { [instanceId]: { enabled: false } } },
+        },
+      }),
+    )(dispatched);
+    const task = (kodoTargetProjectId?: ProjectId) =>
+      ({
+        type: "delegated_task.request",
+        commandId: CommandId.make(
+          `command:thread-management:named:${kodoTargetProjectId ?? "own"}`,
+        ),
+        parentThreadId: ThreadId.make("thread:thread-management:chokepoint"),
+        parentRunId: RunId.make("run:thread-management:named"),
+        parentNodeId: NodeId.make("node:thread-management:named"),
+        task: "Write notes.",
+        modelSelection: { instanceId, model: "test" },
+        runtimeMode: "approval-required",
+        interactionMode: "code",
+        createdBy: "agent",
+        creationSource: "mcp",
+        ...(kodoTargetProjectId === undefined ? {} : { kodoTargetProjectId }),
+      }) as never;
+
+    return Effect.gen(function* () {
+      const threads = yield* ThreadManagementService.ThreadManagementService;
+      const refused = yield* Effect.flip(threads.dispatch(task(targetProjectId)));
+      expect(refused).toBeInstanceOf(
+        ThreadManagementService.ThreadManagementProviderInstanceDisabledError,
+      );
+      expect(refused).toMatchObject({ projectId: targetProjectId, instanceId });
+      expect(dispatched).toEqual([]);
+      // Its own project does not disable it, so a task that stays there goes through.
+      yield* threads.dispatch(task());
+      expect(dispatched).toEqual(["delegated_task.request"]);
     }).pipe(Effect.provide(layerTest));
   },
 );

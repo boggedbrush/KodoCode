@@ -192,6 +192,23 @@ describe("omitIdleSubagentShells", () => {
     ]);
   });
 
+  // KODO: swarm-delegate - what the Orchestrator started is listed in its project, so idle or not it is sent.
+  it("keeps an idle worker of the Orchestrator, in either of its conversations, and no other idle child", () => {
+    const threads = [
+      row("kodo-orchestrator", null),
+      row("kodo-orchestrator-2", null),
+      row("old-worker", "kodo-orchestrator"),
+      row("new-worker", "kodo-orchestrator-2"),
+      row("ordinary-child", "root"),
+    ];
+    expect(omitIdleSubagentShells(threads).map((thread) => thread.id)).toEqual([
+      "kodo-orchestrator",
+      "kodo-orchestrator-2",
+      "old-worker",
+      "new-worker",
+    ]);
+  });
+
   it("still filters the transcript events of omitted children for a subscriber that opts in", () => {
     const threads = [row("root", null), row("idle", "root")];
     const omitted = activeShellRowsForSubscriber(threads, true);

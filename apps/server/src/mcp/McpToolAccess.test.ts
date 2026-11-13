@@ -386,7 +386,7 @@ it.effect.each([
       ["reads_as_caller", caller, {}, "ran"],
     ] as const;
   }),
-  // KODO: delegation-policy - a Code lead is read-only for tools like Ask is, yet its limits stay Code's, so it still starts Code workers.
+  // KODO: delegation-policy - a Code lead is read-only for the other tools as Review is, and its limits are that floor: nothing it starts or messages goes above it.
   ["acts_as_caller", leading, {}, "capability_denied"],
   ["writes", leading, {}, "capability_denied"],
   ["writes_with_capability", leading, {}, "capability_denied"],
@@ -394,7 +394,9 @@ it.effect.each([
   ["acts_as_caller_readonly", leading, {}, "ran"],
   ["acts_as_caller_allowed", leading, {}, "ran"],
   ["reads", leading, {}, "ran"],
-  ["starts_threads", leading, {}, "full-access/code"],
+  ["starts_threads", leading, {}, "full-access/review"],
+  ["writes_threads", leading, { threadId: codeThreadId }, "interaction_mode_escalation_denied"],
+  ["writes_threads", leading, { threadId: reviewThreadId }, "ran"],
   ["acts_as_caller_allowed", ended, {}, "parent_not_active"],
   ["acts_as_caller_allowed", fullAccessClient, {}, "thread_credential_required"],
   ["acts_as_caller", coding, {}, "ran"],

@@ -29,7 +29,7 @@ const usage = (over: Partial<KodoDelegationUsage> = {}): KodoDelegationUsage =>
   }) as KodoDelegationUsage;
 
 describe("a worker's header", () => {
-  it("names the lead only for a delegated worker of a thread that leads sub-agents", () => {
+  it("names the lead only for a delegated worker of a thread that leads, a person's or the Orchestrator", () => {
     const lead = { title: "Refactor auth", kodoLead: { kind: "sub-agents" as const } };
     expect(kodoWorkerOf({ relationshipToParent: "subagent", parent: lead })).toEqual({
       leadTitle: "Refactor auth",
@@ -38,12 +38,13 @@ describe("a worker's header", () => {
     expect(
       kodoWorkerOf({ relationshipToParent: "subagent", parent: { title: "Plain" } }),
     ).toBeNull();
+    // A worker the Orchestrator started says so too: it is listed in its project, away from its lead.
     expect(
       kodoWorkerOf({
         relationshipToParent: "subagent",
         parent: { title: "Orchestrator", kodoLead: { kind: "swarm" } },
       }),
-    ).toBeNull();
+    ).toEqual({ leadTitle: "Orchestrator" });
     expect(kodoWorkerOf({ relationshipToParent: "subagent", parent: null })).toBeNull();
   });
 

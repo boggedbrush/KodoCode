@@ -121,6 +121,24 @@ describe("command permissions", () => {
     ),
   );
 
+  // KODO: orchestrator-rpc - a reset deletes the conversation, so it needs the operate grant as opening does
+  it.effect("requires the destination operate grant to reset the Orchestrator", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const reset = createCommandPermissions(runtime, WS_METHODS.serverResetKodoOrchestrator);
+        registry.set(sessions(env), AsyncResult.success(grant(false)));
+        expect(registry.get(reset.permissionAtom(env))).toBe(false);
+        expect((yield* reset.authorize(registry, env).pipe(Effect.flip))._tag).toBe(
+          "EnvironmentAuthorizationError",
+        );
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(reset.permissionAtom(env))).toBe(true);
+        yield* reset.authorize(registry, env);
+      }),
+    ),
+  );
+
   it.effect("requires the destination preview grant to close a browser tab", () =>
     Effect.scoped(
       Effect.gen(function* () {

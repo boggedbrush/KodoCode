@@ -1,12 +1,12 @@
-// The Orchestrator's one-time setup: a project folder under the T3 home and one thread in it, both
-// with fixed ids, so `ensure` is idempotent and safe to race. The server creates the thread as
-// `system`, the only creator that may set the `swarm` lead, at the approval ceiling.
+// The Orchestrator's setup and recovery: its project (fixed id) and one live thread of a fixed id
+// series (a reset starts the next), made as `system` at the approval ceiling. `ensure` is idempotent,
+// safe to race, and makes a lost or reset thread again instead of failing for good.
 import {
   CommandId,
   KODO_ORCHESTRATOR_PROJECT_ID,
-  KODO_ORCHESTRATOR_THREAD_ID,
   KODO_ORCHESTRATOR_TITLE,
   KodoOrchestratorError,
+  kodoOrchestratorThreadIdFor,
   type KodoOrchestratorEnsureResult,
   type ModelSelection,
   type OrchestrationV2Command,
@@ -14,114 +14,220 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
-type CreateCommand = Extract<OrchestrationV2Command, { readonly type: "thread.create" }>;
+/** The errors the setup's dependencies fail with: always tagged, never read here beyond that. */
+type DepError = { readonly _tag?: string };
+
+type ThreadCommand = Extract<
+  OrchestrationV2Command,
+  { readonly type: "thread.create" | "thread.unarchive" }
+>;
+
+/** What the service reads of a thread: enough to tell a live conversation from a lost one. */
+export interface KodoSwarmThreadShell {
+  readonly deletedAt: unknown;
+  readonly archivedAt?: unknown;
+  readonly modelSelection: ModelSelection;
+  readonly activeRunId?: unknown;
+  readonly pendingRuntimeRequest?: unknown;
+}
 
 export interface KodoSwarmDeps {
   /** The folder the Orchestrator's project is rooted at. */
   readonly workspaceRoot: string;
-  readonly makeFolder: (folder: string) => Effect.Effect<void, unknown>;
+  readonly makeFolder: (folder: string) => Effect.Effect<void, DepError>;
   readonly projects: {
-    readonly bootstrap: (input: {
-      readonly commandId: CommandId;
-      readonly projectId: typeof KODO_ORCHESTRATOR_PROJECT_ID;
-      readonly title: string;
+    /** Makes the project, or puts it right when it was deleted, archived or moved. */
+    readonly ensureKodoOrchestratorProject: (input: {
       readonly workspaceRoot: string;
-    }) => Effect.Effect<
-      { readonly project: { readonly id: string }; readonly created: boolean },
-      unknown
-    >;
+    }) => Effect.Effect<unknown, DepError>;
   };
   readonly threads: {
+    /** A live thread's shell; a deleted thread has none, as the projection reads it. */
     readonly getThreadShell: (
       threadId: ThreadId,
-    ) => Effect.Effect<{ readonly deletedAt: unknown } | null, unknown>;
-    readonly dispatch: (
-      command: CreateCommand,
-    ) => Effect.Effect<unknown, { readonly _tag?: string }>;
+    ) => Effect.Effect<KodoSwarmThreadShell | null, DepError>;
+    readonly dispatch: (command: ThreadCommand) => Effect.Effect<unknown, DepError>;
+    /** A deleted thread still holds its id, so the next one cannot be made under it. */
+    readonly isTombstone: (threadId: ThreadId) => Effect.Effect<boolean, DepError>;
+    /** Deletes a thread of the series, which no command from outside may do. */
+    readonly deleteThread: (threadId: ThreadId) => Effect.Effect<void, DepError>;
+    /** Workers the Orchestrator started that are still running. */
+    readonly liveWorkers: (threadId: ThreadId) => Effect.Effect<number, DepError>;
   };
-  /** The thread's own model: the Orchestrator model is applied per turn on top of it. */
-  readonly baseModel: Effect.Effect<ModelSelection | null>;
+  readonly settings: Effect.Effect<{
+    readonly enabled: boolean;
+    /** The thread's own model: the Orchestrator model is applied per turn on top of it. */
+    readonly baseModel: ModelSelection | null;
+  }>;
+  /** Why this model's provider cannot receive the delegation tools, or undefined. */
+  readonly supportRefusal: (model: ModelSelection) => Effect.Effect<string | undefined, DepError>;
 }
 
 const fail = (reason: string, cause?: unknown) => new KodoOrchestratorError({ reason, cause });
 
+const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
+
 export const makeKodoSwarmService = (deps: KodoSwarmDeps) => {
-  const ensure: Effect.Effect<KodoOrchestratorEnsureResult, KodoOrchestratorError> = Effect.gen(
+  /** The newest live thread of the series, and the id the next one would take. */
+  const findSeries = Effect.fn("KodoSwarm.findSeries")(
     function* () {
-      const threadId = KODO_ORCHESTRATOR_THREAD_ID;
-      const existing = yield* deps.threads
-        .getThreadShell(threadId)
-        .pipe(Effect.mapError((cause) => fail("The Orchestrator could not be read.", cause)));
-      if (existing !== null) {
-        // A deleted thread keeps its id, so it cannot be made again here.
-        if (existing.deletedAt !== null) {
-          return yield* fail("The Orchestrator conversation was deleted and cannot be restored.");
+      let live: { readonly threadId: ThreadId; readonly shell: KodoSwarmThreadShell } | undefined;
+      for (let generation = 1; ; generation += 1) {
+        const threadId = kodoOrchestratorThreadIdFor(generation);
+        const shell = yield* deps.threads.getThreadShell(threadId);
+        if (shell === null) {
+          if (!(yield* deps.threads.isTombstone(threadId))) {
+            return { live, next: threadId, generation } as const;
+          }
+          continue;
         }
-        return { projectId: KODO_ORCHESTRATOR_PROJECT_ID, threadId };
+        if (shell.deletedAt === null) live = { threadId, shell };
       }
-      const model = yield* deps.baseModel;
-      if (model === null) {
-        return yield* fail("Choose a default model in Settings before opening the Orchestrator.");
-      }
-      yield* deps
-        .makeFolder(deps.workspaceRoot)
-        .pipe(
-          Effect.mapError((cause) =>
-            fail("The Orchestrator's folder could not be created.", cause),
-          ),
-        );
-      yield* deps.projects
-        .bootstrap({
-          commandId: CommandId.make("kodo-orchestrator:project"),
-          projectId: KODO_ORCHESTRATOR_PROJECT_ID,
-          title: KODO_ORCHESTRATOR_TITLE,
-          workspaceRoot: deps.workspaceRoot,
-        })
-        .pipe(
-          // Racing creates return the winner as a conflict; only a conflict with our own id is fine.
-          Effect.catchIf(
-            (error: unknown) =>
-              typeof error === "object" &&
-              error !== null &&
-              "_tag" in error &&
-              error._tag === "ProjectConflictError" &&
-              "conflictingProjectId" in error &&
-              error.conflictingProjectId === KODO_ORCHESTRATOR_PROJECT_ID,
-            () => Effect.void,
-          ),
-          Effect.mapError((cause) =>
-            fail("The Orchestrator's project could not be created.", cause),
-          ),
-        );
-      yield* deps.threads
-        .dispatch({
-          type: "thread.create",
-          createdBy: "system",
-          creationSource: "server",
-          commandId: CommandId.make("kodo-orchestrator:thread"),
-          threadId,
-          projectId: KODO_ORCHESTRATOR_PROJECT_ID,
-          title: KODO_ORCHESTRATOR_TITLE,
-          modelSelection: model,
-          // What it delegates can never be broader than this.
-          runtimeMode: "approval-required",
-          interactionMode: "code",
-          kodoLead: { kind: "swarm" },
-          branch: null,
-          worktreePath: null,
-        })
-        .pipe(
-          // A racing ensure created it first: the same thread, so the same answer.
-          Effect.catchIf(
-            (error) => error._tag === "OrchestratorThreadAlreadyExistsError",
-            () => Effect.void,
-          ),
-          Effect.mapError((cause) => fail("The Orchestrator could not be created.", cause)),
-        );
-      return { projectId: KODO_ORCHESTRATOR_PROJECT_ID, threadId };
     },
-  ).pipe(Effect.withSpan("KodoSwarm.ensure"));
-  return { ensure } as const;
+    Effect.mapError((cause) => fail("The Orchestrator could not be read.", cause)),
+  );
+
+  const requireEnabled = Effect.gen(function* () {
+    const settings = yield* deps.settings;
+    if (!settings.enabled) {
+      return yield* fail("The Orchestrator is turned off in Settings.");
+    }
+    return settings;
+  });
+
+  const requireSupport = Effect.fn("KodoSwarm.requireSupport")(function* (model: ModelSelection) {
+    const refusal = yield* deps
+      .supportRefusal(model)
+      .pipe(
+        Effect.mapError((cause) => fail("The Orchestrator's model could not be checked.", cause)),
+      );
+    if (refusal !== undefined) return yield* fail(refusal);
+  });
+
+  const createThread = Effect.fn("KodoSwarm.createThread")(function* (
+    threadId: ThreadId,
+    generation: number,
+    model: ModelSelection,
+  ) {
+    yield* deps.threads
+      .dispatch({
+        type: "thread.create",
+        createdBy: "system",
+        creationSource: "server",
+        commandId: CommandId.make(
+          generation <= 1 ? "kodo-orchestrator:thread" : `kodo-orchestrator:thread:${generation}`,
+        ),
+        threadId,
+        projectId: KODO_ORCHESTRATOR_PROJECT_ID,
+        title: KODO_ORCHESTRATOR_TITLE,
+        modelSelection: model,
+        // What it delegates can never be broader than this.
+        runtimeMode: "approval-required",
+        interactionMode: "code",
+        kodoLead: { kind: "swarm" },
+        branch: null,
+        worktreePath: null,
+      })
+      .pipe(
+        // A racing ensure created it first: the same thread, so the same answer, if it is live.
+        Effect.catchIf(
+          (error) => error._tag === "OrchestratorThreadAlreadyExistsError",
+          () =>
+            deps.threads
+              .getThreadShell(threadId)
+              .pipe(
+                Effect.flatMap((shell) =>
+                  shell === null
+                    ? Effect.fail({ _tag: "OrchestratorThreadAlreadyExistsError" })
+                    : Effect.void,
+                ),
+              ),
+        ),
+        Effect.mapError((cause) => fail("The Orchestrator could not be created.", cause)),
+      );
+  });
+
+  const ensureProject = deps.makeFolder(deps.workspaceRoot).pipe(
+    Effect.mapError((cause) => fail("The Orchestrator's folder could not be created.", cause)),
+    Effect.andThen(
+      deps.projects
+        .ensureKodoOrchestratorProject({ workspaceRoot: deps.workspaceRoot })
+        .pipe(
+          Effect.mapError((cause) => fail("The Orchestrator's project could not be made.", cause)),
+        ),
+    ),
+  );
+
+  const ensureWith = Effect.fn("KodoSwarm.ensure")(function* (options: {
+    readonly freshThread: boolean;
+  }) {
+    const settings = yield* requireEnabled;
+    const series = yield* findSeries();
+    const current = options.freshThread ? undefined : series.live;
+    const model = current?.shell.modelSelection ?? settings.baseModel;
+    if (model === null) {
+      return yield* fail("Choose a default model in Settings before opening the Orchestrator.");
+    }
+    yield* requireSupport(model);
+    yield* ensureProject;
+    if (current !== undefined) {
+      // Nothing archives it, but a lost archive state is put right rather than hiding it for good.
+      if (current.shell.archivedAt != null) {
+        yield* deps.threads
+          .dispatch({
+            type: "thread.unarchive",
+            commandId: CommandId.make(
+              `kodo-orchestrator:unarchive:${String(current.shell.archivedAt)}`,
+            ),
+            threadId: current.threadId,
+          })
+          .pipe(Effect.mapError((cause) => fail("The Orchestrator could not be restored.", cause)));
+      }
+      return { projectId: KODO_ORCHESTRATOR_PROJECT_ID, threadId: current.threadId };
+    }
+    yield* createThread(series.next, series.generation, model);
+    return { projectId: KODO_ORCHESTRATOR_PROJECT_ID, threadId: series.next };
+  });
+
+  const ensure: Effect.Effect<KodoOrchestratorEnsureResult, KodoOrchestratorError> = ensureWith({
+    freshThread: false,
+  });
+
+  /** A new conversation, refused while the old one has live workers, a turn or a question open. */
+  const reset: Effect.Effect<KodoOrchestratorEnsureResult, KodoOrchestratorError> = Effect.gen(
+    function* () {
+      const settings = yield* requireEnabled;
+      const { live } = yield* findSeries();
+      if (live !== undefined) {
+        // The new conversation must be makeable before the old one goes.
+        if (settings.baseModel === null) {
+          return yield* fail(
+            "Choose a default model in Settings before resetting the Orchestrator.",
+          );
+        }
+        yield* requireSupport(settings.baseModel);
+        const workers = yield* deps.threads
+          .liveWorkers(live.threadId)
+          .pipe(Effect.mapError((cause) => fail("Its workers could not be read.", cause)));
+        if (workers > 0) {
+          return yield* fail(
+            `${plural(workers, "worker is", "workers are")} still running. Use Stop all in the Orchestrator conversation, then reset.`,
+          );
+        }
+        if (live.shell.activeRunId != null || live.shell.pendingRuntimeRequest != null) {
+          return yield* fail(
+            "The Orchestrator is in the middle of a turn or waiting on you. Stop it, then reset.",
+          );
+        }
+        yield* deps.threads
+          .deleteThread(live.threadId)
+          .pipe(Effect.mapError((cause) => fail("The conversation could not be reset.", cause)));
+      }
+      return yield* ensureWith({ freshThread: true });
+    },
+  ).pipe(Effect.withSpan("KodoSwarm.reset"));
+
+  return { ensure, reset } as const;
 };
 
 export type KodoSwarmService = ReturnType<typeof makeKodoSwarmService>;

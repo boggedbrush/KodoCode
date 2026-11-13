@@ -85,6 +85,7 @@ import {
   KodoLoopStageRef,
 } from "./kodoLoop.ts"; // KODO: loop-state
 import { KodoLead, LenientKodoLead } from "./kodoDelegation.ts"; // KODO: delegation-state
+import { KodoThreadOrigin } from "./kodoOrchestrator.ts"; // KODO: swarm-delegate
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 import {
@@ -466,6 +467,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   kodoLoop: Schema.optional(KodoLoop),
   /** KODO: delegation-state - set while this thread leads sub-agent workers. */
   kodoLead: Schema.optional(LenientKodoLead),
+  /** KODO: swarm-delegate - set on a worker the Orchestrator started. */
+  kodoOrigin: Schema.optional(KodoThreadOrigin),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -2132,6 +2135,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   kodoModeModel: Schema.optional(KodoThreadModeModel), // KODO: mode-models-state
   kodoLoopStatus: Schema.optional(KodoLoopShellStatus), // KODO: loop-state
   kodoLead: Schema.optional(LenientKodoLead), // KODO: delegation-state
+  kodoOrigin: Schema.optional(KodoThreadOrigin), // KODO: swarm-delegate
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -3650,6 +3654,22 @@ const OrchestrationV2InternalCommand = Schema.Union([
     placeholder: Schema.optional(Schema.String),
     delivery: Schema.optional(OrchestrationV2SecretRequestDelivery),
     secretStatus: OrchestrationV2SecretRequestStatus,
+  }),
+  /**
+   * KODO: swarm-delegate - raises the card asking the person to confirm that the Orchestrator may
+   * start a worker, as an approval on its run, or closes it as cancelled. Internal so no client can
+   * raise one; only a client's `runtime-request.respond` answers it.
+   */
+  Schema.Struct({
+    type: Schema.Literal("kodo.start-request.record"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: RunId,
+    nodeId: NodeId,
+    requestId: RuntimeRequestId,
+    outcome: Schema.Literals(["pending", "cancelled"]),
+    prompt: TrimmedNonEmptyString,
+    reason: Schema.String,
   }),
   /**
    * Records or updates a link an agent asked the user to make. Internal so no

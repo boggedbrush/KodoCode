@@ -48,6 +48,33 @@ const hasServerUrl = (config: unknown): boolean =>
   typeof config.serverUrl === "string" &&
   config.serverUrl.trim().length > 0;
 
+/**
+ * Why a thread cannot lead because of the providers its turns would run on, or undefined: its own
+ * model's provider must receive the tools, and so must the Orchestrator slot's, which its turns run on.
+ */
+export function kodoLeadProvidersRefusal(input: {
+  readonly thread: Pick<OrchestrationV2AppThread, "modelSelection" | "kodoModeModel">;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly providerInstances: Readonly<Record<string, { readonly config?: unknown }>> | undefined;
+  readonly orchestratorSlot: { readonly instanceId: string } | null | undefined;
+}): string | undefined {
+  const own = kodoThreadOwnModel(input.thread);
+  const ownRefusal = kodoLeadSupportRefusal({
+    provider: input.providers.find((provider) => provider.instanceId === own.instanceId),
+    externalOpenCode: hasServerUrl(input.providerInstances?.[own.instanceId]?.config),
+  });
+  if (ownRefusal !== undefined) return ownRefusal;
+  const slot = input.orchestratorSlot;
+  const slotProvider =
+    slot === null || slot === undefined
+      ? undefined
+      : input.providers.find((provider) => provider.instanceId === slot.instanceId);
+  return slotProvider !== undefined &&
+    kodoSubAgentsSupportForDriver(slotProvider.driver).support === "none"
+    ? `The Orchestrator model runs on ${slotProvider.displayName ?? slotProvider.driver}, which cannot receive the delegation tools. Change the Orchestrator model in Settings first.`
+    : undefined;
+}
+
 export const makeKodoLeadCommands = (services: KodoLeadCommandServices) => {
   const getShell = (threadId: ThreadId) =>
     services.projectionStore.getThreadShell(threadId) as Effect.Effect<
@@ -64,24 +91,13 @@ export const makeKodoLeadCommands = (services: KodoLeadCommandServices) => {
     }
     const providers: ReadonlyArray<ServerProvider> = yield* services.providerRegistry.getProviders;
     const settings = yield* services.serverSettings.getSettings.pipe(Effect.option);
-    const own = kodoThreadOwnModel(thread);
-    const ownRefusal = kodoLeadSupportRefusal({
-      provider: providers.find((provider) => provider.instanceId === own.instanceId),
-      externalOpenCode:
-        settings._tag === "Some" &&
-        hasServerUrl(settings.value.providerInstances[own.instanceId]?.config),
+    return kodoLeadProvidersRefusal({
+      thread,
+      providers,
+      providerInstances: settings._tag === "Some" ? settings.value.providerInstances : undefined,
+      orchestratorSlot:
+        settings._tag === "Some" ? settings.value.modeModelSelections.orchestrator : null,
     });
-    if (ownRefusal !== undefined) return ownRefusal;
-    // The lead's turns run on the Orchestrator model when one is set, so its provider must receive the tools too.
-    const slot = settings._tag === "Some" ? settings.value.modeModelSelections.orchestrator : null;
-    const slotProvider =
-      slot === null
-        ? undefined
-        : providers.find((provider) => provider.instanceId === slot.instanceId);
-    return slotProvider !== undefined &&
-      kodoSubAgentsSupportForDriver(slotProvider.driver).support === "none"
-      ? `The Orchestrator model runs on ${slotProvider.displayName ?? slotProvider.driver}, which cannot receive the delegation tools. Change the Orchestrator model in Settings first.`
-      : undefined;
   });
 
   /** The thread's next lead state for a set command, or the reason it is refused. */

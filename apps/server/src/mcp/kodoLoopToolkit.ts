@@ -117,7 +117,10 @@ const refuseReadOnlyCaller = (tool: string) =>
       ? Effect.fail(
           new OrchestratorMcpFailure({
             code: "capability_denied",
-            message: `${tool} changes things, and this thread is in a read-only mode (Ask, Plan or Review). Switch the thread to Code mode to use it.`,
+            message:
+              caller.caller?.kodoLead == null
+                ? `${tool} changes things, and this thread is in a read-only mode (Ask, Plan or Review). Switch the thread to Code mode to use it.`
+                : `${tool} changes things, and this thread only delegates. Hand the work to a worker with delegate_task; a person can start a loop with /loop.`,
           }),
         )
       : Effect.void,

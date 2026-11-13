@@ -1,13 +1,21 @@
 import { sendToThreadOrLoop } from "../kodo/loop/LoopService.ts"; // KODO: loop-intercept
-import { kodoInteractionModeLimit } from "../kodo/interactionMode.ts"; // KODO: mode-peer-limit
+import { kodoInteractionModeLimit, kodoLimitMode } from "../kodo/interactionMode.ts"; // KODO: mode-peer-limit
 import { makeKodoDelegationGuard } from "../kodo/delegation/delegationGuard.ts"; // KODO: delegation-normalize
+import {
+  kodoStartRefusalMessage,
+  makeKodoStartConfirmation,
+} from "../kodo/swarm/startConfirmation.ts"; // KODO: swarm-delegate
+import {
+  kodoOrchestratorWriteRefusal,
+  kodoWithoutOrchestratorThread,
+} from "../kodo/swarm/swarmTarget.ts"; // KODO: swarm-guard
 import { isKodoLead } from "../kodo/delegation/leadGuard.ts"; // KODO: delegation-normalize
 import {
   kodoWorkerInstanceIds,
   normalizeLeadDelegation,
 } from "../kodo/delegation/leadDelegation.ts"; // KODO: delegation-normalize
 import { KODO_LEAD_REMOTE_REFUSAL } from "../kodo/delegation/limits.ts"; // KODO: delegation-normalize
-import { kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel"; // KODO: delegation-normalize
+import { kodoModeModelSlot, kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel"; // KODO: delegation-normalize
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts"; // KODO: delegation-normalize
 import {
   CommandId,
@@ -49,6 +57,7 @@ import {
   type OrchestratorMcpUpdateScheduledTaskInput,
   type OrchestratorMcpListScheduledTasksInput,
   type ProjectId,
+  RuntimeRequestId, // KODO: swarm-delegate
   type OrchestratorMcpThreadDetail,
   type OrchestratorMcpThreadPullRequest,
   type OrchestratorMcpThreadInterruptInput,
@@ -96,6 +105,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result"; // KODO: swarm-delegate
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -1055,6 +1065,42 @@ const make = Effect.gen(function* () {
   const gitDriver = yield* GitVcsDriver.GitVcsDriver;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const remoteDelegation = yield* RemoteDelegation.RemoteDelegation;
+  // KODO: swarm-delegate - the server's gate on the Orchestrator starting work
+  const kodoStartConfirmation = makeKodoStartConfirmation({
+    askBefore: serverSettings.getSettings.pipe(
+      Effect.map((settings) => settings.kodoOrchestratorAskBeforeStart),
+      // A setting that cannot be read asks.
+      Effect.orElseSucceed(() => true),
+    ),
+    eventSequence: (threadId) => threadManagement.getThreadEventSequence(threadId),
+    readRequest: (threadId, requestId) =>
+      threadManagement
+        .getThreadRecords(threadId, ["runtimeRequests"], {
+          runtimeRequestStatuses: ["pending", "resolved", "cancelled", "expired"],
+        })
+        .pipe(
+          Effect.map((records) =>
+            records.runtimeRequests.find((request) => request.id === requestId),
+          ),
+        ),
+    record: (command) => threadManagement.dispatch(command),
+    settled: ({ threadId, afterSequence, requestId }) =>
+      threadManagement
+        .streamStoredEventsFrom({ threadId, afterSequence, eventType: "runtime-request.updated" })
+        .pipe(
+          Stream.filterMap(({ event }) =>
+            event.type === "runtime-request.updated" &&
+            event.payload.id === requestId &&
+            event.payload.status !== "pending"
+              ? Result.succeed(event.payload)
+              : Result.fail(undefined),
+          ),
+          Stream.runHead,
+          Effect.flatMap(Option.match({ onNone: () => Effect.never, onSome: Effect.succeed })),
+        ),
+    timeout: Duration.millis(MAX_WAIT_TIMEOUT_MS),
+  });
+
   // KODO: delegation-normalize - the lead's caps, depth rule and usage gate; the instance registry is optional, as in the loop.
   const kodoGuard = makeKodoDelegationGuard({
     threads: threadManagement,
@@ -1092,15 +1138,28 @@ const make = Effect.gen(function* () {
       : ({ input, lead: false, swarm: false } as const);
   });
 
-  /** KODO: delegation-normalize - a lead's worker inherits the lead's own model, not the orchestrator model standing in for it. */
+  /**
+   * KODO: delegation-normalize - a lead's worker inherits the lead's own model, not the orchestrator
+   * model standing in for it. The Orchestrator's worker (KODO: swarm-delegate) resolves its model and its
+   * provider's enablement as the project it starts in would: its default model, else the Orchestrator's own.
+   */
   const kodoInheritingParent = <Parent extends Pick<OrchestrationV2ThreadProjection, "thread">>(
     parent: Parent,
     lead: boolean,
+    targetProject?: {
+      readonly id: ProjectId;
+      readonly defaultModelSelection: ModelSelection | null;
+    },
   ): Parent =>
     lead
       ? {
           ...parent,
-          thread: { ...parent.thread, modelSelection: kodoThreadOwnModel(parent.thread) },
+          thread: {
+            ...parent.thread,
+            modelSelection:
+              targetProject?.defaultModelSelection ?? kodoThreadOwnModel(parent.thread),
+            ...(targetProject === undefined ? {} : { projectId: targetProject.id }),
+          },
         }
       : parent;
 
@@ -1126,10 +1185,53 @@ const make = Effect.gen(function* () {
           "Work started from here runs in the project's own checkout. Omit isolation.",
         );
       }
-      yield* requireProject(projectId);
-      return projectId;
+      return yield* requireProject(projectId);
     },
   );
+
+  /** KODO: swarm-delegate - asks the person before the Orchestrator's worker starts, and refuses if they do not approve. */
+  const kodoConfirmStart = Effect.fn("OrchestratorMcpService.kodoConfirmStart")(function* (input: {
+    readonly parent: Pick<OrchestrationV2ThreadProjection, "thread">;
+    readonly parentRunId: RunId;
+    readonly rootNodeId: NodeId;
+    readonly commandId: CommandId;
+    readonly project: { readonly id: ProjectId; readonly title: string };
+    readonly mode: string;
+    readonly model: string;
+    readonly task: string;
+  }) {
+    const threadId = input.parent.thread.id;
+    // The worker runs on its mode's slot when one is set, else on the model it inherits.
+    const slotModel = yield* serverSettings.getSettings.pipe(
+      Effect.map((settings) => settings.modeModelSelections[kodoModeModelSlot(input.mode)]?.model),
+      Effect.orElseSucceed(() => undefined),
+    );
+    const answer = yield* kodoStartConfirmation
+      .confirm({
+        threadId,
+        runId: input.parentRunId,
+        rootNodeId: input.rootNodeId,
+        requestId: RuntimeRequestId.make(`kodo-start:${input.commandId}`),
+        commandId: input.commandId,
+        summary: {
+          projectTitle: input.project.title,
+          projectId: input.project.id,
+          mode: input.mode,
+          model: slotModel ?? input.model,
+          request: input.task,
+        },
+      })
+      .pipe(
+        Effect.mapError((error) =>
+          failure("orchestration_error", `Could not ask before starting: ${errorMessage(error)}`),
+        ),
+      );
+    if (answer === "approved" || answer === "not-asked") return;
+    return yield* failure(
+      "capability_denied",
+      kodoStartRefusalMessage(answer, input.project.title),
+    );
+  });
 
   /**
    * KODO: delegation-normalize - what a lead's new worker must pass: the usage gate over every
@@ -1241,7 +1343,8 @@ const make = Effect.gen(function* () {
       parent,
       limits: {
         runtimeMode: parent.thread.runtimeMode,
-        interactionMode: parent.thread.interactionMode,
+        // KODO: delegation-policy - a lead's other tools are bounded by its read-only floor; delegate_task alone reads the displayed mode
+        interactionMode: kodoLimitMode(parent.thread.interactionMode, parent.thread.kodoLead),
       },
     } as const;
   });
@@ -1297,6 +1400,12 @@ const make = Effect.gen(function* () {
         : yield* loadTargetThread(threadId);
     return { ...caller, target } as const;
   });
+
+  /** KODO: swarm-guard - no agent writes to the Orchestrator's conversation. */
+  const kodoRefuseOrchestratorWrite = (scope: McpInvocationScope, threadId: ThreadId) => {
+    const refusal = kodoOrchestratorWriteRefusal(scope.thread?.threadId, threadId);
+    return refusal === undefined ? Effect.void : failure("capability_denied", refusal);
+  };
 
   /** Cross-thread writes require a live caller run; stale session credentials cannot authorize them. */
   const assertLiveCallerForOtherThread = (
@@ -2509,9 +2618,10 @@ const make = Effect.gen(function* () {
         }
         const { scope, parent } = yield* loadThreadCaller(callerScope, "delegate_task");
         // KODO: swarm-delegate - the Orchestrator starts work only in a project it was told to, never in its own
-        const kodoTargetProjectId = kodoSwarm
+        const kodoTargetProject = kodoSwarm
           ? yield* kodoSwarmTargetProject(parent.thread.projectId, input)
           : undefined;
+        const kodoTargetProjectId = kodoTargetProject?.id;
         if (
           kodoTargetProjectId === undefined &&
           input.target?.projectId !== undefined &&
@@ -2544,7 +2654,7 @@ const make = Effect.gen(function* () {
         });
         const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
         const target = yield* resolveTargetRechecking({
-          parent: kodoInheritingParent(parent, kodoLead), // KODO: delegation-normalize
+          parent: kodoInheritingParent(parent, kodoLead, kodoTargetProject), // KODO: delegation-normalize
           target: input.target,
           providers,
           skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
@@ -2558,6 +2668,19 @@ const make = Effect.gen(function* () {
           parent.thread.interactionMode,
           input.interactionMode,
         ); // KODO: mode-child-limit
+        // KODO: swarm-delegate - the person confirms each worker the Orchestrator would start, before any cap is taken
+        if (kodoTargetProject !== undefined && !isRetryOfAcceptedDelegation) {
+          yield* kodoConfirmStart({
+            parent,
+            parentRunId: parentRun.id,
+            rootNodeId: parentRun.rootNodeId,
+            commandId,
+            project: kodoTargetProject,
+            mode: interactionMode,
+            model: target.modelSelection.model,
+            task: taskPrompt(input),
+          });
+        }
         // KODO: delegation-normalize - a retry of a delegation already accepted starts nothing new
         const kodoRelease: Effect.Effect<void> =
           kodoLead && !isRetryOfAcceptedDelegation
@@ -3104,16 +3227,21 @@ const make = Effect.gen(function* () {
       const projectId = input.allProjects
         ? null
         : yield* resolveProjectTarget(parent, input.projectId);
-      const projectThreads = yield* threadManagement
-        .listProjectThreads({
-          projectId: projectId ?? undefined,
-          includeSubagents: input.includeSubagents !== false,
-        })
-        .pipe(
-          Effect.mapError((error) =>
-            failure("orchestration_error", `Unable to list threads: ${errorMessage(error)}`),
+      const projectThreads = kodoWithoutOrchestratorThread(
+        // KODO: swarm-guard - the Orchestrator's conversation is not on other agents' lists
+        scope.thread?.threadId,
+        yield* threadManagement
+          .listProjectThreads({
+            projectId: projectId ?? undefined,
+            includeSubagents: input.includeSubagents !== false,
+          })
+          .pipe(
+            Effect.mapError((error) =>
+              failure("orchestration_error", `Unable to list threads: ${errorMessage(error)}`),
+            ),
           ),
-        );
+        (thread) => thread.id,
+      );
       const nowMs = yield* Clock.currentTimeMillis;
       // An empty list is no filter: clients that fill every optional field send `[]`.
       const statuses =
@@ -3260,6 +3388,7 @@ const make = Effect.gen(function* () {
     }),
     sendToThread: Effect.fn("OrchestratorMcpService.sendToThread")(function* (scope, input) {
       if (scope.thread !== undefined) yield* kodoGuard.guardWorkerMessaging(scope.thread.threadId); // KODO: delegation-normalize
+      yield* kodoRefuseOrchestratorWrite(scope, input.threadId); // KODO: swarm-guard
       const { parent, limits, target } = yield* loadScopedThread(scope, input.threadId, ["runs"]);
       yield* assertLiveCallerForOtherThread(scope, parent, target);
       yield* resolveRuntimeMode(limits.runtimeMode, target.thread.runtimeMode);
@@ -3371,6 +3500,7 @@ const make = Effect.gen(function* () {
       } satisfies OrchestratorMcpThreadWaitResult;
     }),
     interruptThread: Effect.fn("OrchestratorMcpService.interruptThread")(function* (scope, input) {
+      yield* kodoRefuseOrchestratorWrite(scope, input.threadId); // KODO: swarm-guard
       const { parent, limits, target } = yield* loadScopedThread(scope, input.threadId, ["runs"]);
       yield* assertLiveCallerForOtherThread(scope, parent, target);
       yield* resolveRuntimeMode(limits.runtimeMode, target.thread.runtimeMode);

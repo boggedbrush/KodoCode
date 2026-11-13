@@ -44,6 +44,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.projectsCreateFromThread]: AuthOrchestrationOperateScope,
   // Creates the Orchestrator's project and thread on first use.
   [WS_METHODS.serverEnsureKodoOrchestrator]: AuthOrchestrationOperateScope, // KODO: orchestrator-rpc
+  [WS_METHODS.serverResetKodoOrchestrator]: AuthOrchestrationOperateScope, // KODO: orchestrator-rpc
   [WS_METHODS.sourceControlCloneRepository]: AuthSourceControlWriteScope,
   [WS_METHODS.sourceControlPublishRepository]: AuthSourceControlWriteScope,
   [WS_METHODS.sourceControlStar]: AuthSourceControlWriteScope,

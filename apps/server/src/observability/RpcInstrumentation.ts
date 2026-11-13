@@ -95,6 +95,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverGetKodoLoopLedger]: "server", // KODO: loop-ledger-rpc
   [WS_METHODS.serverGetKodoDelegationUsage]: "server", // KODO: delegation-usage-rpc
   [WS_METHODS.serverEnsureKodoOrchestrator]: "server", // KODO: orchestrator-rpc
+  [WS_METHODS.serverResetKodoOrchestrator]: "server", // KODO: orchestrator-rpc
   [WS_METHODS.serverSignalProcess]: "server",
   [WS_METHODS.serverReportClientActivity]: "server",
   [WS_METHODS.scheduledTasksSubscribe]: "scheduledTasks",

@@ -1,5 +1,5 @@
 // KODO: thread-mode-type
-import { kodoInteractionModeRank } from "../kodo/interactionMode.ts"; // KODO: mode-rank
+import { kodoInteractionModeRank, kodoLimitMode } from "../kodo/interactionMode.ts"; // KODO: mode-rank
 import type { ProjectionRecordField } from "../orchestration-v2/ProjectionStore.ts";
 import {
   CommandId,
@@ -110,7 +110,11 @@ export const loadCaller = Effect.fn("mcp.loadCaller")(function* () {
     scope,
     threads,
     caller,
-    limits: { runtimeMode: caller.runtimeMode, interactionMode: caller.interactionMode },
+    limits: {
+      runtimeMode: caller.runtimeMode,
+      // KODO: delegation-policy - a lead's other tools are bounded by its read-only floor; delegate_task alone reads the displayed mode
+      interactionMode: kodoLimitMode(caller.interactionMode, caller.kodoLead),
+    },
   } satisfies Caller;
 });
 

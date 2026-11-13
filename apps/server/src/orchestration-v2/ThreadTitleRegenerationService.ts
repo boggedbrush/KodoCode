@@ -2,6 +2,7 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { isAttachmentOnlyBootstrapPrompt } from "@t3tools/shared/composerContextReferences";
 import {
   CommandId,
+  isKodoOrchestratorThreadId, // KODO: swarm-guard
   type ChatAttachment,
   type MessageId,
   type OrchestrationV2AppThread,
@@ -110,6 +111,10 @@ const make = Effect.gen(function* () {
   const execute: ThreadTitleRegenerationService["Service"]["execute"] = Effect.fn(
     "ThreadTitleRegenerationService.execute",
   )(function* (input) {
+    // KODO: swarm-guard - the Orchestrator's title is fixed: nothing is generated, the request just closes
+    if (isKodoOrchestratorThreadId(input.threadId)) {
+      return yield* complete({ threadId: input.threadId, requestId: input.requestId });
+    }
     const outcome:
       | { readonly type: "stale" }
       | { readonly type: "complete"; readonly title?: string } = yield* Effect.gen(function* () {

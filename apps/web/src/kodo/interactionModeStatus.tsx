@@ -6,18 +6,22 @@ interface KodoInteractionModeStatus {
   readonly appliesNextTurn: boolean;
   /** A loop is running and sets the mode itself; the picker does not change it. */
   readonly locked: boolean;
+  /** The Orchestrator conversation: its mode is the server's, so no mode chip is shown, and it runs on the Orchestrator model. */
+  readonly orchestrator: boolean;
 }
 
 const KodoInteractionModeStatusContext = createContext<KodoInteractionModeStatus>({
   appliesNextTurn: false,
   locked: false,
+  orchestrator: false,
 });
 
 export function KodoInteractionModeStatusProvider(props: {
   readonly appliesNextTurn: boolean;
   readonly locked?: boolean;
+  readonly orchestrator?: boolean;
   /** The sub-agents switch for the same composer, so one wrapper in the chat view serves both chips. */
-  readonly subAgents?: KodoSubAgentsStatus;
+  readonly subAgents?: KodoSubAgentsStatus | undefined;
   readonly children: ReactNode;
 }) {
   const children =
@@ -30,7 +34,11 @@ export function KodoInteractionModeStatusProvider(props: {
     );
   return (
     <KodoInteractionModeStatusContext.Provider
-      value={{ appliesNextTurn: props.appliesNextTurn, locked: props.locked ?? false }}
+      value={{
+        appliesNextTurn: props.appliesNextTurn,
+        locked: props.locked ?? false,
+        orchestrator: props.orchestrator ?? false,
+      }}
     >
       {children}
     </KodoInteractionModeStatusContext.Provider>

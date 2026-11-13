@@ -62,11 +62,16 @@ const withTools = <A, E>(
     ) => Effect.Effect<McpSchema.CallToolResult, never, never>;
     readonly commands: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>;
   }) => Effect.Effect<A, E, McpServer.McpServer>,
+  /** The caller leads workers (KODO: delegation-policy); its mode still shows `mode`. */
+  options: { readonly lead?: boolean } = {},
 ) =>
   Effect.gen(function* () {
     const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
     const shells = {
-      [callerId]: liveThreadShell(callerId, { interactionMode: mode }),
+      [callerId]: {
+        ...liveThreadShell(callerId, { interactionMode: mode }),
+        ...(options.lead === true ? { kodoLead: { kind: "sub-agents" as const } } : {}),
+      },
       // The target reads only when the caller does, so a read-only caller can name it.
       [otherId]: {
         ...liveThreadShell(otherId, { interactionMode: mode, activeRunId: null }),
@@ -125,6 +130,26 @@ it.effect("a read-only caller cannot change sub-agents, and can still read them"
       expect(yield* Ref.get(commands)).toEqual([]);
     }),
   ),
+);
+
+// KODO: delegation-policy - a lead only delegates, so it changes no other thread's sub-agents however its mode reads
+it.effect(
+  "a lead whose mode shows Code cannot change another thread's sub-agents, and can read them",
+  () =>
+    withTools(
+      "code",
+      ({ call, commands }) =>
+        Effect.gen(function* () {
+          // Refused at the thread's mode (a Code thread is above the lead's floor), whichever check sees it first.
+          expect(["capability_denied", "interaction_mode_escalation_denied"]).toContain(
+            declaredFailure(yield* call("t3_sub_agents_set", { threadId: otherId, enabled: false }))
+              ?.code,
+          );
+          expect((yield* call("t3_sub_agents_status", { threadId: otherId })).isError).toBe(false);
+          expect(yield* Ref.get(commands)).toEqual([]);
+        }),
+      { lead: true },
+    ),
 );
 
 it.effect("an agent cannot change its own thread, whatever it asks for", () =>

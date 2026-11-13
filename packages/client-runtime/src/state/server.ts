@@ -1216,6 +1216,12 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.serverEnsureKodoOrchestrator,
       concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
     }),
+    // KODO: orchestrator-rpc - a new conversation, refused while it has live workers; the server says why
+    resetKodoOrchestrator: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:reset-kodo-orchestrator",
+      tag: WS_METHODS.serverResetKodoOrchestrator,
+      concurrency: { mode: "singleFlight", key: ({ environmentId }) => environmentId },
+    }),
     prepareTriage: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:prepare-triage",
       tag: WS_METHODS.serverPrepareTriage,

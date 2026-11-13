@@ -65,7 +65,12 @@ export function kodoSubAgentsToggle(input: {
  * its model is the one it was given, not the lead's applied one. Spread over the copy.
  */
 export const kodoChildThreadFields = () =>
-  ({ kodoLead: null, kodoLoop: undefined, kodoModeModel: undefined }) as const;
+  ({
+    kodoLead: null,
+    kodoLoop: undefined,
+    kodoModeModel: undefined,
+    kodoOrigin: undefined,
+  }) as const;
 
 /**
  * The same for a fork. A fork never inherits a loop, and one an agent made never leads (only a
@@ -74,5 +79,5 @@ export const kodoChildThreadFields = () =>
  */
 export const kodoForkThreadFields = (createdBy: OrchestrationV2Actor) =>
   createdBy === "user"
-    ? ({ kodoLoop: undefined } as const)
-    : ({ kodoLead: null, kodoLoop: undefined } as const);
+    ? ({ kodoLoop: undefined, kodoOrigin: undefined } as const)
+    : ({ kodoLead: null, kodoLoop: undefined, kodoOrigin: undefined } as const);

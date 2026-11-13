@@ -1,6 +1,7 @@
 import {
   type CommandId,
   type EventId,
+  isKodoOrchestratorProjectId, // KODO: swarm-project
   MAX_SCRIPT_ID_LENGTH,
   type ModelSelection,
   type ProjectIconOverride,
@@ -145,7 +146,11 @@ export function planProjectCommand(input: {
 
   switch (command.type) {
     case "project.create": {
-      if (state.project !== undefined) {
+      // KODO: swarm-project - the Orchestrator's project, deleted by an older build, is made again by the server
+      if (
+        state.project !== undefined &&
+        !(state.project.deletedAt !== null && isKodoOrchestratorProjectId(command.projectId))
+      ) {
         return invariant(
           `Project '${command.projectId}' already exists and cannot be created twice.`,
         );

@@ -108,7 +108,7 @@ export const KodoInteractionModeChip = memo(function KodoInteractionModeChip(pro
   const [open, setOpen] = useComposerMenuState(props.hidden);
   const chipRef = useRef<HTMLButtonElement>(null);
   const option = kodoInteractionModeOption(props.interactionMode);
-  const { appliesNextTurn, locked } = useKodoInteractionModeStatus();
+  const { appliesNextTurn, locked, orchestrator } = useKodoInteractionModeStatus();
   const swapRef = useRef<HTMLSpanElement>(null);
   const shownModeRef = useRef(props.interactionMode);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- plays a one-shot DOM animation when the shown mode changes
@@ -124,6 +124,8 @@ export const KodoInteractionModeChip = memo(function KodoInteractionModeChip(pro
       { duration: 160, easing: "ease-out" },
     );
   }, [props.interactionMode]);
+  // KODO: orchestrator-lock - the Orchestrator's mode is the server's, so there is nothing to pick
+  if (orchestrator) return null;
   return (
     <Menu open={open} onOpenChange={setOpen}>
       <Tooltip>

@@ -1,5 +1,6 @@
 // The loop savings ledger: what ended loops spent and saved, kept after their threads are deleted.
 // Rows live in a Kodo-owned table (apps/server/src/kodo/ledger); this is only the read contract.
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { IsoDateTime, NonNegativeInt } from "./baseSchemas.ts";
@@ -25,8 +26,16 @@ export const KodoLoopLedgerTotals = Schema.Struct({
   loops: NonNegativeInt,
   rounds: NonNegativeInt,
   /** Workers a lead delegated to, one per worker thread. */
-  workers: NonNegativeInt,
-  split: Schema.Struct({ loop: KodoLoopLedgerSource, subAgents: KodoLoopLedgerSource }),
+  workers: NonNegativeInt.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
+  /** Absent from an older server's reply: all of it came from loops. */
+  split: Schema.Struct({ loop: KodoLoopLedgerSource, subAgents: KodoLoopLedgerSource }).pipe(
+    Schema.withDecodingDefault(
+      Effect.succeed({
+        loop: { tokens: 0, savedUsd: 0, priced: 0 },
+        subAgents: { tokens: 0, savedUsd: 0, priced: 0 },
+      }),
+    ),
+  ),
   /** Loops with a savings figure: stages on a cheaper model were priced on both sides. */
   pricedLoops: NonNegativeInt,
   /** Priced loops whose figure leaves something out (an unpriced stage, partial usage), so it is "at least". */

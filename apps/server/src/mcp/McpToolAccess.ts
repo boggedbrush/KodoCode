@@ -28,7 +28,7 @@ import {
   refusesInReadOnlyModes,
   refusesWhenAnyRefuses,
 } from "./kodoReadOnlyGuard.ts"; // KODO: mode-read-only-tools
-import { guardSwarmTools } from "./kodoSwarmGuard.ts"; // KODO: swarm-guard
+import { kodoOrchestratorWriteRefusal } from "../kodo/swarm/swarmTarget.ts"; // KODO: swarm-guard
 import { assertNotLinked, assertSameLink, callerLinkOrigin } from "./linkOrigin.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import { resolveChildInteractionMode, resolveRuntimeMode } from "./delegatedTaskModes.ts"; // KODO: mode-child-limit
@@ -202,6 +202,14 @@ export const writesThreads = <P, A, E, R>(
         const caller = yield* writingCaller;
         for (const threadId of threads(params)) {
           if (threadId === undefined || threadId === caller.scope.thread?.threadId) continue;
+          // KODO: swarm-guard - no agent writes to the Orchestrator's conversation
+          const kodoRefusal = kodoOrchestratorWriteRefusal(caller.scope.thread?.threadId, threadId);
+          if (kodoRefusal !== undefined) {
+            return yield* new OrchestratorMcpFailure({
+              code: "capability_denied",
+              message: kodoRefusal,
+            });
+          }
           const target = yield* caller.threads
             .getThreadShell(threadId)
             .pipe(Effect.mapError(unavailable));
@@ -444,8 +452,6 @@ export const toLayer = <Tools extends Record<string, Tool.Any>, EX = never, RX =
       Effect.map(
         (handlers) => guardReadOnlyModes(toolkit, handlers, declarations) as typeof handlers,
       ),
-      // KODO: swarm-guard - the Orchestrator may call only its own tools.
-      Effect.map((handlers) => guardSwarmTools(toolkit, handlers) as typeof handlers),
     );
   return handlersLayer(
     toolkit.toLayer(

@@ -317,6 +317,8 @@ const makeTestRelay = Effect.fnUntraced(function* (
       bootstrap: unused,
       update: unused,
       delete: unused,
+      ensureKodoOrchestratorProject: unused, // KODO: swarm-project
+      deleteKodoOrchestratorThread: unused, // KODO: swarm-project
       getByWorkspaceRoot: unused,
       workspaceScanDirectory: unused,
       snapshot: Effect.succeed({ projects: [project], updatedAt: NOW }),

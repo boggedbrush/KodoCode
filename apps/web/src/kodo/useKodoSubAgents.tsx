@@ -63,8 +63,10 @@ export function useKodoSubAgents(input: {
 
   const serverOn = input.serverLead?.kind === "sub-agents";
   const shownOn = isServerThread ? (pending ?? serverOn) : (draftChoice ?? input.draftDefault);
+  // KODO: swarm-delegate - the Orchestrator's flag is the server's: shown as it is, never flipped from here
+  const orchestrator = input.serverLead?.kind === "swarm";
   const toggle = kodoSubAgentsToggle({
-    lead: shownOn ? { kind: "sub-agents" } : null,
+    lead: orchestrator ? { kind: "swarm" } : shownOn ? { kind: "sub-agents" } : null,
     provider: input.provider,
     busy: input.busy,
     loopRunning: input.loopRunning,
@@ -112,18 +114,19 @@ export function useKodoSubAgents(input: {
   });
 
   const banner: ComposerBannerStackItem | null =
-    isServerThread && serverOn && running > 0
+    isServerThread && (serverOn || orchestrator) && running > 0
       ? {
           id: "kodo-sub-agents-workers",
           variant: "info",
           icon: <NetworkIcon className="text-mode-code" />,
           title: kodoWorkersBannerTitle(running),
-          description:
-            "Their results come back here. Stop workers ends them and leaves this turn running.",
+          description: orchestrator
+            ? "They run in their own projects, and also show in each project's thread list. Stop all ends every one of them."
+            : "Their results come back here. Stop workers ends them and leaves this turn running.",
           actions: input.canOperate ? (
             <Button size="xs" variant="outline" disabled={stopping} onClick={() => void stop()}>
               <CircleStopIcon aria-hidden />
-              Stop workers
+              {orchestrator ? "Stop all" : "Stop workers"}
             </Button>
           ) : undefined,
         }

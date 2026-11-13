@@ -672,4 +672,43 @@ describe("v2 thread shell lists", () => {
       harness.registry.dispose();
     }
   });
+
+  // KODO: orchestrator-hidden - what the Orchestrator starts is listed in its own project, like any thread.
+  it("lists a worker the Orchestrator started, and no other subagent", () => {
+    const harness = makeHarness();
+    const orchestrator: OrchestrationV2ThreadShell = {
+      ...v2ThreadShell,
+      id: KODO_ORCHESTRATOR_THREAD_ID,
+      projectId: KODO_ORCHESTRATOR_PROJECT_ID,
+      title: "Orchestrator",
+    };
+    const child = (id: string, title: string, parent: ThreadId): OrchestrationV2ThreadShell => ({
+      ...v2ThreadShell,
+      id: ThreadId.make(id),
+      title,
+      lineage: { parentThreadId: parent, relationshipToParent: "subagent", rootThreadId: parent },
+    });
+    harness.registry.set(harness.snapshotAtom(environmentId), {
+      ...v2ShellSnapshot,
+      threads: [
+        v2ThreadShell,
+        orchestrator,
+        child("thread:orchestrator-worker", "Orchestrator worker", KODO_ORCHESTRATOR_THREAD_ID),
+        child("thread:ordinary-subagent", "Ordinary subagent", v2ThreadShell.id),
+      ],
+    });
+    const atom = harness.threads.navigationThreadShellsAtom;
+    const dispose = harness.registry.mount(atom);
+    try {
+      expect(
+        harness.registry
+          .get(atom)
+          .map((thread) => thread.title)
+          .toSorted(),
+      ).toEqual([v2ThreadShell.title, "Orchestrator worker"].toSorted());
+    } finally {
+      dispose();
+      harness.registry.dispose();
+    }
+  });
 });

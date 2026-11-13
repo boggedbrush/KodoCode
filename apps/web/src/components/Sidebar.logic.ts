@@ -2,6 +2,7 @@ import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
+import { isKodoOrchestratorWorkerLineage } from "@t3tools/shared/kodoOrchestrator"; // KODO: orchestrator-hidden
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import * as React from "react";
@@ -575,7 +576,7 @@ export async function deleteSelectedThreadEntries<
 }
 
 export function isSidebarHiddenThread(thread: Pick<SidebarThreadSummary, "lineage">): boolean {
-  return !isListedThreadLineage(thread.lineage);
+  return !isListedThreadLineage(thread.lineage) && !isKodoOrchestratorWorkerLineage(thread.lineage); // KODO: orchestrator-hidden
 }
 
 // Subagent and side-chat threads have no sidebar row, so an open one is represented by

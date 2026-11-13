@@ -39,7 +39,33 @@ export function kodoSwarmCommandRefusal(command: Command): string | undefined {
       ? REFUSAL
       : undefined;
   }
-  return PROTECTED_ON_THREAD.has(command.type) && isKodoOrchestratorThreadId(idOf(command.threadId))
-    ? REFUSAL
-    : undefined;
+  if (!isKodoOrchestratorThreadId(idOf(command.threadId))) return undefined;
+  // A generated title would rename it; closing the request without one is how the title stays fixed.
+  if (command.type === "thread.title.regeneration.complete") {
+    return command.title === undefined ? undefined : REFUSAL;
+  }
+  return PROTECTED_ON_THREAD.has(command.type) ? REFUSAL : undefined;
+}
+
+/**
+ * Why a delegated task may not carry a target project, or undefined. Only the Orchestrator's own
+ * task starts in another project, and only in one that exists, that is not its own scratch project and
+ * that is not archived: a client may send this command, so the decision is made here, not at the MCP door.
+ */
+export function kodoSwarmTaskTargetRefusal(input: {
+  readonly targetProjectId: string | undefined;
+  readonly parentIsSwarm: boolean;
+  /** The target as the project store has it: active, and archived or not. */
+  readonly target: { readonly archivedAt: unknown } | undefined;
+}): string | undefined {
+  if (input.targetProjectId === undefined) return undefined;
+  if (!input.parentIsSwarm) return "Only the Orchestrator starts work in another project.";
+  if (isKodoOrchestratorProjectId(input.targetProjectId)) {
+    return "The Orchestrator starts work in the person's projects, never its own.";
+  }
+  if (input.target === undefined) return `Project ${input.targetProjectId} does not exist.`;
+  if (input.target.archivedAt !== null) {
+    return `Project ${input.targetProjectId} is archived.`;
+  }
+  return undefined;
 }

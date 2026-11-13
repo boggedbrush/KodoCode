@@ -327,7 +327,9 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "Orchestrator",
     to: "/settings/threads",
     scope: "environment-defaults",
-    searchTerms: ["orchestrator swarm pinned conversation all projects status delegate model"],
+    searchTerms: [
+      "orchestrator swarm pinned conversation all projects status delegate model approve ask before start reset worker",
+    ],
     environmentOnly: true,
   },
   // KODO: sub-agents-search

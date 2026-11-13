@@ -1,5 +1,7 @@
 import {
   CommandId,
+  KODO_ORCHESTRATOR_PROJECT_ID, // KODO: swarm-project
+  isKodoOrchestratorThreadId, // KODO: swarm-project
   type OrchestrationProjectShell,
   ProjectId,
   type Project,
@@ -18,6 +20,10 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
+import {
+  kodoOrchestratorProjectRefusal,
+  planKodoOrchestratorProject,
+} from "../kodo/swarm/orchestratorProject.ts"; // KODO: swarm-project
 import { withCommandMetrics } from "../observability/Metrics.ts";
 import * as EventSink from "../orchestration-v2/EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -136,6 +142,14 @@ export class ProjectService extends Context.Service<
     >;
     readonly update: (input: ProjectUpdateInput) => Effect.Effect<Project, ProjectServiceError>;
     readonly delete: (input: ProjectDeleteInput) => Effect.Effect<Project, ProjectServiceError>;
+    /** KODO: swarm-project - makes the Orchestrator's project, or puts it right if it was deleted, archived or moved. */
+    readonly ensureKodoOrchestratorProject: (input: {
+      readonly workspaceRoot: string;
+    }) => Effect.Effect<Project, ProjectServiceError>;
+    /** KODO: swarm-project - deletes a conversation of the Orchestrator's series (a reset); no command from outside may. */
+    readonly deleteKodoOrchestratorThread: (
+      threadId: ThreadId,
+    ) => Effect.Effect<void, ProjectServiceError>;
     readonly getById: (
       projectId: ProjectId,
       options?: { readonly includeDeleted?: boolean },
@@ -376,7 +390,7 @@ export const make = Effect.gen(function* () {
     return Option.isNone(row) ? Option.none() : Option.some(yield* hydrate(row.value));
   });
 
-  const create: ProjectService["Service"]["create"] = Effect.fn("ProjectService.create")(
+  const createProject: ProjectService["Service"]["create"] = Effect.fn("ProjectService.create")(
     function* (input) {
       const workspaceRoot = yield* normalizeWorkspaceRoot({
         projectId: input.projectId,
@@ -396,8 +410,20 @@ export const make = Effect.gen(function* () {
     },
   );
 
+  // KODO: swarm-project - the Orchestrator's project is the server's, whoever asks
+  const refuseKodoOrchestratorProject = (projectId: ProjectId) => {
+    const detail = kodoOrchestratorProjectRefusal(projectId);
+    return detail === undefined
+      ? Effect.void
+      : Effect.fail(new ProjectInvalidError({ projectId, detail }));
+  };
+
+  const create: ProjectService["Service"]["create"] = (input) =>
+    refuseKodoOrchestratorProject(input.projectId).pipe(Effect.andThen(createProject(input)));
+
   const update: ProjectService["Service"]["update"] = Effect.fn("ProjectService.update")(
     function* (input) {
+      yield* refuseKodoOrchestratorProject(input.projectId); // KODO: swarm-project
       const existing = yield* readRow(input.projectId);
       if (Option.isNone(existing)) {
         return yield* new ProjectNotFoundError({ projectId: input.projectId });
@@ -440,9 +466,42 @@ export const make = Effect.gen(function* () {
     function* (input) {
       const existing = yield* getByWorkspaceRoot(input.workspaceRoot);
       if (Option.isSome(existing)) return { project: existing.value, created: false };
-      return { project: yield* create(input), created: true };
+      return { project: yield* createProject(input), created: true };
     },
   );
+
+  // KODO: swarm-project - the Orchestrator's own setup; the only way its project is made or put right
+  const ensureKodoOrchestratorProject: ProjectService["Service"]["ensureKodoOrchestratorProject"] =
+    Effect.fn("ProjectService.ensureKodoOrchestratorProject")(function* (input) {
+      const projectId = KODO_ORCHESTRATOR_PROJECT_ID;
+      const workspaceRoot = yield* normalizeWorkspaceRoot({
+        projectId,
+        workspaceRoot: input.workspaceRoot,
+        createIfMissing: true,
+      });
+      const existing = Option.getOrUndefined(yield* readRow(projectId, { includeDeleted: true }));
+      const plan = planKodoOrchestratorProject({ existing, workspaceRoot });
+      if (plan?.type === "create") {
+        yield* commit({
+          type: "project.create",
+          commandId: plan.commandId,
+          projectId,
+          title: plan.title,
+          workspaceRoot,
+        });
+        yield* projectEnrichment.invalidate([workspaceRoot]);
+      } else if (plan?.type === "repair") {
+        yield* commit({
+          type: "project.meta.update",
+          commandId: plan.commandId,
+          projectId,
+          archived: false,
+          ...(plan.workspaceRoot === undefined ? {} : { workspaceRoot: plan.workspaceRoot }),
+        });
+        yield* projectEnrichment.invalidate([workspaceRoot]);
+      }
+      return yield* readCommitted(projectId);
+    });
 
   const deleteChildThread = Effect.fn("ProjectService.deleteChildThread")(function* (
     input: ProjectDeleteInput,
@@ -525,6 +584,35 @@ export const make = Effect.gen(function* () {
     );
   });
 
+  // KODO: swarm-project
+  const deleteKodoOrchestratorThread: ProjectService["Service"]["deleteKodoOrchestratorThread"] =
+    Effect.fn("ProjectService.deleteKodoOrchestratorThread")(function* (threadId) {
+      const projectId = KODO_ORCHESTRATOR_PROJECT_ID;
+      if (!isKodoOrchestratorThreadId(threadId)) {
+        return yield* new ProjectInvalidError({
+          projectId,
+          detail: "Only the Orchestrator's own conversation can be reset.",
+        });
+      }
+      yield* threadCommands
+        .withLock(
+          threadId,
+          deleteChildThread(
+            {
+              commandId: CommandId.make(`kodo-orchestrator:reset:${threadId}`),
+              projectId,
+              force: true,
+            },
+            threadId,
+          ),
+        )
+        .pipe(
+          Effect.mapError(
+            (cause) => new ProjectOperationError({ operation: "delete-thread", projectId, cause }),
+          ),
+        );
+    });
+
   // Best-effort cleanup releases disabled instances kept alive by overrides; crashes have no replay to revisit deletion.
   const clearProjectSettingsOverrides = (projectId: ProjectId) =>
     serverSettings.updateSettings({ projectSettingsOverrides: { [projectId]: null } }).pipe(
@@ -540,6 +628,7 @@ export const make = Effect.gen(function* () {
   const deleteProject: ProjectService["Service"]["delete"] = Effect.fn("ProjectService.delete")(
     function* (input) {
       const { projectId } = input;
+      yield* refuseKodoOrchestratorProject(projectId); // KODO: swarm-project
       // Read deleted rows so retries replay receipts and other command ids fail as not found.
       const existing = yield* readRow(projectId, { includeDeleted: true });
       if (Option.isNone(existing)) {
@@ -634,6 +723,8 @@ export const make = Effect.gen(function* () {
     bootstrap,
     update,
     delete: deleteProject,
+    ensureKodoOrchestratorProject, // KODO: swarm-project
+    deleteKodoOrchestratorThread, // KODO: swarm-project
     getById,
     getByWorkspaceRoot,
     workspaceScanDirectory,

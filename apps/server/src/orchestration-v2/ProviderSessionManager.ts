@@ -2,6 +2,7 @@ import { AgentScope } from "@t3tools/shared/AgentScope";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
+  isKodoOrchestratorThreadId, // KODO: swarm-guard
   isOrchestrationV2WorkActive,
   ModelSelection,
   OrchestrationV2DomainEvent,
@@ -499,14 +500,15 @@ export const layerWithOptions = (
                 >(["orchestration", "worktree", "pull-requests"]);
                 if (browserToolsAvailable) capabilities.add("preview");
                 if (deviceToolsAvailable) capabilities.add("device");
+                // KODO: swarm-guard - the Orchestrator is known by its id alone, so no failed read can leave it unmarked
+                const kodoSwarm = isKodoOrchestratorThreadId(threadId);
                 const lineageThread = yield* projectionStore.getThread(threadId).pipe(
                   Effect.map((thread) => ({
                     subagent: thread.lineage.relationshipToParent === "subagent",
-                    kodoSwarm: thread.kodoLead?.kind === "swarm", // KODO: swarm-guard
                   })),
-                  Effect.orElseSucceed(() => ({ subagent: false, kodoSwarm: false })),
+                  Effect.orElseSucceed(() => ({ subagent: false })),
                 );
-                const { subagent, kodoSwarm } = lineageThread;
+                const { subagent } = lineageThread;
                 const existing = yield* mcpSessions.read(threadId);
                 if (existing !== undefined) {
                   // Reserve before async validation so release cannot revoke between validation and reservation.

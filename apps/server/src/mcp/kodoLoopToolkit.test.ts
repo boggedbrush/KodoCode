@@ -70,11 +70,16 @@ const withTools = <A, E>(
     ) => Effect.Effect<McpSchema.CallToolResult, never, never>;
     readonly commands: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>;
   }) => Effect.Effect<A, E, McpServer.McpServer>,
+  /** The caller leads workers (KODO: delegation-policy); its mode still shows `mode`. */
+  options: { readonly lead?: boolean } = {},
 ) =>
   Effect.gen(function* () {
     const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
     const shells = {
-      [threadId]: liveThreadShell(threadId, { interactionMode: mode }),
+      [threadId]: {
+        ...liveThreadShell(threadId, { interactionMode: mode }),
+        ...(options.lead === true ? { kodoLead: { kind: "sub-agents" as const } } : {}),
+      },
       [otherThreadId]: liveThreadShell(otherThreadId, { interactionMode: mode, activeRunId: null }),
       [busyThreadId]: liveThreadShell(busyThreadId, { interactionMode: mode }),
     } as Record<string, ReturnType<typeof liveThreadShell>>;
@@ -147,6 +152,30 @@ const withTools = <A, E>(
       return yield* body({ call, commands });
     }).pipe(Effect.provide(layer));
   });
+
+// KODO: delegation-policy - a lead only delegates, so it starts no loop on another thread however its mode reads
+it.effect(
+  "a lead whose mode shows Code starts and stops no loop on another thread, and can read one",
+  () =>
+    withTools(
+      "code",
+      ({ call, commands }) =>
+        Effect.gen(function* () {
+          for (const [name, args] of [
+            ["t3_loop_start", { request: "Add retries", threadId: otherThreadId }],
+            ["t3_loop_stop", { threadId: otherThreadId }],
+          ] as const) {
+            // Refused at the thread's mode (a Code thread is above the lead's floor), whichever check sees it first.
+            expect(["capability_denied", "interaction_mode_escalation_denied"]).toContain(
+              declaredFailure(yield* call(name, args))?.code,
+            );
+          }
+          expect((yield* call("t3_loop_status", { threadId: otherThreadId })).isError).toBe(false);
+          expect(yield* Ref.get(commands)).toEqual([]);
+        }),
+      { lead: true },
+    ),
+);
 
 it.effect("a thread in a read-only mode cannot start or stop a loop, but can read one", () =>
   withTools("plan", ({ call, commands }) =>

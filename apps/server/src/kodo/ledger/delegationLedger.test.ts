@@ -11,6 +11,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import {
   finishedWorkerOf,
+  lateUsageWorkerOf,
   makeDelegationLedgerLook,
 } from "../delegation/DelegationLedgerWorker.ts";
 import { summarizeDelegation } from "../delegation/delegationUsage.ts";
@@ -53,6 +54,8 @@ const turn = (inputTokens: number, outputTokens: number, model?: string) =>
 
 interface Fixture {
   readonly leadLeads: boolean;
+  /** The Orchestrator leads, rather than a person's sub-agents lead (KODO: swarm-delegate). */
+  readonly leadKind?: "swarm";
   readonly leadModel: string;
   readonly workerModel: string;
   readonly turns: ReadonlyArray<unknown>;
@@ -68,7 +71,9 @@ const fakeOrchestrator = (fixture: Fixture) =>
               id: leadId,
               projectId: ProjectId.make("p1"),
               modelSelection: select(fixture.leadModel),
-              ...(fixture.leadLeads ? { kodoLead: { kind: "sub-agents" } } : {}),
+              ...(fixture.leadLeads
+                ? { kodoLead: { kind: fixture.leadKind ?? "sub-agents" } }
+                : {}),
               lineage: { parentThreadId: null, relationshipToParent: null },
             } as never)
           : threadId === workerId
@@ -205,6 +210,38 @@ describe("a finished worker", () => {
       ]);
     }).pipe(Effect.provide(layerTest)),
   );
+
+  // KODO: swarm-delegate - the Orchestrator's workers are sub-agent workers in the ledger, in the project they ran in
+  it.effect(
+    "records the Orchestrator's worker as a sub-agent worker of its own, in the worker's project",
+    () =>
+      Effect.gen(function* () {
+        yield* lookWith({ ...baseFixture, leadKind: "swarm" });
+        expect(yield* ledgerRows).toMatchObject([
+          { loop_id: "worker:worker", kind: "sub-agents", thread_id: "lead", priced: 1 },
+        ]);
+      }).pipe(Effect.provide(layerTest)),
+  );
+
+  it("looks again at a recorded worker whose provider turn reports usage later, and at no other thread", () => {
+    const turnEvent = (threadId: ThreadId, payload: Record<string, unknown>) =>
+      ({ type: "provider-turn.updated", threadId, payload }) as never;
+    const finished = new Set([workerId]);
+    expect(lateUsageWorkerOf(turnEvent(workerId, { turnTokenUsage: {} }), finished)).toBe(workerId);
+    expect(lateUsageWorkerOf(turnEvent(workerId, { tokenUsage: {} }), finished)).toBe(workerId);
+    // No usage on the update, another thread, or an event of another kind: nothing to read.
+    expect(lateUsageWorkerOf(turnEvent(workerId, {}), finished)).toBeUndefined();
+    expect(lateUsageWorkerOf(turnEvent(leadId, { turnTokenUsage: {} }), finished)).toBeUndefined();
+    expect(
+      lateUsageWorkerOf(turnEvent(workerId, { turnTokenUsage: {} }), new Set()),
+    ).toBeUndefined();
+    expect(
+      lateUsageWorkerOf(
+        { type: "run.updated", threadId: workerId, payload: {} } as never,
+        finished,
+      ),
+    ).toBeUndefined();
+  });
 
   it.effect("is not counted twice when the same work is replayed", () =>
     Effect.gen(function* () {

@@ -1417,6 +1417,10 @@ export const ServerSettings = Schema.Struct({
   ),
   // KODO: orchestrator-setting - whether the pinned Orchestrator row is shown. Its model is the existing orchestrator slot.
   kodoOrchestratorEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  // KODO: orchestrator-setting - whether the person confirms each worker the Orchestrator would start. Only a person changes it.
+  kodoOrchestratorAskBeforeStart: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(true)),
+  ),
   defaultRuntimeMode: RuntimeMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
   ),
@@ -1861,6 +1865,7 @@ export const ServerSettingsPatch = Schema.Struct({
     Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: KODO_SUB_AGENTS_MAX_WORKERS_LIMIT })),
   ), // KODO: sub-agents-setting
   kodoOrchestratorEnabled: Schema.optionalKey(Schema.Boolean), // KODO: orchestrator-setting
+  kodoOrchestratorAskBeforeStart: Schema.optionalKey(Schema.Boolean), // KODO: orchestrator-setting
   /** Replaces each project's override set; null removes it. Omitted providerInstances retains its stored value. */
   projectSettingsOverrides: Schema.optionalKey(
     Schema.Record(

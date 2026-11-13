@@ -7,7 +7,7 @@ import type {
 } from "@t3tools/contracts";
 import * as AsyncResult from "effect/reactivity/AsyncResult";
 import { ArrowUpLeftIcon, BotIcon } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import { Button } from "../components/ui/button";
 import { serverEnvironment } from "../state/server";
@@ -32,10 +32,13 @@ function LeadUsageLine(props: {
   });
   const refresh = useAtomRefresh(atom);
   const key = kodoUsageRefreshKey(props.subagents);
+  // The atom reads once when it mounts; only a worker starting or finishing after that is a reason to read again.
+  const readFor = useRef(key);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- re-reads server-held usage when a worker starts or finishes
   useEffect(() => {
+    if (readFor.current === key) return;
+    readFor.current = key;
     refresh();
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `key` says when a worker started or finished
   }, [key, refresh]);
   const usage = AsyncResult.getOrElse(useAtomValue(atom), () => null);
   const view = usage === null ? null : describeKodoDelegationUsage(usage);
@@ -78,7 +81,8 @@ export function KodoDelegationBar(props: {
     parent: props.parent,
   });
   if (worker === null) {
-    return props.lead?.kind === "sub-agents" && props.threadId !== null ? (
+    // KODO: swarm-delegate - the Orchestrator shows the same line: what it and its workers spent
+    return props.lead != null && props.threadId !== null ? (
       <LeadUsageLine
         environmentId={props.environmentId}
         threadId={props.threadId}
