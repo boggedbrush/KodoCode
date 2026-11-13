@@ -8,7 +8,7 @@ import {
   isKodoOrchestratorProjectId,
 } from "@t3tools/contracts";
 
-export const KODO_ORCHESTRATOR_PROJECT_REFUSAL =
+const KODO_ORCHESTRATOR_PROJECT_REFUSAL =
   "The Orchestrator's project is managed by the server and cannot be created, changed or deleted.";
 
 /** The reason a project command on this id is refused, or undefined for any other project. */

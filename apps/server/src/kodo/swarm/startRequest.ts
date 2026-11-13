@@ -35,7 +35,7 @@ export const isKodoStartRequest = (
   request.nativeRequestRef?.driver === START_REQUEST_REF.driver &&
   request.nativeRequestRef.nativeId === START_REQUEST_REF.nativeId;
 
-export const kodoStartRequestNodeId = (requestId: RuntimeRequestId): NodeId =>
+const kodoStartRequestNodeId = (requestId: RuntimeRequestId): NodeId =>
   NodeId.make(`${requestId}:node`);
 
 /** Approve or decline are the only answers; "for this session" and "always" would outlive the one request. */

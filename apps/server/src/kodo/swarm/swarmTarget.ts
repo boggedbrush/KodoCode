@@ -3,7 +3,7 @@
 // writes to it (a message, a queued run, an answer to its question), so only a person starts or steers it.
 import { isKodoOrchestratorProjectId, isKodoOrchestratorThreadId } from "@t3tools/contracts";
 
-export const KODO_ORCHESTRATOR_NO_AGENT_WRITES =
+const KODO_ORCHESTRATOR_NO_AGENT_WRITES =
   "The Orchestrator is the person's own conversation, and agents cannot write to it.";
 
 /** Whether the caller is the Orchestrator itself, which may see its own project and conversation. */
