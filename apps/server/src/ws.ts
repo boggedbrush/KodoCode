@@ -2782,6 +2782,7 @@ export const layerWsRpc = (
                   Effect.provide(deviceHostContext),
                 )
               : undefined;
+            yield* kodoSwarm.guardSettingsPatch(patch); // KODO: orchestrator-rpc
             const nextPatch = { ...patch, ...(deviceHosts ? { deviceHosts } : {}) };
             const settings = yield* providerInstanceMutation === undefined
               ? serverSettings.updateSettings(nextPatch)

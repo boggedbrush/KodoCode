@@ -15,7 +15,7 @@ import {
   normalizeLeadDelegation,
 } from "../kodo/delegation/leadDelegation.ts"; // KODO: delegation-normalize
 import { KODO_LEAD_REMOTE_REFUSAL } from "../kodo/delegation/limits.ts"; // KODO: delegation-normalize
-import { kodoModeModelSlot, kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel"; // KODO: delegation-normalize
+import { kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel"; // KODO: delegation-normalize
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts"; // KODO: delegation-normalize
 import {
   CommandId,
@@ -57,7 +57,6 @@ import {
   type OrchestratorMcpUpdateScheduledTaskInput,
   type OrchestratorMcpListScheduledTasksInput,
   type ProjectId,
-  RuntimeRequestId, // KODO: swarm-delegate
   type OrchestratorMcpThreadDetail,
   type OrchestratorMcpThreadPullRequest,
   type OrchestratorMcpThreadInterruptInput,
@@ -1197,27 +1196,19 @@ const make = Effect.gen(function* () {
     readonly commandId: CommandId;
     readonly project: { readonly id: ProjectId; readonly title: string };
     readonly mode: string;
-    readonly model: string;
     readonly task: string;
   }) {
     const threadId = input.parent.thread.id;
-    // The worker runs on its mode's slot when one is set, else on the model it inherits.
-    const slotModel = yield* serverSettings.getSettings.pipe(
-      Effect.map((settings) => settings.modeModelSelections[kodoModeModelSlot(input.mode)]?.model),
-      Effect.orElseSucceed(() => undefined),
-    );
     const answer = yield* kodoStartConfirmation
       .confirm({
         threadId,
         runId: input.parentRunId,
         rootNodeId: input.rootNodeId,
-        requestId: RuntimeRequestId.make(`kodo-start:${input.commandId}`),
         commandId: input.commandId,
         summary: {
           projectTitle: input.project.title,
           projectId: input.project.id,
           mode: input.mode,
-          model: slotModel ?? input.model,
           request: input.task,
         },
       })
@@ -2677,7 +2668,6 @@ const make = Effect.gen(function* () {
             commandId,
             project: kodoTargetProject,
             mode: interactionMode,
-            model: target.modelSelection.model,
             task: taskPrompt(input),
           });
         }

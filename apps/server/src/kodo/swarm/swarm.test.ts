@@ -16,7 +16,7 @@ import {
   kodoOrchestratorProjectRefusal,
   planKodoOrchestratorProject,
 } from "./orchestratorProject.ts";
-import { kodoSwarmCommandRefusal } from "./swarmGuard.ts";
+import { kodoSwarmCommandRefusal, kodoSwarmTaskTargetRefusal } from "./swarmGuard.ts";
 
 const model: ModelSelection = { instanceId: ProviderInstanceId.make("claude-main"), model: "m" };
 
@@ -200,16 +200,33 @@ describe("ensuring the Orchestrator", () => {
     }),
   );
 
-  it.effect(
-    "refuses a provider that cannot receive the tools for a conversation that exists too",
-    () =>
+  it.effect.each([
+    {
+      name: "a provider that cannot receive the tools",
+      world: { support: "Nope." },
+      warning: "Nope.",
+    },
+    { name: "the setting off", world: { enabled: false }, warning: "turned off" },
+  ])(
+    "still opens a conversation that exists with $name, and says why it will not run",
+    ({ world, warning }) =>
       Effect.gen(function* () {
-        const { service } = yield* setup({
+        const { service, created } = yield* setup({
           threads: { [KODO_ORCHESTRATOR_THREAD_ID]: live },
-          support: "Nope.",
+          ...world,
         });
-        expect((yield* service.ensure.pipe(Effect.flip)).reason).toBe("Nope.");
+        const result = yield* service.ensure;
+        expect(result.threadId).toBe(KODO_ORCHESTRATOR_THREAD_ID);
+        expect(result.warning).toContain(warning);
+        expect(yield* Ref.get(created)).toEqual([]);
       }),
+  );
+
+  it.effect("gives no warning when a conversation that exists can run", () =>
+    Effect.gen(function* () {
+      const { service } = yield* setup({ threads: { [KODO_ORCHESTRATOR_THREAD_ID]: live } });
+      expect((yield* service.ensure).warning).toBeUndefined();
+    }),
   );
 });
 
@@ -261,6 +278,64 @@ describe("resetting the Orchestrator", () => {
       expect((yield* service.reset).threadId).toBe(KODO_ORCHESTRATOR_THREAD_ID);
     }),
   );
+});
+
+describe("turning the Orchestrator off", () => {
+  it.effect("is refused while its workers run, with the reason", () =>
+    Effect.gen(function* () {
+      const { service } = yield* setup({
+        threads: { [KODO_ORCHESTRATOR_THREAD_ID]: live },
+        workers: 1,
+      });
+      const refused = yield* service
+        .guardSettingsPatch({ kodoOrchestratorEnabled: false })
+        .pipe(Effect.flip);
+      expect(refused.message).toContain("Stop all");
+    }),
+  );
+
+  it.effect.each([
+    { name: "no workers run", world: { workers: 0 }, patch: { kodoOrchestratorEnabled: false } },
+    { name: "it is turned on", world: { workers: 2 }, patch: { kodoOrchestratorEnabled: true } },
+    { name: "the patch leaves it", world: { workers: 2 }, patch: {} },
+    {
+      name: "it is already off",
+      world: { workers: 2, enabled: false },
+      patch: { kodoOrchestratorEnabled: false },
+    },
+  ])("is allowed when $name", ({ world, patch }) =>
+    Effect.gen(function* () {
+      const { service } = yield* setup({
+        threads: { [KODO_ORCHESTRATOR_THREAD_ID]: live },
+        ...world,
+      });
+      yield* service.guardSettingsPatch(patch);
+    }),
+  );
+});
+
+describe("a task that names another project", () => {
+  const task = {
+    targetProjectId: "project-acme",
+    parentIsSwarm: true,
+    target: { archivedAt: null },
+  };
+
+  it("is honored only from the server's own start, never a client's command", () => {
+    expect(kodoSwarmTaskTargetRefusal({ ...task, createdBy: "agent" })).toBeUndefined();
+    for (const createdBy of ["user", "system"]) {
+      expect(kodoSwarmTaskTargetRefusal({ ...task, createdBy })).toContain("approved start");
+    }
+  });
+
+  it("is still refused for another thread, its own project, a missing or archived project", () => {
+    const refused = (change: Record<string, unknown>) =>
+      kodoSwarmTaskTargetRefusal({ ...task, createdBy: "agent", ...change });
+    expect(refused({ parentIsSwarm: false })).toContain("Only the Orchestrator");
+    expect(refused({ targetProjectId: KODO_ORCHESTRATOR_PROJECT_ID })).toContain("never its own");
+    expect(refused({ target: undefined })).toContain("does not exist");
+    expect(refused({ target: { archivedAt: "then" } })).toContain("archived");
+  });
 });
 
 describe("what no one may do to the Orchestrator's thread", () => {

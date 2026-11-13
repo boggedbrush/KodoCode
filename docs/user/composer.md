@@ -354,7 +354,7 @@ inline in the lead's conversation, and you can open one to see what it did or to
 
 A loop is cheaper for multi-round work (implement, review, fix until clean), because it runs
 those rounds without lead turns. You can run `/loop` on a thread that is not leading; a lead does
-not start loops itself, and sends fixes back to a worker. Agents can read and change the switch of
+not start loops itself, and hands each fix to a new worker. Agents can read and change the switch of
 another idle thread with `t3_sub_agents_status` and `t3_sub_agents_set`; they cannot change their
 own thread's, and a caller in Ask, Plan or Review, or a lead, cannot change any.
 

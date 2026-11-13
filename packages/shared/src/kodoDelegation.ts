@@ -69,7 +69,6 @@ export const kodoChildThreadFields = () =>
     kodoLead: null,
     kodoLoop: undefined,
     kodoModeModel: undefined,
-    kodoOrigin: undefined,
   }) as const;
 
 /**
@@ -79,5 +78,5 @@ export const kodoChildThreadFields = () =>
  */
 export const kodoForkThreadFields = (createdBy: OrchestrationV2Actor) =>
   createdBy === "user"
-    ? ({ kodoLoop: undefined, kodoOrigin: undefined } as const)
-    : ({ kodoLead: null, kodoLoop: undefined, kodoOrigin: undefined } as const);
+    ? ({ kodoLoop: undefined } as const)
+    : ({ kodoLead: null, kodoLoop: undefined } as const);

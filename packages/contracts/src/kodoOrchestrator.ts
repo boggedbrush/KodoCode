@@ -34,12 +34,11 @@ export const isKodoOrchestratorThreadId = (threadId: string): boolean =>
   kodoOrchestratorGeneration(threadId) !== undefined;
 
 /** Where a thread came from, for a thread the Orchestrator's `delegate_task` started. */
-export const KodoThreadOrigin = Schema.Literal("orchestrator");
-export type KodoThreadOrigin = typeof KodoThreadOrigin.Type;
-
 export const KodoOrchestratorEnsureResult = Schema.Struct({
   projectId: ProjectId,
   threadId: ThreadId,
+  /** Why an existing conversation will not run as it is (the setting is off, its model cannot take the tools). */
+  warning: Schema.optional(Schema.String),
 });
 export type KodoOrchestratorEnsureResult = typeof KodoOrchestratorEnsureResult.Type;
 

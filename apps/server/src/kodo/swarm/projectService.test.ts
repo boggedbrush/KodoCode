@@ -7,6 +7,7 @@ import {
   EventId,
   KODO_ORCHESTRATOR_PROJECT_ID,
   KODO_ORCHESTRATOR_THREAD_ID,
+  kodoOrchestratorThreadIdFor,
   type OrchestrationV2AppThread,
   ProjectId,
   ProviderInstanceId,
@@ -29,6 +30,7 @@ import * as ProjectStore from "../../orchestration-v2/ProjectStore.ts";
 import * as ThreadCommandExecutor from "../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ServerSettings from "../../serverSettings.ts";
+import { makeKodoSwarmService } from "./SwarmService.ts";
 import * as WorkspacePaths from "../../workspace/WorkspacePaths.ts";
 import * as ProjectEnrichmentService from "../../project/ProjectEnrichmentService.ts";
 import * as ProjectFaviconResolver from "../../project/ProjectFaviconResolver.ts";
@@ -261,6 +263,51 @@ it.effect("deletes a conversation of its series for a reset, and no other thread
       assert.isNotNull(
         (yield* projections.getThreadProjection(KODO_ORCHESTRATOR_THREAD_ID)).thread.deletedAt,
       );
+    }),
+  ),
+);
+
+it.effect("makes the next conversation after a reset, read through the real projection store", () =>
+  withService((service) =>
+    Effect.gen(function* () {
+      yield* seedOrchestratorProject();
+      const eventSink = yield* EventSink.EventSinkV2;
+      const projections = yield* ProjectionStore.ProjectionStoreV2;
+      yield* eventSink.write({
+        events: [threadCreated(KODO_ORCHESTRATOR_PROJECT_ID, KODO_ORCHESTRATOR_THREAD_ID)],
+      });
+      const model = { instanceId: ProviderInstanceId.make("codex"), model: "m" };
+      const swarm = makeKodoSwarmService({
+        workspaceRoot: ROOT,
+        makeFolder: () => Effect.void,
+        projects: service,
+        threads: {
+          getThreadShell: projections.getThreadShell,
+          // As the server wires it: a deleted thread still has records, so it still holds its id.
+          isTombstone: (threadId) =>
+            projections.getThreadRecords(threadId, []).pipe(
+              Effect.as(true),
+              Effect.orElseSucceed(() => false),
+            ),
+          dispatch: (command) =>
+            command.type === "thread.create"
+              ? eventSink.write({
+                  events: [threadCreated(KODO_ORCHESTRATOR_PROJECT_ID, command.threadId)],
+                })
+              : Effect.void,
+          deleteThread: service.deleteKodoOrchestratorThread,
+          liveWorkers: () => Effect.succeed(0),
+        },
+        settings: Effect.succeed({ enabled: true, baseModel: model }),
+        supportRefusal: () => Effect.undefined,
+      });
+      const reset = yield* swarm.reset;
+      assert.equal(reset.threadId, kodoOrchestratorThreadIdFor(2));
+      assert.isNotNull(
+        (yield* projections.getThreadProjection(KODO_ORCHESTRATOR_THREAD_ID)).thread.deletedAt,
+      );
+      assert.deepEqual(yield* swarm.ensure, reset);
+      assert.isNotNull(yield* projections.getThreadShell(kodoOrchestratorThreadIdFor(2)));
     }),
   ),
 );

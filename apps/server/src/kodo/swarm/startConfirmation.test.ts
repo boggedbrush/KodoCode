@@ -5,7 +5,6 @@ import {
   type OrchestrationV2RuntimeRequest,
   NodeId,
   RunId,
-  RuntimeRequestId,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
@@ -22,19 +21,16 @@ import {
 } from "./startConfirmation.ts";
 
 const threadId = ThreadId.make("kodo-orchestrator");
-const requestId = RuntimeRequestId.make("kodo-start:command:1");
 const summary = {
   projectTitle: "acme-api",
   projectId: "project-acme-api",
   mode: "code",
-  model: "slot-model",
   request: "Add retries to src/http.ts.",
 };
 const input = {
   threadId,
   runId: RunId.make("run:1"),
   rootNodeId: NodeId.make("node:root"),
-  requestId,
   commandId: CommandId.make("command:1"),
   summary,
 };
@@ -42,12 +38,12 @@ const input = {
 const request = (
   over: Partial<OrchestrationV2RuntimeRequest> = {},
 ): OrchestrationV2RuntimeRequest =>
-  ({ id: requestId, status: "pending", ...over }) as OrchestrationV2RuntimeRequest;
+  ({ id: "any", status: "pending", ...over }) as OrchestrationV2RuntimeRequest;
 
 interface World {
   readonly askBefore?: boolean;
-  /** The request as stored before the call, when a retry finds one. */
-  readonly existing?: OrchestrationV2RuntimeRequest;
+  /** What each successive read for a question finds: the first id, then the next, and so on. */
+  readonly stored?: ReadonlyArray<OrchestrationV2RuntimeRequest | undefined>;
 }
 
 const setup = (world: World = {}) =>
@@ -55,12 +51,14 @@ const setup = (world: World = {}) =>
     const recorded = yield* Ref.make<ReadonlyArray<Record<string, unknown>>>([]);
     const answer = yield* Deferred.make<OrchestrationV2RuntimeRequest>();
     const waits = yield* Ref.make(0);
+    const reads = yield* Ref.make<ReadonlyArray<string>>([]);
     /** Set once the call is waiting for an answer, so a test acts only when it is. */
     const waiting = yield* Deferred.make<void>();
     const confirmation = makeKodoStartConfirmation({
       askBefore: Effect.succeed(world.askBefore ?? true),
       eventSequence: () => Effect.succeed(7),
-      readRequest: () => Effect.succeed(world.existing),
+      readRequest: (_, id) =>
+        Ref.modify(reads, (all) => [world.stored?.[all.length], [...all, id]] as const),
       record: (command) => Ref.update(recorded, (all) => [...all, command]),
       settled: () =>
         Ref.update(waits, (count) => count + 1).pipe(
@@ -69,7 +67,7 @@ const setup = (world: World = {}) =>
         ),
       timeout: Duration.minutes(30),
     });
-    return { confirmation, recorded, answer, waits, waiting };
+    return { confirmation, recorded, answer, waits, waiting, reads };
   });
 
 describe("asking before the Orchestrator starts work", () => {
@@ -95,11 +93,11 @@ describe("asking before the Orchestrator starts work", () => {
           type: "kodo.start-request.record",
           outcome: "pending",
           threadId,
-          requestId,
           nodeId: "node:root",
-          commandId: "command:1:kodo-start:pending",
         });
-        for (const part of ["acme-api", "project-acme-api", "Code", "slot-model", "Add retries"]) {
+        expect(String(asked?.requestId)).toMatch(/^kodo-start:command:1:[0-9a-f]{24}$/);
+        expect(asked?.commandId).toBe(`${String(asked?.requestId)}:record:pending`);
+        for (const part of ["acme-api", "project-acme-api", "Code", "Add retries"]) {
           expect(String(asked?.prompt)).toContain(part);
         }
         yield* Deferred.succeed(answer, request({ status: "resolved", decision: "accept" }));
@@ -158,26 +156,54 @@ describe("asking before the Orchestrator starts work", () => {
     }),
   );
 
-  it.effect(
-    "a retry of the same call finds its question: it asks nothing new, and takes an answer already given",
-    () =>
-      Effect.gen(function* () {
-        const pending = yield* setup({ existing: request() });
-        const fiber = yield* Effect.forkChild(pending.confirmation.confirm(input));
-        yield* Deferred.await(pending.waiting);
-        yield* Deferred.succeed(
-          pending.answer,
-          request({ status: "resolved", decision: "accept" }),
-        );
-        expect(yield* Fiber.join(fiber)).toBe("approved");
-        expect(yield* Ref.get(pending.recorded)).toEqual([]);
+  it.effect("a duplicate call joins the question still pending and asks nothing new", () =>
+    Effect.gen(function* () {
+      const { confirmation, recorded, answer, waiting } = yield* setup({ stored: [request()] });
+      const fiber = yield* Effect.forkChild(confirmation.confirm(input));
+      yield* Deferred.await(waiting);
+      yield* Deferred.succeed(answer, request({ status: "resolved", decision: "accept" }));
+      expect(yield* Fiber.join(fiber)).toBe("approved");
+      expect(yield* Ref.get(recorded)).toEqual([]);
+    }),
+  );
 
-        const answered = yield* setup({
-          existing: request({ status: "resolved", decision: "decline" }),
+  it.effect.each(["resolved", "cancelled", "expired"] as const)(
+    "a %s question under the same id is not replayed: the call asks again under a new one",
+    (status) =>
+      Effect.gen(function* () {
+        const { confirmation, recorded, answer, waiting, reads } = yield* setup({
+          stored: [request({ status, decision: "accept" } as never)],
         });
-        expect(yield* answered.confirmation.confirm(input)).toBe("declined");
-        expect(yield* Ref.get(answered.waits)).toBe(0);
+        const fiber = yield* Effect.forkChild(confirmation.confirm(input));
+        yield* Deferred.await(waiting);
+        const [first, second] = yield* Ref.get(reads);
+        expect(second).toBe(`${first}:1`);
+        const [asked] = yield* Ref.get(recorded);
+        expect(asked).toMatchObject({ outcome: "pending", requestId: second });
+        yield* Deferred.succeed(answer, request({ status: "resolved", decision: "decline" }));
+        expect(yield* Fiber.join(fiber)).toBe("declined");
       }),
+  );
+
+  it.effect("the same call with other content is another question", () =>
+    Effect.gen(function* () {
+      const ids = new Set<string>();
+      for (const changed of [
+        {},
+        { projectId: "project-other" },
+        { request: "Something else." },
+        { mode: "review" },
+      ]) {
+        const { confirmation, recorded, waiting } = yield* setup();
+        const fiber = yield* Effect.forkChild(
+          confirmation.confirm({ ...input, summary: { ...summary, ...changed } }),
+        );
+        yield* Deferred.await(waiting);
+        ids.add(String((yield* Ref.get(recorded))[0]?.requestId));
+        yield* Fiber.interrupt(fiber);
+      }
+      expect(ids.size).toBe(4);
+    }),
   );
 });
 

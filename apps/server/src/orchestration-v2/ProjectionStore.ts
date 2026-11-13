@@ -1644,9 +1644,6 @@ export function threadShellFromProjection(
       : { kodoLoopStatus: kodoLoopShellStatus(projection.thread.kodoLoop) }),
     // KODO: delegation-state
     ...(projection.thread.kodoLead == null ? {} : { kodoLead: projection.thread.kodoLead }),
-    ...(projection.thread.kodoOrigin === undefined
-      ? {}
-      : { kodoOrigin: projection.thread.kodoOrigin }), // KODO: swarm-delegate
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
     pullRequests: threadPullRequestsOf(projection.thread),
@@ -1960,9 +1957,6 @@ function shellFromState(input: {
       : { kodoLoopStatus: kodoLoopShellStatus(input.state.thread.kodoLoop) }),
     // KODO: delegation-state
     ...(input.state.thread.kodoLead == null ? {} : { kodoLead: input.state.thread.kodoLead }),
-    ...(input.state.thread.kodoOrigin === undefined
-      ? {}
-      : { kodoOrigin: input.state.thread.kodoOrigin }), // KODO: swarm-delegate
     branch: input.state.thread.branch,
     worktreePath: input.state.thread.worktreePath,
     pullRequests: threadPullRequestsOf(input.state.thread),

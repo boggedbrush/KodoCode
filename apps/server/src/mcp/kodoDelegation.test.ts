@@ -20,6 +20,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
 
@@ -96,8 +97,8 @@ interface World {
   readonly onDispatch?: (shells: Record<string, unknown>) => Effect.Effect<void>;
   /** Runs with each command dispatched (KODO: swarm-delegate: the start question is one). */
   readonly onCommand?: (command: Record<string, unknown>) => Effect.Effect<void>;
-  /** What a person answers the Orchestrator's start question; the stream of requests waits for it. */
-  readonly answer?: Deferred.Deferred<Record<string, unknown>>;
+  /** What a person answers the Orchestrator's start questions, one per question; the stream of requests waits for it. */
+  readonly answer?: Queue.Queue<Record<string, unknown>>;
   /** The default model of each project `getById` finds. */
   readonly projectDefaultModel?: {
     readonly instanceId: ProviderInstanceId;
@@ -135,6 +136,8 @@ const run = <A, E>(
 ) =>
   Effect.gen(function* () {
     const dispatched = yield* Ref.make<ReadonlyArray<Record<string, unknown>>>([]);
+    /** The start questions as the projection holds them, by id. */
+    const requests = yield* Ref.make<Record<string, Record<string, unknown>>>({});
     const caller = world.callerId ?? leadId;
     const leadShell = shell(leadId, {
       interactionMode: world.mode,
@@ -162,6 +165,7 @@ const run = <A, E>(
       subagents: [],
       runtimeRequests: [],
     } as unknown as OrchestrationV2ThreadProjection;
+    const storedRequests = Ref.get(requests).pipe(Effect.map((all) => Object.values(all)));
     const task = {
       id: NodeId.make("node:task"),
       threadId: leadId,
@@ -180,7 +184,17 @@ const run = <A, E>(
       NodeServices.layer,
       NodeCrypto.layer,
       Layer.mock(ThreadManagementService.ThreadManagementService)({
-        hasReceipt: () => Effect.succeed(world.accepted === true),
+        hasReceipt: (commandId) =>
+          Ref.get(dispatched).pipe(
+            Effect.map(
+              (all) =>
+                world.accepted === true ||
+                all.some(
+                  (command) =>
+                    command.type === "delegated_task.request" && command.commandId === commandId,
+                ),
+            ),
+          ),
         assertProviderInstanceEnabled: () => Effect.void,
         isProviderInstanceEnabledForProject: () => Effect.succeed(true),
         getThreadShell: (id) => Effect.succeed((shells[id] ?? null) as never),
@@ -190,16 +204,19 @@ const run = <A, E>(
             return (world.onChildrenRead ?? Effect.void).pipe(Effect.as(read));
           }),
         getThreadRecords: (id) =>
-          Effect.succeed(
-            (id === leadId
-              ? parentProjection
-              : ({
-                  thread: shells[id],
-                  runs: [],
-                  messages: [],
-                  subagents: [],
-                  contextTransfers: [],
-                } as never)) as never,
+          storedRequests.pipe(
+            Effect.map(
+              (runtimeRequests) =>
+                (id === leadId
+                  ? { ...parentProjection, runtimeRequests }
+                  : ({
+                      thread: shells[id],
+                      runs: [],
+                      messages: [],
+                      subagents: [],
+                      contextTransfers: [],
+                    } as never)) as never,
+            ),
           ),
         getThreadEventSequence: () => Effect.succeed(1),
         getProjectThreadRecords: ({ threadId }) =>
@@ -208,7 +225,13 @@ const run = <A, E>(
           world.answer === undefined
             ? Stream.empty
             : Stream.fromEffect(
-                Deferred.await(world.answer).pipe(
+                Queue.take(world.answer).pipe(
+                  Effect.tap((payload) =>
+                    Ref.update(requests, (all) => ({
+                      ...all,
+                      [String(payload.id)]: { ...all[String(payload.id)], ...payload },
+                    })),
+                  ),
                   Effect.map(
                     (payload) =>
                       ({
@@ -222,6 +245,17 @@ const run = <A, E>(
         dispatch: (command) =>
           (world.onDispatch?.(shells) ?? Effect.void).pipe(
             Effect.andThen(Ref.update(dispatched, (all) => [...all, command as never])),
+            Effect.andThen(
+              command.type === "kodo.start-request.record"
+                ? Ref.update(requests, (all) => ({
+                    ...all,
+                    [String(command.requestId)]:
+                      command.outcome === "pending"
+                        ? { id: command.requestId, status: "pending" }
+                        : { ...all[String(command.requestId)], status: "cancelled" },
+                  }))
+                : Effect.void,
+            ),
             Effect.andThen(world.onCommand?.(command as never) ?? Effect.void),
             Effect.as({
               sequence: 1,
@@ -825,14 +859,20 @@ describe("the Orchestrator's start confirmation", () => {
         call: Fiber.Fiber<Result, Failure>,
         decision: "accept" | "decline",
       ) => Effect.Effect<void>;
+      /** Waits for the call to end, failing at once if it raises a question instead. */
+      readonly endsWithoutAsking: <Result, Failure>(
+        call: Fiber.Fiber<Result, Failure>,
+      ) => Effect.Effect<Result, Failure>;
     }) => Effect.Effect<A, E, never>,
   ) =>
     Effect.gen(function* () {
-      const answered = yield* Deferred.make<Record<string, unknown>>();
-      const asked = yield* Deferred.make<Record<string, unknown>>();
+      const answered = yield* Queue.unbounded<Record<string, unknown>>();
+      const asked = yield* Queue.unbounded<Record<string, unknown>>();
+      /** The question the test last looked at, until it is answered. */
+      const current = yield* Ref.make<Record<string, unknown> | undefined>(undefined);
       const question = <Result, Failure>(call: Fiber.Fiber<Result, Failure>) =>
         Effect.raceFirst(
-          Deferred.await(asked),
+          Queue.take(asked).pipe(Effect.tap((card) => Ref.set(current, card))),
           Fiber.await(call).pipe(
             Effect.flatMap(() => Effect.die("The call ended without asking.")),
           ),
@@ -843,7 +883,7 @@ describe("the Orchestrator's start confirmation", () => {
           answer: answered,
           onCommand: (command) =>
             command.type === "kodo.start-request.record" && command.outcome === "pending"
-              ? Deferred.succeed(asked, command).pipe(Effect.asVoid)
+              ? Queue.offer(asked, command).pipe(Effect.asVoid)
               : Effect.void,
         },
         ({ service, dispatched }) =>
@@ -851,10 +891,21 @@ describe("the Orchestrator's start confirmation", () => {
             service,
             dispatched,
             question,
+            endsWithoutAsking: (call) =>
+              Effect.raceFirst(
+                Fiber.join(call),
+                Queue.take(asked).pipe(
+                  Effect.flatMap(() => Effect.die("The call raised a second question.")),
+                ),
+              ),
             answer: (call, decision) =>
-              question(call).pipe(
+              Ref.getAndSet(current, undefined).pipe(
+                Effect.filterOrElse(
+                  (card): card is Record<string, unknown> => card !== undefined,
+                  () => question(call),
+                ),
                 Effect.flatMap((asking) =>
-                  Deferred.succeed(answered, {
+                  Queue.offer(answered, {
                     id: asking.requestId,
                     status: "resolved",
                     decision,
@@ -873,8 +924,8 @@ describe("the Orchestrator's start confirmation", () => {
         Effect.gen(function* () {
           const fiber = yield* Effect.forkChild(delegate(service, call("asks-first")));
           const asked = yield* question(fiber);
-          // The card names the project, the mode, the model and the request.
-          for (const part of ["project:other", "Code", "claude-own-model", "Add retries."]) {
+          // The card names the project, the mode and the request, and no model it cannot promise.
+          for (const part of ["project:other", "Code", "Add retries."]) {
             assert.include(String(asked.prompt), part);
           }
           assert.equal(asked.threadId, leadId);
@@ -924,6 +975,122 @@ describe("the Orchestrator's start confirmation", () => {
       }),
     ),
   );
+
+  // The approval covers exactly what the card showed: a start is bound to its content, and an answer is used once.
+  describe("what an approval covers", () => {
+    const secondProject = ProjectId.make("project:second");
+    const full = { ...asking, knownProjects: ["project:other", "project:second"] };
+    const running = (name: string) =>
+      shell(ThreadId.make(name), {
+        lineage: { parentThreadId: leadId, relationshipToParent: "subagent", rootThreadId: leadId },
+        status: "running",
+        activityRunStatus: "running",
+      });
+    const atCap = {
+      ...full,
+      children: ["w1", "w2", "w3"],
+      shells: { w1: running("w1"), w2: running("w2"), w3: running("w3") },
+    };
+    const callIn = (clientRequestId: string, projectId: ProjectId, task: string) =>
+      ({ ...call(clientRequestId), task, target: { projectId } }) as const;
+    const workers = (all: ReadonlyArray<Record<string, unknown>>) =>
+      all.filter((command) => command.type === "delegated_task.request");
+
+    it.effect(
+      "a cap refusal after approval does not carry over: the same id for another project asks again and starts nothing",
+      () =>
+        withQuestion(atCap, ({ service, dispatched, question, answer }) =>
+          Effect.gen(function* () {
+            const first = yield* Effect.forkChild(
+              service
+                .delegateTask(
+                  scope(leadId),
+                  callIn("r1", ProjectId.make("project:other"), "Fix a typo."),
+                )
+                .pipe(Effect.flip),
+            );
+            const firstCard = yield* question(first);
+            yield* answer(first, "accept");
+            const refused = yield* Fiber.join(first);
+            assert.equal(refused.code, "capability_denied");
+            assert.include(refused.message, "3 of 3 workers are still running");
+
+            const second = yield* Effect.forkChild(
+              service
+                .delegateTask(scope(leadId), callIn("r1", secondProject, "Delete everything."))
+                .pipe(Effect.flip),
+            );
+            const secondCard = yield* question(second);
+            assert.notEqual(secondCard.requestId, firstCard.requestId);
+            assert.include(String(secondCard.prompt), "project:second");
+            assert.include(String(secondCard.prompt), "Delete everything.");
+            // Nothing starts for the new content without its own approval.
+            yield* Fiber.interrupt(second);
+            assert.lengthOf(workers(yield* Ref.get(dispatched)), 0);
+          }),
+        ),
+    );
+
+    it.effect("a question that was withdrawn is asked again, not replayed as withdrawn", () =>
+      withQuestion(full, ({ service, dispatched, question, answer }) =>
+        Effect.gen(function* () {
+          const first = yield* Effect.forkChild(delegate(service, call("again")));
+          const firstCard = yield* question(first);
+          yield* Fiber.interrupt(first);
+
+          const second = yield* Effect.forkChild(delegate(service, call("again")));
+          const secondCard = yield* question(second);
+          assert.notEqual(secondCard.requestId, firstCard.requestId);
+          yield* answer(second, "accept");
+          yield* Fiber.join(second);
+          assert.lengthOf(workers(yield* Ref.get(dispatched)), 1);
+        }),
+      ),
+    );
+
+    it.effect("an approved start that went through is retried without a second card", () =>
+      withQuestion(full, ({ service, dispatched, question, answer, endsWithoutAsking }) =>
+        Effect.gen(function* () {
+          const first = yield* Effect.forkChild(delegate(service, call("retry")));
+          yield* question(first);
+          yield* answer(first, "accept");
+          yield* Fiber.join(first);
+          // The retry finds the receipt of the worker that started: it asks nothing and starts nothing new.
+          yield* endsWithoutAsking(yield* Effect.forkChild(delegate(service, call("retry"))));
+          const all = yield* Ref.get(dispatched);
+          assert.deepEqual(types(all), [
+            "kodo.start-request.record",
+            "delegated_task.request",
+            "delegated_task.request",
+          ]);
+          assert.equal(workers(all)[0]?.commandId, workers(all)[1]?.commandId);
+        }),
+      ),
+    );
+
+    it.effect("a usage limit after approval refuses and starts nothing", () =>
+      withQuestion(
+        {
+          ...full,
+          settings: { loop: { budget: { stopAtLimitPercent: 80 } } } as never,
+          usageLimits: {
+            checkedAt: DateTime.formatIso(DateTime.makeUnsafe("2026-01-01T00:00:00Z")),
+            windows: [{ id: "5h", label: "5 hour", usedPercent: 95, windowDurationMins: 300 }],
+          } as never,
+        },
+        ({ service, dispatched, answer }) =>
+          Effect.gen(function* () {
+            const fiber = yield* Effect.forkChild(
+              service.delegateTask(scope(leadId), call("limit")).pipe(Effect.flip),
+            );
+            yield* answer(fiber, "accept");
+            const refused = yield* Fiber.join(fiber);
+            assert.include(refused.message, "usage limit");
+            assert.lengthOf(workers(yield* Ref.get(dispatched)), 0);
+          }),
+      ),
+    );
+  });
 
   it.effect(
     "asks for a sub-agents lead's worker never: that lead's start is its own thread's",

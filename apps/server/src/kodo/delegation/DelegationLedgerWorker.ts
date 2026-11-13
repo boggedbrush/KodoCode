@@ -23,14 +23,14 @@ import { priceWorker } from "./delegationUsage.ts";
 const TERMINAL = new Set(["completed", "failed", "cancelled", "interrupted"]);
 
 /** Finished workers remembered, so usage that arrives after their last task is picked up. */
-const MAX_REMEMBERED_WORKERS = 2048;
+const MAX_REMEMBERED_WORKERS = 256;
 
 /**
  * A worker already recorded whose provider turn changed after its task finished (a provider's final
  * token report can land later). Only a thread seen finishing is asked about, so no other thread's
  * turn events cost a read.
  */
-export const lateUsageWorkerOf = (
+const lateUsageWorkerOf = (
   event: OrchestrationV2DomainEvent,
   finished: ReadonlySet<ThreadId>,
 ): ThreadId | undefined =>
@@ -49,6 +49,39 @@ export const finishedWorkerOf = (event: OrchestrationV2DomainEvent): ThreadId | 
     ? event.payload.childThreadId
     : undefined;
 
+/** The worker thread a task that is not finished points at: it is working again, so no longer finished. */
+const startedWorkerOf = (event: OrchestrationV2DomainEvent): ThreadId | undefined =>
+  event.type === "subagent.updated" &&
+  event.payload.origin === "app_owned" &&
+  event.payload.childThreadId !== null &&
+  !TERMINAL.has(event.payload.status)
+    ? event.payload.childThreadId
+    : undefined;
+
+/**
+ * Finished workers whose lead is a lead, newest kept. Anything else costs a set lookup at most,
+ * because provider-turn events arrive for every streaming turn of every thread.
+ */
+export const makeFinishedWorkerMemory = (max = MAX_REMEMBERED_WORKERS) => {
+  const finished = new Set<ThreadId>();
+  return {
+    remember: (workerThreadId: ThreadId) => {
+      finished.delete(workerThreadId);
+      if (finished.size >= max) {
+        const oldest = finished.values().next();
+        if (!oldest.done) finished.delete(oldest.value);
+      }
+      finished.add(workerThreadId);
+    },
+    /** The worker takes another task as this event says, or nothing changes. */
+    forgetIfRestarted: (event: OrchestrationV2DomainEvent) => {
+      const worker = startedWorkerOf(event);
+      if (worker !== undefined) finished.delete(worker);
+    },
+    lateUsageWorkerOf: (event: OrchestrationV2DomainEvent) => lateUsageWorkerOf(event, finished),
+  };
+};
+
 export const makeDelegationLedgerLook = (deps: {
   readonly orchestrator: Pick<
     Orchestrator.OrchestratorV2["Service"],
@@ -57,14 +90,15 @@ export const makeDelegationLedgerLook = (deps: {
   readonly price: PriceTokens;
 }) =>
   Effect.fn("KodoDelegationLedger.look")(function* (workerThreadId: ThreadId) {
+    /** True when the worker belongs to a lead and has finished a task, so later usage is worth a look. */
     const { orchestrator } = deps;
     const worker = yield* orchestrator.getThreadShell(workerThreadId);
     const leadId =
       worker?.lineage.relationshipToParent === "subagent" ? worker.lineage.parentThreadId : null;
-    if (worker === null || leadId === null) return;
+    if (worker === null || leadId === null) return false;
     const lead = yield* orchestrator.getThreadShell(leadId);
     // A person's sub-agents lead and the Orchestrator both record their workers, as sub-agent workers.
-    if (lead?.kodoLead == null) return;
+    if (lead?.kodoLead == null) return false;
     const { subagents } = yield* orchestrator.getThreadRecords(leadId, ["subagents"]);
     const tasks = subagents.filter(
       (task) => task.origin === "app_owned" && task.childThreadId === workerThreadId,
@@ -77,9 +111,9 @@ export const makeDelegationLedgerLook = (deps: {
           DateTime.toEpochMillis(b.completedAt ?? b.updatedAt),
       )
       .at(-1);
-    if (finished === undefined) return;
+    if (finished === undefined) return false;
     const side = yield* readDelegationSide(orchestrator, workerThreadId);
-    if (side === undefined) return;
+    if (side === undefined) return false;
     const priced = yield* priceWorker(side, lead.modelSelection, deps.price);
     yield* recordDelegatedWorker(
       workerLedgerRow({
@@ -93,6 +127,7 @@ export const makeDelegationLedgerLook = (deps: {
         referenceModel: lead.modelSelection.model,
       }),
     );
+    return true;
   });
 
 export const layer = Layer.effectDiscard(
@@ -116,16 +151,22 @@ export const layer = Layer.effectDiscard(
         ),
       ),
     );
-    const finished = new Set<ThreadId>();
+    const memory = makeFinishedWorkerMemory();
     yield* forkParked(
       Stream.runForEach(orchestrator.streamDomainEvents, (event) => {
+        memory.forgetIfRestarted(event);
         const done = finishedWorkerOf(event);
         if (done !== undefined) {
-          if (finished.size >= MAX_REMEMBERED_WORKERS) finished.clear();
-          finished.add(done);
+          return guarded(done).pipe(
+            // Only a lead's worker is remembered: nothing else has a row to correct.
+            Effect.tap((recorded) =>
+              recorded === true ? Effect.sync(() => memory.remember(done)) : Effect.void,
+            ),
+            Effect.forkScoped,
+          );
         }
-        const worker = done ?? lateUsageWorkerOf(event, finished);
-        return worker === undefined ? Effect.void : guarded(worker).pipe(Effect.forkScoped);
+        const late = memory.lateUsageWorkerOf(event);
+        return late === undefined ? Effect.void : guarded(late).pipe(Effect.forkScoped);
       }).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("kodo.delegation-ledger.events-failed", { cause }),

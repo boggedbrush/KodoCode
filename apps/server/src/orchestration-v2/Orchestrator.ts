@@ -8752,6 +8752,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const targetRefusal = kodoSwarmTaskTargetRefusal({
           targetProjectId: command.kodoTargetProjectId,
           parentIsSwarm: parentProjection.thread.kodoLead?.kind === "swarm",
+          createdBy: command.createdBy,
           target: Option.getOrUndefined(targetProject),
         });
         if (targetRefusal !== undefined) {
@@ -8816,7 +8817,6 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               projectId: command.kodoTargetProjectId,
               branch: null,
               worktreePath: null,
-              kodoOrigin: "orchestrator" as const,
             }
           : {}),
       };

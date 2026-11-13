@@ -1025,6 +1025,7 @@ const delegateFromActiveRun = Effect.fnUntraced(function* (
   input: TurnContext,
   targetProjectId: ProjectId,
   label = "delegate",
+  createdBy: "agent" | "user" = "agent",
 ) {
   // One turn is enough: a second call (another label) uses the run the first started.
   if ((yield* input.orchestrator.getThreadProjection(input.threadId)).runs.length === 0) {
@@ -1034,8 +1035,8 @@ const delegateFromActiveRun = Effect.fnUntraced(function* (
   const run = projection.runs[0]!;
   yield* input.orchestrator.dispatch({
     type: "delegated_task.request",
-    createdBy: "agent",
-    creationSource: "mcp",
+    createdBy,
+    creationSource: createdBy === "agent" ? "mcp" : "web",
     commandId: CommandId.make(`command:${input.name}:${label}`),
     parentThreadId: input.threadId,
     parentRunId: run.id,
@@ -1050,47 +1051,52 @@ const delegateFromActiveRun = Effect.fnUntraced(function* (
   return (yield* input.orchestrator.getThreadShell(task.childThreadId!))!;
 });
 
-it.live(
-  "a task starts in the project it names only when the Orchestrator asks for it, and is stamped as its own",
-  () =>
-    withHarness("kodo-swarm-delegate", {}, ({ state, orchestrator, worker, cwd, seedProject }) =>
-      Effect.gen(function* () {
-        const other = ProjectId.make("project:named-by-the-person");
-        yield* seedProject(other);
-        const orchestratorCtx = {
-          state,
-          orchestrator,
-          worker,
-          name: "kodo-swarm-delegate-orchestrator",
-          threadId: ORCHESTRATOR_THREAD,
-        };
-        yield* createOrchestrator(orchestrator, {
-          cwd,
-          createdBy: "system",
-          lead: { kind: "swarm" },
-        });
-        const started = yield* delegateFromActiveRun(orchestratorCtx, other);
-        assert.equal(started.projectId, other);
-        assert.equal(started.kodoOrigin, "orchestrator");
+it.live("a task starts in the project it names only when the Orchestrator asks for it, ", () =>
+  withHarness("kodo-swarm-delegate", {}, ({ state, orchestrator, worker, cwd, seedProject }) =>
+    Effect.gen(function* () {
+      const other = ProjectId.make("project:named-by-the-person");
+      yield* seedProject(other);
+      const orchestratorCtx = {
+        state,
+        orchestrator,
+        worker,
+        name: "kodo-swarm-delegate-orchestrator",
+        threadId: ORCHESTRATOR_THREAD,
+      };
+      yield* createOrchestrator(orchestrator, {
+        cwd,
+        createdBy: "system",
+        lead: { kind: "swarm" },
+      });
+      const started = yield* delegateFromActiveRun(orchestratorCtx, other);
+      assert.equal(started.projectId, other);
+      // A client's own command cannot skip the card, the caps and the model rule that sit at the MCP door.
+      const fromClient = yield* delegateFromActiveRun(
+        orchestratorCtx,
+        other,
+        "from-client",
+        "user",
+      ).pipe(Effect.flip);
+      assert.include(String((fromClient as { cause?: unknown }).cause), "approved start");
 
-        const plain = ThreadId.make("thread:kodo-swarm-delegate-plain");
-        yield* createThread(orchestrator, {
-          name: "kodo-swarm-delegate-plain",
-          threadId: plain,
-          cwd,
-        });
-        const plainCtx = {
-          state,
-          orchestrator,
-          worker,
-          name: "kodo-swarm-delegate-plain",
-          threadId: plain,
-        };
-        // No other thread starts work in another project, whatever a client sends.
-        const refused = yield* delegateFromActiveRun(plainCtx, other).pipe(Effect.flip);
-        assert.include(String((refused as { cause?: unknown }).cause), "Only the Orchestrator");
-      }),
-    ),
+      const plain = ThreadId.make("thread:kodo-swarm-delegate-plain");
+      yield* createThread(orchestrator, {
+        name: "kodo-swarm-delegate-plain",
+        threadId: plain,
+        cwd,
+      });
+      const plainCtx = {
+        state,
+        orchestrator,
+        worker,
+        name: "kodo-swarm-delegate-plain",
+        threadId: plain,
+      };
+      // No other thread starts work in another project, whatever a client sends.
+      const refused = yield* delegateFromActiveRun(plainCtx, other).pipe(Effect.flip);
+      assert.include(String((refused as { cause?: unknown }).cause), "Only the Orchestrator");
+    }),
+  ),
 );
 
 it.live(

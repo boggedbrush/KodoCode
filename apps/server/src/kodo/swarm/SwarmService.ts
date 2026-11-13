@@ -10,6 +10,7 @@ import {
   type KodoOrchestratorEnsureResult,
   type ModelSelection,
   type OrchestrationV2Command,
+  ServerSettingsError,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -158,19 +159,22 @@ export const makeKodoSwarmService = (deps: KodoSwarmDeps) => {
     ),
   );
 
+  /** Why a conversation that exists would not run as it is; undefined when it would. */
+  const runWarning = Effect.fn("KodoSwarm.runWarning")(function* (model: ModelSelection) {
+    const settings = yield* deps.settings;
+    if (!settings.enabled) return "The Orchestrator is turned off in Settings.";
+    return yield* deps.supportRefusal(model).pipe(Effect.orElseSucceed(() => undefined));
+  });
+
   const ensureWith = Effect.fn("KodoSwarm.ensure")(function* (options: {
     readonly freshThread: boolean;
   }) {
-    const settings = yield* requireEnabled;
     const series = yield* findSeries();
     const current = options.freshThread ? undefined : series.live;
-    const model = current?.shell.modelSelection ?? settings.baseModel;
-    if (model === null) {
-      return yield* fail("Choose a default model in Settings before opening the Orchestrator.");
-    }
-    yield* requireSupport(model);
-    yield* ensureProject;
+    // A conversation that exists always opens, so a pending question or its usage can still be reached;
+    // the checks below guard making one, and a turn is refused on its own.
     if (current !== undefined) {
+      yield* ensureProject;
       // Nothing archives it, but a lost archive state is put right rather than hiding it for good.
       if (current.shell.archivedAt != null) {
         yield* deps.threads
@@ -183,8 +187,20 @@ export const makeKodoSwarmService = (deps: KodoSwarmDeps) => {
           })
           .pipe(Effect.mapError((cause) => fail("The Orchestrator could not be restored.", cause)));
       }
-      return { projectId: KODO_ORCHESTRATOR_PROJECT_ID, threadId: current.threadId };
+      const warning = yield* runWarning(current.shell.modelSelection);
+      return {
+        projectId: KODO_ORCHESTRATOR_PROJECT_ID,
+        threadId: current.threadId,
+        ...(warning === undefined ? {} : { warning }),
+      };
     }
+    const settings = yield* requireEnabled;
+    const model = settings.baseModel;
+    if (model === null) {
+      return yield* fail("Choose a default model in Settings before opening the Orchestrator.");
+    }
+    yield* requireSupport(model);
+    yield* ensureProject;
     yield* createThread(series.next, series.generation, model);
     return { projectId: KODO_ORCHESTRATOR_PROJECT_ID, threadId: series.next };
   });
@@ -227,7 +243,32 @@ export const makeKodoSwarmService = (deps: KodoSwarmDeps) => {
     },
   ).pipe(Effect.withSpan("KodoSwarm.reset"));
 
-  return { ensure, reset } as const;
+  /**
+   * Turning the Orchestrator off hides the way to stop its workers, so it waits until none run. This
+   * is the server's rule; the switch in the client only shows it. A read that fails holds it on.
+   */
+  const guardSettingsPatch = Effect.fn("KodoSwarm.guardSettingsPatch")(function* (patch: {
+    readonly kodoOrchestratorEnabled?: boolean | undefined;
+  }) {
+    if (patch.kodoOrchestratorEnabled !== false) return;
+    if (!(yield* deps.settings).enabled) return;
+    const holds = yield* findSeries().pipe(
+      Effect.flatMap(({ live }) =>
+        live === undefined
+          ? Effect.succeed(false)
+          : deps.threads.liveWorkers(live.threadId).pipe(Effect.map((workers) => workers > 0)),
+      ),
+      Effect.orElseSucceed(() => true),
+    );
+    if (holds) {
+      return yield* new ServerSettingsError({
+        settingsPath: "kodoOrchestratorEnabled",
+        operation: "orchestrator-off-with-workers",
+      });
+    }
+  });
+
+  return { ensure, reset, guardSettingsPatch } as const;
 };
 
 export type KodoSwarmService = ReturnType<typeof makeKodoSwarmService>;

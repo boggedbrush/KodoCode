@@ -434,13 +434,7 @@ export default {
     },
     {
       file: "apps/server/src/orchestration-v2/ProjectionStore.ts",
-      hooks: [
-        "mode-models-state",
-        "loop-state",
-        "loop-ledger-write",
-        "delegation-state",
-        "swarm-delegate",
-      ],
+      hooks: ["mode-models-state", "loop-state", "loop-ledger-write", "delegation-state"],
     },
     {
       file: "apps/server/src/orchestration-v2/ThreadManagementService.ts",
@@ -753,7 +747,10 @@ export default {
     },
     { file: "apps/web/src/components/CommandPaletteThemeItems.tsx", hooks: ["theme-builtin-list"] },
     { file: "apps/web/src/components/GitHubStarPrompt.tsx", hooks: ["brand-star-repository"] },
-    { file: "apps/web/src/components/Sidebar.logic.ts", hooks: ["thread-mode-compare"] },
+    {
+      file: "apps/web/src/components/Sidebar.logic.ts",
+      hooks: ["thread-mode-compare", "orchestrator-hidden"],
+    },
     {
       file: "apps/web/src/components/chat/MessagesTimeline.logic.ts",
       hooks: ["mode-models-notice"],

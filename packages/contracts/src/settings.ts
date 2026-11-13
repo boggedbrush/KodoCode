@@ -1723,6 +1723,7 @@ export const ServerSettingsOperation = Schema.Literals([
   "prepare-directory",
   "write-managed-setting",
   "use-disallowed-provider",
+  "orchestrator-off-with-workers", // KODO: orchestrator-setting
 ]);
 export type ServerSettingsOperation = typeof ServerSettingsOperation.Type;
 
@@ -1748,6 +1749,10 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
   override get message(): string {
     if (this.operation === "write-managed-setting") {
       return `${this.managedSetting ?? "This setting"} is managed by ${this.managedBy ?? "your organization"} and cannot be changed.`;
+    }
+    // KODO: orchestrator-setting - turning the Orchestrator off waits for its workers
+    if (this.operation === "orchestrator-off-with-workers") {
+      return "The Orchestrator has workers running. Use Stop all in its conversation, then turn it off.";
     }
     if (this.operation === "use-disallowed-provider") {
       return disallowedProviderMessage(

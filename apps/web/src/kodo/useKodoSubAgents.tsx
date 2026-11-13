@@ -98,7 +98,10 @@ export function useKodoSubAgents(input: {
     if (!toggle.disabled) void onToggle(!toggle.checked);
   });
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers this composer's switch with the palette and keybinding, which live outside React's tree
-  useEffect(() => registerKodoSubAgentsToggle(flip), [flip]);
+  useEffect(
+    () => (orchestrator ? undefined : registerKodoSubAgentsToggle(flip)),
+    [flip, orchestrator],
+  );
 
   const stop = useStableCallback(async () => {
     if (serverThreadId === null || stopping) return;

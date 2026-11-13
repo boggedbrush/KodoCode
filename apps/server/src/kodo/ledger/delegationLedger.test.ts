@@ -11,7 +11,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import {
   finishedWorkerOf,
-  lateUsageWorkerOf,
+  makeFinishedWorkerMemory,
   makeDelegationLedgerLook,
 } from "../delegation/DelegationLedgerWorker.ts";
 import { summarizeDelegation } from "../delegation/delegationUsage.ts";
@@ -226,22 +226,46 @@ describe("a finished worker", () => {
   it("looks again at a recorded worker whose provider turn reports usage later, and at no other thread", () => {
     const turnEvent = (threadId: ThreadId, payload: Record<string, unknown>) =>
       ({ type: "provider-turn.updated", threadId, payload }) as never;
-    const finished = new Set([workerId]);
-    expect(lateUsageWorkerOf(turnEvent(workerId, { turnTokenUsage: {} }), finished)).toBe(workerId);
-    expect(lateUsageWorkerOf(turnEvent(workerId, { tokenUsage: {} }), finished)).toBe(workerId);
+    const memory = makeFinishedWorkerMemory();
+    memory.remember(workerId);
+    expect(memory.lateUsageWorkerOf(turnEvent(workerId, { turnTokenUsage: {} }))).toBe(workerId);
+    expect(memory.lateUsageWorkerOf(turnEvent(workerId, { tokenUsage: {} }))).toBe(workerId);
     // No usage on the update, another thread, or an event of another kind: nothing to read.
-    expect(lateUsageWorkerOf(turnEvent(workerId, {}), finished)).toBeUndefined();
-    expect(lateUsageWorkerOf(turnEvent(leadId, { turnTokenUsage: {} }), finished)).toBeUndefined();
+    expect(memory.lateUsageWorkerOf(turnEvent(workerId, {}))).toBeUndefined();
+    expect(memory.lateUsageWorkerOf(turnEvent(leadId, { turnTokenUsage: {} }))).toBeUndefined();
     expect(
-      lateUsageWorkerOf(turnEvent(workerId, { turnTokenUsage: {} }), new Set()),
+      memory.lateUsageWorkerOf({ type: "run.updated", threadId: workerId, payload: {} } as never),
     ).toBeUndefined();
     expect(
-      lateUsageWorkerOf(
-        { type: "run.updated", threadId: workerId, payload: {} } as never,
-        finished,
-      ),
+      makeFinishedWorkerMemory().lateUsageWorkerOf(turnEvent(workerId, { turnTokenUsage: {} })),
     ).toBeUndefined();
   });
+
+  it("forgets a worker that starts another task, and keeps only the newest few", () => {
+    const turnEvent = (threadId: ThreadId) =>
+      ({ type: "provider-turn.updated", threadId, payload: { turnTokenUsage: {} } }) as never;
+    const memory = makeFinishedWorkerMemory(2);
+    memory.remember(workerId);
+    memory.forgetIfRestarted({
+      type: "subagent.updated",
+      payload: { origin: "app_owned", childThreadId: workerId, status: "running" },
+    } as never);
+    expect(memory.lateUsageWorkerOf(turnEvent(workerId))).toBeUndefined();
+    const [a, b, c] = ["a", "b", "c"].map((id) => ThreadId.make(id));
+    for (const id of [a!, b!, c!]) memory.remember(id);
+    expect(memory.lateUsageWorkerOf(turnEvent(a!))).toBeUndefined();
+    expect(memory.lateUsageWorkerOf(turnEvent(b!))).toBe(b);
+    expect(memory.lateUsageWorkerOf(turnEvent(c!))).toBe(c);
+  });
+
+  it.effect("reports a worker of no lead as not worth remembering", () =>
+    Effect.gen(function* () {
+      const found = yield* lookWith(baseFixture);
+      expect(found).toBe(true);
+      const unled = yield* lookWith({ ...baseFixture, leadLeads: false });
+      expect(unled).toBe(false);
+    }).pipe(Effect.provide(layerTest)),
+  );
 
   it.effect("is not counted twice when the same work is replayed", () =>
     Effect.gen(function* () {

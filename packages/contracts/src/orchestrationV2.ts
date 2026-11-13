@@ -85,7 +85,6 @@ import {
   KodoLoopStageRef,
 } from "./kodoLoop.ts"; // KODO: loop-state
 import { KodoLead, LenientKodoLead } from "./kodoDelegation.ts"; // KODO: delegation-state
-import { KodoThreadOrigin } from "./kodoOrchestrator.ts"; // KODO: swarm-delegate
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 import {
@@ -467,8 +466,6 @@ export const OrchestrationV2AppThread = Schema.Struct({
   kodoLoop: Schema.optional(KodoLoop),
   /** KODO: delegation-state - set while this thread leads sub-agent workers. */
   kodoLead: Schema.optional(LenientKodoLead),
-  /** KODO: swarm-delegate - set on a worker the Orchestrator started. */
-  kodoOrigin: Schema.optional(KodoThreadOrigin),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -2135,7 +2132,6 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   kodoModeModel: Schema.optional(KodoThreadModeModel), // KODO: mode-models-state
   kodoLoopStatus: Schema.optional(KodoLoopShellStatus), // KODO: loop-state
   kodoLead: Schema.optional(LenientKodoLead), // KODO: delegation-state
-  kodoOrigin: Schema.optional(KodoThreadOrigin), // KODO: swarm-delegate
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),

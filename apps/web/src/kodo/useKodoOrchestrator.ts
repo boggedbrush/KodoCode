@@ -156,6 +156,13 @@ export function useKodoOrchestrator(): KodoOrchestratorView {
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(scopeThreadRef(environmentId, result.value.threadId)),
     });
+    if (result.value.warning !== undefined) {
+      toastManager.add({
+        type: "warning",
+        title: "The Orchestrator will not run as it is",
+        description: result.value.warning,
+      });
+    }
   });
   const visible = environmentId !== null && enabled !== false;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- registers the opener with the palette and keybinding, which live outside React's tree

@@ -55,10 +55,15 @@ export function kodoSwarmCommandRefusal(command: Command): string | undefined {
 export function kodoSwarmTaskTargetRefusal(input: {
   readonly targetProjectId: string | undefined;
   readonly parentIsSwarm: boolean;
+  /** Who made the command: a transport stamps its own as "user", and only the MCP door makes an "agent"'s. */
+  readonly createdBy: string;
   /** The target as the project store has it: active, and archived or not. */
   readonly target: { readonly archivedAt: unknown } | undefined;
 }): string | undefined {
   if (input.targetProjectId === undefined) return undefined;
+  if (input.createdBy !== "agent") {
+    return "Work in another project starts only through the Orchestrator's approved start.";
+  }
   if (!input.parentIsSwarm) return "Only the Orchestrator starts work in another project.";
   if (isKodoOrchestratorProjectId(input.targetProjectId)) {
     return "The Orchestrator starts work in the person's projects, never its own.";

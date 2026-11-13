@@ -94,6 +94,9 @@ function EnvironmentOrchestratorRow(props: {
     setOpening(false);
     if (result._tag === "Success") {
       props.onOpen(environmentId, result.value.threadId);
+      if (result.value.warning !== undefined) {
+        Dialog.alert("The Orchestrator will not run as it is", result.value.warning);
+      }
       return;
     }
     // The server's own reason: a missing default model, a provider that cannot receive the tools, a setting that is off.
