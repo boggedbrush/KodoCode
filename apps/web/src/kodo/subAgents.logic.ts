@@ -21,8 +21,6 @@ export function kodoRunningWorkers(
   return children.size;
 }
 
-export const KODO_SUB_AGENTS_MODEL_LABEL = "Lead model";
-
 export function kodoWorkersBannerTitle(running: number): string {
   return running === 1 ? "1 worker running" : `${running} workers running`;
 }

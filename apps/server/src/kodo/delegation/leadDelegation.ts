@@ -1,8 +1,7 @@
 // What a lead's delegation call becomes before the upstream rules see it. A lead never picks a
-// worker's model, provider or effort: the worker's mode slot (Settings, Models by mode) decides, and
-// nothing is recorded as an explicit pick. A role the lead names maps to a mode, clamped to what the
-// lead's own mode may start; the child-mode and runtime-mode limits still run after this and are what
-// actually forbid escalation.
+// worker's model: the worker's mode slot decides, and nothing is recorded as an explicit pick. A role
+// maps to a mode clamped to the lead's own; the child-mode and runtime-mode limits still run after
+// this and are what actually forbid escalation.
 import {
   normalizeKodoInteractionMode,
   type KodoInteractionMode,

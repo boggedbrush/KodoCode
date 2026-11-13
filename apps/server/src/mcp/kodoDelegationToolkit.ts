@@ -1,8 +1,6 @@
-// Kodo: agent access to sub-agents. `t3_sub_agents_set` is a thin tool over the same command the
-// composer switch sends (`thread.kodo-lead.set`), so an agent and a person are judged by the same
-// rules: the orchestrator refuses a running thread, a loop, an unsupported provider, and an agent
-// turning it on for its own thread or for the lead it works for. The tool also refuses a read-only
-// caller before anything is sent. `t3_sub_agents_status` is a read.
+// Kodo: agent access to sub-agents. `t3_sub_agents_set` sends the same command as the composer
+// switch (`thread.kodo-lead.set`), so the orchestrator judges an agent as it judges a person; the
+// tool also refuses a read-only caller up front. `t3_sub_agents_status` is a read.
 import { CommandId, OrchestratorMcpFailure, ThreadId } from "@t3tools/contracts";
 import { kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel";
 import * as Effect from "effect/Effect";

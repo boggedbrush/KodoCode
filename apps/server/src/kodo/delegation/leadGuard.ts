@@ -1,8 +1,7 @@
 // The service-layer guard for starting work from a thread that leads sub-agents or is one of their
-// workers. It reads the server's own record of the threads (never anything the caller says about
-// itself) and answers with the refusal the lead can relay. Every route that starts a worker or a
-// thread asks it: delegate_task, create_threads and t3_thread_launch, and the loop start rules read
-// the same ancestry.
+// workers. It reads the server's own record of the threads, never what the caller says about
+// itself; delegate_task, create_threads and t3_thread_launch all ask it, and the loop start rules
+// read the same ancestry.
 import {
   isLiveSubagentShell,
   OrchestratorMcpFailure,

@@ -1,9 +1,7 @@
 // Turns a request to switch sub-agents on or off into the thread's next lead state, or says why it
-// cannot. Pure: the orchestrator reads the thread, its runs and its workers, asks this, and commits
-// the answer, so every route that sets the flag (the composer, Settings, the palette, mobile, an
-// agent's MCP tool) is judged by one rule set. Who is asking is never read from the request: the
-// transport stamps `createdBy` and `senderThreadId` (a client's own values are overwritten in
-// `withCreationProvenance`), and the agent route builds them from the credential the call came in on.
+// cannot. Pure: every route that sets the flag is judged by these rules. Who is asking is never read
+// from the request: the transport stamps `createdBy` and `senderThreadId` (a client's own values are
+// overwritten in `withCreationProvenance`), and the agent route builds them from its credential.
 import type { KodoLead, OrchestrationV2Actor, ThreadId } from "@t3tools/contracts";
 
 import { kodoInteractionModeRank } from "../interactionMode.ts";

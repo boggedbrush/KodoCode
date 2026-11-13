@@ -80,36 +80,45 @@ describe("a read-only thread only ever gets read-only workers, by every request 
     interactionMode: "default" | "plan" | "inherit" | undefined,
   ) => {
     const normalized = normalizeLeadDelegation({ role, interactionMode }, leadMode);
-    return Effect.runSync(
-      resolveChildInteractionMode(leadMode, normalized.interactionMode).pipe(
-        Effect.map((mode) => ({ ok: true as const, mode })),
-        Effect.catch((error) => Effect.succeed({ ok: false as const, code: error.code })),
-      ),
+    return resolveChildInteractionMode(leadMode, normalized.interactionMode).pipe(
+      Effect.map((mode) => ({ ok: true as const, mode })),
+      Effect.catch((error) => Effect.succeed({ ok: false as const, code: error.code })),
     );
   };
 
-  it("by role alone: Ask, Plan and Review leads never get a Code worker, a Code lead can", () => {
-    for (const leadMode of ["ask", "plan", "review"] as const) {
-      for (const role of ROLES) {
-        const result = outcome(leadMode, role, undefined);
-        expect(result.ok, `${leadMode}/${role}`).toBe(true);
-        if (result.ok) expect(["code", "default"]).not.toContain(result.mode);
-      }
-    }
-    expect(outcome("code", "implementation", undefined)).toEqual({ ok: true, mode: "code" });
-    expect(outcome("code", "review", undefined)).toEqual({ ok: true, mode: "review" });
-  });
-
-  it("by an explicit Code mode: refused for every read-only lead, whatever the role says", () => {
-    for (const leadMode of ["ask", "plan", "review"] as const) {
-      for (const role of ROLES) {
-        expect(outcome(leadMode, role, "default"), `${leadMode}/${role}`).toEqual({
-          ok: false,
-          code: "interaction_mode_escalation_denied",
+  it.effect(
+    "by role alone: Ask, Plan and Review leads never get a Code worker, a Code lead can",
+    () =>
+      Effect.gen(function* () {
+        for (const leadMode of ["ask", "plan", "review"] as const) {
+          for (const role of ROLES) {
+            const result = yield* outcome(leadMode, role, undefined);
+            expect(result.ok, `${leadMode}/${role}`).toBe(true);
+            if (result.ok) expect(["code", "default"]).not.toContain(result.mode);
+          }
+        }
+        expect(yield* outcome("code", "implementation", undefined)).toEqual({
+          ok: true,
+          mode: "code",
         });
-      }
-    }
-  });
+        expect(yield* outcome("code", "review", undefined)).toEqual({ ok: true, mode: "review" });
+      }),
+  );
+
+  it.effect(
+    "by an explicit Code mode: refused for every read-only lead, whatever the role says",
+    () =>
+      Effect.gen(function* () {
+        for (const leadMode of ["ask", "plan", "review"] as const) {
+          for (const role of ROLES) {
+            expect(yield* outcome(leadMode, role, "default"), `${leadMode}/${role}`).toEqual({
+              ok: false,
+              code: "interaction_mode_escalation_denied",
+            });
+          }
+        }
+      }),
+  );
 });
 
 describe("what a lead's target keeps", () => {
