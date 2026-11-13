@@ -1724,6 +1724,7 @@ export const ServerSettingsOperation = Schema.Literals([
   "write-managed-setting",
   "use-disallowed-provider",
   "orchestrator-off-with-workers", // KODO: orchestrator-setting
+  "orchestrator-off-while-busy", // KODO: orchestrator-setting
 ]);
 export type ServerSettingsOperation = typeof ServerSettingsOperation.Type;
 
@@ -1750,9 +1751,12 @@ export class ServerSettingsError extends Schema.TaggedError<ServerSettingsError>
     if (this.operation === "write-managed-setting") {
       return `${this.managedSetting ?? "This setting"} is managed by ${this.managedBy ?? "your organization"} and cannot be changed.`;
     }
-    // KODO: orchestrator-setting - turning the Orchestrator off waits for its workers
+    // KODO: orchestrator-setting - turning the Orchestrator off waits for its workers, its turn and its question
     if (this.operation === "orchestrator-off-with-workers") {
       return "The Orchestrator has workers running. Use Stop all in its conversation, then turn it off.";
+    }
+    if (this.operation === "orchestrator-off-while-busy") {
+      return "The Orchestrator is in the middle of a turn or waiting on you. Stop it or answer it, then turn it off.";
     }
     if (this.operation === "use-disallowed-provider") {
       return disallowedProviderMessage(

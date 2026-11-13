@@ -48,9 +48,11 @@ export function kodoSwarmCommandRefusal(command: Command): string | undefined {
 }
 
 /**
- * Why a delegated task may not carry a target project, or undefined. Only the Orchestrator's own
- * task starts in another project, and only in one that exists, that is not its own scratch project and
- * that is not archived: a client may send this command, so the decision is made here, not at the MCP door.
+ * Why a delegated task may not be made, or undefined. The Orchestrator's workers are made only by
+ * its own approved start (an "agent"'s command naming a project), whatever else a client sends. Only
+ * its task starts in another project, and only in one that exists, that is not its own scratch
+ * project and that is not archived: a client may send this command, so the decision is made here,
+ * not at the MCP door.
  */
 export function kodoSwarmTaskTargetRefusal(input: {
   readonly targetProjectId: string | undefined;
@@ -60,7 +62,12 @@ export function kodoSwarmTaskTargetRefusal(input: {
   /** The target as the project store has it: active, and archived or not. */
   readonly target: { readonly archivedAt: unknown } | undefined;
 }): string | undefined {
-  if (input.targetProjectId === undefined) return undefined;
+  if (input.parentIsSwarm && input.createdBy !== "agent") {
+    return "The Orchestrator's workers start only through its approved start.";
+  }
+  if (input.targetProjectId === undefined) {
+    return input.parentIsSwarm ? "The Orchestrator starts work in a project it names." : undefined;
+  }
   if (input.createdBy !== "agent") {
     return "Work in another project starts only through the Orchestrator's approved start.";
   }

@@ -8739,19 +8739,23 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         });
       }
 
-      // KODO: swarm-delegate - a task started in another project is the Orchestrator's, and the project is checked here
-      if (command.kodoTargetProjectId !== undefined) {
-        const targetProject = yield* projects
-          .get(command.kodoTargetProjectId)
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new OrchestratorProjectionError({ threadId: command.parentThreadId, cause }),
-            ),
-          );
+      // KODO: swarm-delegate - the Orchestrator's workers come only from its approved start, and the project is checked here
+      const kodoParentIsSwarm = parentProjection.thread.kodoLead?.kind === "swarm";
+      if (command.kodoTargetProjectId !== undefined || kodoParentIsSwarm) {
+        const targetProject =
+          command.kodoTargetProjectId === undefined
+            ? Option.none()
+            : yield* projects
+                .get(command.kodoTargetProjectId)
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestratorProjectionError({ threadId: command.parentThreadId, cause }),
+                  ),
+                );
         const targetRefusal = kodoSwarmTaskTargetRefusal({
           targetProjectId: command.kodoTargetProjectId,
-          parentIsSwarm: parentProjection.thread.kodoLead?.kind === "swarm",
+          parentIsSwarm: kodoParentIsSwarm,
           createdBy: command.createdBy,
           target: Option.getOrUndefined(targetProject),
         });

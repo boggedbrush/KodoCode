@@ -66,6 +66,10 @@ export interface KodoSwarmDeps {
 
 const fail = (reason: string, cause?: unknown) => new KodoOrchestratorError({ reason, cause });
 
+/** A turn is running or a question is waiting on the person: the conversation is not to be reset or hidden. */
+const isBusy = (shell: KodoSwarmThreadShell) =>
+  shell.activeRunId != null || shell.pendingRuntimeRequest != null;
+
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
 
 export const makeKodoSwarmService = (deps: KodoSwarmDeps) => {
@@ -159,12 +163,12 @@ export const makeKodoSwarmService = (deps: KodoSwarmDeps) => {
     ),
   );
 
-  /** Why a conversation that exists would not run as it is; undefined when it would. */
-  const runWarning = Effect.fn("KodoSwarm.runWarning")(function* (model: ModelSelection) {
-    const settings = yield* deps.settings;
-    if (!settings.enabled) return "The Orchestrator is turned off in Settings.";
-    return yield* deps.supportRefusal(model).pipe(Effect.orElseSucceed(() => undefined));
-  });
+  /**
+   * Why a conversation that exists would not run as it is; undefined when it would. The setting is
+   * not a reason: turning the Orchestrator off hides its row and command, and the conversation still works.
+   */
+  const runWarning = (model: ModelSelection) =>
+    deps.supportRefusal(model).pipe(Effect.orElseSucceed(() => undefined));
 
   const ensureWith = Effect.fn("KodoSwarm.ensure")(function* (options: {
     readonly freshThread: boolean;
@@ -172,7 +176,7 @@ export const makeKodoSwarmService = (deps: KodoSwarmDeps) => {
     const series = yield* findSeries();
     const current = options.freshThread ? undefined : series.live;
     // A conversation that exists always opens, so a pending question or its usage can still be reached;
-    // the checks below guard making one, and a turn is refused on its own.
+    // the checks below guard making one, and a turn on a model that cannot take the tools is refused on its own.
     if (current !== undefined) {
       yield* ensureProject;
       // Nothing archives it, but a lost archive state is put right rather than hiding it for good.
@@ -230,7 +234,7 @@ export const makeKodoSwarmService = (deps: KodoSwarmDeps) => {
             `${plural(workers, "worker is", "workers are")} still running. Use Stop all in the Orchestrator conversation, then reset.`,
           );
         }
-        if (live.shell.activeRunId != null || live.shell.pendingRuntimeRequest != null) {
+        if (isBusy(live.shell)) {
           return yield* fail(
             "The Orchestrator is in the middle of a turn or waiting on you. Stop it, then reset.",
           );
@@ -244,8 +248,9 @@ export const makeKodoSwarmService = (deps: KodoSwarmDeps) => {
   ).pipe(Effect.withSpan("KodoSwarm.reset"));
 
   /**
-   * Turning the Orchestrator off hides the way to stop its workers, so it waits until none run. This
-   * is the server's rule; the switch in the client only shows it. A read that fails holds it on.
+   * Turning the Orchestrator off hides the way to stop its workers and to answer its question, so it
+   * waits until no worker runs, no turn is going and no question is open. This is the server's rule;
+   * the switch in the client only shows it. A read that fails holds it on.
    */
   const guardSettingsPatch = Effect.fn("KodoSwarm.guardSettingsPatch")(function* (patch: {
     readonly kodoOrchestratorEnabled?: boolean | undefined;
@@ -255,15 +260,25 @@ export const makeKodoSwarmService = (deps: KodoSwarmDeps) => {
     const holds = yield* findSeries().pipe(
       Effect.flatMap(({ live }) =>
         live === undefined
-          ? Effect.succeed(false)
-          : deps.threads.liveWorkers(live.threadId).pipe(Effect.map((workers) => workers > 0)),
+          ? Effect.succeed(undefined)
+          : deps.threads
+              .liveWorkers(live.threadId)
+              .pipe(
+                Effect.map((workers) =>
+                  workers > 0
+                    ? ("orchestrator-off-with-workers" as const)
+                    : isBusy(live.shell)
+                      ? ("orchestrator-off-while-busy" as const)
+                      : undefined,
+                ),
+              ),
       ),
-      Effect.orElseSucceed(() => true),
+      Effect.orElseSucceed(() => "orchestrator-off-with-workers" as const),
     );
-    if (holds) {
+    if (holds !== undefined) {
       return yield* new ServerSettingsError({
         settingsPath: "kodoOrchestratorEnabled",
-        operation: "orchestrator-off-with-workers",
+        operation: holds,
       });
     }
   });

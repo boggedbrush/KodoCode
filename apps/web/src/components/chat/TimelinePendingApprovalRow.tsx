@@ -11,6 +11,7 @@ import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions
 import { ToolActivityIconView, type WorkEntryIconName } from "./TimelineToolActivityIcon";
 import { TimelineRowCtx } from "./timelineRowContext";
 import { WorkLogRow } from "./WorkLog";
+import { KodoApprovalDetail } from "../../kodo/KodoApprovalDetail"; // KODO: approval-detail
 
 const APPROVAL_PRESENTATION = {
   command: { icon: "terminal", label: "Command approval", detailLabel: "Command" },
@@ -54,14 +55,19 @@ export const TimelinePendingApprovalRow = memo(function TimelinePendingApprovalR
         />
       }
       label={
-        <code
-          aria-label={presentation.detailLabel}
-          className="block max-h-40 min-w-0 overflow-auto whitespace-pre-wrap font-mono text-xs leading-5 text-foreground select-text! wrap-anywhere [scrollbar-width:thin] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
-          data-approval-detail="complete"
-          tabIndex={0}
-        >
-          {approval.detail || presentation.label}
-        </code>
+        // KODO: approval-detail - a long request collapses to its first lines, with a way to read all of it
+        <KodoApprovalDetail text={approval.detail || presentation.label}>
+          {({ text, complete }) => (
+            <code
+              aria-label={presentation.detailLabel}
+              className="block max-h-40 min-w-0 overflow-auto whitespace-pre-wrap font-mono text-xs leading-5 text-foreground select-text! wrap-anywhere [scrollbar-width:thin] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70"
+              data-approval-detail={complete ? "complete" : "collapsed"}
+              tabIndex={0}
+            >
+              {text}
+            </code>
+          )}
+        </KodoApprovalDetail>
       }
     >
       <div className="ms-7.5 flex min-w-0 flex-col gap-1 pb-1 text-xs">

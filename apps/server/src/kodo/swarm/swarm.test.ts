@@ -206,7 +206,6 @@ describe("ensuring the Orchestrator", () => {
       world: { support: "Nope." },
       warning: "Nope.",
     },
-    { name: "the setting off", world: { enabled: false }, warning: "turned off" },
   ])(
     "still opens a conversation that exists with $name, and says why it will not run",
     ({ world, warning }) =>
@@ -219,6 +218,18 @@ describe("ensuring the Orchestrator", () => {
         expect(result.threadId).toBe(KODO_ORCHESTRATOR_THREAD_ID);
         expect(result.warning).toContain(warning);
         expect(yield* Ref.get(created)).toEqual([]);
+      }),
+  );
+
+  it.effect(
+    "gives no warning for a conversation that exists with the setting off: it still runs",
+    () =>
+      Effect.gen(function* () {
+        const { service } = yield* setup({
+          threads: { [KODO_ORCHESTRATOR_THREAD_ID]: live },
+          enabled: false,
+        });
+        expect((yield* service.ensure).warning).toBeUndefined();
       }),
   );
 
@@ -295,6 +306,26 @@ describe("turning the Orchestrator off", () => {
   );
 
   it.effect.each([
+    {
+      name: "a turn in progress",
+      shell: { ...live, activeRunId: "run" },
+    },
+    {
+      name: "a question waiting",
+      shell: { ...live, pendingRuntimeRequest: { id: "r" } },
+    },
+  ])("is refused with $name, with the reason", ({ shell }) =>
+    Effect.gen(function* () {
+      const { service } = yield* setup({ threads: { [KODO_ORCHESTRATOR_THREAD_ID]: shell } });
+      const refused = yield* service
+        .guardSettingsPatch({ kodoOrchestratorEnabled: false })
+        .pipe(Effect.flip);
+      expect(refused.operation).toBe("orchestrator-off-while-busy");
+      expect(refused.message).toContain("middle of a turn");
+    }),
+  );
+
+  it.effect.each([
     { name: "no workers run", world: { workers: 0 }, patch: { kodoOrchestratorEnabled: false } },
     { name: "it is turned on", world: { workers: 2 }, patch: { kodoOrchestratorEnabled: true } },
     { name: "the patch leaves it", world: { workers: 2 }, patch: {} },
@@ -325,6 +356,22 @@ describe("a task that names another project", () => {
     expect(kodoSwarmTaskTargetRefusal({ ...task, createdBy: "agent" })).toBeUndefined();
     for (const createdBy of ["user", "system"]) {
       expect(kodoSwarmTaskTargetRefusal({ ...task, createdBy })).toContain("approved start");
+    }
+  });
+
+  it("is refused for the Orchestrator's task from a client whatever it names, and needs a project from the server", () => {
+    const noProject = { ...task, targetProjectId: undefined };
+    for (const createdBy of ["user", "system"]) {
+      expect(kodoSwarmTaskTargetRefusal({ ...noProject, createdBy })).toContain("approved start");
+    }
+    expect(kodoSwarmTaskTargetRefusal({ ...noProject, createdBy: "agent" })).toContain(
+      "project it names",
+    );
+    // Any other thread's task without a project is an ordinary one.
+    for (const createdBy of ["user", "agent"]) {
+      expect(
+        kodoSwarmTaskTargetRefusal({ ...noProject, createdBy, parentIsSwarm: false }),
+      ).toBeUndefined();
     }
   });
 

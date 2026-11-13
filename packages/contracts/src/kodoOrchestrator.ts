@@ -33,11 +33,11 @@ export const kodoOrchestratorGeneration = (threadId: string): number | undefined
 export const isKodoOrchestratorThreadId = (threadId: string): boolean =>
   kodoOrchestratorGeneration(threadId) !== undefined;
 
-/** Where a thread came from, for a thread the Orchestrator's `delegate_task` started. */
+/** The Orchestrator's conversation as `ensure` returns it, with a warning when it will not run as it is. */
 export const KodoOrchestratorEnsureResult = Schema.Struct({
   projectId: ProjectId,
   threadId: ThreadId,
-  /** Why an existing conversation will not run as it is (the setting is off, its model cannot take the tools). */
+  /** Why an existing conversation will not run as it is (its model cannot take the tools). */
   warning: Schema.optional(Schema.String),
 });
 export type KodoOrchestratorEnsureResult = typeof KodoOrchestratorEnsureResult.Type;

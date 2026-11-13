@@ -32,7 +32,7 @@ const MAX_REMEMBERED_WORKERS = 256;
  */
 const lateUsageWorkerOf = (
   event: OrchestrationV2DomainEvent,
-  finished: ReadonlySet<ThreadId>,
+  finished: ReadonlyMap<ThreadId, unknown>,
 ): ThreadId | undefined =>
   event.type === "provider-turn.updated" &&
   finished.has(event.threadId) &&
@@ -63,15 +63,22 @@ const startedWorkerOf = (event: OrchestrationV2DomainEvent): ThreadId | undefine
  * because provider-turn events arrive for every streaming turn of every thread.
  */
 export const makeFinishedWorkerMemory = (max = MAX_REMEMBERED_WORKERS) => {
-  const finished = new Set<ThreadId>();
+  const finished = new Map<ThreadId, number>();
+  let marks = 0;
   return {
+    /** Returns the worker's way out for a look that finds nothing to correct: it takes only this memory, not a later one. */
     remember: (workerThreadId: ThreadId) => {
       finished.delete(workerThreadId);
       if (finished.size >= max) {
-        const oldest = finished.values().next();
+        const oldest = finished.keys().next();
         if (!oldest.done) finished.delete(oldest.value);
       }
-      finished.add(workerThreadId);
+      marks += 1;
+      const mark = marks;
+      finished.set(workerThreadId, mark);
+      return () => {
+        if (finished.get(workerThreadId) === mark) finished.delete(workerThreadId);
+      };
     },
     /** The worker takes another task as this event says, or nothing changes. */
     forgetIfRestarted: (event: OrchestrationV2DomainEvent) => {
@@ -130,6 +137,32 @@ export const makeDelegationLedgerLook = (deps: {
     return true;
   });
 
+/**
+ * What each domain event does to the ledger. A finished worker is remembered as its event arrives,
+ * before anything is read, so a late usage report cannot land in the gap while the look runs; a look
+ * that finds no row to correct lets go of only that memory, never a newer one.
+ */
+export const makeDelegationLedgerEvents =
+  (deps: {
+    /** The look as one at a time per thread: false when the worker has no row to correct. */
+    readonly look: (threadId: ThreadId) => Effect.Effect<unknown>;
+    readonly memory: ReturnType<typeof makeFinishedWorkerMemory>;
+  }) =>
+  (event: OrchestrationV2DomainEvent) => {
+    const { look, memory } = deps;
+    memory.forgetIfRestarted(event);
+    const done = finishedWorkerOf(event);
+    if (done !== undefined) {
+      const forget = memory.remember(done);
+      return look(done).pipe(
+        Effect.tap((recorded) => (recorded === false ? Effect.sync(forget) : Effect.void)),
+        Effect.forkScoped,
+      );
+    }
+    const late = memory.lateUsageWorkerOf(event);
+    return late === undefined ? Effect.void : look(late).pipe(Effect.forkScoped);
+  };
+
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
@@ -152,22 +185,9 @@ export const layer = Layer.effectDiscard(
       ),
     );
     const memory = makeFinishedWorkerMemory();
+    const onEvent = makeDelegationLedgerEvents({ look: guarded, memory });
     yield* forkParked(
-      Stream.runForEach(orchestrator.streamDomainEvents, (event) => {
-        memory.forgetIfRestarted(event);
-        const done = finishedWorkerOf(event);
-        if (done !== undefined) {
-          return guarded(done).pipe(
-            // Only a lead's worker is remembered: nothing else has a row to correct.
-            Effect.tap((recorded) =>
-              recorded === true ? Effect.sync(() => memory.remember(done)) : Effect.void,
-            ),
-            Effect.forkScoped,
-          );
-        }
-        const late = memory.lateUsageWorkerOf(event);
-        return late === undefined ? Effect.void : guarded(late).pipe(Effect.forkScoped);
-      }).pipe(
+      Stream.runForEach(orchestrator.streamDomainEvents, onEvent).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("kodo.delegation-ledger.events-failed", { cause }),
         ),

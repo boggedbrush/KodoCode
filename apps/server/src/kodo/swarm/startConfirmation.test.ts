@@ -15,7 +15,9 @@ import * as Ref from "effect/Ref";
 import { TestClock } from "effect/testing";
 
 import {
+  kodoStartContentDigest,
   kodoStartRefusalMessage,
+  kodoStartRequestRefusal,
   kodoStartRequestText,
   makeKodoStartConfirmation,
 } from "./startConfirmation.ts";
@@ -35,6 +37,10 @@ const input = {
   summary,
 };
 
+const baseId = `kodo-start:${input.commandId}:${kodoStartContentDigest(summary)}`;
+/** What marks a stored request as the Orchestrator's start question. */
+const startRef = { driver: "kodo", nativeId: "start-request" };
+
 const request = (
   over: Partial<OrchestrationV2RuntimeRequest> = {},
 ): OrchestrationV2RuntimeRequest =>
@@ -42,24 +48,43 @@ const request = (
 
 interface World {
   readonly askBefore?: boolean;
-  /** What each successive read for a question finds: the first id, then the next, and so on. */
-  readonly stored?: ReadonlyArray<OrchestrationV2RuntimeRequest | undefined>;
+  /** The first read of the thread's requests waits for `readGate`, with what it saw before waiting. */
+  readonly gated?: boolean;
+  /** The runtime requests the thread already holds, as one read returns them. */
+  readonly stored?: ReadonlyArray<OrchestrationV2RuntimeRequest>;
 }
 
 const setup = (world: World = {}) =>
   Effect.gen(function* () {
     const recorded = yield* Ref.make<ReadonlyArray<Record<string, unknown>>>([]);
+    const held = yield* Ref.make<ReadonlyArray<OrchestrationV2RuntimeRequest>>(world.stored ?? []);
     const answer = yield* Deferred.make<OrchestrationV2RuntimeRequest>();
     const waits = yield* Ref.make(0);
-    const reads = yield* Ref.make<ReadonlyArray<string>>([]);
+    const reads = yield* Ref.make(0);
+    const readGate = yield* Deferred.make<void>();
     /** Set once the call is waiting for an answer, so a test acts only when it is. */
     const waiting = yield* Deferred.make<void>();
     const confirmation = makeKodoStartConfirmation({
       askBefore: Effect.succeed(world.askBefore ?? true),
       eventSequence: () => Effect.succeed(7),
-      readRequest: (_, id) =>
-        Ref.modify(reads, (all) => [world.stored?.[all.length], [...all, id]] as const),
-      record: (command) => Ref.update(recorded, (all) => [...all, command]),
+      readRequests: () =>
+        Effect.gen(function* () {
+          const before = yield* Ref.getAndUpdate(reads, (count) => count + 1);
+          const seen = yield* Ref.get(held);
+          if (world.gated === true && before === 0) yield* Deferred.await(readGate);
+          return seen;
+        }),
+      record: (command) =>
+        Ref.update(recorded, (all) => [...all, command]).pipe(
+          Effect.andThen(
+            command.outcome === "pending"
+              ? Ref.update(held, (all) => [
+                  ...all,
+                  request({ id: command.requestId, nativeRequestRef: startRef } as never),
+                ])
+              : Effect.void,
+          ),
+        ),
       settled: () =>
         Ref.update(waits, (count) => count + 1).pipe(
           Effect.andThen(Deferred.succeed(waiting, undefined)),
@@ -67,7 +92,7 @@ const setup = (world: World = {}) =>
         ),
       timeout: Duration.minutes(30),
     });
-    return { confirmation, recorded, answer, waits, waiting, reads };
+    return { confirmation, recorded, answer, waits, waiting, reads, readGate };
   });
 
 describe("asking before the Orchestrator starts work", () => {
@@ -158,7 +183,9 @@ describe("asking before the Orchestrator starts work", () => {
 
   it.effect("a duplicate call joins the question still pending and asks nothing new", () =>
     Effect.gen(function* () {
-      const { confirmation, recorded, answer, waiting } = yield* setup({ stored: [request()] });
+      const { confirmation, recorded, answer, waiting } = yield* setup({
+        stored: [request({ id: baseId as never })],
+      });
       const fiber = yield* Effect.forkChild(confirmation.confirm(input));
       yield* Deferred.await(waiting);
       yield* Deferred.succeed(answer, request({ status: "resolved", decision: "accept" }));
@@ -171,50 +198,109 @@ describe("asking before the Orchestrator starts work", () => {
     "a %s question under the same id is not replayed: the call asks again under a new one",
     (status) =>
       Effect.gen(function* () {
-        const { confirmation, recorded, answer, waiting, reads } = yield* setup({
-          stored: [request({ status, decision: "accept" } as never)],
+        const { confirmation, recorded, answer, waiting } = yield* setup({
+          stored: [request({ id: baseId, status, decision: "accept" } as never)],
         });
         const fiber = yield* Effect.forkChild(confirmation.confirm(input));
         yield* Deferred.await(waiting);
-        const [first, second] = yield* Ref.get(reads);
-        expect(second).toBe(`${first}:1`);
         const [asked] = yield* Ref.get(recorded);
-        expect(asked).toMatchObject({ outcome: "pending", requestId: second });
+        expect(asked).toMatchObject({ outcome: "pending", requestId: `${baseId}:1` });
         yield* Deferred.succeed(answer, request({ status: "resolved", decision: "decline" }));
         expect(yield* Fiber.join(fiber)).toBe("declined");
       }),
   );
 
-  it.effect("the same call with other content is another question", () =>
+  it.effect("walks past several answered questions from one read of the thread's requests", () =>
     Effect.gen(function* () {
-      const ids = new Set<string>();
-      for (const changed of [
-        {},
-        { projectId: "project-other" },
-        { request: "Something else." },
-        { mode: "review" },
-      ]) {
-        const { confirmation, recorded, waiting } = yield* setup();
-        const fiber = yield* Effect.forkChild(
-          confirmation.confirm({ ...input, summary: { ...summary, ...changed } }),
-        );
+      const { confirmation, recorded, waiting, reads } = yield* setup({
+        stored: [
+          request({ id: baseId, status: "resolved" } as never),
+          request({ id: `${baseId}:1`, status: "cancelled" } as never),
+          request({ id: `${baseId}:2`, status: "expired" } as never),
+        ],
+      });
+      const fiber = yield* Effect.forkChild(confirmation.confirm(input));
+      yield* Deferred.await(waiting);
+      expect((yield* Ref.get(recorded))[0]).toMatchObject({ requestId: `${baseId}:3` });
+      expect(yield* Ref.get(reads)).toBe(1);
+      yield* Fiber.interrupt(fiber);
+    }),
+  );
+
+  it.effect.each([
+    {
+      name: "another start question is open",
+      stored: [request({ id: "kodo-start:other", nativeRequestRef: startRef } as never)],
+      expected: "busy",
+    },
+    {
+      name: "only a provider's own approval is open",
+      stored: [request({ id: "provider-approval" })],
+      expected: "asked",
+    },
+    {
+      name: "the other start question is already answered",
+      stored: [
+        request({
+          id: "kodo-start:other",
+          status: "resolved",
+          nativeRequestRef: startRef,
+        } as never),
+      ],
+      expected: "asked",
+    },
+  ])("with $name, the call is $expected", ({ stored, expected }) =>
+    Effect.gen(function* () {
+      const { confirmation, recorded, waiting, waits } = yield* setup({ stored });
+      const fiber = yield* Effect.forkChild(confirmation.confirm(input));
+      if (expected === "busy") {
+        expect(yield* Fiber.join(fiber)).toBe("busy");
+        expect(yield* Ref.get(recorded)).toEqual([]);
+        expect(yield* Ref.get(waits)).toBe(0);
+      } else {
         yield* Deferred.await(waiting);
-        ids.add(String((yield* Ref.get(recorded))[0]?.requestId));
+        expect(yield* Ref.get(recorded)).toHaveLength(1);
         yield* Fiber.interrupt(fiber);
       }
-      expect(ids.size).toBe(4);
+    }),
+  );
+
+  it.effect("two different calls at once raise one question: the other is told to wait", () =>
+    Effect.gen(function* () {
+      const { confirmation, recorded, readGate } = yield* setup({ gated: true });
+      const other = { ...input, summary: { ...summary, request: "Something else." } };
+      const first = yield* Effect.forkChild(confirmation.confirm(input));
+      const second = yield* Effect.forkChild(confirmation.confirm(other));
+      // One yield lets the second call run as far as it can while the first still holds its read.
+      yield* Effect.yieldNow;
+      yield* Deferred.succeed(readGate, undefined);
+      expect(yield* Fiber.join(second)).toBe("busy");
+      expect(
+        (yield* Ref.get(recorded)).filter((command) => command.outcome === "pending"),
+      ).toHaveLength(1);
+      yield* Fiber.interrupt(first);
     }),
   );
 });
 
 describe("what the card and the refusal say", () => {
-  it("keeps a long request to a bounded card and names the project in every refusal", () => {
-    const long = kodoStartRequestText({ ...summary, request: "x".repeat(5000) });
-    expect(long.prompt.length).toBeLessThan(1800);
-    expect(long.prompt).toContain("...");
+  it("carries the whole request, and the fallback it names is the project's default model", () => {
+    const long = `${"Add retries to the client. ".repeat(400)}Then push to main.`;
+    const card = kodoStartRequestText({ ...summary, request: long });
+    expect(card.prompt.endsWith(`Request: ${long}`)).toBe(true);
+    expect(card.prompt).toContain("the project's default model");
+  });
+
+  it("refuses a request longer than a person can be asked to approve, and no shorter one", () => {
+    expect(kodoStartRequestRefusal("x".repeat(32_000))).toBeUndefined();
+    expect(kodoStartRequestRefusal("x".repeat(32_001))).toContain("32000");
+  });
+
+  it("names the project in every refusal", () => {
     for (const answer of ["declined", "withdrawn", "unanswered"] as const) {
       expect(kodoStartRefusalMessage(answer, "acme-api")).toContain("acme-api");
       expect(kodoStartRefusalMessage(answer, "acme-api")).toContain("Nothing was started");
     }
+    expect(kodoStartRefusalMessage("busy", "acme-api")).toContain("Wait for their answer");
   });
 });

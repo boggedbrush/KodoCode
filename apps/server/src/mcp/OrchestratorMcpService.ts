@@ -2,7 +2,9 @@ import { sendToThreadOrLoop } from "../kodo/loop/LoopService.ts"; // KODO: loop-
 import { kodoInteractionModeLimit, kodoLimitMode } from "../kodo/interactionMode.ts"; // KODO: mode-peer-limit
 import { makeKodoDelegationGuard } from "../kodo/delegation/delegationGuard.ts"; // KODO: delegation-normalize
 import {
+  kodoStartContentDigest,
   kodoStartRefusalMessage,
+  kodoStartRequestRefusal,
   makeKodoStartConfirmation,
 } from "../kodo/swarm/startConfirmation.ts"; // KODO: swarm-delegate
 import {
@@ -1072,16 +1074,12 @@ const make = Effect.gen(function* () {
       Effect.orElseSucceed(() => true),
     ),
     eventSequence: (threadId) => threadManagement.getThreadEventSequence(threadId),
-    readRequest: (threadId, requestId) =>
+    readRequests: (threadId) =>
       threadManagement
         .getThreadRecords(threadId, ["runtimeRequests"], {
           runtimeRequestStatuses: ["pending", "resolved", "cancelled", "expired"],
         })
-        .pipe(
-          Effect.map((records) =>
-            records.runtimeRequests.find((request) => request.id === requestId),
-          ),
-        ),
+        .pipe(Effect.map((records) => records.runtimeRequests)),
     record: (command) => threadManagement.dispatch(command),
     settled: ({ threadId, afterSequence, requestId }) =>
       threadManagement
@@ -1199,6 +1197,8 @@ const make = Effect.gen(function* () {
     readonly task: string;
   }) {
     const threadId = input.parent.thread.id;
+    const tooLong = kodoStartRequestRefusal(input.task);
+    if (tooLong !== undefined) return yield* failure("invalid_request", tooLong);
     const answer = yield* kodoStartConfirmation
       .confirm({
         threadId,
@@ -1233,6 +1233,7 @@ const make = Effect.gen(function* () {
     callerThreadId: ThreadId,
     mode: ThreadInteractionMode,
     inherited: ModelSelection,
+    commandId: CommandId,
   ) {
     const modeModels = yield* serverSettings.getSettings.pipe(
       Effect.map((settings) => settings.modeModelSelections),
@@ -1246,7 +1247,11 @@ const make = Effect.gen(function* () {
       yield* kodoGuard.guardLimit(instanceId);
     }
     const release = yield* kodoGuard.holdLead(callerThreadId);
-    yield* kodoGuard.guardStart({ callerThreadId, adding: 1 });
+    // A call that waited for the lock may find its start already made by a call that joined the same
+    // question: that worker counts in the cap, and this call's dispatch replays it, so it is not counted again.
+    if (!(yield* threadManagement.hasReceipt(commandId))) {
+      yield* kodoGuard.guardStart({ callerThreadId, adding: 1 });
+    }
     return release;
   });
 
@@ -2638,9 +2643,22 @@ const make = Effect.gen(function* () {
         }
         const providers = yield* loadProviders;
         const key = yield* requestKey(input.clientRequestId);
+        const interactionMode = yield* resolveChildInteractionMode(
+          parent.thread.interactionMode,
+          input.interactionMode,
+        ); // KODO: mode-child-limit
         const commandId = stableCommandId({
           scope,
-          requestKey: key,
+          // KODO: swarm-delegate - what a person approved is part of the start's identity, so the same key with other content starts its own work
+          requestKey:
+            kodoTargetProject === undefined
+              ? key
+              : `${key}:${kodoStartContentDigest({
+                  projectTitle: kodoTargetProject.title,
+                  projectId: kodoTargetProject.id,
+                  mode: interactionMode,
+                  request: taskPrompt(input),
+                })}`,
           operation: "delegate-task",
         });
         const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
@@ -2655,10 +2673,6 @@ const make = Effect.gen(function* () {
           input.runtimeMode,
           target,
         );
-        const interactionMode = yield* resolveChildInteractionMode(
-          parent.thread.interactionMode,
-          input.interactionMode,
-        ); // KODO: mode-child-limit
         // KODO: swarm-delegate - the person confirms each worker the Orchestrator would start, before any cap is taken
         if (kodoTargetProject !== undefined && !isRetryOfAcceptedDelegation) {
           yield* kodoConfirmStart({
@@ -2674,7 +2688,12 @@ const make = Effect.gen(function* () {
         // KODO: delegation-normalize - a retry of a delegation already accepted starts nothing new
         const kodoRelease: Effect.Effect<void> =
           kodoLead && !isRetryOfAcceptedDelegation
-            ? yield* kodoStartWorker(scope.thread.threadId, interactionMode, target.modelSelection)
+            ? yield* kodoStartWorker(
+                scope.thread.threadId,
+                interactionMode,
+                target.modelSelection,
+                commandId,
+              )
             : Effect.void;
         let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
         if (input.isolation === "worktree" && !isRetryOfAcceptedDelegation) {

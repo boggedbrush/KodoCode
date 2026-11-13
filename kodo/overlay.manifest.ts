@@ -1050,6 +1050,10 @@ export default {
     },
     { file: "packages/client-runtime/src/state/threadShell.ts", hooks: ["orchestrator-hidden"] },
     { file: "apps/web/src/components/ThreadRouteView.tsx", hooks: ["orchestrator-hidden"] },
+    {
+      file: "apps/web/src/components/chat/TimelinePendingApprovalRow.tsx",
+      hooks: ["approval-detail"],
+    },
     { file: "packages/contracts/src/clientRpcPermissions.ts", hooks: ["orchestrator-rpc"] },
     {
       file: "apps/server/src/orchestration-v2/ProviderSessionManager.test.ts",
@@ -1374,6 +1378,7 @@ export default {
       "apps/server/src/mcp/McpSessionRegistry.test.ts",
       "apps/web/src/kodo/delegationBar.logic.test.ts",
       "apps/web/src/kodo/orchestrator.logic.test.ts",
+      "apps/web/src/kodo/approvalDetail.logic.test.ts",
       "evals/mcp-tool-use/orchestratorCases.test.ts",
       "packages/client-runtime/src/state/commandPermissions.test.ts",
       "packages/client-runtime/src/state/projectEntities.test.ts",

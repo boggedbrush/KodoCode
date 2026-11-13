@@ -33,9 +33,12 @@ window to use them.
 - **Reads.** It can list projects and threads across all of them, search them and read one.
 - **Starts work, after you approve it.** Only with `delegate_task`, in a project you name. When it
   wants to start a worker, nothing starts. A card appears in the Orchestrator conversation naming the
-  project, the mode the worker would run in (it runs on that mode's model from Settings, or the thread's own if that is not available), and the request, with **Approve** and
-  **Decline**. Only you can answer it: not the Orchestrator and not any other agent. Declining tells
-  the Orchestrator it was refused. Stopping the Orchestrator's turn withdraws the card. This is a
+  project, the mode the worker would run in (it runs on that mode's model from Settings, or the
+  project's default model if that is not available), and the whole request, with **Approve** and
+  **Decline**. A long request shows its first lines, and **Show all** opens the rest; the worker
+  gets exactly the text on the card, and a request too long to read on a card (over 32,000
+  characters) is refused. Only one card is open at a time. Only you can answer it: not the
+  Orchestrator and not any other agent. Declining tells the Orchestrator it was refused. Stopping the Orchestrator's turn withdraws the card. This is a
   rule of the server, not a request in the Orchestrator's instructions, so it holds whatever the
   model does. **Settings → Threads → Orchestrator → Ask before the Orchestrator starts work** turns
   it off, and then workers start at once. Agents cannot change that setting through the app's tools.
@@ -58,9 +61,10 @@ window to use them.
 
 **Settings → Threads → Orchestrator** has:
 
-- **Show the Orchestrator** turns the row off and hides the command. It waits while workers are
-  running, with the reason shown, because turning the row off would hide the way to stop them. The
-  conversation is kept.
+- **Show the Orchestrator** turns the row off and hides the command; it does not stop the
+  Orchestrator, and a conversation you reach another way still answers. It waits while workers are
+  running, a turn is in progress or a question is open, with the reason shown, because turning the
+  row off would hide the way to stop or answer them. The conversation is kept.
 - **Ask before the Orchestrator starts work**, on by default, as above.
 - **Reset conversation** starts the Orchestrator's conversation again from nothing. It is refused while
   workers are running or a turn or a question is open. It also repairs the Orchestrator if its

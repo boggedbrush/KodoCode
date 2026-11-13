@@ -3,17 +3,23 @@
 import { ProjectId, ProviderInstanceId, ThreadId, type ModelSelection } from "@t3tools/contracts";
 import { describe, expect, it } from "@effect/vitest";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as TestClock from "effect/testing/TestClock";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import {
   finishedWorkerOf,
+  makeDelegationLedgerEvents,
   makeFinishedWorkerMemory,
   makeDelegationLedgerLook,
 } from "../delegation/DelegationLedgerWorker.ts";
+import { makeThreadSingleFlight } from "../loop/threadSingleFlight.ts";
 import { summarizeDelegation } from "../delegation/delegationUsage.ts";
 import * as KodoLoopLedger from "./LoopLedger.ts";
 import { workerLedgerRow } from "./delegationLedgerRow.ts";
@@ -484,5 +490,117 @@ describe("a lead's usage", () => {
       });
       expect(usage.workers?.costUsd).toBeCloseTo(1);
     }),
+  );
+});
+
+describe("the worker events of the ledger", () => {
+  const task = (status: string) =>
+    ({
+      type: "subagent.updated",
+      payload: { origin: "app_owned", childThreadId: workerId, status },
+    }) as never;
+  const finished = task("completed");
+  const restarted = task("running");
+  const lateUsage = {
+    type: "provider-turn.updated",
+    threadId: workerId,
+    payload: { turnTokenUsage: {} },
+  } as never;
+
+  /** The look as the layer builds it, one at a time per thread; each call follows the script and says when it starts. */
+  const events = (
+    script: ReadonlyArray<{ readonly gate?: Deferred.Deferred<void>; readonly found: boolean }>,
+  ) =>
+    Effect.gen(function* () {
+      const calls = yield* Ref.make(0);
+      const started = yield* Queue.unbounded<number>();
+      const memory = makeFinishedWorkerMemory();
+      const handle = makeDelegationLedgerEvents({
+        memory,
+        look: makeThreadSingleFlight(() =>
+          Effect.gen(function* () {
+            const index = yield* Ref.getAndUpdate(calls, (count) => count + 1);
+            yield* Queue.offer(started, index);
+            const step = script[index];
+            if (step?.gate !== undefined) yield* Deferred.await(step.gate);
+            return step?.found ?? false;
+          }),
+        ),
+      });
+      return { handle, memory, calls, started };
+    });
+
+  it.effect(
+    "a usage report that lands while the worker's look is running is looked at after it",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const gate = yield* Deferred.make<void>();
+          const { handle, calls, started } = yield* events([
+            { gate, found: true },
+            { found: true },
+          ]);
+          const look = yield* handle(finished);
+          yield* Queue.take(started);
+          const late = yield* handle(lateUsage);
+          // Its own look ends at once, leaving the running one a mark to go round again.
+          if (late !== undefined) yield* Fiber.join(late);
+          yield* Deferred.succeed(gate, undefined);
+          yield* Fiber.join(look);
+          expect(yield* Ref.get(calls)).toBe(2);
+        }),
+      ),
+  );
+
+  it.effect(
+    "a finish that arrives during a look is remembered, and an older look that finds nothing does not forget it",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const gate = yield* Deferred.make<void>();
+          const { handle, memory, calls, started } = yield* events([
+            { gate, found: false },
+            { found: true },
+          ]);
+          const first = yield* handle(finished);
+          yield* Queue.take(started);
+          yield* handle(restarted);
+          // The look is running, so this event starts none of its own; the running look goes round again.
+          const second = yield* handle(finished);
+          yield* Fiber.join(second);
+          expect(memory.lateUsageWorkerOf(lateUsage)).toBe(workerId);
+          yield* Deferred.succeed(gate, undefined);
+          yield* Fiber.join(first);
+          expect(yield* Ref.get(calls)).toBe(2);
+          expect(memory.lateUsageWorkerOf(lateUsage)).toBe(workerId);
+        }),
+      ),
+  );
+
+  it.effect("a look that finds nothing forgets the worker it was asked about", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const { handle, memory } = yield* events([{ found: false }]);
+        yield* Fiber.join(yield* handle(finished));
+        expect(memory.lateUsageWorkerOf(lateUsage)).toBeUndefined();
+      }),
+    ),
+  );
+
+  it.effect(
+    "a worker that takes another task is not remembered again by the look of the first",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const gate = yield* Deferred.make<void>();
+          const { handle, memory, started } = yield* events([{ gate, found: true }]);
+          const look = yield* handle(finished);
+          yield* Queue.take(started);
+          yield* handle(restarted);
+          yield* Deferred.succeed(gate, undefined);
+          yield* Fiber.join(look);
+          expect(memory.lateUsageWorkerOf(lateUsage)).toBeUndefined();
+        }),
+      ),
   );
 });

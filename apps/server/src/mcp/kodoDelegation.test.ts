@@ -94,7 +94,12 @@ interface World {
   /** Runs after each read of the lead's workers, with the list the read returned. */
   readonly onChildrenRead?: Effect.Effect<void>;
   /** Runs inside each dispatch, before the worker is recorded; may add the worker to `children` and `shells`. */
-  readonly onDispatch?: (shells: Record<string, unknown>) => Effect.Effect<void>;
+  readonly onDispatch?: (
+    shells: Record<string, unknown>,
+    command: Record<string, unknown>,
+  ) => Effect.Effect<void>;
+  /** Runs with the requests the thread held, after each read of them as the start question reads them. */
+  readonly onRequestsRead?: (seen: ReadonlyArray<Record<string, unknown>>) => Effect.Effect<void>;
   /** Runs with each command dispatched (KODO: swarm-delegate: the start question is one). */
   readonly onCommand?: (command: Record<string, unknown>) => Effect.Effect<void>;
   /** What a person answers the Orchestrator's start questions, one per question; the stream of requests waits for it. */
@@ -203,8 +208,13 @@ const run = <A, E>(
             const read = (world.children ?? []).map((child) => ThreadId.make(child));
             return (world.onChildrenRead ?? Effect.void).pipe(Effect.as(read));
           }),
-        getThreadRecords: (id) =>
+        getThreadRecords: (id, _kinds, options) =>
           storedRequests.pipe(
+            Effect.tap((runtimeRequests) =>
+              id === leadId && options?.runtimeRequestStatuses !== undefined
+                ? (world.onRequestsRead?.(runtimeRequests) ?? Effect.void)
+                : Effect.void,
+            ),
             Effect.map(
               (runtimeRequests) =>
                 (id === leadId
@@ -243,7 +253,7 @@ const run = <A, E>(
                 ),
               ),
         dispatch: (command) =>
-          (world.onDispatch?.(shells) ?? Effect.void).pipe(
+          (world.onDispatch?.(shells, command as never) ?? Effect.void).pipe(
             Effect.andThen(Ref.update(dispatched, (all) => [...all, command as never])),
             Effect.andThen(
               command.type === "kodo.start-request.record"
@@ -251,7 +261,11 @@ const run = <A, E>(
                     ...all,
                     [String(command.requestId)]:
                       command.outcome === "pending"
-                        ? { id: command.requestId, status: "pending" }
+                        ? {
+                            id: command.requestId,
+                            status: "pending",
+                            nativeRequestRef: { driver: "kodo", nativeId: "start-request" },
+                          }
                         : { ...all[String(command.requestId)], status: "cancelled" },
                   }))
                 : Effect.void,
@@ -859,6 +873,8 @@ describe("the Orchestrator's start confirmation", () => {
         call: Fiber.Fiber<Result, Failure>,
         decision: "accept" | "decline",
       ) => Effect.Effect<void>;
+      /** The answers the calls take, one per call waiting: for a question that more than one call waits on. */
+      readonly answers: Queue.Queue<Record<string, unknown>>;
       /** Waits for the call to end, failing at once if it raises a question instead. */
       readonly endsWithoutAsking: <Result, Failure>(
         call: Fiber.Fiber<Result, Failure>,
@@ -891,6 +907,7 @@ describe("the Orchestrator's start confirmation", () => {
             service,
             dispatched,
             question,
+            answers: answered,
             endsWithoutAsking: (call) =>
               Effect.raceFirst(
                 Fiber.join(call),
@@ -1064,6 +1081,140 @@ describe("the Orchestrator's start confirmation", () => {
             "delegated_task.request",
           ]);
           assert.equal(workers(all)[0]?.commandId, workers(all)[1]?.commandId);
+        }),
+      ),
+    );
+
+    it.effect("the card carries the whole request: what is stored is what is dispatched", () =>
+      withQuestion(full, ({ service, dispatched, question, answer }) =>
+        Effect.gen(function* () {
+          const long = `${"Add retries to the client. ".repeat(300)}Then push to main.`;
+          const fiber = yield* Effect.forkChild(
+            delegate(service, { ...callIn("long", ProjectId.make("project:other"), long) }),
+          );
+          const card = yield* question(fiber);
+          yield* answer(fiber, "accept");
+          yield* Fiber.join(fiber);
+          const [worker] = workers(yield* Ref.get(dispatched));
+          assert.isAbove(String(worker?.task).length, 8_000);
+          assert.isTrue(String(card.prompt).endsWith(`Request: ${String(worker?.task)}`));
+        }),
+      ),
+    );
+
+    it.effect(
+      "a request longer than a person can be asked to approve is refused before any card",
+      () =>
+        withQuestion(full, ({ service, dispatched }) =>
+          Effect.gen(function* () {
+            const refused = yield* service
+              .delegateTask(
+                scope(leadId),
+                callIn("too-long", ProjectId.make("project:other"), "x".repeat(32_001)),
+              )
+              .pipe(Effect.flip);
+            assert.equal(refused.code, "invalid_request");
+            assert.include(refused.message, "32000");
+            assert.deepEqual(yield* Ref.get(dispatched), []);
+          }),
+        ),
+    );
+
+    it.effect(
+      "two calls joined on one question both report the one start, even when it filled the cap",
+      () =>
+        Effect.gen(function* () {
+          const children: Array<string> = [];
+          const reads = yield* Queue.unbounded<ReadonlyArray<Record<string, unknown>>>();
+          return yield* withQuestion(
+            {
+              ...full,
+              children,
+              settings: { kodoSubAgentsMaxWorkers: 1 },
+              onRequestsRead: (seen) => Queue.offer(reads, seen).pipe(Effect.asVoid),
+              // The first start fills the cap; a replay of it adds nothing.
+              onDispatch: (shells, command) =>
+                command.type === "delegated_task.request" && children.length === 0
+                  ? Effect.sync(() => {
+                      children.push("w1");
+                      shells.w1 = running("w1");
+                    })
+                  : Effect.void,
+            },
+            ({ service, dispatched, question, answers }) =>
+              Effect.gen(function* () {
+                const same = callIn("joined", ProjectId.make("project:other"), "Fix a typo.");
+                const first = yield* Effect.forkChild(Effect.result(delegate(service, same)));
+                const card = yield* question(first);
+                yield* Queue.take(reads);
+                const second = yield* Effect.forkChild(Effect.result(delegate(service, same)));
+                // The second call has read the question still pending, so it waits on the same card.
+                const seen = yield* Queue.take(reads);
+                assert.deepEqual(
+                  seen.map((request) => [request.id, request.status]),
+                  [[card.requestId, "pending"]],
+                );
+                for (const _ of [first, second]) {
+                  yield* Queue.offer(answers, {
+                    id: card.requestId,
+                    status: "resolved",
+                    decision: "accept",
+                  });
+                }
+                assert.deepEqual(
+                  [(yield* Fiber.join(first))._tag, (yield* Fiber.join(second))._tag],
+                  ["Success", "Success"],
+                );
+                const all = yield* Ref.get(dispatched);
+                assert.lengthOf(
+                  all.filter((command) => command.type === "kodo.start-request.record"),
+                  1,
+                );
+                const [one, two] = workers(all);
+                assert.equal(one?.commandId, two?.commandId);
+              }),
+          );
+        }),
+    );
+
+    it.effect("the same id with other approved content starts its own work, not the first's", () =>
+      withQuestion(full, ({ service, dispatched, question, answer }) =>
+        Effect.gen(function* () {
+          for (const task of ["Fix a typo.", "Fix another typo."]) {
+            const fiber = yield* Effect.forkChild(
+              delegate(service, callIn("reused", ProjectId.make("project:other"), task)),
+            );
+            yield* question(fiber);
+            yield* answer(fiber, "accept");
+            yield* Fiber.join(fiber);
+          }
+          const [first, second] = workers(yield* Ref.get(dispatched));
+          assert.notEqual(first?.commandId, second?.commandId);
+          assert.isTrue(String(first?.task).endsWith("Fix a typo."));
+          assert.isTrue(String(second?.task).endsWith("Fix another typo."));
+        }),
+      ),
+    );
+
+    it.effect("a second start request while one is open is refused, and asks nothing", () =>
+      withQuestion(full, ({ service, dispatched, question }) =>
+        Effect.gen(function* () {
+          const first = yield* Effect.forkChild(
+            delegate(service, callIn("one", ProjectId.make("project:other"), "Fix a typo.")),
+          );
+          yield* question(first);
+          const refused = yield* service
+            .delegateTask(scope(leadId), callIn("two", secondProject, "Fix something else."))
+            .pipe(Effect.flip);
+          assert.equal(refused.code, "capability_denied");
+          assert.include(refused.message, "Wait for their answer");
+          assert.lengthOf(
+            (yield* Ref.get(dispatched)).filter(
+              (command) => command.type === "kodo.start-request.record",
+            ),
+            1,
+          );
+          yield* Fiber.interrupt(first);
         }),
       ),
     );
