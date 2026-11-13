@@ -12,6 +12,7 @@ import { contextBridge, ipcRenderer, webFrame, webUtils } from "electron";
 
 import * as IpcChannels from "./ipc/channels.ts";
 import { mergeLegacyLocalStorage } from "./legacyLocalStorageMerge.ts";
+import { kodoLinuxDesktopPreload } from "./kodo/kodoLinuxDesktopPreload.ts"; // KODO: linux-desktop-bridge
 
 const SNAP_SHOT_EVENT_TYPES = new Set([
   "requested",
@@ -470,4 +471,5 @@ contextBridge.exposeInMainWorld("desktopBridge", {
         ipcRenderer.removeListener(IpcChannels.PREVIEW_OPEN_LINK_CHANNEL, wrappedListener);
     },
   },
+  ...kodoLinuxDesktopPreload(ipcRenderer, clientPlatform), // KODO: linux-desktop-bridge
 } satisfies DesktopBridge);

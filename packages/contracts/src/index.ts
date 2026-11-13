@@ -28,6 +28,7 @@ export * from "./kodoLoop.ts"; // KODO: loop-contract
 export * from "./kodoLoopLedger.ts"; // KODO: loop-ledger-contract
 export * from "./kodoModeModels.ts"; // KODO: mode-models-setting
 export * from "./kodoPromptEnhance.ts"; // KODO: prompt-enhance-contract
+export * from "./kodoLinuxDesktop.ts"; // KODO: linux-desktop-contract
 export * from "./modelSelection.ts";
 export * from "./chatAttachment.ts";
 export * from "./checkpointDiff.ts";

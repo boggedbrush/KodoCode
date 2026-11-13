@@ -318,6 +318,13 @@ export const make = Effect.gen(function* () {
       {
         role: "help",
         submenu: [
+          // KODO: shortcuts-window - the web client's shortcuts overview; its own chord is a keybinding
+          {
+            label: "Keyboard Shortcuts",
+            click: () => {
+              runMenuEffect("shortcuts-open", dispatchMenuAction("shortcuts.open"));
+            },
+          },
           {
             label: "Check for Updates...",
             click: checkForUpdatesClick,

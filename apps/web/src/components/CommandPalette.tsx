@@ -66,6 +66,7 @@ import {
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
+  KeyboardIcon, // KODO: shortcuts-palette
   MessageSquareDashedIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -81,6 +82,7 @@ import {
   UserPlusIcon,
 } from "lucide-react";
 import { openThreadFind } from "./chat/threadFindStore";
+import { setKodoShortcutsOpen } from "../kodo/shortcutsWindow"; // KODO: shortcuts-palette
 import {
   useDeferredValue,
   useEffect,
@@ -1704,6 +1706,19 @@ function OpenCommandPaletteDialog(props: {
       },
     });
   }
+
+  // KODO: shortcuts-palette - the keyboard shortcuts overview, on every platform
+  actionItems.push({
+    kind: "action",
+    value: "action:keyboard-shortcuts",
+    searchTerms: ["keyboard", "shortcuts", "keys", "keybindings", "cheat sheet", "help", "hotkeys"],
+    title: "Keyboard shortcuts",
+    icon: <KeyboardIcon className={ITEM_ICON_CLASS} />,
+    shortcutCommand: "shortcuts.open",
+    run: async () => {
+      setKodoShortcutsOpen(true);
+    },
+  });
 
   // KODO: usage-palette-action - jumps straight to the subscription limits view
   actionItems.push({

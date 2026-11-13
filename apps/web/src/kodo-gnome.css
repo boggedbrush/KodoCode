@@ -165,3 +165,33 @@ html[data-theme-id="kodo"] [data-settings-scroll-target] h2 {
   font-size: 0.9375rem;
   font-weight: 700;
 }
+
+/* System accent (Linux desktop app, kodo/systemAccent.ts): GNOME's accent colour replaces Kodo's
+   purple while the Kodo theme is in use and the person follows the system. The values are
+   !important because the theme writes its colours inline. `--kodo-accent-window-text` is the
+   libadwaita accent_color: the fill mixed towards black on light and white on dark so it reads as
+   text on the window. */
+html[data-theme-id="kodo"][data-kodo-system-accent] {
+  --kodo-accent-window-text: color-mix(in srgb, var(--kodo-accent-fill) 75%, black);
+  --kodo-accent-hover: color-mix(in srgb, var(--kodo-accent-fill) 88%, white);
+  --kodo-accent-tint: color-mix(in srgb, var(--kodo-accent-fill) 12%, var(--app-theme-canvas));
+  --app-theme-accent: var(--kodo-accent-fill) !important;
+  --app-theme-accent-foreground: var(--kodo-accent-text) !important;
+  --app-theme-focus: var(--kodo-accent-window-text) !important;
+  --app-theme-message-action: var(--kodo-accent-fill) !important;
+  --app-theme-message-action-foreground: var(--kodo-accent-text) !important;
+  --app-theme-message-action-hover: var(--kodo-accent-hover) !important;
+  --app-theme-update: var(--kodo-accent-fill) !important;
+  --app-theme-update-foreground: var(--kodo-accent-window-text) !important;
+  --app-theme-update-surface: var(--kodo-accent-tint) !important;
+  --app-theme-terminal-cursor: var(--kodo-accent-fill) !important;
+  --app-theme-terminal-selection-background: color-mix(
+    in srgb,
+    var(--kodo-accent-fill) 22%,
+    var(--app-theme-terminal-background)
+  ) !important;
+}
+html[data-theme-id="kodo"][data-kodo-system-accent].dark {
+  --kodo-accent-window-text: color-mix(in srgb, var(--kodo-accent-fill) 55%, white);
+  --kodo-accent-tint: color-mix(in srgb, var(--kodo-accent-fill) 18%, var(--app-theme-canvas));
+}

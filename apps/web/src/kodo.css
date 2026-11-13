@@ -7,6 +7,9 @@
 /* GNOME look, scoped to the Kodo theme (see kodo-gnome.css). */
 @import "./kodo-gnome.css";
 
+/* Header bar window buttons of the Linux desktop app. */
+@import "./kodo-window-chrome.css";
+
 /*
  * Interaction-mode accents. These are named tokens that do not change with the selected
  * theme: ask, plan, code and review each keep their own colour. Tailwind exposes them as

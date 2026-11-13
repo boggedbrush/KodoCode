@@ -20,6 +20,7 @@ import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import { getDesktopUrl } from "../electron/ElectronProtocol.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
+import { isKodoCustomFrame, kodoLinuxDesktopFor } from "../kodo/KodoLinuxDesktop.ts"; // KODO: linux-header-bar
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import {
   MENU_ACTION_CHANNEL,
@@ -297,7 +298,8 @@ function syncWindowAppearance(
 
     window.setBackgroundColor(getInitialWindowBackgroundColor(shouldUseDarkColors));
     const { titleBarOverlay } = getWindowTitleBarOptions(shouldUseDarkColors, platform);
-    if (typeof titleBarOverlay === "object") {
+    // KODO: linux-header-bar - a window with Kodo's own header buttons has no overlay to recolor
+    if (typeof titleBarOverlay === "object" && !isKodoCustomFrame(window)) {
       window.setTitleBarOverlay(titleBarOverlay);
     }
   });
@@ -392,6 +394,9 @@ export const make = Effect.gen(function* () {
     const iconPaths = yield* assets.iconPaths;
     const iconOption = getIconOption(iconPaths, environment.platform);
     const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
+    // KODO: linux-header-bar - on GNOME the window drops the system frame and the page draws the header buttons
+    const kodoDesktop = kodoLinuxDesktopFor(environment);
+    const kodoOwnHeaderButtons = yield* Effect.promise(() => kodoDesktop.prepareFrame());
     const persistedSettings = yield* desktopSettings.get;
     const persistedBounds = persistedSettings.mainWindowBounds;
     const displayBoundsResult = yield* Effect.sync(() => {
@@ -426,7 +431,9 @@ export const make = Effect.gen(function* () {
       backgroundColor: getInitialWindowBackgroundColor(shouldUseDarkColors),
       ...iconOption,
       title: environment.displayName,
-      ...getWindowTitleBarOptions(shouldUseDarkColors, environment.platform),
+      ...(kodoOwnHeaderButtons
+        ? ({ titleBarStyle: "hidden" } as const) // KODO: linux-header-bar - no overlay: the page draws the buttons
+        : getWindowTitleBarOptions(shouldUseDarkColors, environment.platform)),
       webPreferences: {
         preload: environment.preloadPath,
         // Hidden-renderer throttling stalls first paint; re-enable it after the first reveal.
@@ -445,6 +452,7 @@ export const make = Effect.gen(function* () {
       return Option.none();
     }
 
+    kodoDesktop.attach(window, kodoOwnHeaderButtons); // KODO: linux-header-bar
     pendingMainReveals.set(window, Effect.void);
     yield* rendererHistory.register(window.webContents, { surface: "main" });
     if (environment.platform === "darwin") {

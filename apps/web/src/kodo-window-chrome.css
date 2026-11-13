@@ -1,0 +1,13 @@
+/*
+ * The Linux desktop app draws its own header buttons when the window has no system frame
+ * (kodo/KodoWindowControls.tsx). The headers reserve room for window controls under the `wco`
+ * class, so these are the insets they reserve: the buttons' width on each side, set by
+ * kodo/windowChrome.ts. The 47px header is libadwaita's.
+ */
+html[data-kodo-window-chrome="custom"] {
+  --workspace-topbar-height: 47px;
+  --workspace-controls-top: 0px;
+  --workspace-controls-left: calc(var(--kodo-controls-left, 0px) + 0.75rem);
+  --workspace-controls-right: calc(var(--kodo-controls-right, 0px) + 0.75rem);
+  --workspace-native-controls-inset: calc(var(--kodo-controls-right, 0px) + 0.75rem);
+}

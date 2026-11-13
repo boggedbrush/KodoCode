@@ -64,6 +64,7 @@ import { KodoModeModelsSettings } from "./KodoModeModelsSettings"; // KODO: mode
 import { KodoLoopSettings } from "./KodoLoopSettings"; // KODO: loop-settings
 import { KodoSubAgentsSettings } from "./KodoSubAgentsSettings"; // KODO: sub-agents-settings
 import { KodoOrchestratorSettings } from "./KodoOrchestratorSettings"; // KODO: orchestrator-settings
+import { KodoLinuxDesktopSettings } from "./KodoLinuxDesktopSettings"; // KODO: linux-desktop-settings
 import { ThreadTitleInstructionsSettings } from "./ThreadTitleInstructionsSettings";
 import { SnoozePresetsRow } from "./SnoozePresetsSettings";
 import { useDesktopUpdateState } from "../../state/desktopUpdate";
@@ -1007,6 +1008,7 @@ export function GeneralSettingsPanel() {
             }
           />
         ) : null}
+        <KodoLinuxDesktopSettings /> {/* KODO: linux-desktop-settings */}
       </SettingsSection>
 
       <SettingsSection id="display" title="Display">

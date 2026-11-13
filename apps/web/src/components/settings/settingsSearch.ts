@@ -58,6 +58,7 @@ export interface SettingsSearchItem {
   readonly desktopOnly?: boolean;
   readonly macOnly?: boolean;
   readonly windowsOnly?: boolean;
+  readonly linuxOnly?: boolean; // KODO: linux-desktop-search
   readonly releaseChannelOnly?: boolean;
   readonly secretsFeatureOnly?: boolean;
   readonly cloudOnly?: boolean;
@@ -881,6 +882,24 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["confirmation desktop app exit direct hold double click press twice"],
     desktopOnly: true,
   },
+  // KODO: linux-desktop-search
+  {
+    id: "system-title-bar",
+    title: "Use system title bar",
+    to: "/settings/general",
+    searchTerms: ["window header bar buttons close minimize maximize gnome frame decorations"],
+    desktopOnly: true,
+    linuxOnly: true,
+  },
+  // KODO: linux-desktop-search
+  {
+    id: "system-accent",
+    title: "Follow the system accent colour",
+    to: "/settings/general",
+    searchTerms: ["gnome color theme purple blue teal green orange red pink slate yellow"],
+    desktopOnly: true,
+    linuxOnly: true,
+  },
   {
     id: "text-generation-model",
     title: "Text generation model",
@@ -1554,7 +1573,8 @@ export function settingsForThisPlatform(
       (!item.releaseChannelOnly || isElectron || HOSTED_APP_CHANNEL !== null) &&
       (!item.secretsFeatureOnly || isSecretsFeatureEnabled) &&
       (!item.macOnly || isMacPlatform(platform)) &&
-      (!item.windowsOnly || isWindowsPlatform(platform)),
+      (!item.windowsOnly || isWindowsPlatform(platform)) &&
+      (!item.linuxOnly || (isElectron && /linux/i.test(platform))), // KODO: linux-desktop-search
   );
 }
 

@@ -14,6 +14,7 @@ import { AdvertisedEndpoint } from "./remoteAccess.ts";
 import { ExecutionEnvironmentDescriptor } from "./environment.ts";
 import { type ClientSettings, type QuitConfirmationMode, SnapShotShortcut } from "./settings.ts";
 import type { EditorId } from "./editor.ts";
+import type { KodoLinuxDesktopBridge } from "./kodoLinuxDesktop.ts"; // KODO: linux-desktop-contract
 import { KeybindingShortcut, type PreviewForwardedShortcut } from "./keybindings.ts";
 
 import type {
@@ -1132,6 +1133,8 @@ export interface DesktopBridge {
   getWindowFullscreenState: () => boolean;
   onWindowFullscreenStateChange: (listener: (fullscreen: boolean) => void) => () => void;
   getWindowZoomFactor: () => number;
+  /** KODO: linux-desktop-contract - header bar window buttons and the system accent; Linux desktop only. */
+  kodoLinuxDesktop?: KodoLinuxDesktopBridge;
   getUpdateState: () => Promise<DesktopUpdateState>;
   /** `minimumVersion` is a track switch's checked release; nothing older is offered after. */
   setUpdateChannel: (

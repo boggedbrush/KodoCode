@@ -56,6 +56,9 @@ import { installCommandPaletteCommands } from "./shortcuts/commandPaletteCommand
 import { registerOpenFavoriteEditorCommand } from "./components/chat/OpenInPickerShortcut";
 import { environmentThreadShells, threadEnvironment } from "./state/threads";
 import { resolveThreadRouteTarget } from "./threadRoutes";
+import { startKodoWindowChrome } from "./kodo/windowChrome"; // KODO: window-controls
+import { startKodoSystemAccent } from "./kodo/systemAccent"; // KODO: system-accent
+import { startKodoShortcutsWindow } from "./kodo/shortcutsWindow"; // KODO: shortcuts-window
 
 /** Writes appearance settings onto the document, touching only the groups that changed. */
 function startClientAppearance(): void {
@@ -175,6 +178,8 @@ export function startAppServices(): AppRouter {
   if (isElectron) {
     syncDocumentElectronPlatformClasses(navigator.platform);
     syncDocumentWindowControlsOverlayClass();
+    startKodoWindowChrome(); // KODO: window-controls - after the overlay class, which it must not undo
+    startKodoSystemAccent(); // KODO: system-accent
   }
 
   installDesktopPasteAsText(window.desktopBridge, window);
@@ -192,6 +197,7 @@ export function startAppServices(): AppRouter {
   startBrowserProfileReporting();
   installChatRouteCommands(router);
   installCommandPaletteCommands(router);
+  startKodoShortcutsWindow(); // KODO: shortcuts-window
   registerOpenFavoriteEditorCommand();
   startThreadOverlayRetention(router);
   // Drafts promote as their server threads arrive, wherever the user is.

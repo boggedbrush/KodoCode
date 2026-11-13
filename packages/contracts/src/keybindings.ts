@@ -84,6 +84,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "filePicker.toggle",
   "projectSearch.toggle",
   "usage.open",
+  "shortcuts.open", // KODO: shortcuts-window - opens the keyboard shortcuts overview
   "orchestrator.open", // KODO: orchestrator-open - opens the Orchestrator conversation; no default binding
   "theme.select",
   "appearance.cycle",

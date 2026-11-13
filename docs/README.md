@@ -6,6 +6,7 @@
 - [Messages and context](./user/composer.md)
 - [Working with threads](./user/thread-sidebar.md)
 - [Orchestrator](./user/orchestrator.md)
+- [Shortcuts window and GNOME](./user/gnome.md)
 - [Permission modes](./user/permission-modes.md)
 - [Terminal history](./user/terminal.md)
 - [Source control](./user/source-control.md)
