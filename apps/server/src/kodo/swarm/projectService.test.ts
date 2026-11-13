@@ -139,7 +139,7 @@ const withService = <A, E>(
   Effect.gen(function* () {
     const service = yield* ProjectService.make;
     return yield* body(service);
-  }).pipe(Effect.provide(layerServices), Effect.provide(layerDatabase));
+  }).pipe(Effect.provide(layerServices.pipe(Layer.provideMerge(layerDatabase))));
 
 const refusedWith = <A>(effect: Effect.Effect<A, ProjectService.ProjectServiceError>) =>
   effect.pipe(
