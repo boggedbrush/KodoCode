@@ -12,13 +12,15 @@ import { useStableCallback } from "../hooks/useStableCallback";
 import { threadEnvironment } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { KodoLoopCard } from "./KodoLoopCard";
+import { readDismissedLoopIds, rememberDismissedLoop } from "./loopDismissal";
 import { isKodoLoopRunning, kodoLoopActions, kodoLoopTitle } from "./loopCard.logic";
 
 const DEFAULT_EXTEND_ROUNDS = 3;
 
 /**
  * The loop's card above the composer: where it is while it runs, and why it ended after. A finished
- * loop's card stays until it is dismissed, with the one action its ending offers.
+ * loop's card stays until it is dismissed, with the one action its ending offers. A dismissal is
+ * remembered by loop id in this browser, so a reload keeps it and the next loop always shows.
  */
 export function useKodoLoop(input: {
   readonly environmentId: EnvironmentId;
@@ -30,7 +32,7 @@ export function useKodoLoop(input: {
   readonly setThreadError: (threadId: ThreadId, message: string | null) => void;
 }): ComposerBannerStackItem | null {
   const control = useOrchestrationCommand(threadEnvironment.controlLoop, { reportFailure: false });
-  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(readDismissedLoopIds);
   const [busy, setBusy] = useState(false);
   const { loop, threadId } = input;
 
@@ -59,9 +61,8 @@ export function useKodoLoop(input: {
   );
 
   if (loop === undefined || threadId === null) return null;
-  const key = `${loop.loopId}:${loop.status}`;
   const running = isKodoLoopRunning(loop);
-  if (!running && dismissedKey === key) return null;
+  if (!running && dismissed.has(loop.loopId)) return null;
   const actions = kodoLoopActions(loop, {
     canOperate: input.canOperateThread,
     threadIdle: input.threadIdle,
@@ -76,7 +77,10 @@ export function useKodoLoop(input: {
     children: <KodoLoopCard loop={loop} />,
     ...(running
       ? {}
-      : { dismissLabel: "Dismiss loop summary", onDismiss: () => setDismissedKey(key) }),
+      : {
+          dismissLabel: "Dismiss loop summary",
+          onDismiss: () => setDismissed((current) => rememberDismissedLoop(current, loop.loopId)),
+        }),
     ...(hasActions
       ? {
           actions: (

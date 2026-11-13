@@ -24,6 +24,7 @@ import {
   type TurnTokenUsage,
 } from "@t3tools/contracts";
 import { kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel";
+import * as Clock from "effect/Clock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -416,6 +417,19 @@ const runToEnd = (
       yield* endTurn(ctx);
     }
     return yield* Effect.die("the loop never ended");
+  });
+
+/** Settles so the next stage starts, lets the provider answer it, and settles again so the one after starts. */
+const runToEndOfStage = (
+  ctx: Ctx,
+  stepper: { readonly step: (id: ThreadId) => Effect.Effect<LoopStepResult> },
+) =>
+  Effect.gen(function* () {
+    const started = yield* watchTurnStart(ctx);
+    yield* settle(ctx, stepper);
+    yield* Fiber.join(started);
+    yield* endTurn(ctx);
+    yield* ctx.worker.drain();
   });
 
 const projectionOf = (ctx: Ctx) => ctx.orchestrator.getThreadProjection(ctx.threadId);
@@ -1103,14 +1117,25 @@ it.live(
         );
         assert.deepEqual(
           loop.cleanup,
-          { leftMode: "plan" },
-          "the mode is owed once the run settles",
+          { leftMode: "plan", record: true },
+          "the mode and the stage's record are owed once the run settles",
         );
 
         // While the run runs the loop waits; it starts nothing and restores nothing.
         assert.equal(yield* stepper.step(ctx.threadId), "idle");
         assert.equal((yield* projectionOf(ctx)).thread.interactionMode, "plan");
         yield* endTurn(ctx);
+        assert.equal(
+          yield* stepper.step(ctx.threadId),
+          "acted",
+          "the stage that was running is recorded",
+        );
+        loop = yield* requireLoop(ctx);
+        assert.deepEqual(
+          loop.stages.map((record) => [record.round, record.stage, record.status]),
+          [[1, "plan", "interrupted"]],
+        );
+        assert.deepEqual(loop.cleanup, { leftMode: "plan" });
         assert.equal(yield* stepper.step(ctx.threadId), "acted", "the mode goes back");
         yield* ctx.worker.drain();
         assert.equal((yield* projectionOf(ctx)).thread.interactionMode, "ask");
@@ -1461,7 +1486,7 @@ it.live(
             commandId: CommandId.make("command:kodo-loop-restart-cleanup:stop"),
           });
           let loop = yield* requireLoop(ctx);
-          assert.deepEqual(loop.cleanup, { leftMode: "plan", interrupt: true });
+          assert.deepEqual(loop.cleanup, { leftMode: "plan", interrupt: true, record: true });
           assert.equal((yield* projectionOf(ctx)).runs[0]?.status, "running");
 
           // A new process: the stepper has no memory, only the thread's own state to go on.
@@ -1624,8 +1649,10 @@ const spendWith = (input: {
     ? Partial<A>
     : never;
   readonly providers: LoopSpendDeps["providers"];
+  readonly refreshLimits?: LoopSpendDeps["refreshLimits"];
 }): LoopSpendDeps => ({
   providers: input.providers,
+  ...(input.refreshLimits === undefined ? {} : { refreshLimits: input.refreshLimits }),
   modeModels: Effect.succeed({
     ask: null,
     plan: null,
@@ -1873,7 +1900,10 @@ it.live("a token cap stops the loop after the stage that reached it", () =>
         yield* runToEnd(ctx, yield* ctx.newStepper());
         const loop = yield* requireLoop(ctx);
         assert.equal(loop.stopReason, "budget");
-        assert.include(loop.stopDetail ?? "", "10,500 tokens, at the 10,000 cap");
+        assert.include(
+          loop.stopDetail ?? "",
+          "10,500 tokens (cache reads are not counted), at the 10,000 cap",
+        );
         assert.equal(loop.stages.length, 1);
       }),
   ),
@@ -1909,7 +1939,16 @@ it.live(
           yield* runToEnd(ctx, yield* ctx.newStepper(spendWith({ providers: Effect.succeed([]) })));
           const loop = yield* requireLoop(ctx);
           assert.equal(loop.status, "done");
-          assert.deepEqual(loop.limitCheck, { state: "missing", provider: providerInstanceId });
+          assert.deepEqual(loop.limitCheck, {
+            state: "missing",
+            provider: providerInstanceId,
+            unchecked: [
+              { round: 1, stage: "plan" },
+              { round: 1, stage: "code" },
+              { round: 1, stage: "review" },
+              { round: 1, stage: "judge" },
+            ],
+          });
         }),
     ),
 );
@@ -2012,6 +2051,348 @@ it.live(
           assert.equal(loop.stopReason, "user_message");
         }),
     ),
+);
+
+it.live(
+  "a stopped loop records the stage that was running, with what it spent, once its run settles",
+  () =>
+    withLoopHarness(
+      "kodo-loop-stop-record",
+      {
+        startMode: "code",
+        replies: [REPLIES.plan, REPLIES.code],
+        usages: [
+          usage({ inputTokens: 1_000, outputTokens: 100 }),
+          usage({ inputTokens: 9_000, cachedInputTokens: 2_000, outputTokens: 900 }),
+        ],
+      },
+      (ctx) =>
+        Effect.gen(function* () {
+          yield* startLoop(ctx, "Do it.", 3);
+          const stepper = yield* ctx.newStepper(spendWith({ providers: Effect.succeed([]) }));
+          yield* runToEndOfStage(ctx, stepper);
+          // The Code stage is now running. A person stops the loop.
+          const started = yield* watchTurnStart(ctx);
+          yield* settle(ctx, stepper);
+          yield* Fiber.join(started);
+          assert.equal((yield* projectionOf(ctx)).runs[1]?.status, "running");
+          yield* ctx.service.stop({
+            threadId: ctx.threadId,
+            commandId: CommandId.make("command:kodo-loop-stop-record:stop"),
+          });
+          let loop = yield* requireLoop(ctx);
+          assert.deepEqual(
+            loop.stages.map((record) => record.stage),
+            ["plan"],
+            "the running stage has no record yet",
+          );
+          assert.equal(loop.cleanup?.record, true);
+
+          const ended = yield* ctx.orchestrator.streamDomainEvents.pipe(
+            Stream.filter(
+              (event) => event.type === "run.updated" && event.payload.status === "interrupted",
+            ),
+            Stream.take(1),
+            Stream.runDrain,
+            Effect.forkScoped({ startImmediately: true }),
+          );
+          assert.equal(yield* stepper.step(ctx.threadId), "acted", "the run is interrupted");
+          yield* Fiber.join(ended);
+          yield* ctx.worker.drain();
+          for (let index = 0; index < 4; index += 1) yield* settle(ctx, stepper);
+
+          loop = yield* requireLoop(ctx);
+          const code = loop.stages.find((record) => record.stage === "code");
+          assert.equal(code?.status, "interrupted");
+          assert.equal(code?.usage?.uncachedInputTokens, 7_000);
+          assert.equal(code?.usage?.cachedInputTokens, 2_000);
+          assert.equal(code?.usage?.outputTokens, 900);
+          assert.isUndefined(loop.cleanup, "nothing is owed any more");
+        }),
+    ),
+);
+
+const otherInstanceId = ProviderInstanceId.make("other-provider");
+
+it.live(
+  "the budget gate reads the windows of the provider a fallback sends the stage to, not the one configured",
+  () =>
+    withLoopHarness(
+      "kodo-loop-gate-fallback",
+      {
+        // Code is configured on a provider that is not there, so its stage falls back to the thread's own.
+        modeModels: { code: { instanceId: otherInstanceId, model: "big-model" } },
+        replies: [REPLIES.plan, REPLIES.code],
+      },
+      (ctx) =>
+        Effect.gen(function* () {
+          const own = yield* Ref.make(50);
+          const checkedAt = yield* nowIso;
+          yield* startLoop(ctx, "Do it.", 2);
+          const stepper = yield* ctx.newStepper(
+            spendWith({
+              modeModels: { code: { instanceId: otherInstanceId, model: "big-model" } },
+              providers: Ref.get(own).pipe(
+                Effect.map((used) => [
+                  providerWithWindow(used, checkedAt),
+                  { ...providerWithWindow(20, checkedAt), instanceId: otherInstanceId },
+                ]),
+              ),
+            }),
+          );
+          const started = yield* watchTurnStart(ctx);
+          yield* settle(ctx, stepper);
+          yield* Fiber.join(started);
+          yield* Ref.set(own, 97);
+          yield* endTurn(ctx);
+          yield* settle(ctx, stepper);
+          const loop = yield* requireLoop(ctx);
+          assert.equal(loop.stopReason, "budget");
+          assert.equal(loop.stopDetail, "Grok 5-hour window at 97%, limit 90%.");
+          assert.equal((yield* Ref.get(ctx.state)).started.length, 1, "no Code stage started");
+        }),
+    ),
+);
+
+const providerAt = (usedPercent: number, checkedAtMs: number) =>
+  providerWithWindow(usedPercent, DateTime.formatIso(DateTime.makeUnsafe(checkedAtMs)));
+
+it.live(
+  "the budget gate asks for a fresh reading, and acts on it rather than on the old one it held",
+  () =>
+    withLoopHarness("kodo-loop-gate-fresh", { replies: [REPLIES.plan] }, (ctx) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        // The provider holds an hour-old 40% until asked; asked, it reads 95%.
+        const held = yield* Ref.make(providerAt(40, now - 3_600_000));
+        const asked = yield* Ref.make(0);
+        yield* startLoop(ctx, "Do it.", 2);
+        const stepper = yield* ctx.newStepper(
+          spendWith({
+            providers: Ref.get(held).pipe(Effect.map((provider) => [provider])),
+            refreshLimits: () =>
+              Ref.update(asked, (count) => count + 1).pipe(
+                Effect.andThen(Ref.set(held, providerAt(95, now))),
+              ),
+          }),
+        );
+        yield* settle(ctx, stepper);
+        const loop = yield* requireLoop(ctx);
+        assert.equal(loop.stopReason, "budget");
+        assert.equal(loop.stopDetail, "Grok 5-hour window at 95%, limit 90%.");
+        assert.equal(yield* Ref.get(asked), 1);
+        assert.deepEqual((yield* Ref.get(ctx.state)).started, []);
+      }),
+    ),
+);
+
+it.live(
+  "when no reading newer than the bound can be had, the loop goes on, says it could not check, and the note stays",
+  () =>
+    withLoopHarness(
+      "kodo-loop-gate-stale",
+      { replies: [REPLIES.plan, REPLIES.code, REPLIES.review, REPLIES.complete] },
+      (ctx) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis;
+          const held = yield* Ref.make(providerAt(40, now - 3_600_000));
+          yield* startLoop(ctx, "Do it.", 1);
+          const stepper = yield* ctx.newStepper(
+            spendWith({
+              providers: Ref.get(held).pipe(Effect.map((provider) => [provider])),
+              refreshLimits: () => Effect.void,
+            }),
+          );
+          const started = yield* watchTurnStart(ctx);
+          yield* settle(ctx, stepper);
+          yield* Fiber.join(started);
+          let loop = yield* requireLoop(ctx);
+          assert.deepEqual(loop.limitCheck?.unchecked, [{ round: 1, stage: "plan" }]);
+          assert.equal(loop.limitCheck?.state, "stale");
+          // The reading comes good for the rest of the loop: the earlier stage is still counted.
+          yield* Ref.set(held, providerAt(10, yield* Clock.currentTimeMillis));
+          yield* endTurn(ctx);
+          yield* runToEnd(ctx, stepper);
+          loop = yield* requireLoop(ctx);
+          assert.equal(loop.status, "done");
+          assert.deepEqual(loop.limitCheck?.unchecked, [{ round: 1, stage: "plan" }]);
+        }),
+    ),
+);
+
+it.live(
+  "a stage's before and after limit readings appear only when they are two different readings",
+  () =>
+    withLoopHarness("kodo-loop-limit-change", { replies: [REPLIES.plan, REPLIES.code] }, (ctx) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const held = yield* Ref.make(providerAt(40, now - 5_000));
+        yield* startLoop(ctx, "Do it.", 2);
+        const stepper = yield* ctx.newStepper(
+          spendWith({
+            providers: Ref.get(held).pipe(Effect.map((provider) => [provider])),
+            refreshLimits: () => Effect.void,
+          }),
+        );
+        // The same reading before and after the plan stage: nothing is shown for it.
+        const started = yield* watchTurnStart(ctx);
+        yield* settle(ctx, stepper);
+        yield* Fiber.join(started);
+        yield* endTurn(ctx);
+        // A newer reading arrives before the code stage settles.
+        yield* settle(ctx, stepper);
+        const codeStarted = yield* watchTurnStart(ctx);
+        yield* settle(ctx, stepper);
+        yield* Fiber.join(codeStarted);
+        yield* Ref.set(held, providerAt(46, yield* Clock.currentTimeMillis));
+        yield* endTurn(ctx);
+        yield* settle(ctx, stepper);
+        const loop = yield* requireLoop(ctx);
+        const [plan, code] = loop.stages;
+        assert.isUndefined(plan?.limits, "one reading seen twice says nothing");
+        assert.deepEqual(code?.limits, [{ window: "5-hour", before: 40, after: 46 }]);
+      }),
+    ),
+);
+
+it.live(
+  "looking again at a loop between stages does not ask the provider again within the half minute",
+  () =>
+    withLoopHarness("kodo-loop-gate-reuse", { startMode: "ask", replies: [REPLIES.plan] }, (ctx) =>
+      Effect.gen(function* () {
+        const now = yield* Clock.currentTimeMillis;
+        const asked = yield* Ref.make(0);
+        // A reading that stays old however often the provider is asked: every look would ask again.
+        const held = providerAt(40, now - 3_600_000);
+        const service = serviceWith(ctx, { planApproval: "ask" });
+        yield* service.start({
+          threadId: ctx.threadId,
+          commandId: CommandId.make("command:kodo-loop-gate-reuse:start"),
+          requestMessageId: MessageId.make("message:kodo-loop-gate-reuse:start"),
+          request: "Do it.",
+          maxRounds: 2,
+        });
+        const stepper = yield* ctx.newStepper(
+          spendWith({
+            providers: Effect.succeed([held]),
+            refreshLimits: () => Ref.update(asked, (count) => count + 1),
+          }),
+        );
+        const started = yield* watchTurnStart(ctx);
+        yield* settle(ctx, stepper);
+        yield* Fiber.join(started);
+        yield* endTurn(ctx);
+        yield* settle(ctx, stepper);
+        assert.equal((yield* requireLoop(ctx)).hold, "plan_approval");
+        const before = yield* Ref.get(asked);
+        for (let index = 0; index < 5; index += 1) {
+          assert.equal(yield* stepper.step(ctx.threadId), "idle");
+        }
+        assert.equal(yield* Ref.get(asked), before, "the held loop's looks asked for nothing");
+      }),
+    ),
+);
+
+/** A second thread in the same project, as a loop's stage might start a loop on. */
+const createSiblingThread = (ctx: Ctx, suffix: string, mode: "ask" | "code" = "code") =>
+  Effect.gen(function* () {
+    const threadId = ThreadId.make(`thread:${ctx.name}:${suffix}`);
+    yield* ctx.orchestrator.dispatch({
+      type: "thread.create",
+      createdBy: "user",
+      creationSource: "web",
+      commandId: CommandId.make(`command:${ctx.name}:${suffix}:create`),
+      threadId,
+      projectId: ProjectId.make(`project:${ctx.name}`),
+      title: suffix,
+      modelSelection: selection("base-model"),
+      runtimeMode: "full-access",
+      interactionMode: mode,
+      branch: null,
+      worktreePath: ctx.cwd,
+    });
+    return threadId;
+  });
+
+const agentStart = (ctx: Ctx, target: ThreadId, sender: ThreadId | undefined, attempt: string) =>
+  ctx.service.start({
+    threadId: target,
+    commandId: CommandId.make(`command:${ctx.name}:${attempt}`),
+    requestMessageId: MessageId.make(`message:${ctx.name}:${attempt}`),
+    request: "Do it.",
+    requestMessage: {
+      text: "/loop Do it.",
+      createdBy: "agent",
+      creationSource: "mcp",
+      ...(sender === undefined ? {} : { senderThreadId: sender }),
+    },
+  });
+
+it.live("a loop's own thread cannot start a loop, by the tool's route or by a /loop message", () =>
+  withLoopHarness("kodo-loop-no-nesting", { startMode: "code", replies: [] }, (ctx) =>
+    Effect.gen(function* () {
+      const other = yield* createSiblingThread(ctx, "other");
+      yield* startLoop(ctx, "Do it.", 2);
+      // The tool's route.
+      const refused = yield* agentStart(ctx, other, ctx.threadId, "nested").pipe(Effect.flip);
+      assert.include(
+        userFacingDispatchErrorMessage(refused) ?? String(refused),
+        "cannot start another loop",
+      );
+      assert.isUndefined(
+        (yield* ctx.orchestrator.getThreadProjection(other)).thread.kodoLoop,
+        "nothing was started on the other thread",
+      );
+      // The `/loop` message route (an agent's send): the same refusal.
+      const viaMessage = ctx.service.sendControl({
+        type: "message.dispatch",
+        commandId: CommandId.make("command:kodo-loop-no-nesting:message"),
+        threadId: other,
+        messageId: MessageId.make("message:kodo-loop-no-nesting:message"),
+        senderThreadId: ctx.threadId,
+        text: "/loop Do it too.",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "agent",
+        creationSource: "mcp",
+      } as OrchestrationV2Command);
+      assert.isDefined(viaMessage);
+      const messageRefusal = yield* viaMessage!.pipe(Effect.flip);
+      assert.include(
+        userFacingDispatchErrorMessage(messageRefusal) ?? String(messageRefusal),
+        "cannot start another loop",
+      );
+      // A thread that runs no loop may start one on the same target.
+      const free = yield* createSiblingThread(ctx, "free", "ask");
+      yield* agentStart(ctx, other, free, "from-free");
+      assert.equal(
+        (yield* ctx.orchestrator.getThreadProjection(other)).thread.kodoLoop?.status,
+        "active",
+      );
+    }),
+  ),
+);
+
+it.live("an agent cannot start a new loop where the budget or a person stopped the last one", () =>
+  withLoopHarness("kodo-loop-no-restart", { startMode: "code", replies: [] }, (ctx) =>
+    Effect.gen(function* () {
+      yield* startLoop(ctx, "Do it.", 2);
+      yield* ctx.service.stop({
+        threadId: ctx.threadId,
+        commandId: CommandId.make("command:kodo-loop-no-restart:stop"),
+      });
+      const refused = yield* agentStart(ctx, ctx.threadId, undefined, "agent-restart").pipe(
+        Effect.flip,
+      );
+      const text = userFacingDispatchErrorMessage(refused) ?? String(refused);
+      assert.include(text, "a person stopped it");
+      assert.include(text, "Ask the person");
+      assert.equal((yield* requireLoop(ctx)).status, "stopped");
+      // The person can start over, and an agent can once that loop ended some other way.
+      yield* startLoop(ctx, "Do it again.", 1, "person-restart");
+      assert.equal((yield* requireLoop(ctx)).status, "active");
+    }),
+  ),
 );
 
 export type { KodoLoop };

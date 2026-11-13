@@ -84,7 +84,10 @@ export function summarizeStageUsage(
     measured += 1;
     // Subagent and compaction work is counted when the provider's ledger reports it; only subagents
     // the ledger did not account for leave something known to be missing.
-    if (usage.usageStatus !== "complete" || (usage.hasSubagents && usage.otherUsage === undefined)) {
+    if (
+      usage.usageStatus !== "complete" ||
+      (usage.hasSubagents && usage.otherUsage === undefined)
+    ) {
       complete = false;
     }
     otherTokens += (usage.otherUsage?.inputTokens ?? 0) + (usage.otherUsage?.outputTokens ?? 0);

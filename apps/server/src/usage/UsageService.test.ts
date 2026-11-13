@@ -3243,6 +3243,125 @@ describe("UsageService", () => {
       }).pipe(Effect.scoped),
   );
 
+  // KODO: loop-pricing - a stage settle must never wait on the network, nor hold the Usage page's lock.
+  describe("pricing for the loop never waits on the rate fetch for long", () => {
+    const loopTotals = {
+      uncachedInputTokens: 1_000_000,
+      cachedInputTokens: 0,
+      cacheCreationTokens: 0,
+      outputTokens: 0,
+      reasoningTokens: 0,
+    };
+    const ratesDocument = {
+      "priced-model": { input_cost_per_token: 0.000002, output_cost_per_token: 0.000004 },
+    };
+
+    it.effect(
+      "gives up on a rate fetch that does not answer in 2s, as 'no price', and does not retry at once",
+      () =>
+        Effect.gen(function* () {
+          const { settings, home } = yield* setup;
+          let fetches = 0;
+          // The 2s bound starts before the request goes out, so the clock moves once it has.
+          const requested = yield* Deferred.make<void>();
+          const service = yield* UsageService.make.pipe(
+            Effect.provide(
+              layerService({
+                prefix: "usage-service-loop-pricing-offline-test",
+                home,
+                settings,
+                onRatesFetch: () => {
+                  fetches += 1;
+                  Deferred.doneUnsafe(requested, Exit.void);
+                },
+                ratesResponse: () => Effect.never,
+              }),
+            ),
+          );
+          const attempt = yield* service
+            .priceTokens({ model: "priced-model", totals: loopTotals })
+            .pipe(Effect.forkChild({ startImmediately: true }));
+          yield* Deferred.await(requested);
+          yield* TestClock.adjust(Duration.seconds(2));
+          assert.strictEqual(yield* Fiber.join(attempt), null);
+          // Another stage settles a moment later: no second wait, no second fetch.
+          assert.strictEqual(
+            yield* service.priceTokens({ model: "priced-model", totals: loopTotals }),
+            null,
+          );
+          assert.strictEqual(fetches, 1);
+        }).pipe(Effect.scoped),
+    );
+
+    it.effect(
+      "does not hold the lock the Usage page's refresh takes while its own attempt waits",
+      () =>
+        Effect.gen(function* () {
+          const { settings, home } = yield* setup;
+          let fetches = 0;
+          // The 2s bound starts before the request goes out, so the clock moves once it has.
+          const requested = yield* Deferred.make<void>();
+          const service = yield* UsageService.make.pipe(
+            Effect.provide(
+              layerService({
+                prefix: "usage-service-loop-pricing-lock-test",
+                home,
+                settings,
+                onRatesFetch: () => {
+                  fetches += 1;
+                  Deferred.doneUnsafe(requested, Exit.void);
+                },
+                // The loop's attempt is the first fetch and never answers; the page's refresh is served.
+                ratesResponse: () =>
+                  fetches === 1 ? Effect.never : Effect.succeed(Response.json(ratesDocument)),
+              }),
+            ),
+          );
+          const attempt = yield* service
+            .priceTokens({ model: "priced-model", totals: loopTotals })
+            .pipe(Effect.forkChild({ startImmediately: true }));
+          yield* Deferred.await(requested);
+          yield* Deferred.await(requested);
+          const pricing = yield* service.refreshRates;
+          assert.strictEqual(pricing.status, "fresh");
+          yield* TestClock.adjust(Duration.seconds(2));
+          yield* Fiber.join(attempt);
+        }).pipe(Effect.scoped),
+    );
+
+    it.effect(
+      "prices from a rate table it already holds, however old, without asking the network again",
+      () =>
+        Effect.gen(function* () {
+          const { settings, home } = yield* setup;
+          let fetches = 0;
+          const service = yield* UsageService.make.pipe(
+            Effect.provide(
+              layerService({
+                prefix: "usage-service-loop-pricing-held-test",
+                home,
+                settings,
+                onRatesFetch: () => (fetches += 1),
+                ratesDocument,
+              }),
+            ),
+          );
+          assert.closeTo(
+            (yield* service.priceTokens({ model: "priced-model", totals: loopTotals })) ?? NaN,
+            2,
+            1e-9,
+          );
+          yield* TestClock.adjust(Duration.days(3));
+          assert.closeTo(
+            (yield* service.priceTokens({ model: "priced-model", totals: loopTotals })) ?? NaN,
+            2,
+            1e-9,
+          );
+          assert.strictEqual(fetches, 1);
+        }).pipe(Effect.scoped),
+    );
+  });
+
   it.live("does not orphan an in-flight scan when its first caller is interrupted", () =>
     Effect.gen(function* () {
       const { settings, home } = yield* setup;

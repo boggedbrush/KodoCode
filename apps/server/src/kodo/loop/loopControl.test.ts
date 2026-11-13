@@ -9,6 +9,7 @@ import {
   kodoLoopBlocksContinuation,
   kodoLoopLimitRefusal,
   kodoLoopModeSetRefusal,
+  kodoLoopStartRefusal,
   validKodoLoopStage,
 } from "./loopControl.ts";
 import { kodoLoopStageMessageId } from "./loopMachine.ts";
@@ -212,8 +213,8 @@ describe("what a message arriving on the thread means for its loop", () => {
       setMode: "ask",
       loop: { status: "stopped", stopReason: "user_message", revision: 2 },
     });
-    // The mode is handed back in the same commit, so the loop owes nothing afterwards.
-    expect(decision.type === "stop" && decision.loop.cleanup).toBeUndefined();
+    // The mode is handed back in the same commit; only the record of the stage that ran is owed.
+    expect(decision.type === "stop" && decision.loop.cleanup).toEqual({ record: true });
   });
 
   it("a steer into the stage run ends the loop too, and leaves the mode to the clean-up after the run", () => {
@@ -226,7 +227,7 @@ describe("what a message arriving on the thread means for its loop", () => {
     expect(decision).toMatchObject({
       type: "stop",
       setMode: undefined,
-      loop: { stopReason: "user_message", cleanup: { leftMode: "code" } },
+      loop: { stopReason: "user_message", cleanup: { leftMode: "code", record: true } },
     });
   });
 
@@ -396,5 +397,64 @@ describe("continuing a run of a loop that ended", () => {
     expect(kodoLoopBlocksContinuation(taken, runs, { id: "r1" })).toBe(false);
     expect(kodoLoopBlocksContinuation(testLoop(), runs, { id: "r1" })).toBe(false);
     expect(kodoLoopBlocksContinuation(undefined, runs, { id: "r1" })).toBe(false);
+  });
+});
+
+describe("who may start a loop", () => {
+  it.each([
+    [
+      "a request from a thread running a loop, whoever sent it",
+      "user",
+      undefined,
+      true,
+      "cannot start another loop",
+    ],
+    [
+      "an agent over a loop a person stopped",
+      "agent",
+      { status: "stopped", stopReason: "user_stop" },
+      false,
+      "a person stopped it",
+    ],
+    [
+      "an agent over a loop a person's message ended",
+      "agent",
+      { status: "stopped", stopReason: "user_message" },
+      false,
+      "sent a message",
+    ],
+    [
+      "an agent over a loop the budget stopped",
+      "agent",
+      { status: "stopped", stopReason: "budget" },
+      false,
+      "reached its budget",
+    ],
+  ] as const)("refuses %s", (_name, requestedBy, target, callerRunsLoop, text) => {
+    expect(kodoLoopStartRefusal({ requestedBy, target, callerRunsLoop })).toContain(text);
+  });
+
+  it.each([
+    ["a person over any ended loop", "user", { status: "stopped", stopReason: "budget" }],
+    ["an agent over a loop that finished", "agent", { status: "done", stopReason: "complete" }],
+    ["an agent over a loop that failed", "agent", { status: "failed", stopReason: "error" }],
+    [
+      "an agent over a loop that hit its round cap",
+      "agent",
+      { status: "stopped", stopReason: "round_cap" },
+    ],
+    ["an agent on a thread with no loop", "agent", undefined],
+  ] as const)("allows %s", (_name, requestedBy, target) => {
+    expect(kodoLoopStartRefusal({ requestedBy, target, callerRunsLoop: false })).toBeUndefined();
+  });
+
+  it("leaves a running loop to the ordinary 'already running' refusal", () => {
+    expect(
+      kodoLoopStartRefusal({
+        requestedBy: "agent",
+        target: { status: "active" },
+        callerRunsLoop: false,
+      }),
+    ).toBeUndefined();
   });
 });

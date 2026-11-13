@@ -2,13 +2,11 @@ import type { KodoLoop } from "@t3tools/contracts";
 import { CheckIcon } from "lucide-react";
 
 import { cn } from "~/lib/utils";
-import { KodoInlineText } from "./KodoInlineText";
 import { KodoLoopSummary } from "./KodoLoopSummary";
 import {
   KODO_LOOP_STAGE_LABEL,
   isKodoLoopRunning,
   kodoLoopHeldReason,
-  kodoLoopOutstanding,
   kodoLoopStageStrip,
   kodoLoopStopText,
   type KodoLoopStageState,
@@ -21,12 +19,20 @@ const STATE_CLASS: Record<KodoLoopStageState, string> = {
   stopped: "font-medium text-destructive-foreground",
 };
 
-/** The loop's stages in order with where it is, and why it is waiting or why it ended. */
+/**
+ * The loop's stages in order with where it is while it runs or waits. A finished loop is the
+ * collapsed summary: why it ended, its totals, and a Details disclosure for the rest.
+ */
 export function KodoLoopCard(props: { readonly loop: KodoLoop }) {
   const { loop } = props;
+  if (!isKodoLoopRunning(loop)) {
+    return (
+      <div data-kodo-loop-card={loop.status} className="grid gap-1.5 py-1 ps-8 pe-3 sm:ps-7">
+        <KodoLoopSummary loop={loop} stopText={kodoLoopStopText(loop)} />
+      </div>
+    );
+  }
   const held = kodoLoopHeldReason(loop);
-  const stopText = kodoLoopStopText(loop);
-  const outstanding = kodoLoopOutstanding(loop);
   return (
     <div data-kodo-loop-card={loop.status} className="grid gap-1.5 py-1 ps-8 pe-3 sm:ps-7">
       <ol aria-label="Loop stages" className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
@@ -47,29 +53,6 @@ export function KodoLoopCard(props: { readonly loop: KodoLoop }) {
         ))}
       </ol>
       {held === null ? null : <p className="text-muted-foreground">{held}</p>}
-      {stopText === null ? null : <p className="text-muted-foreground wrap-anywhere">{stopText}</p>}
-      {outstanding === null ? null : (
-        <div data-kodo-loop-outstanding className="grid gap-0.5 text-muted-foreground">
-          <p className="font-medium text-foreground">Still outstanding after the last judgement</p>
-          {outstanding.summary === null ? null : (
-            <p className="wrap-anywhere">
-              <KodoInlineText text={outstanding.summary} />
-            </p>
-          )}
-          <ul role="list" className="grid gap-0.5">
-            {outstanding.items.map((item) => (
-              <li key={item} className="flex gap-1.5 wrap-anywhere">
-                <span aria-hidden>-</span>
-                <span>
-                  <KodoInlineText text={item} />
-                </span>
-              </li>
-            ))}
-          </ul>
-          {outstanding.more === 0 ? null : <p>and {outstanding.more} more</p>}
-        </div>
-      )}
-      {isKodoLoopRunning(loop) ? null : <KodoLoopSummary loop={loop} />}
     </div>
   );
 }

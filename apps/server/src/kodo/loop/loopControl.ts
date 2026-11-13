@@ -8,6 +8,8 @@ import {
   type KodoLoopAdvanceStep,
   type KodoLoopControl,
   type KodoLoopStageRef,
+  type KodoLoopStatus,
+  type KodoLoopStopReason,
   type OrchestrationV2Run,
 } from "@t3tools/contracts";
 
@@ -170,6 +172,41 @@ export function decideKodoLoopAdvance(input: {
         { threadMode: input.thread.interactionMode },
       );
   }
+}
+
+/** What ended a loop, as an agent is told why it may not start another over it. */
+const AGENT_LOCKED_STOPS: Partial<Record<KodoLoopStopReason, string>> = {
+  budget: "it reached its budget",
+  user_stop: "a person stopped it",
+  user_message: "a person sent a message on the thread",
+};
+
+/**
+ * Why a request to start a loop is refused, before anything is started. A loop does not start loops:
+ * a request that comes from a thread running one (or from a thread under it) is refused whatever route
+ * it took. And an agent may not start a new loop, with a fresh budget, on a thread whose last loop the
+ * budget or a person ended; only a person can start over there.
+ */
+export function kodoLoopStartRefusal(input: {
+  readonly requestedBy: string | undefined;
+  readonly target:
+    | { readonly status: KodoLoopStatus; readonly stopReason?: string | undefined }
+    | undefined;
+  /** The thread the request came from, or a thread it runs under, is running a loop. */
+  readonly callerRunsLoop: boolean;
+}): string | undefined {
+  if (input.callerRunsLoop) {
+    return "A loop cannot start another loop: the request came from a thread that is running one, and a loop's stages may not start loops of their own. Nothing was started.";
+  }
+  if (input.requestedBy !== "agent" || input.target === undefined) return undefined;
+  if (input.target.status === "active" || input.target.status === "held") return undefined;
+  const why =
+    input.target.stopReason === undefined
+      ? undefined
+      : AGENT_LOCKED_STOPS[input.target.stopReason as KodoLoopStopReason];
+  return why === undefined
+    ? undefined
+    : `This thread's previous loop ended because ${why}, so an agent cannot start another loop here. Ask the person to start one with /loop. Nothing was started.`;
 }
 
 const isRunning = (loop: KodoLoop | undefined): boolean =>

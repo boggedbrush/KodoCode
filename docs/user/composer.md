@@ -186,7 +186,10 @@ composer shows the round and stage, for example "Round 2 of 3 · Review".
 An agent or a scheduled task can send `/loop` to a thread too. A sender that is limited
 to a mode below Code cannot start, extend, approve or retry a loop, because the coding
 stage writes to the workspace; it is refused with that said, and nothing is started.
-Starting a loop as the first message of a new thread works, except when the thread
+A loop does not start loops: a request from a thread that is running a loop (or from a thread
+under it, such as a delegated task) is refused. An agent also cannot start a new loop on a
+thread whose last loop the budget or you stopped, or ended with a message; only you can start
+over there. Starting a loop as the first message of a new thread works, except when the thread
 gets a new worktree: the worktree is made while the first stage would already run, so
 create the thread first and send `/loop` in it.
 
@@ -249,27 +252,48 @@ overrides only the rounds.
   or above the usage-limit percentage (default 90), when its priced cost reaches the cost cap,
   or when its tokens reach the token cap. The budget is a soft cap: it is checked between
   stages, so a stage that is already running always finishes and a loop can pass a cap by up to
-  one stage. A provider that reports no limit windows, or only an out-of-date reading, cannot be
-  checked; the loop goes on and the summary says so. If the check itself fails, the loop stops
-  rather than spend unchecked. The cost cap counts only stages whose model has a price at API
-  rates (the Usage page's prices, including your overrides); a stage without one is not counted
-  as free, and the summary lists it. The token cap counts only what providers report.
-- **Summary.** When a loop ends, the card shows the rounds run, one line per stage (the latest
-  round open, earlier ones folded), why it stopped, the tokens and priced cost, and the note
-  that the thread now continues from the last stage's conversation. A provider that reports no
-  token usage shows as "not reported", never as zero.
+  one stage. The caps and the percentage are fixed when the loop starts; changing them in
+  Settings applies to loops started afterwards.
+- **Usage limits.** Any of the provider's usage windows can stop a loop, the fullest one counts,
+  and the stop says which ("Claude weekly Opus window at 95%"). The provider is the one the
+  stage will really run on, including when its configured model cannot run and it falls back
+  to the thread's own. Before each stage the loop asks that provider for a fresh reading and
+  waits a few seconds at most. If it cannot get a reading from the last two minutes, or the
+  provider reports no limit windows, that stage cannot be checked: the loop goes on, and the
+  summary says how many stages ran unchecked. That note stays for the rest of the loop. If the
+  check itself fails, the loop stops rather than spend unchecked.
+- **Cost and token caps.** The cost cap counts only stages whose model has a price at API rates
+  (the Usage page's prices, including your overrides); a stage without one is not counted as
+  free, and the summary lists it. The token cap counts uncached input, cache writes, output
+  and reasoning, plus the subagent and compaction tokens a provider reports; cache reads are not
+  counted (the summary shows them separately). A stage whose provider reports no usage is not
+  counted. Subagent and compaction tokens have no price, so a stage that used them has a cost
+  that is a floor.
+- **Summary.** When a loop ends, the card shows why it stopped, one line of totals and, when
+  there is one, the savings headline. **Details** opens the rounds (the latest open, earlier
+  ones folded), what is outstanding, the budget notes, the savings detail and the limit
+  readings, in a scrolling area. Dismissing the card is remembered in that browser for that
+  loop, so a reload keeps it hidden and the next loop shows. A total reads "At least" whenever
+  something is missing from it: a stage that reported no usage or only part of it, a stage
+  without a price, or the stage that was running when you stopped the loop, which is added
+  once its run has finished. A provider that reports no token usage shows as "not reported",
+  never as zero.
 - **Estimated savings.** Compares what the Code stage (and Plan, when it ran on a different
   model) cost with what the same tokens would cost at the rates of the Judge model, or the
   Review model when no Judge is set. It is an estimate: a stronger model would use different
   token counts, and prices are API list prices, not what a subscription costs you. Stages with
-  no price are left out and listed. It also shows token share by model, and the change seen in
-  each usage-limit window around each stage; other work on the same account moves those
-  windows too, and they refresh about once a minute, so they are not the loop's cost. No
-  "quota saved" figure is shown. If no Judge or Review model is set, or Code ran on the
-  reference model, there is nothing to compare and only token share is shown.
+  no price are left out and listed. When the cheaper model cost more, it reads "Cost $X more
+  than <model> would have". It also shows token share by model, and the change seen in each
+  usage-limit window around each stage, only when two different readings were taken (before and
+  after); other work on the same account moves those windows too, so they are not the loop's
+  cost. No "quota saved" figure is shown. If no Judge or Review model is set there is nothing
+  to compare against and only token share is shown; if Code ran on the reference model itself
+  it says "Nothing to compare".
 
 Agents can use `t3_loop_start`, `t3_loop_stop` and `t3_loop_status`. Start and stop are
-refused for a thread in Ask, Plan or Review mode; reading status is allowed.
+refused when the calling thread is in Ask, Plan or Review mode; reading status is allowed. A
+thread cannot loop while its own turn is running, so `t3_loop_start` needs another idle thread
+named in `threadId`, and is meant for when you ask for a loop.
 
 ## Custom models
 

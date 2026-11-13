@@ -27,7 +27,8 @@ export function KodoLoopBanner(props: {
   const { status } = props;
   if (status === undefined) return null;
   const banner = kodoLoopBanner(status, { canOperate: props.canOperateThread });
-  const key = `${status.status}:${status.round}:${status.stopReason ?? ""}`;
+  // Per loop, so a later loop that ends the same way is not taken for the one that was dismissed.
+  const key = `${status.loopId ?? ""}:${status.status}:${status.round}:${status.stopReason ?? ""}`;
   const ended = banner.tone === "done" || banner.tone === "stopped" || banner.tone === "failed";
   if (ended && dismissed === key) return null;
 

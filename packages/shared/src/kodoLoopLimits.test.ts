@@ -79,7 +79,8 @@ describe("reading limit windows", () => {
 
   it("takes a reading at the freshness bound as fresh, and one just past it as stale", () => {
     expect(KODO_LIMIT_MAX_AGE_MS).toBe(2 * 60_000);
-    const at = (age: number) => readKodoLimitWindows(limits({ checkedAt: minutesAgo(age / 60_000) }), NOW);
+    const at = (age: number) =>
+      readKodoLimitWindows(limits({ checkedAt: minutesAgo(age / 60_000) }), NOW);
     expect(at(KODO_LIMIT_MAX_AGE_MS).state).toBe("ok");
     expect(at(KODO_LIMIT_MAX_AGE_MS + 1_000).state).toBe("stale");
   });
@@ -88,7 +89,13 @@ describe("reading limit windows", () => {
     const reading = readKodoLimitWindows(
       limits({
         windows: [
-          { id: "seven_day", kind: "weekly", label: "Weekly", usedPercent: 40, windowDurationMins: 10_080 },
+          {
+            id: "seven_day",
+            kind: "weekly",
+            label: "Weekly",
+            usedPercent: 40,
+            windowDurationMins: 10_080,
+          },
           {
             id: "seven_day_opus",
             kind: "weekly",

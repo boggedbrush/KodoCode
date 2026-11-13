@@ -983,14 +983,57 @@ export const make = Effect.gen(function* () {
     return yield* Deferred.await(deferred);
   });
 
+  // KODO: loop-pricing - the loop's settle must never wait on the network for long, nor hold `ratesLock`
+  // (the Usage page waits on it) across a fetch. It prices from the table already held, however old,
+  // and when there is none it reads the disk copy and makes one bounded attempt to fetch it; a failed
+  // attempt is "no price" and shares the failure floor, so later settles do not each pay for it.
+  const LOOP_RATES_WAIT_MS = 2_000;
+  const loadRatesForLoop = Effect.fn("UsageService.loadRatesForLoop")(function* () {
+    if (rates.size > 0) return;
+    const now = yield* Clock.currentTimeMillis;
+    const fromDisk = yield* fileSystem.readFileString(ratesCachePath).pipe(
+      Effect.flatMap((raw) => decodeRatesCache(raw)),
+      Effect.catchCause(() => Effect.succeed(null)),
+    );
+    const cached = fromDisk === null ? undefined : parseRateTable(fromDisk.document);
+    if (fromDisk !== null && cached !== undefined && cached.size > 0 && rates.size === 0) {
+      rates = cached;
+      ratesFetchedAtMs = fromDisk.fetchedAtMs;
+      ratesStatus = "cached";
+    }
+    if (rates.size > 0) return;
+    if (ratesLastFailedAtMs !== null && now - ratesLastFailedAtMs < RATES_REFRESH_FLOOR_MS) return;
+    const fetched = yield* Effect.gen(function* () {
+      return (
+        (yield* fetchRates(LITELLM_RATES_URL)) ??
+        (yield* fetchRates(LITELLM_RATES_API_URL, "application/vnd.github.raw+json"))
+      );
+    }).pipe(Effect.timeoutOption(LOOP_RATES_WAIT_MS), Effect.map(Option.getOrNull));
+    if (fetched === null) {
+      ratesLastFailedAtMs = yield* Clock.currentTimeMillis;
+      return;
+    }
+    // The Usage page may have loaded it meanwhile; its table stands.
+    if (rates.size === 0) {
+      rates = fetched.parsed;
+      ratesFetchedAtMs = now;
+      ratesLastFailedAtMs = null;
+      ratesStatus = "fresh";
+      yield* encodeRatesCache({ fetchedAtMs: now, document: fetched.document }).pipe(
+        Effect.flatMap((contents) => writeCacheFile(ratesCachePath, contents)),
+        Effect.ignoreCause,
+      );
+    }
+  });
+
   // KODO: loop-pricing - null, never zero, when the model has no price (unlisted, or subscription-only).
-  // Reads the rate table already held (fetching it once when it was never loaded) and the person's
-  // price overrides and model aliases, the same as the Usage page does; standard speed, no reported cost.
+  // Uses the person's price overrides and model aliases, the same as the Usage page does; standard
+  // speed, no reported cost.
   const priceTokens = Effect.fn("UsageService.priceTokens")(function* (input: {
     readonly model: string;
     readonly totals: UsageTokenTotals;
   }) {
-    yield* ensureRates(false);
+    yield* loadRatesForLoop();
     const settings = yield* readSettings;
     const model = input.model.trim();
     const priced = priceUsage(

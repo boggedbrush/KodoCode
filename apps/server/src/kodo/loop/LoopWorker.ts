@@ -1,7 +1,7 @@
 // Keeps every running loop moving. It looks at a loop's thread when something happened on it (an event
 // from the orchestrator) and on every scheduler tick, which also covers a restart: loops that were
 // running when the server stopped are found once at startup and picked up where their state says.
-import { DEFAULT_KODO_MODE_MODELS, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_KODO_MODE_MODELS, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -14,6 +14,7 @@ import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import * as DueHint from "../../scheduling/DueHint.ts";
 import * as Scheduler from "../../scheduling/Scheduler.ts";
+import * as ProviderInstanceRegistry from "../../provider/ProviderInstanceRegistry.ts";
 import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import { forkParked } from "../../serverActivation.ts";
 import * as ServerSettings from "../../serverSettings.ts";
@@ -54,6 +55,9 @@ export const layer = Layer.effectDiscard(
     // Each is read where the server has it: no provider list means no limit windows are seen (said on
     // the loop), no price service means no stage has a price, and unreadable settings mean the defaults.
     const providerRegistry = yield* Effect.serviceOption(ProviderRegistry.ProviderRegistry);
+    const instanceRegistry = yield* Effect.serviceOption(
+      ProviderInstanceRegistry.ProviderInstanceRegistry,
+    );
     const usageService = yield* Effect.serviceOption(UsageService.UsageService);
     const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
     const spend: LoopSpendDeps = {
@@ -71,11 +75,41 @@ export const layer = Layer.effectDiscard(
           ? usageService.value.priceTokens({ model, totals })
           : Effect.succeed(null),
     };
+    // The instance's own snapshot is read, not the provider list's copy of it, which follows by a moment.
+    // Without the instance registry the list's reading stands, and no refresh is asked for.
+    const liveLimits: Pick<LoopSpendDeps, "readLimits" | "refreshLimits"> = Option.isSome(
+      instanceRegistry,
+    )
+      ? {
+          readLimits: (instanceId) =>
+            instanceRegistry.value
+              .getInstance(ProviderInstanceId.make(instanceId))
+              .pipe(
+                Effect.flatMap((instance) =>
+                  instance === undefined
+                    ? spend.providers.pipe(
+                        Effect.map(
+                          (providers) =>
+                            providers.find((provider) => provider.instanceId === instanceId)
+                              ?.usageLimits,
+                        ),
+                      )
+                    : instance.snapshot.getSnapshot.pipe(
+                        Effect.map((snapshot) => snapshot.usageLimits),
+                      ),
+                ),
+              ),
+          refreshLimits: (instanceId) =>
+            instanceRegistry.value
+              .getInstance(ProviderInstanceId.make(instanceId))
+              .pipe(Effect.flatMap((instance) => instance?.snapshot.refreshUsage ?? Effect.void)),
+        }
+      : {};
     const stepper = yield* makeKodoLoopStepper({
       orchestrator,
       dispatch: threads.dispatch,
       readDiff: makeDiffReader(diffQuery),
-      spend,
+      spend: { ...spend, ...liveLimits },
     });
     const tracked = new Set<ThreadId>();
     const due = DueHint.make();

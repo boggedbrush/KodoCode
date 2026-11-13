@@ -214,7 +214,8 @@ export function formatKodoUsd(usd: number): string {
 export function kodoLoopStageLine(record: KodoLoopStageRecord): string {
   const said = record.conclusion;
   const failed = record.status === "failed";
-  if (record.status === "interrupted") return "Interrupted: the loop ended while this stage was running.";
+  if (record.status === "interrupted")
+    return "Interrupted: the loop ended while this stage was running.";
   switch (record.stage) {
     case "plan":
       return failed
@@ -330,7 +331,7 @@ export interface KodoLoopSummary {
   /** Plain sentences about what the budget could and could not count. */
   readonly budgetNotes: ReadonlyArray<string>;
   readonly savings: KodoLoopSavingsView;
-  /** The savings estimate in one sentence, or null when there is no estimate to show. */
+  /** The savings estimate in one sentence ("nothing to compare" when Code ran on the reference); null when there is neither. */
   readonly savingsHeadline: string | null;
   readonly limitChanges: ReadonlyArray<KodoLoopLimitChange>;
 }
@@ -359,6 +360,9 @@ const modelOf = (record: KodoLoopStageRecord) =>
 
 /** The estimate in a sentence. Negative savings say what it cost extra, never "$X more savings". */
 export function kodoLoopSavingsHeadline(savings: KodoLoopSavingsView): string | null {
+  if (savings.kind === "same-model") {
+    return `Nothing to compare: Code ran on ${savings.referenceModel}, the model used as the reference.`;
+  }
   if (savings.kind !== "estimate") return null;
   const amount = formatKodoUsd(Math.abs(savings.savedUsd));
   const percent = `${Math.round(Math.abs(savings.savedPct))}%`;

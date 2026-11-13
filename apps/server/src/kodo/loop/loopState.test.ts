@@ -564,6 +564,35 @@ describe("what the budget gate and the savings leave on the loop", () => {
     expect(finished.ok && finished.loop.savings).toEqual(savings);
   });
 
+  it("a finish can price earlier stages that had no price, replacing their records", () => {
+    const unpriced = testRecord({ round: 1, stage: "plan" });
+    const priced = {
+      ...unpriced,
+      usage: {
+        uncachedInputTokens: 1,
+        cachedInputTokens: 0,
+        cacheCreationTokens: 0,
+        outputTokens: 1,
+        reasoningTokens: 0,
+        complete: true,
+        costUsd: 0.5,
+      },
+    };
+    const loop = testLoop({ stage: "judge", stages: [unpriced] });
+    const finished = applyKodoLoopOp(loop, {
+      ...server(loop),
+      type: "finish",
+      status: "done",
+      reason: "complete",
+      record: testRecord({ round: 1, stage: "judge" }),
+      repriced: [priced],
+    });
+    expect(finished.ok && finished.loop.stages.map((record) => record.usage?.costUsd)).toEqual([
+      0.5,
+      undefined,
+    ]);
+  });
+
   it("a limit check records the stage it could not check and stays: a later good reading does not erase it", () => {
     const loop = testLoop();
     const noted = applyKodoLoopOp(loop, {

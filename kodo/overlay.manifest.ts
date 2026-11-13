@@ -340,6 +340,14 @@ export default {
       file: "apps/desktop/gnome-extension/bundle.json",
       set: [{ path: ["uuid"], value: "snap-shot@app.kodocode" }],
     },
+    // The loop's three MCP tool definitions are part of every agent's tool list. After a sync set
+    // this to upstream's value plus the loop tools' bytes (AgentContextBudget.test.ts prints the
+    // measured number); that test is in verify.testFiles, so a stale value fails the sync.
+    {
+      id: "agent-context-budget-loop-tools",
+      file: "apps/server/src/provider/agentContextBudget.json",
+      set: [{ path: ["mcpToolListJsonBytes"], value: 49441 }],
+    },
     {
       id: "root-kodo-scripts",
       file: "package.json",
@@ -535,6 +543,7 @@ export default {
         "mode-models-turn",
         "mode-models-send",
         "loop-command",
+        "loop-stage-model",
         "loop-stage",
         "loop-message",
       ],
@@ -1101,6 +1110,10 @@ export default {
       "packages/shared/src/kodoLoopLimits.test.ts",
       "packages/shared/src/kodoLoopView.test.ts",
       "apps/server/src/kodo/loop/stageUsage.test.ts",
+      "apps/server/src/kodo/loop/limitReading.test.ts",
+      "apps/server/src/kodo/loop/loopCaller.test.ts",
+      "apps/web/src/kodo/loopDismissal.test.ts",
+      "apps/server/src/provider/AgentContextBudget.test.ts",
       "apps/server/src/kodo/loop/loopSpend.test.ts",
       "apps/server/src/mcp/kodoLoopToolkit.test.ts",
       "apps/server/src/usage/UsageService.test.ts",

@@ -857,7 +857,9 @@ describe("stop precedence", () => {
             unchecked: [{ round: 1, stage: "plan" }],
           },
         });
-        expect(decideLoopStep(noted, observe({ threadMode: "code", ...limitAt(10) }))).toMatchObject({
+        expect(
+          decideLoopStep(noted, observe({ threadMode: "code", ...limitAt(10) })),
+        ).toMatchObject({
           kind: "dispatch",
         });
       });

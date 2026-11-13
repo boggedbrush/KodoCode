@@ -11,7 +11,7 @@ import {
 /** Used share at which a window starts to read as "getting close". Matches the thread details card. */
 const KODO_USAGE_WARN_USED_PERCENT = 80;
 const KODO_USAGE_CRITICAL_USED_PERCENT = 90;
-/** Provider health refreshes about once a minute; a reading this old means refreshes are failing. */
+/** Provider health refreshes every five minutes while a client watches; a reading this old means refreshes are failing. */
 const KODO_USAGE_STALE_AFTER_MS = 30 * 60_000;
 /** The sidebar chip stays small; the rest is one click away on Usage. */
 export const KODO_USAGE_METER_MAX_ENTRIES = 2;

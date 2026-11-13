@@ -3,10 +3,7 @@
 // loop runs unattended. The gate therefore asks the provider to read again, waits a few seconds at most,
 // and acts only on a reading it knows the age of; anything older than the bound is "could not check".
 import type { ServerProviderUsageLimits } from "@t3tools/contracts";
-import {
-  readKodoLimitWindows,
-  type KodoLimitReading,
-} from "@t3tools/shared/kodoLoopLimits";
+import { readKodoLimitWindows, type KodoLimitReading } from "@t3tools/shared/kodoLoopLimits";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 
@@ -28,7 +25,10 @@ export const readFreshKodoLimits = Effect.fn("KodoLoopLimits.readFresh")(functio
   source: KodoLimitSource,
 ): Effect.fn.Return<KodoLimitReading> {
   const held = readKodoLimitWindows(yield* source.read, yield* Clock.currentTimeMillis);
-  if (held.state === "ok" && (yield* Clock.currentTimeMillis) - held.checkedAtMs <= KODO_LIMIT_REUSE_MS) {
+  if (
+    held.state === "ok" &&
+    (yield* Clock.currentTimeMillis) - held.checkedAtMs <= KODO_LIMIT_REUSE_MS
+  ) {
     return held;
   }
   if (source.refresh !== undefined) {

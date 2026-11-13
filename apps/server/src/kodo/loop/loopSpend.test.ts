@@ -105,26 +105,30 @@ describe("pricing a stage", () => {
 });
 
 describe("pricing a settled stage again", () => {
-  it.effect("prices a stage that had no price once its model has one, and leaves the rest alone", () =>
-    Effect.gen(function* () {
-      const record = stage(1, "code", "small", tokens({ models: ["small"] }));
-      const priced = yield* repriceStageRecord(record, { reference, price });
-      expect(priced?.usage?.costUsd).toBeCloseTo(1, 6);
-      expect(priced?.usage?.referenceCostUsd).toBeCloseTo(10, 6);
-      expect(priced?.usage?.models).toEqual(["small"]);
-      // Already priced, still unpriced, or run on several models: nothing to change.
-      expect(yield* repriceStageRecord(priced!, { reference, price })).toBeUndefined();
-      expect(
-        yield* repriceStageRecord(stage(1, "code", "local", tokens()), { reference, price }),
-      ).toBeUndefined();
-      expect(
-        yield* repriceStageRecord(stage(1, "code", "small", tokens({ models: ["a", "b"] })), {
-          reference,
-          price,
-        }),
-      ).toBeUndefined();
-      expect(yield* repriceStageRecord(stage(1, "review", "small", undefined), { reference, price })).toBeUndefined();
-    }),
+  it.effect(
+    "prices a stage that had no price once its model has one, and leaves the rest alone",
+    () =>
+      Effect.gen(function* () {
+        const record = stage(1, "code", "small", tokens({ models: ["small"] }));
+        const priced = yield* repriceStageRecord(record, { reference, price });
+        expect(priced?.usage?.costUsd).toBeCloseTo(1, 6);
+        expect(priced?.usage?.referenceCostUsd).toBeCloseTo(10, 6);
+        expect(priced?.usage?.models).toEqual(["small"]);
+        // Already priced, still unpriced, or run on several models: nothing to change.
+        expect(yield* repriceStageRecord(priced!, { reference, price })).toBeUndefined();
+        expect(
+          yield* repriceStageRecord(stage(1, "code", "local", tokens()), { reference, price }),
+        ).toBeUndefined();
+        expect(
+          yield* repriceStageRecord(stage(1, "code", "small", tokens({ models: ["a", "b"] })), {
+            reference,
+            price,
+          }),
+        ).toBeUndefined();
+        expect(
+          yield* repriceStageRecord(stage(1, "review", "small", undefined), { reference, price }),
+        ).toBeUndefined();
+      }),
   );
 });
 

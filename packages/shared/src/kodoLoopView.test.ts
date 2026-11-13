@@ -359,6 +359,10 @@ describe("the loop summary", () => {
         unpricedStages: [],
       });
     expect(view(9, 90)).toBe("Saved about $9.00 (90%) against big (estimate)");
+    expect(kodoLoopSavingsHeadline({ kind: "same-model", referenceModel: "big" })).toBe(
+      "Nothing to compare: Code ran on big, the model used as the reference.",
+    );
+    expect(kodoLoopSavingsHeadline({ kind: "none" })).toBeNull();
     expect(view(-1, -100)).toBe("Cost $1.00 more than big would have (100%, estimate)");
   });
 

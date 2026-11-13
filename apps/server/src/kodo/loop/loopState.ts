@@ -366,7 +366,10 @@ function applyServerOp(
     if (!isKodoLoopTerminal(loop.status) || loop.cleanup?.record !== true) {
       return refuse("not_active", "The loop has no stage left to record.");
     }
-    if (op.record !== undefined && (op.record.round !== loop.round || op.record.stage !== loop.stage)) {
+    if (
+      op.record !== undefined &&
+      (op.record.round !== loop.round || op.record.stage !== loop.stage)
+    ) {
       return refuse("invalid", "That stage is not the one the loop ended in.");
     }
     const { cleanup: _owed, ...rest } = loop;
@@ -457,10 +460,10 @@ function applyServerOp(
           ...(op.record === undefined && op.repriced === undefined
             ? {}
             : {
-                stages: [...(op.repriced ?? []), ...(op.record === undefined ? [] : [op.record])].reduce(
-                  withRecord,
-                  loop.stages,
-                ),
+                stages: [
+                  ...(op.repriced ?? []),
+                  ...(op.record === undefined ? [] : [op.record]),
+                ].reduce(withRecord, loop.stages),
               }),
           ...(op.summary === undefined ? {} : { summary: op.summary }),
           ...(op.savings === undefined ? {} : { savings: op.savings }),

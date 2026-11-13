@@ -141,7 +141,7 @@ export function KodoLoopSettings() {
       <SettingsRow
         {...rowProps}
         title="Stop at usage limit"
-        description="Stops the loop before a stage when its provider is at or above this share of a usage window. Checked between stages only. Providers that report no limits are not checked, and the loop says so."
+        description="Stops before a stage when any usage window of its provider is at or above this share. Needs a reading under two minutes old, else the loop goes on and says so. Fixed when a loop starts."
         resetAction={reset(
           "usage limit",
           loop.budget.stopAtLimitPercent !== defaults.budget.stopAtLimitPercent,
@@ -160,7 +160,7 @@ export function KodoLoopSettings() {
       <SettingsRow
         {...rowProps}
         title="Cost cap (USD)"
-        description="Stops the loop between stages once its priced cost reaches this. A stage whose model has no API price is not counted, and the summary says which. Blank: no cap."
+        description="Stops between stages once priced cost reaches this. Stages without an API price are not counted. Fixed when a loop starts. Blank: no cap."
         resetAction={reset("cost cap", loop.budget.maxCostUsd !== null, {
           budget: { maxCostUsd: null },
         })}
@@ -178,7 +178,7 @@ export function KodoLoopSettings() {
       <SettingsRow
         {...rowProps}
         title="Token cap"
-        description="Stops the loop between stages once it has used this many tokens, counting what providers report. A stage whose provider reports none is not counted. Blank: no cap."
+        description="Stops between stages at this many tokens: input, cache writes, output and reported subagent tokens; cache reads excluded. Fixed when a loop starts. Blank: no cap."
         resetAction={reset("token cap", loop.budget.maxTokens !== null, {
           budget: { maxTokens: null },
         })}

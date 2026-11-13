@@ -54,17 +54,19 @@ describe("reading a provider's limits for the gate", () => {
     }),
   );
 
-  it.effect("is 'could not check' when the provider does not give a reading newer than the bound", () =>
-    Effect.gen(function* () {
-      yield* TestClock.setTime(NOW);
-      const stale = yield* readFreshKodoLimits({
-        read: Effect.succeed(limits(40, 600)),
-        refresh: Effect.void,
-      });
-      expect(stale.state).toBe("stale");
-      const unrefreshable = yield* readFreshKodoLimits({ read: Effect.succeed(limits(40, 600)) });
-      expect(unrefreshable.state).toBe("stale");
-    }),
+  it.effect(
+    "is 'could not check' when the provider does not give a reading newer than the bound",
+    () =>
+      Effect.gen(function* () {
+        yield* TestClock.setTime(NOW);
+        const stale = yield* readFreshKodoLimits({
+          read: Effect.succeed(limits(40, 600)),
+          refresh: Effect.void,
+        });
+        expect(stale.state).toBe("stale");
+        const unrefreshable = yield* readFreshKodoLimits({ read: Effect.succeed(limits(40, 600)) });
+        expect(unrefreshable.state).toBe("stale");
+      }),
   );
 
   it.effect("goes on with what it has when the refresh fails", () =>

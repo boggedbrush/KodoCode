@@ -420,7 +420,10 @@ export const KodoLoopAdvanceStep = Schema.Union([
   /** The budget gate could not see the limit windows before the current stage. */
   Schema.Struct({
     type: Schema.Literal("limit-check"),
-    limitCheck: Schema.Struct({ state: Schema.Literals(["missing", "stale"]), provider: capped(80) }),
+    limitCheck: Schema.Struct({
+      state: Schema.Literals(["missing", "stale"]),
+      provider: capped(80),
+    }),
   }),
   /** The stage that was running when the loop ended has settled: record it (when it has a run) and stop owing it. */
   Schema.Struct({
@@ -466,6 +469,8 @@ export const KODO_LOOP_SHELL_DETAIL_MAX_CHARS = 240;
 
 /** The slim loop summary a thread shell carries; the full loop travels only with the thread. */
 export const KodoLoopShellStatus = Schema.Struct({
+  /** Which loop this is, so a client can remember a dismissal for it and not for the next one. Absent from older servers. */
+  loopId: Schema.optional(Schema.String),
   status: KodoLoopStatus,
   round: PositiveInt,
   maxRounds: PositiveInt,
@@ -479,6 +484,7 @@ export type KodoLoopShellStatus = typeof KodoLoopShellStatus.Type;
 
 export function kodoLoopShellStatus(loop: KodoLoop): KodoLoopShellStatus {
   return {
+    loopId: loop.loopId,
     status: loop.status,
     round: loop.round,
     maxRounds: loop.maxRounds,

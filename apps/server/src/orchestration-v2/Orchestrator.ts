@@ -28,6 +28,7 @@ import {
   kodoLoopModeSetRefusal,
 } from "../kodo/loop/loopControl.ts"; // KODO: loop-command
 import { buildKodoLoopRequestMessage } from "../kodo/loop/loopRequestMessage.ts"; // KODO: loop-command
+import { kodoLoopStartRefusalFor } from "../kodo/loop/loopCaller.ts"; // KODO: loop-command
 import type { KodoLoopStageRef, KodoThreadModeModel } from "@t3tools/contracts"; // KODO: mode-models-turn, loop-stage-model
 import { kodoThreadModeModelFor } from "@t3tools/shared/kodoModeModel"; // KODO: mode-models-turn
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts"; // KODO: mode-models-turn
@@ -4899,6 +4900,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         commandType: command.type,
         cause: `Thread ${command.threadId} is deleted.`,
       });
+    }
+    // KODO: loop-command - a loop does not start loops, and an agent does not restart a loop a person or the budget stopped
+    if (command.type === "thread.kodo-loop.control" && command.control.type === "start") {
+      const startRefusal = yield* kodoLoopStartRefusalFor({
+        getShell: projectionStore.getThreadShell,
+        control: command.control,
+        target: thread.kodoLoop,
+      });
+      if (startRefusal !== undefined) {
+        return yield* new OrchestratorDispatchError({
+          commandId: command.commandId,
+          commandType: command.type,
+          cause: startRefusal,
+        });
+      }
     }
     const decided =
       command.type === "thread.kodo-loop.control"

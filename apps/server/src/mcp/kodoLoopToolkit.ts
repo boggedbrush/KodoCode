@@ -61,7 +61,7 @@ const LoopResult = Schema.Struct({
 
 const LoopStartTool = Tool.make("t3_loop_start", {
   description:
-    "Start a loop in a thread: plan, code, review and judge in rounds until the judge finds `request` complete or `rounds` run out. It edits files, so it needs Code mode. The thread must be idle. Omit `threadId` for this thread. One loop per thread; it ends when a message is sent there. Poll with `t3_loop_status`.",
+    "Start a loop in another idle thread: plan, code, review and judge in rounds until the judge finds `request` complete or `rounds` run out. Use only when the user explicitly asks for a loop. It edits files, so it needs Code mode. Name the idle thread in `threadId`; this thread cannot loop while its own turn runs. One loop per thread; it ends when a message is sent there. A loop's own stages cannot start loops, and an agent cannot restart a loop the budget or a person stopped. Poll with `t3_loop_status`.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     request: Schema.String.check(
@@ -144,6 +144,14 @@ const handlers = {
       Effect.gen(function* () {
         yield* refuseReadOnlyCaller("t3_loop_start");
         const { projection, caller } = yield* readThread(input.threadId);
+        // The caller's own turn is running while it calls this, so its own thread can never loop.
+        if (caller !== undefined && projection.thread.id === caller.id) {
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message:
+              "A thread cannot loop while its own turn is running, and this call is that turn. Name another idle thread in `threadId`.",
+          });
+        }
         const loops = yield* KodoLoopTools;
         const commandId = yield* newCommandId();
         yield* loops

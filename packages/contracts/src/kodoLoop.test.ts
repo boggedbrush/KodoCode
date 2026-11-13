@@ -180,6 +180,70 @@ describe("a stored loop", () => {
   });
 });
 
+describe("what a loop keeps about spend and what it still owes", () => {
+  const base = {
+    loopId: "L",
+    revision: 4,
+    status: "stopped",
+    stopReason: "user_stop",
+    round: 1,
+    maxRounds: 3,
+    stage: "code",
+    request: "x",
+    requestMessageId: "m",
+    startMode: "code",
+    planApproval: "auto",
+    budget: {},
+    baseline: {},
+  };
+  const interrupted = {
+    round: 1,
+    stage: "code",
+    messageId: "kodo-loop-L-r1-code",
+    runId: "r",
+    status: "interrupted",
+    model: null,
+    startedAt: "2026-01-01T00:00:00.000Z",
+    completedAt: null,
+    usage: {
+      uncachedInputTokens: 1,
+      cachedInputTokens: 0,
+      cacheCreationTokens: 0,
+      outputTokens: 1,
+      reasoningTokens: 0,
+      otherTokens: 5,
+      complete: true,
+    },
+  };
+
+  it("keeps an interrupted stage with its other tokens, the stages left unchecked, and a record still owed", () => {
+    const loop = decodeLoop({
+      ...base,
+      stages: [interrupted],
+      cleanup: { record: true },
+      limitCheck: { state: "stale", provider: "Claude", unchecked: [{ round: 1, stage: "plan" }] },
+    } as unknown);
+    expect(loop.stages[0]?.status).toBe("interrupted");
+    expect(loop.stages[0]?.usage?.otherTokens).toBe(5);
+    expect(loop.cleanup?.record).toBe(true);
+    expect(loop.limitCheck?.unchecked).toEqual([{ round: 1, stage: "plan" }]);
+  });
+
+  it("reads a limit check from before the stages were listed", () => {
+    const loop = decodeLoop({
+      ...base,
+      stages: [],
+      limitCheck: { state: "missing", provider: "Cursor" },
+    } as unknown);
+    expect(loop.limitCheck?.unchecked).toBeUndefined();
+  });
+
+  it("carries the loop's id on the shell status, so a client can remember a dismissal per loop", () => {
+    const loop = decodeLoop({ ...base, stages: [] } as unknown);
+    expect(kodoLoopShellStatus(loop).loopId).toBe("L");
+  });
+});
+
 describe("the loop status a thread shell carries", () => {
   it("keeps the stop reason and a one-line detail, cut so the shell stays small", () => {
     const loop = decodeLoop({

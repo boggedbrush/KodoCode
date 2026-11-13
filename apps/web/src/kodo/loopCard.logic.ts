@@ -4,7 +4,6 @@ export {
   KODO_LOOP_CONTEXT_NOTE,
   KODO_LOOP_STAGE_LABEL,
   formatKodoTokens,
-  formatKodoUsd,
   isKodoLoopRunning,
   kodoLoopActions,
   kodoLoopHeldReason,

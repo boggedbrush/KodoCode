@@ -72,7 +72,9 @@ export interface LoopSpendDeps {
   /** One model's price for a set of tokens: null when it has none. */
   readonly price: PriceTokens;
   /** A provider instance's usage limits as it holds them now; the provider list's when absent. */
-  readonly readLimits?: (instanceId: string) => Effect.Effect<ServerProviderUsageLimits | undefined>;
+  readonly readLimits?: (
+    instanceId: string,
+  ) => Effect.Effect<ServerProviderUsageLimits | undefined>;
   /** Asks a provider instance to read its usage limits again, for the gate; the stepper bounds the wait. */
   readonly refreshLimits?: (
     instanceId: string,
@@ -115,6 +117,9 @@ const MAX_DISPATCH_FAILURES = 3;
 /** The same step may be tried this many times with nothing changing before the loop gives up on it. */
 const MAX_STEP_REPEATS = 3;
 const DEFAULT_STREAMING_GRACE_MS = 30_000;
+/** How long the gate's answer for a stage position is reused, so repeated looks do not each ask a provider. */
+const GATE_REUSE_MS = 30_000;
+const MAX_KEPT_GATES = 64;
 
 const iso = (value: DateTime.Utc) => DateTime.formatIso(value);
 
@@ -143,6 +148,14 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
   /** The limit windows as they were when a stage was sent, by stage message. Lost in a restart; then none is shown. */
   const limitsBefore = yield* Ref.make(
     new Map<string, { readonly instanceId: string; readonly reading: KodoLimitReading }>(),
+  );
+
+  /**
+   * The gate's answer for a stage position, kept for a short while: a loop waiting between stages is
+   * looked at on every event, and each look must not ask a provider to read its limits again.
+   */
+  const gateReads = yield* Ref.make(
+    new Map<string, { readonly atMs: number; readonly gate: BudgetGate }>(),
   );
 
   /** A provider instance's limit windows from a reading of known age: it is asked to read again first. */
@@ -405,6 +418,25 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
     threadId: ThreadId,
     loop: KodoLoop,
   ) {
+    const key = `${loop.loopId}:${loop.round}:${loop.stage}`;
+    const now = yield* Clock.currentTimeMillis;
+    const kept = (yield* Ref.get(gateReads)).get(key);
+    if (kept !== undefined && now - kept.atMs < GATE_REUSE_MS) return kept.gate;
+    const gate = yield* readGateFresh(threadId, loop);
+    // A gate that could not be read is tried again on the next look; every other answer is kept.
+    if (gate.budget.error === undefined) {
+      yield* Ref.update(gateReads, (current) => {
+        if (current.size >= MAX_KEPT_GATES) current.clear();
+        return current.set(key, { atMs: now, gate });
+      });
+    }
+    return gate;
+  });
+
+  const readGateFresh = Effect.fn("KodoLoopStepper.readGateFresh")(function* (
+    threadId: ThreadId,
+    loop: KodoLoop,
+  ) {
     return yield* Effect.gen(function* (): Effect.fn.Return<BudgetGate, { readonly _tag: string }> {
       const providers = yield* spend.providers;
       const selection = yield* orchestrator.kodoLoopStageSelection(threadId, {
@@ -562,7 +594,9 @@ export const makeKodoLoopStepper = Effect.fn("KodoLoopStepper.make")(function* (
     // The budget is read between stages only: while a stage runs, a look costs no more than before.
     const betweenStages =
       !isKodoLoopTerminal(loop.status) && stageRun(views, messageId) === undefined;
-    const gate: BudgetGate | undefined = betweenStages ? yield* readGate(threadId, loop) : undefined;
+    const gate: BudgetGate | undefined = betweenStages
+      ? yield* readGate(threadId, loop)
+      : undefined;
     const observation: LoopObservation = {
       threadMode: thread.interactionMode,
       runs: views,
