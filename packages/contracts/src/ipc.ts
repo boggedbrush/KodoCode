@@ -1133,8 +1133,6 @@ export interface DesktopBridge {
   getWindowFullscreenState: () => boolean;
   onWindowFullscreenStateChange: (listener: (fullscreen: boolean) => void) => () => void;
   getWindowZoomFactor: () => number;
-  /** KODO: linux-desktop-contract - header bar window buttons and the system accent; Linux desktop only. */
-  kodoLinuxDesktop?: KodoLinuxDesktopBridge;
   getUpdateState: () => Promise<DesktopUpdateState>;
   /** `minimumVersion` is a track switch's checked release; nothing older is offered after. */
   setUpdateChannel: (
@@ -1162,6 +1160,8 @@ export interface DesktopBridge {
     onRequest: (listener: (request: DesktopAppActivationRequest) => void) => () => void;
   };
   preview: DesktopPreviewBridge;
+  /** KODO: linux-desktop-contract - header bar window buttons and the system accent; Linux desktop only. */
+  kodoLinuxDesktop?: KodoLinuxDesktopBridge;
 }
 
 /** Renderer callback invoked by Electron with a fresh user gesture before display-media capture. */

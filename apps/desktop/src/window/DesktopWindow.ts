@@ -20,7 +20,7 @@ import * as ElectronMenu from "../electron/ElectronMenu.ts";
 import { getDesktopUrl } from "../electron/ElectronProtocol.ts";
 import * as ElectronShell from "../electron/ElectronShell.ts";
 import * as ElectronTheme from "../electron/ElectronTheme.ts";
-import { isKodoCustomFrame, kodoLinuxDesktopFor } from "../kodo/KodoLinuxDesktop.ts"; // KODO: linux-header-bar
+import { kodoLinuxDesktopFor, kodoWindowHasNoOverlay } from "../kodo/KodoLinuxDesktop.ts"; // KODO: linux-header-bar
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import {
   MENU_ACTION_CHANNEL,
@@ -298,8 +298,8 @@ function syncWindowAppearance(
 
     window.setBackgroundColor(getInitialWindowBackgroundColor(shouldUseDarkColors));
     const { titleBarOverlay } = getWindowTitleBarOptions(shouldUseDarkColors, platform);
-    // KODO: linux-header-bar - a window with Kodo's own header buttons has no overlay to recolor
-    if (typeof titleBarOverlay === "object" && !isKodoCustomFrame(window)) {
+    // KODO: linux-header-bar - a window created with Kodo's header buttons or the system frame has no overlay to recolor
+    if (typeof titleBarOverlay === "object" && !kodoWindowHasNoOverlay(window)) {
       window.setTitleBarOverlay(titleBarOverlay);
     }
   });
@@ -394,9 +394,9 @@ export const make = Effect.gen(function* () {
     const iconPaths = yield* assets.iconPaths;
     const iconOption = getIconOption(iconPaths, environment.platform);
     const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
-    // KODO: linux-header-bar - on GNOME the window drops the system frame and the page draws the header buttons
+    // KODO: linux-header-bar - GNOME draws its buttons in the page, and the title bar setting asks for the system frame
     const kodoDesktop = kodoLinuxDesktopFor(environment);
-    const kodoOwnHeaderButtons = yield* Effect.promise(() => kodoDesktop.prepareFrame());
+    const kodoFrame = yield* kodoDesktop.prepareFrame();
     const persistedSettings = yield* desktopSettings.get;
     const persistedBounds = persistedSettings.mainWindowBounds;
     const displayBoundsResult = yield* Effect.sync(() => {
@@ -431,9 +431,11 @@ export const make = Effect.gen(function* () {
       backgroundColor: getInitialWindowBackgroundColor(shouldUseDarkColors),
       ...iconOption,
       title: environment.displayName,
-      ...(kodoOwnHeaderButtons
+      ...(kodoFrame === "kodo"
         ? ({ titleBarStyle: "hidden" } as const) // KODO: linux-header-bar - no overlay: the page draws the buttons
-        : getWindowTitleBarOptions(shouldUseDarkColors, environment.platform)),
+        : kodoFrame === "system"
+          ? {} // KODO: linux-header-bar - the system frame: no hidden title bar, no overlay
+          : getWindowTitleBarOptions(shouldUseDarkColors, environment.platform)),
       webPreferences: {
         preload: environment.preloadPath,
         // Hidden-renderer throttling stalls first paint; re-enable it after the first reveal.
@@ -452,7 +454,11 @@ export const make = Effect.gen(function* () {
       return Option.none();
     }
 
-    kodoDesktop.attach(window, kodoOwnHeaderButtons); // KODO: linux-header-bar
+    // KODO: linux-header-bar
+    kodoDesktop.attach(window, kodoFrame, {
+      run: runFork,
+      showMessageBox: (target, options) => Electron.dialog.showMessageBox(target, options),
+    });
     pendingMainReveals.set(window, Effect.void);
     yield* rendererHistory.register(window.webContents, { surface: "main" });
     if (environment.platform === "darwin") {
@@ -852,6 +858,9 @@ export const make = Effect.gen(function* () {
             ...(retryInMs === undefined ? {} : { retryInMs }),
           }),
         );
+        // KODO: linux-header-bar - no retry is coming, and -3 is only a navigation that was cancelled
+        if (retryInMs === undefined && errorCode !== -3)
+          kodoDesktop.reportUnavailable(window, "gone");
       },
     );
     window.webContents.on("render-process-gone", (_event, details) => {
@@ -877,6 +886,7 @@ export const make = Effect.gen(function* () {
             recovering: shouldRecover,
           });
           if (!shouldRecover) {
+            kodoDesktop.reportUnavailable(window, "gone"); // KODO: linux-header-bar - the page that draws the buttons is gone
             return;
           }
           rendererRecoveryTimestamps.push(now);

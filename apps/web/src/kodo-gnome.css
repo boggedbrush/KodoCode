@@ -168,12 +168,15 @@ html[data-theme-id="kodo"] [data-settings-scroll-target] h2 {
 
 /* System accent (Linux desktop app, kodo/systemAccent.ts): GNOME's accent colour replaces Kodo's
    purple while the Kodo theme is in use and the person follows the system. The values are
-   !important because the theme writes its colours inline. `--kodo-accent-window-text` is the
+   !important because the theme writes its colours inline. The text on an accent fill is white or
+   black, whichever reads better (4.5:1). `--kodo-accent-window-text` is the
    libadwaita accent_color: the fill mixed towards black on light and white on dark so it reads as
    text on the window. */
 html[data-theme-id="kodo"][data-kodo-system-accent] {
   --kodo-accent-window-text: color-mix(in srgb, var(--kodo-accent-fill) 75%, black);
-  --kodo-accent-hover: color-mix(in srgb, var(--kodo-accent-fill) 88%, white);
+  /* The hover state is worked out with the text colour (kodo/systemAccent.logic.ts): lighter in light
+     mode, never lighter in dark mode, and 4.5:1 for the text either way. */
+  --kodo-accent-hover: var(--kodo-accent-hover-light);
   --kodo-accent-tint: color-mix(in srgb, var(--kodo-accent-fill) 12%, var(--app-theme-canvas));
   --app-theme-accent: var(--kodo-accent-fill) !important;
   --app-theme-accent-foreground: var(--kodo-accent-text) !important;
@@ -192,6 +195,7 @@ html[data-theme-id="kodo"][data-kodo-system-accent] {
   ) !important;
 }
 html[data-theme-id="kodo"][data-kodo-system-accent].dark {
+  --kodo-accent-hover: var(--kodo-accent-hover-dark);
   --kodo-accent-window-text: color-mix(in srgb, var(--kodo-accent-fill) 55%, white);
   --kodo-accent-tint: color-mix(in srgb, var(--kodo-accent-fill) 18%, var(--app-theme-canvas));
 }

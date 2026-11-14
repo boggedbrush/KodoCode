@@ -27,14 +27,8 @@ function parseSide(side: string, seen: Set<string>): KodoWindowButton[] {
   return buttons;
 }
 
-/**
- * Reads `org.gnome.desktop.wm.preferences button-layout`, as `gsettings get` prints it.
- * Like GTK, it splits at the first colon, and a string without one is all left. Returns null for
- * output that is not a quoted string, so the caller keeps the system frame.
- */
-export function parseGnomeButtonLayout(output: string): GnomeButtonLayout | null {
-  const layout = unquoteGVariantString(output);
-  if (layout === null) return null;
+/** Like GTK, it splits at the first colon, and a string without one is all left. */
+export function parseGnomeButtonLayoutValue(layout: string): GnomeButtonLayout {
   const colon = layout.indexOf(":");
   const seen = new Set<string>();
   return colon === -1
@@ -43,4 +37,13 @@ export function parseGnomeButtonLayout(output: string): GnomeButtonLayout | null
         left: parseSide(layout.slice(0, colon), seen),
         right: parseSide(layout.slice(colon + 1), seen),
       };
+}
+
+/**
+ * Reads `org.gnome.desktop.wm.preferences button-layout`, as `gsettings get` prints it. Returns
+ * null for output that is not a quoted string, so the caller keeps the other frame.
+ */
+export function parseGnomeButtonLayout(output: string): GnomeButtonLayout | null {
+  const layout = unquoteGVariantString(output);
+  return layout === null ? null : parseGnomeButtonLayoutValue(layout);
 }

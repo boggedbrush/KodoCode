@@ -9,6 +9,7 @@ import * as Scope from "effect/Scope";
 import * as Electron from "electron";
 
 import { watchLinuxColorScheme, type LinuxColorScheme } from "./LinuxColorScheme.ts";
+import { leaseSessionBus } from "../kodo/SessionBusLease.ts"; // KODO: linux-shared-bus
 
 export class ElectronThemeSetSourceError extends Schema.TaggedError<ElectronThemeSetSourceError>()(
   "ElectronThemeSetSourceError",
@@ -92,7 +93,12 @@ export const makeWith = Effect.fn("ElectronTheme.make")(function* (
 /** @public */
 export const make = Effect.gen(function* () {
   const platform = yield* HostProcess.Platform;
-  return yield* makeWith(platform === "linux" ? watchLinuxColorScheme : undefined);
+  // KODO: linux-shared-bus - the colour scheme and Kodo's accent and button layout share one session bus connection
+  return yield* makeWith(
+    platform === "linux"
+      ? (onChange) => watchLinuxColorScheme(onChange, leaseSessionBus())
+      : undefined,
+  );
 });
 
 export const layer = Layer.effect(ElectronTheme, make);

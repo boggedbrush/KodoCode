@@ -2,6 +2,7 @@ import { assert, describe, expect, it } from "vite-plus/test";
 import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import {
   compileResolvedKeybindingsConfig,
+  DEFAULT_RESOLVED_KEYBINDINGS,
   parseKeybindingShortcut,
 } from "@t3tools/shared/keybindings";
 
@@ -10,6 +11,7 @@ import { resolveShortcutCommand } from "../../keybindings";
 import {
   buildKeybindingRows,
   buildWhenVariableOptions,
+  commandLabel,
   keybindingConflictLabels,
   keybindingFromKeyboardEvent,
   parseWhenExpressionDraft,
@@ -294,6 +296,41 @@ describe("KeybindingsSettings.logic", () => {
       keybindingConflictLabels(rows, { rowId: "new", key: "ctrl+k", when: "" }, expected.platform),
     ).toEqual(["Chat: New Local", ...expected.ctrl].toSorted());
   });
+
+  it.each([
+    {
+      platform: "Linux x86_64",
+      modifier: { ctrlKey: true },
+      conflicts: [commandLabel("shortcuts.open")],
+    },
+    {
+      platform: "MacIntel",
+      modifier: { metaKey: true },
+      conflicts: [commandLabel("shortcuts.open")],
+    },
+    // Cmd+Shift+/ is macOS's Help search: the shortcuts window is not bound to it.
+    { platform: "MacIntel", modifier: { metaKey: true, shiftKey: true }, conflicts: [] },
+  ])(
+    "sees the shortcuts window's default when $platform records $modifier on the slash key",
+    ({ platform, modifier, conflicts }) => {
+      const recorded = keybindingFromKeyboardEvent(
+        {
+          key: modifier.shiftKey ? "?" : "/",
+          code: "Slash",
+          metaKey: false,
+          ctrlKey: false,
+          altKey: false,
+          shiftKey: false,
+          ...modifier,
+        },
+        platform,
+      );
+      const rows = buildKeybindingRows(DEFAULT_RESOLVED_KEYBINDINGS, platform);
+      expect(
+        keybindingConflictLabels(rows, { rowId: "new", key: recorded ?? "", when: "" }, platform),
+      ).toEqual(conflicts);
+    },
+  );
 
   it("keeps mod and ctrl shortcuts apart when their when contexts differ", () => {
     const rows = buildKeybindingRows(

@@ -71,7 +71,7 @@ describe("buildShortcutSections", () => {
     );
     expect(entry?.title).toBe("Show keyboard shortcuts");
     expect(entry?.shortcuts.map((s) => shortcutKeyCaps(s, LINUX.platform))).toEqual([
-      ["Ctrl", "Shift", "?"],
+      ["Ctrl", "/"],
     ]);
   });
 

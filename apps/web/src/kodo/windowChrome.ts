@@ -1,7 +1,11 @@
 import type { KodoWindowChromeState } from "@t3tools/contracts";
 import { useSyncExternalStore } from "react";
 
-import { windowControlsWidth, windowStateName } from "./windowChrome.logic";
+import {
+  customChromeTitlebarHeight,
+  windowControlsWidth,
+  windowStateName,
+} from "./windowChrome.logic";
 
 let current: KodoWindowChromeState | null = null;
 const listeners = new Set<() => void>();
@@ -21,6 +25,13 @@ function apply(next: KodoWindowChromeState | null) {
     root.classList.add("wco");
   }
   for (const listener of listeners) listener();
+}
+
+/** What the strip the window buttons sit in measures, for anything that must keep clear of it; null without the custom chrome. */
+export function kodoTitlebarHeight(): number | null {
+  return typeof document === "undefined"
+    ? null
+    : customChromeTitlebarHeight(document.documentElement.dataset.kodoWindowChrome);
 }
 
 /**

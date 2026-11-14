@@ -11,3 +11,28 @@ html[data-kodo-window-chrome="custom"] {
   --workspace-controls-right: calc(var(--kodo-controls-right, 0px) + 0.75rem);
   --workspace-native-controls-inset: calc(var(--kodo-controls-right, 0px) + 0.75rem);
 }
+
+/* The strip the window buttons sit in, for what keeps clear of it: modals, the command palette,
+   tooltips and the media dialog read this where an overlay would report its own height. */
+html[data-kodo-window-chrome="custom"] {
+  --native-titlebar-height: 47px;
+}
+
+/* GNOME hides the header bar's buttons in fullscreen, and the headers take back the room they kept. */
+html[data-kodo-window-chrome="custom"][data-kodo-window-state="fullscreen"] {
+  --workspace-controls-left: 0.75rem;
+  --workspace-controls-right: 0.75rem;
+  --workspace-native-controls-inset: 0.75rem;
+}
+html[data-kodo-window-state="fullscreen"] [data-kodo-window-controls] {
+  display: none;
+}
+
+/* The window buttons sit above overlays (z-index 60), so an overlay that starts at the top edge would
+   put its close control under them. Dialogs and sheets start below the header's strip instead; the
+   Settings and Usage modals, the command palette and tooltips read the same height in script. The
+   media dialog adds the strip to its own padding. */
+html[data-kodo-window-chrome="custom"]
+  :is([data-slot="dialog-viewport"]:not(.z-\[60\]), [data-slot="sheet-viewport"]) {
+  padding-top: var(--native-titlebar-height);
+}

@@ -68,12 +68,9 @@ export const installKodoLinuxDesktopIpc = Effect.fn("desktop.ipc.kodoLinuxDeskto
         channel: Channels.KODO_SET_USE_SYSTEM_TITLE_BAR_CHANNEL,
         payload: Schema.Boolean,
         result: Schema.Void,
-        handler: (enabled) => Effect.promise(() => desktop.setUseSystemTitleBar(enabled)),
+        handler: (enabled) => desktop.setUseSystemTitleBar(enabled),
       }),
     );
-    yield* Effect.acquireRelease(
-      Effect.sync(() => desktop.startAccent()),
-      (stop) => Effect.sync(stop),
-    );
+    yield* desktop.start();
   },
 );

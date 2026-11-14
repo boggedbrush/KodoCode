@@ -896,6 +896,29 @@ describe("composer and pull request shortcuts", () => {
   });
 });
 
+describe("shortcuts window shortcut", () => {
+  it.each([
+    { platform: "Linux", modifier: { ctrlKey: true } },
+    { platform: "Win32", modifier: { ctrlKey: true } },
+    { platform: "MacIntel", modifier: { metaKey: true } },
+  ])("opens on the slash key with $platform's modifier, but not in a terminal", (input) => {
+    const slash = event({ key: "/", code: "Slash", ...input.modifier });
+    assert.strictEqual(
+      resolveShortcutCommand(slash, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: input.platform,
+        context: { terminalFocus: false },
+      }),
+      "shortcuts.open",
+    );
+    assert.isNull(
+      resolveShortcutCommand(slash, DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: input.platform,
+        context: { terminalFocus: true },
+      }),
+    );
+  });
+});
+
 describe("Usage shortcuts", () => {
   it.each(["Linux", "MacIntel"])(
     "preserves desktop numbered thread shortcuts on Usage on %s",

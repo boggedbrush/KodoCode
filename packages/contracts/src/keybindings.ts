@@ -84,7 +84,6 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "filePicker.toggle",
   "projectSearch.toggle",
   "usage.open",
-  "shortcuts.open", // KODO: shortcuts-window - opens the keyboard shortcuts overview
   "orchestrator.open", // KODO: orchestrator-open - opens the Orchestrator conversation; no default binding
   "theme.select",
   "appearance.cycle",
@@ -118,6 +117,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "usage.period.quarter",
   ...MODEL_PICKER_KEYBINDING_COMMANDS,
   ...THREAD_KEYBINDING_COMMANDS,
+  "shortcuts.open", // KODO: shortcuts-window - opens the keyboard shortcuts overview
 ] as const;
 
 export const SCRIPT_RUN_COMMAND_PATTERN = Schema.TemplateLiteral([

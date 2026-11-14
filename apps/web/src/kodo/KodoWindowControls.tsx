@@ -24,9 +24,15 @@ function WindowButton({
   readonly button: KodoWindowButton;
   readonly state: KodoWindowChromeState;
 }) {
+  // "window" keeps these apart from the "Close" of every dialog.
   const label =
-    button === "maximize" ? maximizeButtonLabel(state) : button === "close" ? "Close" : "Minimize";
-  const icon = button === "maximize" ? (label === "Restore" ? "restore" : "maximize") : button;
+    button === "maximize"
+      ? maximizeButtonLabel(state)
+      : button === "close"
+        ? "Close window"
+        : "Minimize window";
+  const icon =
+    button === "maximize" ? (state.maximized || state.fullscreen ? "restore" : "maximize") : button;
   return (
     <button
       type="button"

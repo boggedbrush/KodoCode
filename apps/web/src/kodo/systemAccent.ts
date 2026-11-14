@@ -1,10 +1,17 @@
 import type { KodoGnomeAccent } from "@t3tools/contracts";
 import { useSyncExternalStore } from "react";
 
-import { accentFill, resolveSystemAccent } from "./systemAccent.logic";
+import { accentColors, resolveSystemAccent } from "./systemAccent.logic";
 
 // A per-viewer convenience: the desktop app is its own origin, so this stays on this machine.
 const FOLLOW_STORAGE_KEY = "kodo:follow-system-accent";
+
+const ACCENT_PROPERTIES = [
+  "--kodo-accent-fill",
+  "--kodo-accent-text",
+  "--kodo-accent-hover-light",
+  "--kodo-accent-hover-dark",
+];
 
 let systemAccent: KodoGnomeAccent | null = null;
 let follow = true;
@@ -25,13 +32,14 @@ function apply() {
   const accent = resolveSystemAccent({ themeId: root.dataset.themeId, follow, systemAccent });
   if (accent === null) {
     delete root.dataset.kodoSystemAccent;
-    root.style.removeProperty("--kodo-accent-fill");
-    root.style.removeProperty("--kodo-accent-text");
+    for (const name of ACCENT_PROPERTIES) root.style.removeProperty(name);
   } else {
-    const { fill, text } = accentFill(accent);
+    const { fill, text, hoverLight, hoverDark } = accentColors(accent);
     root.dataset.kodoSystemAccent = accent;
     root.style.setProperty("--kodo-accent-fill", fill);
     root.style.setProperty("--kodo-accent-text", text);
+    root.style.setProperty("--kodo-accent-hover-light", hoverLight);
+    root.style.setProperty("--kodo-accent-hover-dark", hoverDark);
   }
   for (const listener of listeners) listener();
 }
@@ -73,5 +81,17 @@ export function useFollowSystemAccent(): boolean {
     },
     () => follow,
     () => true,
+  );
+}
+
+/** The accent the desktop reports, whether or not the theme follows it; null when it reports none. */
+export function useSystemAccent(): KodoGnomeAccent | null {
+  return useSyncExternalStore(
+    (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    () => systemAccent,
+    () => null,
   );
 }

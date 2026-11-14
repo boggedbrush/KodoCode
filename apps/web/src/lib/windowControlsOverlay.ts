@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 
 import { isElectron } from "~/env";
+import { kodoTitlebarHeight } from "../kodo/windowChrome"; // KODO: window-controls-height
 
 import { isMacPlatform, isWindowsPlatform } from "./utils";
 
@@ -31,6 +32,8 @@ function getWindowControlsOverlay(): WindowControlsOverlayLike | null {
 
 /** Height of the native caption strip drawn over the page, or 0 when the window has none. */
 export function windowControlsOverlayHeight(): number {
+  const kodoHeight = kodoTitlebarHeight(); // KODO: window-controls-height - the header the page draws its buttons in
+  if (kodoHeight !== null) return kodoHeight;
   const overlay = getWindowControlsOverlay();
   return overlay?.visible ? overlay.getTitlebarAreaRect().height : 0;
 }
@@ -68,6 +71,8 @@ function subscribeTitlebarArea(listener: () => void): () => void {
 }
 
 function getNativeTitlebarHeight(): number {
+  const kodoHeight = kodoTitlebarHeight(); // KODO: window-controls-height
+  if (kodoHeight !== null) return kodoHeight;
   if (isElectron && isMacPlatform(navigator.platform)) return MACOS_TITLEBAR_HEIGHT;
   const overlay = getWindowControlsOverlay();
   return overlay?.visible ? overlay.getTitlebarAreaRect().bottom : 0;

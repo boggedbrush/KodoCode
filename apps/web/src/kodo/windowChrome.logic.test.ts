@@ -1,6 +1,11 @@
 import { describe, expect, it } from "@effect/vitest";
 
-import { maximizeButtonLabel, windowControlsWidth, windowStateName } from "./windowChrome.logic";
+import {
+  customChromeTitlebarHeight,
+  maximizeButtonLabel,
+  windowControlsWidth,
+  windowStateName,
+} from "./windowChrome.logic";
 
 describe("windowControlsWidth", () => {
   it("leaves nothing for a side without buttons and grows by a button and a gap", () => {
@@ -15,7 +20,15 @@ describe("window state", () => {
     expect(windowStateName({ maximized: true, fullscreen: true })).toBe("fullscreen");
     expect(windowStateName({ maximized: true, fullscreen: false })).toBe("maximized");
     expect(windowStateName({ maximized: false, fullscreen: false })).toBe("normal");
-    expect(maximizeButtonLabel({ maximized: false, fullscreen: true })).toBe("Restore");
-    expect(maximizeButtonLabel({ maximized: false, fullscreen: false })).toBe("Maximize");
+    expect(maximizeButtonLabel({ maximized: false, fullscreen: true })).toBe("Restore window");
+    expect(maximizeButtonLabel({ maximized: false, fullscreen: false })).toBe("Maximize window");
+  });
+});
+
+describe("customChromeTitlebarHeight", () => {
+  it("reports the 47px header under the custom chrome and nothing otherwise", () => {
+    expect(customChromeTitlebarHeight("custom")).toBe(47);
+    expect(customChromeTitlebarHeight(undefined)).toBeNull();
+    expect(customChromeTitlebarHeight("")).toBeNull();
   });
 });
