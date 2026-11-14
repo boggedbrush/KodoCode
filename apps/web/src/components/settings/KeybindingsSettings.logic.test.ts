@@ -297,6 +297,7 @@ describe("KeybindingsSettings.logic", () => {
     ).toEqual(["Chat: New Local", ...expected.ctrl].toSorted());
   });
 
+  // KODO: shortcuts-window - the recorder sees the shortcuts window's default chord
   it.each([
     {
       platform: "Linux x86_64",

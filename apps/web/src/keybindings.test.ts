@@ -896,6 +896,7 @@ describe("composer and pull request shortcuts", () => {
   });
 });
 
+// KODO: shortcuts-window - the shortcuts window's default chord, and the keys that must not reach it
 describe("shortcuts window shortcut", () => {
   it.each([
     { platform: "Linux", modifier: { ctrlKey: true } },
@@ -916,6 +917,93 @@ describe("shortcuts window shortcut", () => {
         context: { terminalFocus: true },
       }),
     );
+  });
+
+  it.each([
+    {
+      name: "a layout that types - on the physical slash key (QWERTZ, Nordic, Spanish)",
+      input: { key: "-", code: "Slash" },
+      context: { previewFocus: false },
+      expected: null,
+    },
+    {
+      name: "the same key while a preview is focused (zoom out)",
+      input: { key: "-", code: "Slash" },
+      context: { previewFocus: true },
+      expected: "preview.zoomOut",
+    },
+    {
+      name: "a slash typed anywhere else on the keyboard",
+      input: { key: "/", code: "Digit7" },
+      context: { previewFocus: false },
+      expected: "shortcuts.open",
+    },
+    {
+      name: "a non-Latin layout whose slash key types a non-ASCII letter",
+      input: { key: "\u0638", code: "Slash" },
+      context: { previewFocus: false },
+      expected: "shortcuts.open",
+    },
+  ])("Ctrl+key on $name resolves to $expected", ({ input, context, expected }) => {
+    assert.strictEqual(
+      resolveShortcutCommand(event({ ...input, ctrlKey: true }), DEFAULT_RESOLVED_KEYBINDINGS, {
+        platform: "Linux",
+        context: { terminalFocus: false, ...context },
+      }),
+      expected,
+    );
+  });
+});
+
+// KODO: shortcuts-window - a default placed last must not silently beat another default on its chord
+describe("default keybinding registry", () => {
+  const variablesOf = (node: KeybindingWhenNode | undefined): string[] =>
+    node === undefined
+      ? []
+      : node.type === "identifier"
+        ? [node.name]
+        : node.type === "not"
+          ? variablesOf(node.node)
+          : [...variablesOf(node.left), ...variablesOf(node.right)];
+  const holds = (node: KeybindingWhenNode | undefined, on: ReadonlySet<string>): boolean =>
+    node === undefined ||
+    (node.type === "identifier"
+      ? on.has(node.name)
+      : node.type === "not"
+        ? !holds(node.node, on)
+        : node.type === "and"
+          ? holds(node.left, on) && holds(node.right, on)
+          : holds(node.left, on) || holds(node.right, on));
+  const canOverlap = (a: KeybindingWhenNode | undefined, b: KeybindingWhenNode | undefined) => {
+    const names = [...new Set([...variablesOf(a), ...variablesOf(b)])];
+    for (let mask = 0; mask < 1 << names.length; mask += 1) {
+      const on = new Set(names.filter((_, index) => (mask >> index) & 1));
+      if (holds(a, on) && holds(b, on)) return true;
+    }
+    return false;
+  };
+  const chord = (rule: ResolvedKeybindingsConfig[number]) =>
+    JSON.stringify([
+      rule.shortcut.key,
+      rule.shortcut.modKey,
+      rule.shortcut.metaKey,
+      rule.shortcut.ctrlKey,
+      rule.shortcut.shiftKey,
+      rule.shortcut.altKey,
+    ]);
+
+  it("gives no two defaults the same chord in contexts that can both hold", () => {
+    const rules = DEFAULT_RESOLVED_KEYBINDINGS;
+    const shared: string[] = [];
+    rules.forEach((rule, index) => {
+      for (const other of rules.slice(index + 1)) {
+        if (chord(rule) === chord(other) && canOverlap(rule.whenAst, other.whenAst)) {
+          shared.push(`${rule.command} / ${other.command}`);
+        }
+      }
+    });
+    // A draft thread has no running turn, so these two never hold together.
+    assert.deepEqual(shared, ["composer.sendAlternate / composer.sendBackground"]);
   });
 });
 

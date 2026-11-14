@@ -899,6 +899,12 @@ export default {
     },
     { file: "packages/contracts/src/ipc.ts", hooks: ["linux-desktop-contract"] },
     { file: "packages/shared/src/keybindings.ts", hooks: ["shortcuts-window"] },
+    { file: "packages/shared/src/keybindingMatching.ts", hooks: ["typed-punctuation-match"] },
+    { file: "apps/web/src/keybindings.test.ts", hooks: ["shortcuts-window"] },
+    {
+      file: "apps/web/src/components/settings/KeybindingsSettings.logic.test.ts",
+      hooks: ["shortcuts-window"],
+    },
     {
       file: "apps/desktop/src/ipc/DesktopIpcHandlers.ts",
       hooks: ["linux-desktop-ipc"],

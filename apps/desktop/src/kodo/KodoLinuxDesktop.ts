@@ -11,6 +11,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
 import type * as Scope from "effect/Scope";
 import type * as Electron from "electron";
 
@@ -27,11 +28,13 @@ import {
 } from "./kodoLinuxDesktopChannels.ts";
 
 const GSETTINGS_TIMEOUT_MS = 2_000;
-// Everything read in front of the first window (portal, then gsettings) shares this one budget,
+// Everything read in front of the first window (portal and gsettings, in parallel) shares this one budget,
 // so a slow desktop delays the window by at most the gsettings timeout and then gets the upstream frame.
 const FRAME_BUDGET = Duration.millis(GSETTINGS_TIMEOUT_MS);
 // How long a focus waits for the portal's first answer before asking gsettings instead.
 const PORTAL_WAIT = Duration.millis(GSETTINGS_TIMEOUT_MS);
+// A loaded page that has not reported its window buttons by now is not going to.
+const CHROME_READY_WAIT = Duration.seconds(10);
 // A focus asks gsettings again no sooner than this; the settings rarely change and the portal reports them when it can.
 const REFRESH_MIN_INTERVAL_MS = 30_000;
 const PREFERENCE_FILE = "kodo-window-chrome.json";

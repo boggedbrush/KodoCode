@@ -70,8 +70,22 @@ export function resolveEventKeys(event: ShortcutEventLike): Set<string> {
   if (letterCode && !/^[a-z]$/.test(layoutKey)) {
     keys.add(letterCode.toLowerCase());
   }
-  keys.add(shortcutKeyFromEvent(event));
+  // KODO: typed-punctuation-match - an unshifted punctuation key that types its own ASCII character is that character
+  if (!typedCharacterOwnsPunctuationKey(event, layoutKey)) keys.add(shortcutKeyFromEvent(event));
   return keys;
+}
+
+// QWERTZ, Nordic and Spanish layouts type `-` on the physical slash key, so Ctrl+- must not match Ctrl+/.
+// Shifted chords and the digit row keep the physical key (US Shift+[ types `{`, AZERTY Ctrl+4 types `'`),
+// and so do keys that type anything outside printable ASCII (Cyrillic, Arabic, Greek letters).
+function typedCharacterOwnsPunctuationKey(
+  event: Pick<ShortcutEventLike, "code" | "shiftKey">,
+  layoutKey: string,
+): boolean {
+  if (event.shiftKey || !event.code) return false;
+  const physicalKey = EVENT_CODE_SHORTCUT_KEYS[event.code];
+  if (physicalKey === undefined || /^Digit/.test(event.code)) return false;
+  return layoutKey !== physicalKey && /^[\x21-\x7e]$/.test(layoutKey);
 }
 
 export function matchesKeybindingShortcutModifiers(
