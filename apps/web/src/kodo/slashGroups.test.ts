@@ -39,6 +39,37 @@ describe("the slash menu's groups", () => {
     ]);
   });
 
+  it("puts the group of a name match first, so Enter picks what was typed", () => {
+    // `/new` is the provider's own command; `/side` only matches it through its description.
+    const items = [
+      { id: "provider-new", type: "provider-slash-command", command: { name: "new" } },
+      { id: "side", ...slash("side") },
+      { id: "skill", type: "skill", skill: { name: "new-feature" } },
+    ];
+    expect(groupKodoSlashItems(items, "/new").map((item) => item.id)).toEqual([
+      "provider-new",
+      "side",
+      "skill",
+    ]);
+    // A description-only match, or no query, keeps the usual order.
+    expect(groupKodoSlashItems(items, "chat").map((item) => item.id)).toEqual([
+      "side",
+      "provider-new",
+      "skill",
+    ]);
+    expect(groupKodoSlashItems(items).map((item) => item.id)).toEqual([
+      "side",
+      "provider-new",
+      "skill",
+    ]);
+    // The menu still draws each heading once, in the order the keys walk.
+    expect(kodoSlashRuns(groupKodoSlashItems(items, "/new")).map((run) => run.heading)).toEqual([
+      "Provider commands",
+      "Built in",
+      "Skills",
+    ]);
+  });
+
   it("draws one heading per run, and none for items that belong to no group", () => {
     const runs = kodoSlashRuns([
       slash("code"),

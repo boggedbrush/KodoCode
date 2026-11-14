@@ -361,6 +361,7 @@ export function useComposerMenuItems({
             !isKodoModeSlashCommand(item.command) ||
             kodoModeSlashMatchesQuery(item.command, query),
         ),
+        query,
       );
     }
     if (composerTrigger.kind === "skill") {

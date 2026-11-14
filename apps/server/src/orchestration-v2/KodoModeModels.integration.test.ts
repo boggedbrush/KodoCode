@@ -1173,6 +1173,37 @@ it.live(
     ),
 );
 
+// KODO: quiet-watch - the flag on a silent worker: set, cleared, and a repeat is no change and no event.
+it.live("kodo.quiet.set sets and clears the flag, and a repeat adds no event", () =>
+  withHarness("kodo-quiet-set", {}, ({ orchestrator, cwd }) =>
+    Effect.gen(function* () {
+      yield* createOrchestrator(orchestrator, { cwd, createdBy: "system" });
+      let commands = 0;
+      const setQuiet = (quiet: { readonly since: string } | null) =>
+        orchestrator.dispatch({
+          type: "kodo.quiet.set",
+          commandId: CommandId.make(`command:kodo-quiet-set:${(commands += 1)}`),
+          threadId: ORCHESTRATOR_THREAD,
+          quiet,
+        });
+      const before = yield* orchestrator.getThreadShell(ORCHESTRATOR_THREAD);
+      const since = "2026-11-14T11:00:00.000Z";
+      const set = yield* setQuiet({ since });
+      const flagged = yield* orchestrator.getThreadShell(ORCHESTRATOR_THREAD);
+      assert.equal(flagged?.kodoQuiet?.since, since);
+      // The flag is not the thread's activity: its place in the lists does not move.
+      assert.deepEqual(flagged?.updatedAt, before?.updatedAt);
+      const repeat = yield* setQuiet({ since });
+      assert.equal(repeat.sequence, set.sequence);
+      const cleared = yield* setQuiet(null);
+      assert.isAbove(cleared.sequence, set.sequence);
+      assert.isNotOk((yield* orchestrator.getThreadShell(ORCHESTRATOR_THREAD))?.kodoQuiet);
+      const clearedAgain = yield* setQuiet(null);
+      assert.equal(clearedAgain.sequence, cleared.sequence);
+    }),
+  ),
+);
+
 // KODO: swarm-delegate - the start question is an approval on the Orchestrator's run, answered only by a person.
 const raiseStartQuestion = Effect.fnUntraced(function* (input: TurnContext, label: string) {
   yield* startTurn(input, label, selection("base-model"));

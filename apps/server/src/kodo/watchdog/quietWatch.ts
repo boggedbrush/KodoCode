@@ -1,6 +1,6 @@
 // Flags a worker whose running turn made no event for the set time as quiet; it never stops or
-// restarts anything. A pending approval or question holds the clock, and a turn that is not
-// running is never quiet. `decideQuiet` is pure and the clock is Effect's.
+// restarts anything. A pending approval or a question the turn waits on holds the clock, and a turn
+// that is not running is never quiet. `decideQuiet` is pure and the clock is Effect's.
 import {
   CommandId,
   KODO_QUIET_DEFAULT_MINUTES,
@@ -38,7 +38,7 @@ export function kodoQuietAfterMs(minutes: unknown): number | null {
 export interface QuietWatchInput {
   /** The worker's turn is running (not queued, not waiting, not finished). */
   readonly running: boolean;
-  /** An approval or a question of the turn is waiting on a person. */
+  /** An approval, or a question the turn waits on, is waiting on a person. */
   readonly waitingOnPerson: boolean;
   /** The worker's latest event, in epoch milliseconds. */
   readonly lastEventMs: number;
@@ -59,7 +59,7 @@ export interface QuietWatchShell {
   readonly id: ThreadId;
   readonly status: string;
   readonly deletedAt: unknown;
-  readonly pendingRuntimeRequest: unknown;
+  readonly pendingRuntimeRequest: { readonly blocking?: boolean | undefined } | null;
   readonly kodoQuiet?: KodoQuiet | null | undefined;
   readonly kodoLead?: object | null | undefined;
   readonly lineage: {
@@ -86,14 +86,15 @@ export const makeKodoQuietWatch = (deps: QuietWatchDeps) => {
   // The latest event of each thread seen since the server started; a thread that stops running leaves it.
   const lastEvent = new Map<ThreadId, number>();
   const flagged = new Set<ThreadId>();
-  // Threads found not to be workers. A thread's lineage is fixed when it is made, so it is asked once.
+  // Threads whose lineage says they are no sub-agent. Lineage is fixed when a thread is made, so it is
+  // asked once; whether the parent leads can change, so that is asked at every sweep.
   const notWorkers = new Set<ThreadId>();
 
-  const isWatchedWorker = Effect.fn("KodoQuietWatch.isWatchedWorker")(function* (
+  const hasParentLead = Effect.fn("KodoQuietWatch.hasParentLead")(function* (
     shell: QuietWatchShell,
   ) {
     const parentId = shell.lineage.parentThreadId;
-    if (shell.lineage.relationshipToParent !== "subagent" || parentId === null) return false;
+    if (parentId === null) return false;
     const parent = yield* deps.getShell(parentId);
     return parent?.kodoLead != null;
   });
@@ -127,29 +128,39 @@ export const makeKodoQuietWatch = (deps: QuietWatchDeps) => {
     sweep: Effect.fn("KodoQuietWatch.sweep")(function* () {
       const afterMs = kodoQuietAfterMs(yield* deps.quietAfterMinutes);
       const nowMs = yield* Clock.currentTimeMillis;
-      for (const [threadId, lastEventMs] of lastEvent) {
+      for (const threadId of lastEvent.keys()) {
         const shell = yield* deps.getShell(threadId);
+        const isSubagent = shell?.lineage.relationshipToParent === "subagent";
         const watched =
-          shell !== null && shell.deletedAt === null && (yield* isWatchedWorker(shell));
+          shell !== null && shell.deletedAt === null && isSubagent && (yield* hasParentLead(shell));
         if (shell === null || !watched) {
+          // No longer a watched worker (its lead stopped leading, or it was deleted): a flag it holds goes.
+          if (shell !== null && shell.deletedAt === null && shell.kodoQuiet != null) {
+            yield* clear(threadId);
+          }
           lastEvent.delete(threadId);
           flagged.delete(threadId);
-          if (shell !== null && shell.deletedAt === null) notWorkers.add(threadId);
+          if (shell !== null && !isSubagent) notWorkers.add(threadId);
           continue;
         }
+        // Read after the awaits above: an event that arrived meanwhile must count.
+        const lastEventMs = lastEvent.get(threadId);
+        if (lastEventMs === undefined) continue;
         const running = RUNNING.has(shell.status);
         const quiet = decideQuiet({
           running,
-          waitingOnPerson: shell.pendingRuntimeRequest !== null,
+          waitingOnPerson:
+            shell.pendingRuntimeRequest !== null && shell.pendingRuntimeRequest.blocking !== false,
           lastEventMs,
           nowMs,
           afterMs,
         });
         if (quiet && shell.kodoQuiet == null) {
-          yield* deps.setQuiet(threadId, {
-            since: DateTime.formatIso(DateTime.makeUnsafe(lastEventMs)),
-          });
+          // Marked before the write, so an event that lands while it is in flight clears it.
           flagged.add(threadId);
+          yield* deps
+            .setQuiet(threadId, { since: DateTime.formatIso(DateTime.makeUnsafe(lastEventMs)) })
+            .pipe(Effect.tapError(() => Effect.sync(() => flagged.delete(threadId))));
         } else if (!quiet && shell.kodoQuiet != null) {
           yield* clear(threadId);
         }

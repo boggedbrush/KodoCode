@@ -224,15 +224,30 @@ it.effect("reports the workers of a lead with their mode, status and model", () 
 it.effect(
   "t3_usage_status reads the caller's own usage, for a read-only caller too, and writes nothing",
   () =>
-    withTools("plan", ({ call, commands }) =>
-      Effect.gen(function* () {
-        const result = yield* call("t3_usage_status", {});
-        expect(result.isError).toBe(false);
-        expect(result.structuredContent).toMatchObject({
-          stopAtPercent: 90,
-          providers: [{ name: "Codex", windows: [{ name: "5-hour", usedPercent: 62 }] }],
-        });
-        expect(yield* Ref.get(commands)).toEqual([]);
-      }),
+    withTools(
+      "plan",
+      ({ call, commands }) =>
+        Effect.gen(function* () {
+          const result = yield* call("t3_usage_status", {});
+          expect(result.isError).toBe(false);
+          expect(result.structuredContent).toMatchObject({
+            stopAtPercent: 90,
+            providers: [{ name: "Codex", windows: [{ name: "5-hour", usedPercent: 62 }] }],
+          });
+          expect(yield* Ref.get(commands)).toEqual([]);
+        }),
+      { lead: true },
     ),
+);
+
+it.effect("t3_usage_status refuses a thread that does not lead, with a short message", () =>
+  withTools("code", ({ call }) =>
+    Effect.gen(function* () {
+      const result = yield* call("t3_usage_status", {});
+      expect(declaredFailure(result)).toMatchObject({
+        code: "capability_denied",
+        message: "This tool is for the Orchestrator and sub-agent leads.",
+      });
+    }),
+  ),
 );

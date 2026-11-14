@@ -28,7 +28,7 @@ import { useEnvironmentScope } from "../state/session";
 import { environmentThreadDetails } from "../state/threads";
 import { useAtomCommand } from "../state/use-atom-command";
 import { buildThreadRouteParams } from "../threadRoutes";
-import { kodoApprovalDetailView } from "./approvalDetail.logic";
+import { kodoApprovalDetailView, kodoInboxApprovalView } from "./approvalDetail.logic";
 import { kodoInboxApprovalCommand } from "./needsYouCommand";
 import {
   getKodoInboxOpen,
@@ -59,7 +59,7 @@ function InboxApproval(props: {
   const [responding, setResponding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (approval === undefined) return null;
-  const text = approval.detail ?? approval.requestKind;
+  const { text, answerable } = kodoInboxApprovalView(approval);
   const view = kodoApprovalDetailView(text, false);
   return (
     <div className="mt-1.5 flex min-w-0 flex-col gap-1.5">
@@ -70,11 +70,13 @@ function InboxApproval(props: {
         {view.shown}
         {view.collapsible ? "…" : ""}
       </pre>
-      {view.collapsible || approval.responseCapability !== "live" ? (
+      {!answerable || view.collapsible || approval.responseCapability !== "live" ? (
         <p className="text-xs text-muted-foreground">
           {approval.responseCapability !== "live"
             ? "The provider process is gone. Open the thread to respond."
-            : "Open the thread to read all of this before you answer."}
+            : !answerable
+              ? "This request has no detail to read here. Open the thread to respond."
+              : "Open the thread to read all of this before you answer."}
         </p>
       ) : (
         <div className="flex flex-wrap gap-2">

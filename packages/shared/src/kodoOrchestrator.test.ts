@@ -322,6 +322,25 @@ describe("the Needs you list", () => {
     ]);
   });
 
+  it("counts a worker's request once, on the worker, not again on the threads above it", () => {
+    const items = kodoNeedsYouItems(
+      [
+        shell(ORCH, { pendingSubagentRequest: "approval" }),
+        shell("w1", { parent: ORCH, hasPendingApprovals: true }),
+        shell("lead", { lead: true, pendingSubagentRequest: "approval" }),
+        shell("lw", { parent: "lead", pendingSubagentRequest: "approval" }),
+        // A request nothing listed carries is kept on the lead that holds it.
+        shell("lead2", { lead: true, pendingSubagentRequest: "approval" }),
+      ],
+      ORCH,
+    );
+    expect(items.map((item) => [item.threadId, item.kind])).toEqual([
+      ["lead2", "approval"],
+      ["lw", "approval"],
+      ["w1", "approval"],
+    ]);
+  });
+
   it("is empty without an Orchestrator to ask about, but still finds leads", () => {
     expect(
       kodoNeedsYouItems([shell("w1", { parent: ORCH, hasPendingApprovals: true })], undefined),

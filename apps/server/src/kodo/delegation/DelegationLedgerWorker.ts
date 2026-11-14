@@ -17,6 +17,7 @@ import { workerLedgerRow } from "../ledger/delegationLedgerRow.ts";
 import { recordDelegatedWorker } from "../ledger/delegationLedgerStore.ts";
 import type { PriceTokens } from "../loop/loopSpend.ts";
 import { makeThreadSingleFlight } from "../loop/threadSingleFlight.ts";
+import { KodoLeadUsage } from "./leadUsage.ts";
 import { readDelegationSide } from "./usageReader.ts";
 import { priceWorker } from "./delegationUsage.ts";
 
@@ -186,8 +187,15 @@ export const layer = Layer.effectDiscard(
     );
     const memory = makeFinishedWorkerMemory();
     const onEvent = makeDelegationLedgerEvents({ look: guarded, memory });
+    // The usage line's held spend reads again when a turn of a lead or its workers ends; where the
+    // service is absent (tests) there is nothing to tell.
+    const leadUsage = yield* Effect.serviceOption(KodoLeadUsage);
+    const noteSpend = (event: OrchestrationV2DomainEvent) =>
+      Option.isSome(leadUsage) ? leadUsage.value.noteEvent(event) : Effect.void;
     yield* forkParked(
-      Stream.runForEach(orchestrator.streamDomainEvents, onEvent).pipe(
+      Stream.runForEach(orchestrator.streamDomainEvents, (event) =>
+        Effect.andThen(noteSpend(event), onEvent(event)),
+      ).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("kodo.delegation-ledger.events-failed", { cause }),
         ),

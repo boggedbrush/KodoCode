@@ -243,15 +243,34 @@ export function kodoNeedsYouRowView(item: KodoNeedsYouItem): {
   return { label: NEEDS_YOU_LABEL[item.kind], context };
 }
 
-const needsYouKind = (shell: NeedsYouShell): KodoNeedsYouKind | null => {
+type RequestFamily = "approval" | "question";
+
+/**
+ * What a shell waits for. A request a descendant raised reaches every ancestor as
+ * `pendingSubagentRequest`; `covered` holds the families a listed child of this shell already
+ * answers for, so one request is one row, on the thread that raised it.
+ */
+const needsYouKind = (
+  shell: NeedsYouShell,
+  covered: ReadonlySet<RequestFamily> = new Set(),
+): KodoNeedsYouKind | null => {
   if (shell.hasPendingApprovals === true) {
     return shell.pendingKodoStart === true ? "start-approval" : "approval";
   }
   if (shell.hasPendingUserInput === true) return "question";
-  if (shell.pendingSubagentRequest === "approval") return "approval";
-  if (shell.pendingSubagentRequest != null) return "question";
+  if (shell.pendingSubagentRequest === "approval" && !covered.has("approval")) return "approval";
+  if (
+    shell.pendingSubagentRequest != null &&
+    shell.pendingSubagentRequest !== "approval" &&
+    !covered.has("question")
+  ) {
+    return "question";
+  }
   return shell.kodoQuiet == null ? null : "quiet";
 };
+
+const requestFamily = (kind: KodoNeedsYouKind): RequestFamily | null =>
+  kind === "quiet" ? null : kind === "question" ? "question" : "approval";
 
 /** "Quiet for 7m": how long a flagged worker has made no event, in whole minutes from the flag's `since`. */
 export function kodoQuietLabel(since: string, nowMs: number): string {
@@ -274,10 +293,7 @@ export function kodoNeedsYouItems(
   const leads = new Map(
     all.filter((shell) => shell.kodoLead?.kind === "sub-agents").map((lead) => [lead.id, lead]),
   );
-  const items: KodoNeedsYouItem[] = [];
-  for (const shell of all) {
-    const kind = needsYouKind(shell);
-    if (kind === null) continue;
+  const roleOf = (shell: NeedsYouShell) => {
     const parentId = shell.lineage.parentThreadId;
     const isWorker = shell.lineage.relationshipToParent === "subagent" && parentId !== null;
     const parentLead = isWorker ? leads.get(parentId) : undefined;
@@ -291,7 +307,24 @@ export function kodoNeedsYouItems(
             : leads.has(shell.id)
               ? "lead"
               : null;
-    if (role === null) continue;
+    return { role, parentLead, parentId: isWorker ? parentId : null };
+  };
+  // The requests a listed worker already shows, by the thread it works for.
+  const coveredBy = new Map<string, Set<RequestFamily>>();
+  for (const shell of all) {
+    const { role, parentId } = roleOf(shell);
+    const kind = needsYouKind(shell);
+    const family = kind === null ? null : requestFamily(kind);
+    if (role === null || parentId === null || family === null) continue;
+    const covered = coveredBy.get(parentId) ?? new Set<RequestFamily>();
+    covered.add(family);
+    coveredBy.set(parentId, covered);
+  }
+  const items: KodoNeedsYouItem[] = [];
+  for (const shell of all) {
+    const kind = needsYouKind(shell, coveredBy.get(shell.id));
+    const { role, parentLead } = roleOf(shell);
+    if (kind === null || role === null) continue;
     items.push({
       threadId: shell.id,
       title: shell.title,

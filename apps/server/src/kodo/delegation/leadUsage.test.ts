@@ -36,7 +36,12 @@ const thread = (over: Partial<KodoUsageThread> = {}): KodoUsageThread => ({
   ...over,
 });
 
-const provider = (instanceId: string, usedPercent: number, checkedAt: number) => ({
+const provider = (
+  instanceId: string,
+  usedPercent: number,
+  checkedAt: number,
+  resetsAt = NOW + 130 * 60_000,
+) => ({
   instanceId: ProviderInstanceId.make(instanceId),
   driver: instanceId as never,
   displayName: instanceId === "claude" ? "Claude" : "Codex",
@@ -49,7 +54,7 @@ const provider = (instanceId: string, usedPercent: number, checkedAt: number) =>
         label: "5 hour",
         usedPercent,
         windowDurationMins: 300,
-        resetsAt: at(NOW + 130 * 60_000),
+        resetsAt: at(resetsAt),
       },
     ],
   } as never,
@@ -111,11 +116,31 @@ describe("the usage line a lead is given", () => {
     }),
   );
 
-  it.effect("says unknown when the reading is older than the gate's freshness rule", () =>
+  it.effect(
+    "shows a reading older than the gate's rule with its age, and past 15 minutes as unknown",
+    () =>
+      Effect.gen(function* () {
+        const fresh = yield* setup();
+        expect(yield* fresh.service.line(thread())).not.toContain("as of");
+        const aged = yield* setup({
+          providers: Effect.succeed([provider("claude", 62, NOW - 4 * 60_000 - 20_000)]),
+        });
+        expect(yield* aged.service.line(thread())).toContain(
+          "Claude: 5-hour 62% (resets in 2h 10m) as of 4m ago",
+        );
+        const old = yield* setup({
+          providers: Effect.succeed([provider("claude", 99, NOW - 16 * 60_000)]),
+        });
+        const line = yield* old.service.line(thread());
+        expect(line).toContain("Claude: unknown");
+        expect(line).not.toContain("99%");
+      }),
+  );
+
+  it.effect("says unknown for a reading whose window has reset since", () =>
     Effect.gen(function* () {
-      const { service } = yield* setup({
-        providers: Effect.succeed([provider("claude", 99, NOW - 10 * 60_000)]),
-      });
+      const passed = provider("claude", 99, NOW - 5 * 60_000, NOW - 1_000);
+      const { service } = yield* setup({ providers: Effect.succeed([passed]) });
       const line = yield* service.line(thread());
       expect(line).toContain("Claude: unknown");
       expect(line).not.toContain("99%");

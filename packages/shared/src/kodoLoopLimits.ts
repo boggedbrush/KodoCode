@@ -66,6 +66,7 @@ function windowName(window: {
 export function readKodoLimitWindows(
   limits: ServerProviderUsageLimits | undefined,
   nowMs: number,
+  maxAgeMs: number = KODO_LIMIT_MAX_AGE_MS,
 ): KodoLimitReading {
   if (limits === undefined || limits.unavailable?.reason === "unsupported") {
     return { state: "missing" };
@@ -76,7 +77,7 @@ export function readKodoLimitWindows(
   const checkedAt = Date.parse(limits.checkedAt);
   const old =
     !Number.isFinite(checkedAt) ||
-    nowMs - checkedAt > KODO_LIMIT_MAX_AGE_MS ||
+    nowMs - checkedAt > maxAgeMs ||
     limits.unavailable?.reason === "probeFailed";
   // A reset that already passed means the stored percentage describes the previous window.
   const live = limits.windows.filter((window) => {

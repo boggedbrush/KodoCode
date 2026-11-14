@@ -8,7 +8,7 @@ import {
   KODO_SUB_AGENTS_MAX_WORKERS_PER_TURN,
 } from "@t3tools/contracts";
 
-import { kodoResetClock, kodoResetsIn } from "./usageLine.ts";
+import { kodoResetsIn, kodoResetWhen } from "./usageLine.ts";
 
 export const KODO_WORKER_DEPTH_REFUSAL =
   "This thread is a worker of a lead, and workers do not start workers, threads or loops. Do the task yourself and report back, or say what you need from the lead.";
@@ -64,11 +64,11 @@ export function kodoWorkerLimitRefusal(input: {
 }): string | undefined {
   if (input.percent < input.stopAtPercent) return undefined;
   const resetsIn = kodoResetsIn(input.resetsAt, input.nowMs);
-  const clock = kodoResetClock(input.resetsAt);
+  const when = kodoResetWhen(input.resetsAt, input.nowMs);
   const resets =
     resetsIn === undefined
       ? "It has not said when it resets."
-      : `It resets in ${resetsIn}${clock === undefined ? "" : `, at ${clock}`}.`;
+      : `It resets in ${resetsIn}${when === undefined ? "" : `, ${when}`}.`;
   return `The ${input.window} usage limit of ${input.provider} is at ${Math.round(input.percent)}%, at or above the ${input.stopAtPercent}% the person set as the point to stop starting work. ${resets} No worker was started. Tell the person these numbers and stop; do not retry this call or start the work another way until they say the limit has room.`;
 }
 

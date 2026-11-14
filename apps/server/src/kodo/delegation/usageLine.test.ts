@@ -6,6 +6,7 @@ import {
   kodoCombinedSpend,
   kodoResetClock,
   kodoResetsIn,
+  kodoResetWhen,
   kodoUsageStatus,
   type KodoUsageProviderReading,
 } from "./usageLine.ts";
@@ -40,12 +41,20 @@ describe("how long until a reset", () => {
     [inMinutes(130), "2h 10m"],
     [inMinutes(120), "2h"],
     [inMinutes(60 * 72), "3d"],
+    [inMinutes(60 * 60), "2d 12h"],
+    [inMinutes(60 * 60 + 59), "2d 12h"],
   ])("%s reads %s", (resetsAt, expected) => {
     expect(kodoResetsIn(resetsAt, NOW)).toBe(expected);
   });
   it("shows the clock time in UTC", () => {
     expect(kodoResetClock(inMinutes(130))).toBe("14:10 UTC");
     expect(kodoResetClock(undefined)).toBeUndefined();
+  });
+  it("adds the date when the reset is not today in UTC", () => {
+    expect(kodoResetWhen(inMinutes(130), NOW)).toBe("at 14:10 UTC");
+    expect(kodoResetWhen(inMinutes(60 * 60), NOW)).toBe("on 17 Nov at 00:00 UTC");
+    expect(kodoResetWhen(inMinutes(13 * 60), NOW)).toBe("on 15 Nov at 01:00 UTC");
+    expect(kodoResetWhen(undefined, NOW)).toBeUndefined();
   });
 });
 
@@ -114,7 +123,7 @@ describe("the usage line", () => {
       stopAtPercent: 90,
     });
     expect(line).toBe(
-      "<kodo_usage>Usage limits (last reading): Claude: 5-hour 62% (resets in 2h 10m), weekly 31% (resets in 3d). Spent in this conversation, you and workers: 412k tokens, about $1.84. Delegation is refused at 90%.</kodo_usage>",
+      "<kodo_usage>Usage limits (last reading): Claude: 5-hour 62% (resets in 2h 10m), weekly 31% (resets in 2d 18h). Spent in this conversation, you and workers: 412k tokens, about $1.84. Delegation is refused at 90%.</kodo_usage>",
     );
   });
   it("says unknown for a reading that is stale or missing, never a number", () => {

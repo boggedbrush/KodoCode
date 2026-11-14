@@ -1,15 +1,20 @@
 // The usage a lead is told, as pure text and data: the line that rides with each of its messages and
-// the detail `t3_usage_status` returns. Both read the same readings, so they never disagree. A reading
-// that is missing or older than the limit gate's freshness bound is "unknown", never a number.
+// the detail `t3_usage_status` returns. A reading the line shows that is older than the limit gate's
+// freshness bound carries its age ("as of 4m ago"), up to a longer bound of its own; a reading that is
+// missing, older than that or past its window's reset is "unknown", never a number.
 import type { KodoDelegationUsage } from "@t3tools/contracts";
 import { formatKodoTokens, formatKodoUsd } from "@t3tools/shared/kodoLoopView";
 import {
   formatKodoMinutes,
+  KODO_LIMIT_MAX_AGE_MS,
   type KodoLimitReading,
   type KodoLimitWindow,
 } from "@t3tools/shared/kodoLoopLimits";
 import * as DateTime from "effect/DateTime";
 import * as Schema from "effect/Schema";
+
+/** The oldest reading the line still shows, with its age. The gate's own bound is shorter and unchanged. */
+export const KODO_USAGE_LINE_MAX_AGE_MS = 15 * 60_000;
 
 /** The most windows one provider shows in the line: the fullest, which are the ones that stop work. */
 const MAX_WINDOWS_PER_PROVIDER = 2;
@@ -34,7 +39,12 @@ export interface KodoUsageSpend {
 export function kodoResetsIn(resetsAt: string | undefined, nowMs: number): string | undefined {
   const at = resetsAt === undefined ? Number.NaN : Date.parse(resetsAt);
   if (!Number.isFinite(at) || at <= nowMs) return undefined;
-  return formatKodoMinutes(Math.max(1, Math.round((at - nowMs) / 60_000)));
+  const minutes = Math.max(1, Math.round((at - nowMs) / 60_000));
+  if (minutes < 48 * 60) return formatKodoMinutes(minutes);
+  // Days and hours, floored: "2d 12h" must not read as "3d".
+  const days = Math.floor(minutes / (24 * 60));
+  const hours = Math.floor((minutes % (24 * 60)) / 60);
+  return `${days}d${hours === 0 ? "" : ` ${hours}h`}`;
 }
 
 /** "14:30 UTC": the reset as a clock time, for the refusal a person may read. */
@@ -43,6 +53,18 @@ export function kodoResetClock(resetsAt: string | undefined): string | undefined
   return Number.isFinite(at)
     ? `${DateTime.formatIso(DateTime.makeUnsafe(at)).slice(11, 16)} UTC`
     : undefined;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "at 14:30 UTC" for a reset today (UTC), "on 17 Nov at 14:30 UTC" for a later day. */
+export function kodoResetWhen(resetsAt: string | undefined, nowMs: number): string | undefined {
+  const clock = kodoResetClock(resetsAt);
+  if (clock === undefined) return undefined;
+  const at = DateTime.toPartsUtc(DateTime.makeUnsafe(Date.parse(resetsAt ?? "")));
+  const now = DateTime.toPartsUtc(DateTime.makeUnsafe(nowMs));
+  const today = at.year === now.year && at.month === now.month && at.day === now.day;
+  return today ? `at ${clock}` : `on ${at.day} ${MONTHS[at.month - 1]} at ${clock}`;
 }
 
 /** The lead's and its workers' spend as one figure; undefined when nothing reported. */
@@ -68,17 +90,19 @@ export function kodoCombinedSpend(
   };
 }
 
-const windowText = (window: KodoLimitWindow, nowMs: number) => {
+const windowText = (window: KodoLimitWindow, nowMs: number, checkedAtMs: number) => {
   const resets = kodoResetsIn(window.resetsAt, nowMs);
-  return `${window.name} ${Math.round(window.usedPercent)}%${resets === undefined ? "" : ` (resets in ${resets})`}`;
+  const age = nowMs - checkedAtMs;
+  return `${window.name} ${Math.round(window.usedPercent)}%${resets === undefined ? "" : ` (resets in ${resets})`}${age > KODO_LIMIT_MAX_AGE_MS ? ` as of ${formatKodoMinutes(Math.floor(age / 60_000))} ago` : ""}`;
 };
 
 const providerText = (provider: KodoUsageProviderReading, nowMs: number) => {
-  if (provider.reading.state !== "ok") return `${provider.name}: unknown`;
-  const fullest = provider.reading.windows
+  const { reading } = provider;
+  if (reading.state !== "ok") return `${provider.name}: unknown`;
+  const fullest = reading.windows
     .toSorted((a, b) => b.usedPercent - a.usedPercent)
     .slice(0, MAX_WINDOWS_PER_PROVIDER);
-  return `${provider.name}: ${fullest.map((window) => windowText(window, nowMs)).join(", ")}`;
+  return `${provider.name}: ${fullest.map((window) => windowText(window, nowMs, reading.checkedAtMs)).join(", ")}`;
 };
 
 const spendText = (spend: KodoUsageSpend | undefined) => {

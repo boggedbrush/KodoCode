@@ -14666,6 +14666,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           command.type === "thread.interrupt.unresponsive" ||
           command.type === "thread.stop" ||
           command.type === "thread.kodo-lead.stop-workers" || // KODO: delegation-command
+          command.type === "kodo.quiet.set" || // KODO: quiet-watch - setting the flag it already has is no change, not an error
           command.type === "subagent.stop" ||
           // Closing a share again, or after it ended, is not an error.
           command.type === "thread.guest-share.close" ||

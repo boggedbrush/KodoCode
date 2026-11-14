@@ -5,6 +5,7 @@ import {
   type KodoDelegationUsage,
   type KodoLead,
   type KodoModeModels,
+  type OrchestrationV2DomainEvent,
   type ServerProvider,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -22,11 +23,13 @@ import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as UsageService from "../../usage/UsageService.ts";
 import { type KodoLimitSource, readFreshKodoLimits } from "../loop/limitReading.ts";
+import { makeKodoLeadSpendCache } from "./leadSpendCache.ts";
 import { kodoLeadInstructionsFor } from "./leadInstructions.ts";
 import { kodoWorkerInstanceIds } from "./leadDelegation.ts";
 import { makeKodoLimitSources } from "./limitSources.ts";
 import {
   formatKodoUsageLine,
+  KODO_USAGE_LINE_MAX_AGE_MS,
   kodoCombinedSpend,
   kodoUsageStatus,
   type KodoUsageProviderReading,
@@ -49,7 +52,10 @@ export interface KodoLeadUsageDeps {
     { readonly modeModels: KodoModeModels; readonly stopAtPercent: number },
     { readonly _tag: string }
   >;
+  /** The lead's spend. The line asks on the path to every message, so this one must be cheap. */
   readonly spend: (threadId: ThreadId) => Effect.Effect<KodoDelegationUsage | undefined>;
+  /** Lets the spend's holder see what changed it. Absent: nothing is held. */
+  readonly noteEvent?: ((event: OrchestrationV2DomainEvent) => Effect.Effect<void>) | undefined;
   readonly getThread: (threadId: ThreadId) => Effect.Effect<KodoUsageThread | null>;
   /** A provider instance's limits, asked to read again. Absent: the provider list's reading only. */
   readonly limitSource?: ((instanceId: string) => KodoLimitSource) | undefined;
@@ -97,9 +103,11 @@ export const makeKodoLeadUsage = (deps: KodoLeadUsageDeps) => {
         const reading: KodoLimitReading =
           fresh && deps.limitSource !== undefined
             ? yield* readFreshKodoLimits(deps.limitSource(instanceId))
-            : readKodoLimitWindows(
+            : // The line shows an older reading with its age, so it takes one up to its own bound.
+              readKodoLimitWindows(
                 providers.find((candidate) => candidate.instanceId === instanceId)?.usageLimits,
                 nowMs,
+                KODO_USAGE_LINE_MAX_AGE_MS,
               );
         return {
           instanceId,
@@ -120,6 +128,8 @@ export const makeKodoLeadUsage = (deps: KodoLeadUsageDeps) => {
   });
 
   return {
+    noteEvent: (event: OrchestrationV2DomainEvent): Effect.Effect<void> =>
+      deps.noteEvent?.(event) ?? Effect.void,
     /** The line for a lead's message; undefined for a thread that does not lead, or when it cannot be read. */
     line: (thread: KodoUsageThread): Effect.Effect<string | undefined> =>
       kodoLeadInstructionsFor(thread) === undefined
@@ -159,10 +169,18 @@ const layerWithStore = Layer.effect(
     const sources = makeKodoLimitSources({ providerRegistry, instanceRegistry });
     const reader = makeKodoDelegationUsageReader({
       orchestrator: projections,
+      // Never a fetch: with no rates held the line shows tokens alone.
       price: (model, totals) =>
         Option.isSome(usageService)
-          ? usageService.value.priceTokens({ model, totals })
+          ? usageService.value.priceTokensHeld({ model, totals })
           : Effect.succeed(null),
+    });
+    const spend = makeKodoLeadSpendCache({
+      read: (leadId) =>
+        Effect.all([reader.read(leadId), projections.listAppOwnedChildThreadIds(leadId)]).pipe(
+          Effect.map(([usage, threadIds]) => ({ usage, threadIds })),
+          Effect.orElseSucceed(() => undefined),
+        ),
     });
     return makeKodoLeadUsage({
       providers: providerRegistry.getProviders,
@@ -172,7 +190,8 @@ const layerWithStore = Layer.effect(
           stopAtPercent: value.loop.budget.stopAtLimitPercent,
         })),
       ),
-      spend: (threadId) => reader.read(threadId).pipe(Effect.orElseSucceed(() => undefined)),
+      spend: spend.get,
+      noteEvent: spend.noteEvent,
       getThread: (threadId) =>
         projections.getThreadShell(threadId).pipe(Effect.orElseSucceed(() => null)),
       ...(sources.readLimits === undefined || sources.refreshLimits === undefined

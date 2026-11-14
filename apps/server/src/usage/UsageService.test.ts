@@ -3293,6 +3293,39 @@ describe("UsageService", () => {
         }).pipe(Effect.scoped),
     );
 
+    // KODO: loop-pricing - the per-message usage line prices from what is held and never fetches.
+    it.effect(
+      "prices for the usage line without a rate table as 'no price', and never fetches",
+      () =>
+        Effect.gen(function* () {
+          const { settings, home } = yield* setup;
+          let fetches = 0;
+          const service = yield* UsageService.make.pipe(
+            Effect.provide(
+              layerService({
+                prefix: "usage-service-held-pricing-offline-test",
+                home,
+                settings,
+                onRatesFetch: () => (fetches += 1),
+                ratesDocument,
+              }),
+            ),
+          );
+          assert.strictEqual(
+            yield* service.priceTokensHeld({ model: "priced-model", totals: loopTotals }),
+            null,
+          );
+          assert.strictEqual(fetches, 0);
+          // Once a table is held, the same call prices from it.
+          yield* service.refreshRates;
+          assert.closeTo(
+            (yield* service.priceTokensHeld({ model: "priced-model", totals: loopTotals })) ?? NaN,
+            2,
+            1e-9,
+          );
+        }).pipe(Effect.scoped),
+    );
+
     it.effect(
       "does not hold the lock the Usage page's refresh takes while its own attempt waits",
       () =>

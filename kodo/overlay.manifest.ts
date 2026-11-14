@@ -1193,6 +1193,8 @@ export default {
     { path: "apps/web/src/kodo/useKodoReviewRequest.ts" },
     { path: "apps/web/src/kodo/slashGroups.ts", why: "Slash menu headings" },
     { path: "apps/server/src/kodo/delegation/usageLine.test.ts" },
+    { path: "apps/server/src/kodo/delegation/leadSpendCache.test.ts" },
+    { path: "apps/web/src/kodo/quietMinutes.logic.test.ts" },
     { path: "apps/server/src/kodo/delegation/leadUsage.test.ts" },
     { path: "apps/server/src/kodo/watchdog/quietWatch.test.ts" },
     { path: "apps/web/src/kodo/needsYouCommand.test.ts" },
@@ -1433,6 +1435,8 @@ export default {
     testFiles: [
       "apps/server/src/kodo/delegation/leadUsage.test.ts",
       "apps/server/src/kodo/delegation/usageLine.test.ts",
+      "apps/server/src/kodo/delegation/leadSpendCache.test.ts",
+      "apps/web/src/kodo/quietMinutes.logic.test.ts",
       "apps/server/src/kodo/watchdog/quietWatch.test.ts",
       "apps/web/src/kodo/needsYouCommand.test.ts",
       "apps/web/src/kodo/reviewRequest.test.ts",

@@ -5,6 +5,7 @@ import {
   KODO_SUB_AGENTS_MAX_WORKERS_LIMIT,
 } from "@t3tools/contracts";
 
+import { kodoQuietMinutesToSave } from "../../kodo/quietMinutes.logic";
 import { Input } from "../ui/input";
 import { Switch } from "../ui/switch";
 import { searchableSetting } from "./settingsSearch";
@@ -136,15 +137,11 @@ export function KodoSubAgentsSettings(props: { readonly isProjectScope: boolean 
               key={quietMinutes}
               aria-label="Minutes before a worker is marked quiet"
               onBlur={(event) => {
-                const parsed = Number(event.target.value);
-                if (
-                  Number.isInteger(parsed) &&
-                  parsed >= 0 &&
-                  parsed <= KODO_QUIET_MAX_MINUTES &&
-                  parsed !== quietMinutes
-                ) {
-                  updateSettings({ kodoQuietAfterMinutes: parsed });
-                }
+                const minutes = kodoQuietMinutesToSave(event.target.value, quietMinutes);
+                if (minutes !== undefined) updateSettings({ kodoQuietAfterMinutes: minutes });
+                // An emptied field goes back to the setting it still holds.
+                else if (event.target.value.trim() === "")
+                  event.target.value = String(quietMinutes);
               }}
             />
           }

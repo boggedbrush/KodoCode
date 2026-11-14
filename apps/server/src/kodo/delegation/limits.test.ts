@@ -67,6 +67,14 @@ describe("the usage-limit refusal", () => {
     expect(message).toMatch(/resets in 2h 10m, at 14:10 UTC/);
     expect(message).toMatch(/do not retry this call/);
   });
+  it("gives days and hours, and the date, for a reset that is not today", () => {
+    const message = kodoWorkerLimitRefusal({
+      ...input,
+      percent: 95,
+      resetsAt: DateTime.formatIso(DateTime.makeUnsafe(now + 60 * 60 * 60_000 + 30 * 60_000)),
+    });
+    expect(message).toMatch(/resets in 2d 12h, on 16 Nov at 00:30 UTC/);
+  });
   it("says so when the provider gave no reset time", () => {
     expect(kodoWorkerLimitRefusal({ ...input, percent: 95 })).toMatch(
       /has not said when it resets/,

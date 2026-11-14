@@ -10,6 +10,7 @@ import { Tool, Toolkit } from "effect/ai";
 
 import { isKodoLead } from "../kodo/delegation/leadGuard.ts";
 import { KodoLeadUsage } from "../kodo/delegation/leadUsage.ts";
+import { kodoLeadInstructionsFor } from "../kodo/delegation/leadInstructions.ts";
 import { KodoUsageStatus } from "../kodo/delegation/usageLine.ts";
 import { kodoInteractionModeRank } from "../kodo/interactionMode.ts";
 import { kodoMaxWorkers } from "../kodo/delegation/limits.ts";
@@ -186,7 +187,14 @@ const handlers = {
     Effect.gen(function* () {
       const { caller } = yield* readCaller();
       const usage = yield* KodoLeadUsage;
-      const status = caller === undefined ? undefined : yield* usage.status(caller.id);
+      // Only a lead is told its usage; any other thread has nothing to delegate and nothing to read.
+      if (caller === undefined || kodoLeadInstructionsFor(caller) === undefined) {
+        return yield* new OrchestratorMcpFailure({
+          code: "capability_denied",
+          message: "This tool is for the Orchestrator and sub-agent leads.",
+        });
+      }
+      const status = yield* usage.status(caller.id);
       return (
         status ??
         (yield* new OrchestratorMcpFailure({

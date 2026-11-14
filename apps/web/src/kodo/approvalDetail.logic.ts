@@ -21,3 +21,28 @@ export function kodoApprovalDetailView(text: string, expanded: boolean): KodoApp
     totalChars: text.length,
   };
 }
+
+export interface KodoInboxApprovalText {
+  readonly detail?: string | null | undefined;
+  readonly appName?: string | null | undefined;
+  readonly reason?: string | null | undefined;
+  readonly requestKind: string;
+}
+
+/**
+ * What the inbox shows of an approval: the same facts its own card shows (the detail, the app and the
+ * reason), all of them counted toward the length limit. A request with no detail has nothing to
+ * approve by, so it is never answered from the inbox.
+ */
+export function kodoInboxApprovalView(approval: KodoInboxApprovalText): {
+  readonly text: string;
+  readonly answerable: boolean;
+} {
+  const detail = approval.detail?.trim() ?? "";
+  const parts = [
+    detail === "" ? approval.requestKind : detail,
+    approval.appName?.trim(),
+    approval.reason?.trim(),
+  ].filter((part): part is string => part !== undefined && part !== "");
+  return { text: parts.join("\n"), answerable: detail !== "" };
+}

@@ -156,6 +156,11 @@ export class UsageService extends Context.Service<
       readonly model: string;
       readonly totals: UsageTokenTotals;
     }) => Effect.Effect<number | null>;
+    // KODO: loop-pricing - the same from the table already held or saved on disk, never a fetch.
+    readonly priceTokensHeld: (input: {
+      readonly model: string;
+      readonly totals: UsageTokenTotals;
+    }) => Effect.Effect<number | null>;
   }
 >()("t3/usage/UsageService") {}
 
@@ -983,14 +988,9 @@ export const make = Effect.gen(function* () {
     return yield* Deferred.await(deferred);
   });
 
-  // KODO: loop-pricing - the loop's settle must never wait on the network for long, nor hold `ratesLock`
-  // (the Usage page waits on it) across a fetch. It prices from the table already held, however old,
-  // and when there is none it reads the disk copy and makes one bounded attempt to fetch it; a failed
-  // attempt is "no price" and shares the failure floor, so later settles do not each pay for it.
-  const LOOP_RATES_WAIT_MS = 2_000;
-  const loadRatesForLoop = Effect.fn("UsageService.loadRatesForLoop")(function* () {
+  // Adopts the rate table saved on disk when none is held; never touches the network.
+  const loadRatesFromDisk = Effect.fn("UsageService.loadRatesFromDisk")(function* () {
     if (rates.size > 0) return;
-    const now = yield* Clock.currentTimeMillis;
     const fromDisk = yield* fileSystem.readFileString(ratesCachePath).pipe(
       Effect.flatMap((raw) => decodeRatesCache(raw)),
       Effect.catchCause(() => Effect.succeed(null)),
@@ -1001,6 +1001,17 @@ export const make = Effect.gen(function* () {
       ratesFetchedAtMs = fromDisk.fetchedAtMs;
       ratesStatus = "cached";
     }
+  });
+
+  // KODO: loop-pricing - the loop's settle must never wait on the network for long, nor hold `ratesLock`
+  // (the Usage page waits on it) across a fetch. It prices from the table already held, however old,
+  // and when there is none it reads the disk copy and makes one bounded attempt to fetch it; a failed
+  // attempt is "no price" and shares the failure floor, so later settles do not each pay for it.
+  const LOOP_RATES_WAIT_MS = 2_000;
+  const loadRatesForLoop = Effect.fn("UsageService.loadRatesForLoop")(function* () {
+    if (rates.size > 0) return;
+    const now = yield* Clock.currentTimeMillis;
+    yield* loadRatesFromDisk();
     if (rates.size > 0) return;
     if (ratesLastFailedAtMs !== null && now - ratesLastFailedAtMs < RATES_REFRESH_FLOOR_MS) return;
     const fetched = yield* Effect.gen(function* () {
@@ -1029,25 +1040,29 @@ export const make = Effect.gen(function* () {
   // KODO: loop-pricing - null, never zero, when the model has no price (unlisted, or subscription-only).
   // Uses the person's price overrides and model aliases, the same as the Usage page does; standard
   // speed, no reported cost.
-  const priceTokens = Effect.fn("UsageService.priceTokens")(function* (input: {
-    readonly model: string;
-    readonly totals: UsageTokenTotals;
-  }) {
-    yield* loadRatesForLoop();
-    const settings = yield* readSettings;
-    const model = input.model.trim();
-    const priced = priceUsage(
-      rates,
-      {
-        model: resolveModelAliases(settings.usageModelAliases).get(model) ?? model,
-        totals: input.totals,
-        speed: "standard",
-        reportedCostUsd: null,
-      },
-      createOverrideRateTable(settings.usagePriceOverrides),
-    );
-    return priced.costSource === "unpriced" ? null : priced.costUsd;
-  });
+  const priceTokensWith = (loadRates: Effect.Effect<void>) =>
+    Effect.fn("UsageService.priceTokens")(function* (input: {
+      readonly model: string;
+      readonly totals: UsageTokenTotals;
+    }) {
+      yield* loadRates;
+      const settings = yield* readSettings;
+      const model = input.model.trim();
+      const priced = priceUsage(
+        rates,
+        {
+          model: resolveModelAliases(settings.usageModelAliases).get(model) ?? model,
+          totals: input.totals,
+          speed: "standard",
+          reportedCostUsd: null,
+        },
+        createOverrideRateTable(settings.usagePriceOverrides),
+      );
+      return priced.costSource === "unpriced" ? null : priced.costUsd;
+    });
+  const priceTokens = priceTokensWith(Effect.suspend(loadRatesForLoop));
+  // KODO: loop-pricing - for the per-message usage line: the table held or saved on disk, never a fetch.
+  const priceTokensHeld = priceTokensWith(Effect.suspend(loadRatesFromDisk));
 
   return {
     readSummary,
@@ -1055,6 +1070,8 @@ export const make = Effect.gen(function* () {
     awaitPersisted,
     priceTokens: (input: Parameters<typeof priceTokens>[0]) =>
       priceTokens(input).pipe(Effect.catchCause(() => Effect.succeed(null))),
+    priceTokensHeld: (input: Parameters<typeof priceTokens>[0]) =>
+      priceTokensHeld(input).pipe(Effect.catchCause(() => Effect.succeed(null))),
   } as const;
 });
 

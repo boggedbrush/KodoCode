@@ -85,12 +85,22 @@ const setup = (
     );
     const calls = yield* Ref.make<ReadonlyArray<readonly [ThreadId, KodoQuiet | null]>>([]);
     const minutes = yield* Ref.make<unknown>(options.minutes);
+    // Runs as the watch reads a thread, to put an event in the gap a sweep leaves between its reads.
+    const onRead = yield* Ref.make<Effect.Effect<void, { readonly _tag: string }> | null>(null);
     const watch = makeKodoQuietWatch({
       quietAfterMinutes: Ref.get(minutes),
-      getShell: (id) => Ref.get(shells).pipe(Effect.map((all) => all.get(id) ?? null)),
+      getShell: (id) =>
+        Ref.get(onRead).pipe(
+          Effect.flatMap((hook) => hook ?? Effect.void),
+          Effect.andThen(Ref.get(shells)),
+          Effect.map((all) => all.get(id) ?? null),
+        ),
       listRunningWorkers: Ref.get(shells).pipe(
         Effect.map((all) =>
-          [...all.values()].filter((shell) => shell.status === "running").map((shell) => shell.id),
+          // As the store lists them: every sub-agent thread, whatever its run is doing.
+          [...all.values()]
+            .filter((shell) => shell.lineage.relationshipToParent === "subagent")
+            .map((shell) => shell.id),
         ),
       ),
       setQuiet: (id, quiet) =>
@@ -121,7 +131,7 @@ const setup = (
         occurredAt: DateTime.makeUnsafe(atMs),
       } as unknown as OrchestrationV2DomainEvent);
     yield* TestClock.setTime(START);
-    return { watch, calls, patch, shells, event, eventAt, minutes };
+    return { watch, calls, patch, shells, event, eventAt, minutes, onRead };
   });
 
 const flaggedNow = (calls: ReadonlyArray<readonly [ThreadId, KodoQuiet | null]>) =>
@@ -151,12 +161,12 @@ describe("the silence watchdog", () => {
       const { watch, calls, patch, eventAt } = yield* setup();
       yield* eventAt("run.updated", WORKER, START);
       // A question the turn keeps running past holds the clock, though its status says running.
-      yield* patch(WORKER, { pendingRuntimeRequest: { kind: "user_input" } });
+      yield* patch(WORKER, { pendingRuntimeRequest: {} });
       yield* TestClock.adjust(30 * MIN);
       yield* watch.sweep();
       expect(yield* Ref.get(calls)).toEqual([]);
       // An approval the turn waits on does too.
-      yield* patch(WORKER, { pendingRuntimeRequest: { kind: "permission" }, status: "waiting" });
+      yield* patch(WORKER, { pendingRuntimeRequest: { blocking: true }, status: "waiting" });
       yield* TestClock.adjust(30 * MIN);
       yield* watch.sweep();
       expect(yield* Ref.get(calls)).toEqual([]);
@@ -280,6 +290,65 @@ describe("the silence watchdog", () => {
       yield* TestClock.adjust(1 * MIN);
       yield* watch.sweep();
       expect(flaggedNow(yield* Ref.get(calls))).toEqual([WORKER]);
+    }),
+  );
+
+  it.effect(
+    "drops the flag of a worker whose lead stopped leading, and watches it again if it does",
+    () =>
+      Effect.gen(function* () {
+        const { watch, calls, patch, event } = yield* setup();
+        yield* event("run.updated", WORKER);
+        yield* TestClock.adjust(6 * MIN);
+        yield* watch.sweep();
+        expect(flaggedNow(yield* Ref.get(calls))).toEqual([WORKER]);
+        yield* patch(LEAD, { kodoLead: null });
+        yield* watch.sweep();
+        expect(yield* Ref.get(calls)).toEqual([
+          [WORKER, expect.anything()],
+          [WORKER, null],
+        ]);
+        // The lead is back and the worker speaks, then goes quiet: it is watched like before.
+        yield* patch(LEAD, { kodoLead: { kind: "sub-agents" } });
+        yield* event("run.updated", WORKER);
+        yield* TestClock.adjust(6 * MIN);
+        yield* watch.sweep();
+        expect(flaggedNow(yield* Ref.get(calls))).toEqual([WORKER, WORKER]);
+      }),
+  );
+
+  it.effect("clears a flag left on a worker that is no longer running when the server starts", () =>
+    Effect.gen(function* () {
+      const { watch, calls, patch } = yield* setup();
+      yield* patch(WORKER, {
+        status: "completed",
+        kodoQuiet: { since: "2026-11-14T11:00:00.000Z" },
+      });
+      yield* watch.seed();
+      yield* watch.sweep();
+      expect(yield* Ref.get(calls)).toEqual([[WORKER, null]]);
+    }),
+  );
+
+  it.effect("lets a question the turn keeps running past hold the clock only when it blocks", () =>
+    Effect.gen(function* () {
+      const { watch, calls, patch, event } = yield* setup();
+      yield* event("run.updated", WORKER);
+      yield* patch(WORKER, { pendingRuntimeRequest: { blocking: false } });
+      yield* TestClock.adjust(6 * MIN);
+      yield* watch.sweep();
+      expect(flaggedNow(yield* Ref.get(calls))).toEqual([WORKER]);
+    }),
+  );
+
+  it.effect("does not flag a worker whose event arrives while the sweep is reading", () =>
+    Effect.gen(function* () {
+      const { watch, calls, event, eventAt, onRead } = yield* setup();
+      yield* event("run.updated", WORKER);
+      yield* TestClock.adjust(6 * MIN);
+      yield* Ref.set(onRead, eventAt("turn-item.updated", WORKER, START + 6 * MIN));
+      yield* watch.sweep();
+      expect(yield* Ref.get(calls)).toEqual([]);
     }),
   );
 });

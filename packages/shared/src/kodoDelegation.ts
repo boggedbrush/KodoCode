@@ -62,21 +62,23 @@ export function kodoSubAgentsToggle(input: {
 /**
  * The Kodo state a thread must not inherit from the one it was copied from. A child (a worker or a
  * provider's own subagent) is a new thread of its own: it never leads, runs no loop of its own, and
- * its model is the one it was given, not the lead's applied one. Spread over the copy.
+ * its model is the one it was given, not the lead's applied one, and the quiet flag of the thread it was
+ * copied from is not its own. Spread over the copy.
  */
 export const kodoChildThreadFields = () =>
   ({
     kodoLead: null,
     kodoLoop: undefined,
     kodoModeModel: undefined,
+    kodoQuiet: null,
   }) as const;
 
 /**
  * The same for a fork. A fork never inherits a loop, and one an agent made never leads (only a
  * person turns sub-agents on); its model selection is copied, so the record of which model is the
- * thread's own stays with it.
+ * thread's own stays with it. The quiet flag is a fact about the source's silence, so it is not copied.
  */
 export const kodoForkThreadFields = (createdBy: OrchestrationV2Actor) =>
   createdBy === "user"
-    ? ({ kodoLoop: undefined } as const)
-    : ({ kodoLead: null, kodoLoop: undefined } as const);
+    ? ({ kodoLoop: undefined, kodoQuiet: null } as const)
+    : ({ kodoLead: null, kodoLoop: undefined, kodoQuiet: null } as const);
