@@ -116,30 +116,42 @@ export interface KodoLinuxDesktopDependencies {
     readonly ready: Promise<unknown>;
     readonly stop: () => void;
   };
+  readonly writePreference: (directory: string, file: string, enabled: boolean) => Promise<void>;
 }
 
 const defaultDependencies: KodoLinuxDesktopDependencies = {
   readGsettings,
   watchPortal: (handlers) => watchLinuxDesktopSettings(handlers, leaseSessionBus()),
+  writePreference,
 };
 
-/** What a window's owner gives the window's Kodo part: a way to run effects and to ask the person something. */
+const INERT_PORTAL = { ready: Promise.resolve(), stop: () => undefined };
+
+/** What a window's owner gives the window's Kodo part: a way to run effects, to ask the person something and to reload. */
 export interface KodoWindowHost {
   readonly run: (effect: Effect.Effect<void>) => unknown;
+  /** Without a window, the dialog is the system's own and not tied to one that is hidden. */
   readonly showMessageBox: (
-    window: Electron.BrowserWindow,
+    window: Electron.BrowserWindow | undefined,
     options: Electron.MessageBoxOptions,
   ) => Promise<Electron.MessageBoxReturnValue>;
+  /** Loads the app's own URL again. */
+  readonly reload: () => void;
+  /** False in development builds, which have Ctrl+R and DevTools for a page that fails. */
+  readonly recoveryDialogs: boolean;
 }
 
 export type KodoWindowUnavailable = "gone" | "unresponsive";
 
+type UnavailableAction = "wait" | "reload" | "close";
+
 // The page draws the window buttons, so a window whose page is gone has none. The dialog is the
 // system's own, with its own title bar. Electron cannot turn Chromium's overlay buttons on for an
-// existing window, so closing and reloading are what it can offer.
+// existing window, so closing and reloading are what it can offer. Esc and a dismissed box answer
+// the first button, which never closes the window.
 export function unavailableChoices(kind: KodoWindowUnavailable): {
   readonly buttons: ReadonlyArray<string>;
-  readonly actions: ReadonlyArray<"wait" | "reload" | "close">;
+  readonly actions: ReadonlyArray<UnavailableAction>;
 } {
   return kind === "unresponsive"
     ? {
@@ -160,10 +172,15 @@ export class KodoLinuxDesktop {
   private portalAnsweredLayout = false;
   private portalAnsweredAccent = false;
   private portal: ReturnType<KodoLinuxDesktopDependencies["watchPortal"]> | null = null;
+  private stopped = false;
   private refreshing = false;
   private lastRefreshAt: number | null = null;
+  private readonly preferenceWrites = Semaphore.makeUnsafe(1);
   private readonly windows = new Map<Electron.BrowserWindow, TrackedWindow>();
-  private readonly unavailableDialogs = new Set<Electron.BrowserWindow>();
+  private readonly unavailableDialogs = new Map<Electron.BrowserWindow, AbortController>();
+  private readonly htmlFullscreen = new Set<Electron.BrowserWindow>();
+  private readonly chromeReady = new Set<Electron.BrowserWindow>();
+  private readonly pageLoads = new Map<Electron.BrowserWindow, number>();
 
   private readonly platform: NodeJS.Platform;
   private readonly env: NodeJS.ProcessEnv;
@@ -174,12 +191,12 @@ export class KodoLinuxDesktop {
     platform: NodeJS.Platform,
     env: NodeJS.ProcessEnv,
     stateDir: string,
-    dependencies: KodoLinuxDesktopDependencies = defaultDependencies,
+    dependencies: Partial<KodoLinuxDesktopDependencies> = {},
   ) {
     this.platform = platform;
     this.env = env;
     this.stateDir = stateDir;
-    this.dependencies = dependencies;
+    this.dependencies = { ...defaultDependencies, ...dependencies };
   }
 
   private get preferencePath() {
@@ -199,16 +216,24 @@ export class KodoLinuxDesktop {
     }
   }
 
-  setUseSystemTitleBar(enabled: boolean): Effect.Effect<void, KodoPreferenceWriteError> {
-    return Effect.tryPromise({
-      try: () => writePreference(this.stateDir, this.preferencePath, enabled),
-      catch: (cause) => new KodoPreferenceWriteError({ cause }),
-    }).pipe(Effect.withSpan("KodoLinuxDesktop.setUseSystemTitleBar"));
-  }
+  // One write at a time, in the order asked: the last toggle is the one that stays.
+  readonly setUseSystemTitleBar = Effect.fn("KodoLinuxDesktop.setUseSystemTitleBar")(function* (
+    this: KodoLinuxDesktop,
+    enabled: boolean,
+  ): Effect.fn.Return<void, KodoPreferenceWriteError> {
+    yield* this.preferenceWrites.withPermit(
+      Effect.tryPromise({
+        try: () => this.dependencies.writePreference(this.stateDir, this.preferencePath, enabled),
+        catch: (cause) => new KodoPreferenceWriteError({ cause }),
+      }),
+    );
+  });
 
   /** Before the main window exists: which frame it gets. On GNOME, reads the button layout within one budget. */
-  prepareFrame(): Effect.Effect<KodoWindowFrame> {
-    return Effect.gen({ self: this }, function* () {
+  readonly prepareFrame = Effect.fn("KodoLinuxDesktop.prepareFrame")(function* (
+    this: KodoLinuxDesktop,
+  ): Effect.fn.Return<KodoWindowFrame> {
+    const frame = yield* Effect.gen({ self: this }, function* () {
       if (this.platform !== "linux") return "upstream";
       const useSystemTitleBar = yield* Effect.promise(() => this.getUseSystemTitleBar());
       if (useSystemTitleBar) return "system";
@@ -220,14 +245,12 @@ export class KodoLinuxDesktop {
         useSystemTitleBar,
         layout: this.layout,
       });
-    }).pipe(
-      Effect.timeoutOption(FRAME_BUDGET),
-      Effect.map(Option.getOrElse((): KodoWindowFrame => "upstream")),
-      Effect.withSpan("KodoLinuxDesktop.prepareFrame"),
-    );
-  }
+    }).pipe(Effect.timeoutOption(FRAME_BUDGET));
+    return Option.getOrElse(frame, (): KodoWindowFrame => "upstream");
+  });
 
   private startPortal() {
+    if (this.stopped) return INERT_PORTAL;
     if (this.portal === null) {
       try {
         this.portal = this.dependencies.watchPortal({
@@ -241,34 +264,42 @@ export class KodoLinuxDesktop {
           },
         });
       } catch {
-        this.portal = { ready: Promise.resolve(), stop: () => undefined };
+        this.portal = INERT_PORTAL;
       }
     }
     return this.portal;
   }
 
   private stopPortal() {
+    this.stopped = true;
     this.portal?.stop();
     this.portal = null;
   }
 
-  // The portal first; gsettings only for a layout it did not give.
-  private readLayout(): Effect.Effect<void> {
-    return Effect.gen({ self: this }, function* () {
-      yield* Effect.promise(() => this.startPortal().ready);
-      if (this.portalAnsweredLayout) return;
-      yield* this.readLayoutFromGsettings();
-    });
-  }
+  // The portal and gsettings are asked together and the first layout wins, so a portal that is still
+  // starting at login does not cost the window its buttons. When both arrive, the portal's stands.
+  private readonly readLayout = Effect.fn("KodoLinuxDesktop.readLayout")(function* (
+    this: KodoLinuxDesktop,
+  ): Effect.fn.Return<void> {
+    const fromPortal = Effect.promise(() => this.startPortal().ready).pipe(
+      Effect.flatMap(() => (this.portalAnsweredLayout ? Effect.void : Effect.fail("no layout"))),
+    );
+    const fromGsettings = this.readLayoutFromGsettings().pipe(
+      Effect.flatMap((found) => (found ? Effect.void : Effect.fail("no layout"))),
+    );
+    yield* Effect.race(fromPortal, fromGsettings).pipe(Effect.ignore);
+  });
 
-  private readLayoutFromGsettings(): Effect.Effect<void> {
+  /** Whether gsettings gave a layout. The portal's answer, if it came first, is not overwritten. */
+  private readLayoutFromGsettings(): Effect.Effect<boolean> {
     return Effect.promise(async () => {
       const output = await this.dependencies.readGsettings(
         "org.gnome.desktop.wm.preferences",
         "button-layout",
       );
       const layout = output === null ? null : parseGnomeButtonLayout(output);
-      if (layout !== null) this.setLayout(layout);
+      if (layout !== null && !this.portalAnsweredLayout) this.setLayout(layout);
+      return layout !== null;
     });
   }
 
@@ -298,7 +329,7 @@ export class KodoLinuxDesktop {
       left: this.layout.left,
       right: this.layout.right,
       maximized: window.isMaximized(),
-      fullscreen: window.isFullScreen(),
+      fullscreen: window.isFullScreen() || this.htmlFullscreen.has(window),
     };
   }
 
@@ -310,8 +341,11 @@ export class KodoLinuxDesktop {
   attach(window: Electron.BrowserWindow, frame: KodoWindowFrame, host: KodoWindowHost): void {
     this.windows.set(window, { frame, host });
     window.once("closed", () => {
+      this.dismissUnavailable(window);
       this.windows.delete(window);
-      this.unavailableDialogs.delete(window);
+      this.htmlFullscreen.delete(window);
+      this.chromeReady.delete(window);
+      this.pageLoads.delete(window);
     });
     window.on("focus", () => host.run(this.refresh()));
     if (frame !== "kodo") return;
@@ -320,7 +354,24 @@ export class KodoLinuxDesktop {
     window.on("unmaximize", sendChrome);
     window.on("enter-full-screen", sendChrome);
     window.on("leave-full-screen", sendChrome);
-    window.on("unresponsive", () => this.reportUnavailable(window, "unresponsive"));
+    window.webContents.on("enter-html-full-screen", () => {
+      this.htmlFullscreen.add(window);
+      sendChrome();
+    });
+    window.webContents.on("leave-html-full-screen", () => {
+      this.htmlFullscreen.delete(window);
+      sendChrome();
+    });
+    window.on("unresponsive", () => host.run(this.reportUnavailable(window, "unresponsive")));
+    window.on("responsive", () => this.dismissUnavailable(window));
+    window.webContents.on("did-start-loading", () => {
+      this.pageLoads.set(window, (this.pageLoads.get(window) ?? 0) + 1);
+      this.chromeReady.delete(window);
+    });
+    window.webContents.on("did-finish-load", () => {
+      this.dismissUnavailable(window);
+      host.run(this.expectChrome(window));
+    });
   }
 
   private sendChrome(window: Electron.BrowserWindow) {
@@ -348,83 +399,118 @@ export class KodoLinuxDesktop {
    * The layout and the accent change in GNOME Settings. The portal says so when it has them; for what it lacks,
    * a focus is when it is looked at, at most once per interval and never twice at once.
    */
-  refresh(): Effect.Effect<void> {
-    return Effect.gen({ self: this }, function* () {
-      if (!this.gnome) return;
-      yield* Effect.promise(() => this.startPortal().ready).pipe(Effect.timeoutOption(PORTAL_WAIT));
-      const needLayout =
-        !this.portalAnsweredLayout &&
-        [...this.windows.values()].some((tracked) => tracked.frame === "kodo");
-      const needAccent = !this.portalAnsweredAccent;
-      if (!needLayout && !needAccent) return;
-      const now = yield* Clock.currentTimeMillis;
-      if (
-        this.refreshing ||
-        (this.lastRefreshAt !== null && now - this.lastRefreshAt < REFRESH_MIN_INTERVAL_MS)
-      ) {
-        return;
-      }
-      this.refreshing = true;
-      this.lastRefreshAt = now;
-      yield* Effect.gen({ self: this }, function* () {
-        if (needLayout) yield* this.readLayoutFromGsettings();
-        if (needAccent) yield* this.readAccentFromGsettings();
-      }).pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            this.refreshing = false;
-          }),
-        ),
-      );
-    }).pipe(Effect.withSpan("KodoLinuxDesktop.refresh"));
-  }
+  readonly refresh = Effect.fn("KodoLinuxDesktop.refresh")(function* (
+    this: KodoLinuxDesktop,
+  ): Effect.fn.Return<void> {
+    if (!this.gnome || this.stopped) return;
+    yield* Effect.promise(() => this.startPortal().ready).pipe(Effect.timeoutOption(PORTAL_WAIT));
+    const needLayout =
+      !this.portalAnsweredLayout &&
+      [...this.windows.values()].some((tracked) => tracked.frame === "kodo");
+    const needAccent = !this.portalAnsweredAccent;
+    if (!needLayout && !needAccent) return;
+    const now = yield* Clock.currentTimeMillis;
+    if (
+      this.refreshing ||
+      (this.lastRefreshAt !== null && now - this.lastRefreshAt < REFRESH_MIN_INTERVAL_MS)
+    ) {
+      return;
+    }
+    this.refreshing = true;
+    this.lastRefreshAt = now;
+    yield* Effect.gen({ self: this }, function* () {
+      if (needLayout) yield* this.readLayoutFromGsettings();
+      if (needAccent) yield* this.readAccentFromGsettings();
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          this.refreshing = false;
+        }),
+      ),
+    );
+  });
 
   /** Follows the portal for the accent and the layout; what it cannot give is read from gsettings. Releases the portal. */
-  start(): Effect.Effect<void, never, Scope.Scope> {
-    return Effect.gen({ self: this }, function* () {
-      if (!this.gnome) return;
-      yield* Effect.acquireRelease(
-        Effect.sync(() => this.startPortal()),
-        () => Effect.sync(() => this.stopPortal()),
-      );
-      yield* this.refresh().pipe(Effect.forkScoped);
-    });
+  readonly start = Effect.fn("KodoLinuxDesktop.start")(function* (
+    this: KodoLinuxDesktop,
+  ): Effect.fn.Return<void, never, Scope.Scope> {
+    if (!this.gnome) return;
+    yield* Effect.acquireRelease(
+      Effect.sync(() => this.startPortal()),
+      () => Effect.sync(() => this.stopPortal()),
+    );
+    yield* this.refresh().pipe(Effect.forkScoped);
+  });
+
+  /** The page says its window buttons are on screen. */
+  markChromeReady(window: Electron.BrowserWindow): void {
+    if (this.windows.has(window)) this.chromeReady.add(window);
+  }
+
+  // A page that loaded can still fail to mount the buttons (its start-up threw). It is as unusable as a
+  // crashed one, so it gets the same way out when the buttons have not been reported in time.
+  private readonly expectChrome = Effect.fn("KodoLinuxDesktop.expectChrome")(function* (
+    this: KodoLinuxDesktop,
+    window: Electron.BrowserWindow,
+  ): Effect.fn.Return<void> {
+    if (this.chromeReady.has(window)) return;
+    const load = this.pageLoads.get(window);
+    yield* Effect.sleep(CHROME_READY_WAIT);
+    if (this.chromeReady.has(window) || this.pageLoads.get(window) !== load) return;
+    yield* this.reportUnavailable(window, "gone");
+  });
+
+  private dismissUnavailable(window: Electron.BrowserWindow) {
+    this.unavailableDialogs.get(window)?.abort();
+    this.unavailableDialogs.delete(window);
   }
 
   /** A window whose page cannot draw its buttons: offer what a person needs to get out of it. */
-  reportUnavailable(window: Electron.BrowserWindow, kind: KodoWindowUnavailable): void {
+  readonly reportUnavailable = Effect.fn("KodoLinuxDesktop.reportUnavailable")(function* (
+    this: KodoLinuxDesktop,
+    window: Electron.BrowserWindow,
+    kind: KodoWindowUnavailable,
+  ): Effect.fn.Return<void> {
     const tracked = this.windows.get(window);
-    if (tracked?.frame !== "kodo" || window.isDestroyed() || this.unavailableDialogs.has(window)) {
+    if (
+      tracked?.frame !== "kodo" ||
+      !tracked.host.recoveryDialogs ||
+      window.isDestroyed() ||
+      this.unavailableDialogs.has(window)
+    ) {
       return;
     }
-    this.unavailableDialogs.add(window);
+    const answered = new AbortController();
+    this.unavailableDialogs.set(window, answered);
     const { buttons, actions } = unavailableChoices(kind);
-    void tracked.host
-      .showMessageBox(window, {
-        type: "error",
-        title: "Kodo Code",
-        message:
-          kind === "unresponsive"
-            ? "Kodo Code is not responding"
-            : "Kodo Code could not show its window",
-        detail:
-          "The window's buttons are drawn by the page, which is not available. You can reload it or close the window.",
-        buttons: [...buttons],
-        defaultId: 0,
-        cancelId: buttons.length - 1,
-        noLink: true,
-      })
-      .then(
-        ({ response }) => {
-          this.unavailableDialogs.delete(window);
-          if (window.isDestroyed()) return;
-          const action = actions[response];
-          if (action === "reload") window.webContents.reload();
-          else if (action === "close") window.close();
-        },
-        () => this.unavailableDialogs.delete(window),
-      );
-  }
+    const response = yield* Effect.promise(() =>
+      tracked.host
+        .showMessageBox(window.isVisible() ? window : undefined, {
+          type: "error",
+          title: "Kodo Code",
+          message:
+            kind === "unresponsive"
+              ? "Kodo Code is not responding"
+              : "Kodo Code could not show its window",
+          detail:
+            "The window's buttons are drawn by the page, which is not available. You can reload it or close the window.",
+          buttons: [...buttons],
+          defaultId: 0,
+          cancelId: 0,
+          noLink: true,
+          signal: answered.signal,
+        })
+        .then(
+          (result) => (answered.signal.aborted ? undefined : result.response),
+          () => undefined,
+        ),
+    );
+    if (this.unavailableDialogs.get(window) === answered) this.unavailableDialogs.delete(window);
+    if (response === undefined || window.isDestroyed()) return;
+    const action = actions[response];
+    if (action === "reload") tracked.host.reload();
+    else if (action === "close") window.close();
+  });
 
   runWindowAction(window: Electron.BrowserWindow, action: KodoWindowButton): void {
     if (window.isDestroyed()) return;

@@ -39,7 +39,7 @@ export function KodoLinuxDesktopSettings() {
     <>
       <SettingsRow
         {...searchableSetting("system-title-bar")}
-        description="Use the desktop's own window frame, with its own title bar. Off, Kodo Code draws the window buttons in its header bar on GNOME, in your button layout's order, and Chromium draws them on other desktops. Applies at next start."
+        description="Use your desktop's own window frame and title bar. Off, Kodo Code draws the window buttons in its header bar on GNOME, and Chromium draws them elsewhere. Applies at next start."
         control={
           <Switch
             checked={useSystemTitleBar === true}
@@ -48,7 +48,8 @@ export function KodoLinuxDesktopSettings() {
               const next = Boolean(checked);
               setUseSystemTitleBar(next);
               bridge.setUseSystemTitleBar(next).catch(() => {
-                setUseSystemTitleBar(!next);
+                // Writes land in order, so what is saved is what the last successful toggle asked for.
+                void bridge.getUseSystemTitleBar().then(setUseSystemTitleBar);
                 toastManager.add({ type: "error", title: "The setting could not be saved" });
               });
             }}

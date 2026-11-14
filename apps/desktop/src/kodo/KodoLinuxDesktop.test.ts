@@ -4,6 +4,7 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import { assert, describe, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -89,9 +90,14 @@ describe("chooseWindowFrame", () => {
 });
 
 describe("unavailableChoices", () => {
-  it("offers waiting only while the page may still answer", () => {
-    assert.deepStrictEqual(unavailableChoices("gone").actions, ["reload", "close"]);
-    assert.deepStrictEqual(unavailableChoices("unresponsive").actions, ["wait", "reload", "close"]);
+  it.each([
+    ["gone", ["reload", "close"]],
+    ["unresponsive", ["wait", "reload", "close"]],
+  ] as const)("%s offers %j, and the first answer is never to close", (kind, actions) => {
+    const choices = unavailableChoices(kind);
+    assert.deepStrictEqual(choices.actions, actions);
+    assert.strictEqual(choices.buttons.length, actions.length);
+    assert.notStrictEqual(choices.actions[0], "close");
   });
 });
 
@@ -99,29 +105,30 @@ interface FakeWindow {
   readonly window: Electron.BrowserWindow;
   readonly sent: Array<[string, unknown]>;
   readonly listeners: Map<string, () => void>;
+  readonly contentsListeners: Map<string, () => void>;
   readonly close: ReturnType<typeof vi.fn>;
-  readonly reload: ReturnType<typeof vi.fn>;
 }
 
-function fakeWindow(): FakeWindow {
+function fakeWindow(options: { readonly visible?: boolean } = {}): FakeWindow {
   const sent: Array<[string, unknown]> = [];
   const listeners = new Map<string, () => void>();
+  const contentsListeners = new Map<string, () => void>();
   const close = vi.fn();
-  const reload = vi.fn();
   const window = {
     once: vi.fn(),
     on: (event: string, listener: () => void) => listeners.set(event, listener),
     isDestroyed: () => false,
+    isVisible: () => options.visible ?? true,
     isMaximized: () => false,
     isFullScreen: () => false,
     close,
     webContents: {
       send: (channel: string, value: unknown) => sent.push([channel, value]),
+      on: (event: string, listener: () => void) => contentsListeners.set(event, listener),
       isDestroyed: () => false,
-      reload,
     },
   } as unknown as Electron.BrowserWindow;
-  return { window, sent, listeners, close, reload };
+  return { window, sent, listeners, contentsListeners, close };
 }
 
 interface Setup {
@@ -131,6 +138,9 @@ interface Setup {
   readonly stopPortal: ReturnType<typeof vi.fn>;
   readonly host: KodoWindowHost;
   readonly showMessageBox: ReturnType<typeof vi.fn>;
+  readonly reload: ReturnType<typeof vi.fn>;
+  /** What the window handed to `host.run`, for a test to run on its own clock. */
+  readonly scheduled: Array<Effect.Effect<void>>;
 }
 
 function setup(options: {
@@ -140,15 +150,25 @@ function setup(options: {
   /** What the portal reports as it starts; absent means it lacks the setting. */
   readonly portal?: (handlers: LinuxDesktopSettingsHandlers) => void;
   readonly gsettings?: (schema: string, key: string) => Promise<string | null>;
-}): Setup {
+  /** The portal's `ready`; absent means it has answered already. */
+  readonly portalReady?: Promise<unknown>;
+  readonly recoveryDialogs?: boolean;
+  readonly writePreference?: KodoLinuxDesktopDependencies["writePreference"];
+} = {}): Setup {
   const gsettings = vi.fn(options.gsettings ?? (async () => null));
   const stopPortal = vi.fn();
   const watchPortal = vi.fn((handlers: LinuxDesktopSettingsHandlers) => {
     options.portal?.(handlers);
-    return { ready: Promise.resolve(), stop: stopPortal };
+    return { ready: options.portalReady ?? Promise.resolve(), stop: stopPortal };
   });
   const showMessageBox = vi.fn();
-  const dependencies: KodoLinuxDesktopDependencies = { readGsettings: gsettings, watchPortal };
+  const reload = vi.fn();
+  const scheduled: Array<Effect.Effect<void>> = [];
+  const dependencies: Partial<KodoLinuxDesktopDependencies> = {
+    readGsettings: gsettings,
+    watchPortal,
+    ...(options.writePreference === undefined ? {} : { writePreference: options.writePreference }),
+  };
   return {
     desktop: new KodoLinuxDesktop(
       options.platform ?? "linux",
@@ -160,7 +180,14 @@ function setup(options: {
     watchPortal,
     stopPortal,
     showMessageBox,
-    host: { run: vi.fn(), showMessageBox },
+    reload,
+    scheduled,
+    host: {
+      run: (effect) => scheduled.push(effect),
+      showMessageBox,
+      reload,
+      recoveryDialogs: options.recoveryDialogs ?? true,
+    },
   };
 }
 
@@ -206,6 +233,49 @@ describe("prepareFrame", () => {
       const fiber = yield* Effect.forkChild(desktop.prepareFrame());
       yield* TestClock.adjust(2_000);
       assert.strictEqual(yield* Fiber.join(fiber), "upstream");
+    }),
+  );
+
+  it.effect("does not wait for a slow portal when gsettings answers", () =>
+    Effect.gen(function* () {
+      const { desktop } = setup({
+        portalReady: new Promise(() => undefined),
+        gsettings: async () => "'appmenu:close'\n",
+      });
+      assert.strictEqual(yield* desktop.prepareFrame(), "kodo");
+    }),
+  );
+
+  it.effect("keeps the portal's layout when gsettings answers after it", () =>
+    Effect.gen(function* () {
+      const gsettingsAnswer = yield* Deferred.make<string>();
+      const { desktop, host } = setup({
+        portal: (handlers) => handlers.onButtonLayout({ left: ["close"], right: [] }),
+        gsettings: () => Effect.runPromise(Deferred.await(gsettingsAnswer)),
+      });
+      const { window } = fakeWindow();
+      assert.strictEqual(yield* desktop.prepareFrame(), "kodo");
+      desktop.attach(window, "kodo", host);
+      yield* Deferred.succeed(gsettingsAnswer, "':minimize,close'");
+      yield* Effect.promise(() => Promise.resolve());
+      assert.deepStrictEqual(desktop.chromeState(window)?.left, ["close"]);
+    }),
+  );
+
+  it.effect("lets the portal replace gsettings' layout when it arrives later", () =>
+    Effect.gen(function* () {
+      let answer: LinuxDesktopSettingsHandlers | undefined;
+      const { desktop, host } = setup({
+        portalReady: new Promise(() => undefined),
+        portal: (handlers) => (answer = handlers),
+        gsettings: async () => "':minimize,close'",
+      });
+      const { window } = fakeWindow();
+      assert.strictEqual(yield* desktop.prepareFrame(), "kodo");
+      desktop.attach(window, "kodo", host);
+      assert.deepStrictEqual(desktop.chromeState(window)?.right, ["minimize", "close"]);
+      answer?.onButtonLayout({ left: ["close"], right: [] });
+      assert.deepStrictEqual(desktop.chromeState(window)?.left, ["close"]);
     }),
   );
 
@@ -347,41 +417,249 @@ describe("refresh", () => {
 });
 
 describe("reportUnavailable", () => {
-  it("offers reload and close once at a time, and does what was chosen", async () => {
-    const { desktop, host, showMessageBox } = setup({});
-    const { window, close, reload } = fakeWindow();
-    desktop.attach(window, "kodo", host);
+  /** A dialog the test answers itself, and what it was asked. */
+  const dialog = (setupOptions: Parameters<typeof setup>[0] = {}) => {
+    const context = setup(setupOptions);
+    const shown = Deferred.makeUnsafe<Electron.MessageBoxOptions>();
     let choose: (response: number) => void = () => undefined;
-    showMessageBox.mockImplementation(
-      () => new Promise((resolve) => (choose = (response) => resolve({ response }))),
+    context.showMessageBox.mockImplementation(
+      (_parent: unknown, options: Electron.MessageBoxOptions) => {
+        const answer = new Promise((resolve) => (choose = (response) => resolve({ response })));
+        options.signal?.addEventListener("abort", () => choose(options.cancelId ?? 0));
+        Deferred.doneUnsafe(shown, Effect.succeed(options));
+        return answer;
+      },
     );
+    return { ...context, shown, choose: (response: number) => choose(response) };
+  };
+  const attached = (setupOptions?: Parameters<typeof setup>[0], windowOptions?: { visible: boolean }) => {
+    const context = dialog(setupOptions);
+    const fake = fakeWindow(windowOptions);
+    context.desktop.attach(fake.window, "kodo", context.host);
+    return { ...context, ...fake };
+  };
 
-    desktop.reportUnavailable(window, "gone");
-    desktop.reportUnavailable(window, "gone");
-    assert.strictEqual(showMessageBox.mock.calls.length, 1);
-    choose(0);
-    await Promise.resolve();
-    await Promise.resolve();
-    assert.strictEqual(reload.mock.calls.length, 1);
+  it.effect("offers reload and close once at a time, and does what was chosen", () =>
+    Effect.gen(function* () {
+      const { desktop, window, shown, choose, showMessageBox, reload, close } = attached();
+      const first = yield* Effect.forkChild(desktop.reportUnavailable(window, "gone"));
+      yield* Deferred.await(shown);
+      yield* desktop.reportUnavailable(window, "gone");
+      assert.strictEqual(showMessageBox.mock.calls.length, 1);
+      choose(0);
+      yield* Fiber.join(first);
+      assert.strictEqual(reload.mock.calls.length, 1);
 
-    desktop.reportUnavailable(window, "gone");
-    choose(1);
-    await Promise.resolve();
-    await Promise.resolve();
-    assert.strictEqual(close.mock.calls.length, 1);
-  });
+      const second = yield* Effect.forkChild(desktop.reportUnavailable(window, "gone"));
+      yield* Effect.promise(() => Promise.resolve());
+      choose(1);
+      yield* Fiber.join(second);
+      assert.strictEqual(close.mock.calls.length, 1);
+    }),
+  );
 
-  it("says nothing for a window that has its own frame buttons", () => {
-    const { desktop, host, showMessageBox } = setup({});
-    const { window } = fakeWindow();
-    desktop.attach(window, "upstream", host);
-    desktop.reportUnavailable(window, "gone");
-    assert.strictEqual(showMessageBox.mock.calls.length, 0);
-  });
+  it.effect.each(["gone", "unresponsive"] as const)(
+    "Esc on the %s box never closes the window",
+    (kind) =>
+      Effect.gen(function* () {
+        const { desktop, window, shown, choose, reload, close } = attached();
+        const fiber = yield* Effect.forkChild(desktop.reportUnavailable(window, "unresponsive" === kind ? kind : kind));
+        const options = yield* Deferred.await(shown);
+        const { actions } = unavailableChoices(kind);
+        assert.notStrictEqual(actions[options.cancelId ?? -1], "close");
+        choose(options.cancelId ?? -1);
+        yield* Fiber.join(fiber);
+        assert.strictEqual(close.mock.calls.length, 0);
+        assert.strictEqual(reload.mock.calls.length, kind === "gone" ? 1 : 0);
+      }),
+  );
+
+  it.effect("closes the not responding box when the page responds again, and does nothing", () =>
+    Effect.gen(function* () {
+      const { desktop, window, shown, listeners, reload, close } = attached();
+      const fiber = yield* Effect.forkChild(desktop.reportUnavailable(window, "unresponsive"));
+      yield* Deferred.await(shown);
+      listeners.get("responsive")?.();
+      yield* Fiber.join(fiber);
+      assert.strictEqual(close.mock.calls.length + reload.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("closes a crash box once the page has loaded again, without reloading it", () =>
+    Effect.gen(function* () {
+      const { desktop, window, shown, contentsListeners, reload } = attached();
+      const fiber = yield* Effect.forkChild(desktop.reportUnavailable(window, "gone"));
+      yield* Deferred.await(shown);
+      contentsListeners.get("did-finish-load")?.();
+      yield* Fiber.join(fiber);
+      assert.strictEqual(reload.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("does not parent the box to a window that is not on screen", () =>
+    Effect.gen(function* () {
+      const { desktop, window, showMessageBox, choose, shown } = attached(undefined, {
+        visible: false,
+      });
+      const fiber = yield* Effect.forkChild(desktop.reportUnavailable(window, "gone"));
+      yield* Deferred.await(shown);
+      assert.strictEqual(showMessageBox.mock.calls[0]?.[0], undefined);
+      choose(0);
+      yield* Fiber.join(fiber);
+    }),
+  );
+
+  it.effect("says nothing in a development build", () =>
+    Effect.gen(function* () {
+      const { desktop, window, showMessageBox } = attached({ recoveryDialogs: false });
+      yield* desktop.reportUnavailable(window, "gone");
+      assert.strictEqual(showMessageBox.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("says nothing for a window that has its own frame buttons", () =>
+    Effect.gen(function* () {
+      const { desktop, host, showMessageBox } = dialog();
+      const { window } = fakeWindow();
+      desktop.attach(window, "upstream", host);
+      yield* desktop.reportUnavailable(window, "gone");
+      assert.strictEqual(showMessageBox.mock.calls.length, 0);
+    }),
+  );
+});
+
+describe("a page that loaded without mounting the window buttons", () => {
+  const load = (context: ReturnType<typeof attachedPage>, name: "did-start-loading" | "did-finish-load") =>
+    context.contentsListeners.get(name)?.();
+  const attachedPage = (setupOptions?: Parameters<typeof setup>[0]) => {
+    const context = setup(setupOptions);
+    const fake = fakeWindow();
+    context.desktop.attach(fake.window, "kodo", context.host);
+    return { ...context, ...fake };
+  };
+  const waitedOn = (context: ReturnType<typeof attachedPage>) =>
+    Effect.gen(function* () {
+      const [expectation] = context.scheduled.splice(-1);
+      assert.isDefined(expectation);
+      return yield* Effect.forkChild(expectation as Effect.Effect<void>);
+    });
+
+  it.effect("gets the recovery box after the wait", () =>
+    Effect.gen(function* () {
+      const context = attachedPage();
+      context.showMessageBox.mockReturnValue(new Promise(() => undefined));
+      load(context, "did-start-loading");
+      load(context, "did-finish-load");
+      yield* waitedOn(context);
+      yield* TestClock.adjust(9_999);
+      assert.strictEqual(context.showMessageBox.mock.calls.length, 0);
+      yield* TestClock.adjust(1);
+      assert.strictEqual(context.showMessageBox.mock.calls.length, 1);
+    }),
+  );
+
+  it.effect.each(["before the page finished loading", "during the wait"] as const)(
+    "is left alone when the buttons are reported %s",
+    (when) =>
+      Effect.gen(function* () {
+        const context = attachedPage();
+        load(context, "did-start-loading");
+        if (when === "before the page finished loading") context.desktop.markChromeReady(context.window);
+        load(context, "did-finish-load");
+        const fiber = yield* waitedOn(context);
+        if (when === "during the wait") context.desktop.markChromeReady(context.window);
+        yield* TestClock.adjust(60_000);
+        yield* Fiber.join(fiber);
+        assert.strictEqual(context.showMessageBox.mock.calls.length, 0);
+      }),
+  );
+
+  it.effect("is left alone when a newer load has started", () =>
+    Effect.gen(function* () {
+      const context = attachedPage();
+      load(context, "did-start-loading");
+      load(context, "did-finish-load");
+      const fiber = yield* waitedOn(context);
+      load(context, "did-start-loading");
+      yield* TestClock.adjust(60_000);
+      yield* Fiber.join(fiber);
+      assert.strictEqual(context.showMessageBox.mock.calls.length, 0);
+    }),
+  );
+
+  it.effect("is not asked in a development build", () =>
+    Effect.gen(function* () {
+      const context = attachedPage({ recoveryDialogs: false });
+      load(context, "did-start-loading");
+      load(context, "did-finish-load");
+      yield* waitedOn(context);
+      yield* TestClock.adjust(60_000);
+      assert.strictEqual(context.showMessageBox.mock.calls.length, 0);
+    }),
+  );
+});
+
+describe("window state", () => {
+  it.effect("follows HTML fullscreen as well as the window's own", () =>
+    Effect.gen(function* () {
+      const { desktop, host } = setup({ portal: (handlers) => handlers.onButtonLayout(LAYOUT) });
+      const { window, contentsListeners, sent } = fakeWindow();
+      yield* desktop.prepareFrame();
+      desktop.attach(window, "kodo", host);
+      contentsListeners.get("enter-html-full-screen")?.();
+      assert.strictEqual(desktop.chromeState(window)?.fullscreen, true);
+      assert.deepStrictEqual(
+        sent.map(([, state]) => (state as { fullscreen: boolean }).fullscreen),
+        [true],
+      );
+      contentsListeners.get("leave-html-full-screen")?.();
+      assert.strictEqual(desktop.chromeState(window)?.fullscreen, false);
+      assert.strictEqual(sent.length, 2);
+    }),
+  );
+});
+
+describe("start", () => {
+  it.effect("does not open the session bus again once it has shut down", () =>
+    Effect.gen(function* () {
+      const { desktop, watchPortal, stopPortal } = setup({});
+      yield* Effect.scoped(desktop.start());
+      assert.strictEqual(watchPortal.mock.calls.length, 1);
+      assert.strictEqual(stopPortal.mock.calls.length, 1);
+      yield* desktop.refresh();
+      assert.strictEqual(watchPortal.mock.calls.length, 1);
+    }),
+  );
 });
 
 describe("setUseSystemTitleBar", () => {
-  it.effect("keeps the last value of quick toggles and leaves no temporary file", () =>
+  it.effect("keeps the last value when toggles overlap", () =>
+    Effect.gen(function* () {
+      const firstWriteStarted = yield* Deferred.make<void>();
+      const releaseFirstWrite = yield* Deferred.make<void>();
+      let saved: boolean | undefined;
+      const { desktop } = setup({
+        writePreference: async (_directory, _file, enabled) => {
+          if (enabled) {
+            await Effect.runPromise(
+              Deferred.succeed(firstWriteStarted, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseFirstWrite)),
+              ),
+            );
+          }
+          saved = enabled;
+        },
+      });
+      const first = yield* Effect.forkChild(desktop.setUseSystemTitleBar(true));
+      yield* Deferred.await(firstWriteStarted);
+      const second = yield* Effect.forkChild(desktop.setUseSystemTitleBar(false));
+      yield* Deferred.succeed(releaseFirstWrite, undefined);
+      yield* Fiber.joinAll([first, second]);
+      assert.strictEqual(saved, false);
+    }),
+  );
+
+  it.effect("leaves no temporary file behind", () =>
     withTemporaryDirectory((stateDir) =>
       Effect.gen(function* () {
         const { desktop } = setup({ stateDir });
@@ -389,8 +667,7 @@ describe("setUseSystemTitleBar", () => {
           [desktop.setUseSystemTitleBar(true), desktop.setUseSystemTitleBar(false)],
           { concurrency: "unbounded" },
         );
-        yield* desktop.setUseSystemTitleBar(true);
-        assert.strictEqual(yield* Effect.promise(() => desktop.getUseSystemTitleBar()), true);
+        assert.strictEqual(yield* Effect.promise(() => desktop.getUseSystemTitleBar()), false);
         assert.deepStrictEqual(yield* Effect.promise(() => NodeFSP.readdir(stateDir)), [
           "kodo-window-chrome.json",
         ]);

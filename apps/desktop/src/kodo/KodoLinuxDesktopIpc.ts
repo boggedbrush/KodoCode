@@ -57,6 +57,26 @@ export const installKodoLinuxDesktopIpc = Effect.fn("desktop.ipc.kodoLinuxDeskto
     );
     yield* ipc.handle(
       DesktopIpc.makeIpcMethod({
+        channel: Channels.KODO_WINDOW_CHROME_READY_CHANNEL,
+        payload: Schema.Undefined,
+        result: Schema.Void,
+        handler: Effect.fn("desktop.ipc.kodoLinuxDesktop.windowChromeReady")(
+          function* (_payload, event) {
+            const window = yield* electronWindow.main;
+            if (
+              event === undefined ||
+              Option.isNone(window) ||
+              window.value.webContents.id !== event.sender.id
+            ) {
+              return;
+            }
+            desktop.markChromeReady(window.value);
+          },
+        ),
+      }),
+    );
+    yield* ipc.handle(
+      DesktopIpc.makeIpcMethod({
         channel: Channels.KODO_GET_USE_SYSTEM_TITLE_BAR_CHANNEL,
         payload: Schema.Undefined,
         result: Schema.Boolean,

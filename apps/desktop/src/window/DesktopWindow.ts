@@ -457,7 +457,12 @@ export const make = Effect.gen(function* () {
     // KODO: linux-header-bar
     kodoDesktop.attach(window, kodoFrame, {
       run: runFork,
-      showMessageBox: (target, options) => Electron.dialog.showMessageBox(target, options),
+      showMessageBox: (target, options) =>
+        target === undefined
+          ? Electron.dialog.showMessageBox(options)
+          : Electron.dialog.showMessageBox(target, options),
+      reload: () => loadApplication(),
+      recoveryDialogs: !environment.isDevelopment,
     });
     pendingMainReveals.set(window, Effect.void);
     yield* rendererHistory.register(window.webContents, { surface: "main" });
@@ -860,7 +865,7 @@ export const make = Effect.gen(function* () {
         );
         // KODO: linux-header-bar - no retry is coming, and -3 is only a navigation that was cancelled
         if (retryInMs === undefined && errorCode !== -3)
-          kodoDesktop.reportUnavailable(window, "gone");
+          runFork(kodoDesktop.reportUnavailable(window, "gone"));
       },
     );
     window.webContents.on("render-process-gone", (_event, details) => {
@@ -886,7 +891,7 @@ export const make = Effect.gen(function* () {
             recovering: shouldRecover,
           });
           if (!shouldRecover) {
-            kodoDesktop.reportUnavailable(window, "gone"); // KODO: linux-header-bar - the page that draws the buttons is gone
+            yield* kodoDesktop.reportUnavailable(window, "gone"); // KODO: linux-header-bar - the page that draws the buttons is gone
             return;
           }
           rendererRecoveryTimestamps.push(now);

@@ -1,5 +1,5 @@
 import type { KodoWindowButton, KodoWindowChromeState } from "@t3tools/contracts";
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 
 import { useKodoWindowChrome } from "./windowChrome";
 import { maximizeButtonLabel } from "./windowChrome.logic";
@@ -64,6 +64,11 @@ function WindowButton({
  */
 export function KodoWindowControls() {
   const state = useKodoWindowChrome();
+  const drawn = state !== null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- tells the desktop shell, outside React, that the buttons are on screen
+  useEffect(() => {
+    if (drawn) void window.desktopBridge?.kodoLinuxDesktop?.reportWindowChromeReady();
+  }, [drawn]);
   if (state === null) return null;
   return (
     <>

@@ -10,11 +10,8 @@ html[data-kodo-window-chrome="custom"] {
   --workspace-controls-left: calc(var(--kodo-controls-left, 0px) + 0.75rem);
   --workspace-controls-right: calc(var(--kodo-controls-right, 0px) + 0.75rem);
   --workspace-native-controls-inset: calc(var(--kodo-controls-right, 0px) + 0.75rem);
-}
-
-/* The strip the window buttons sit in, for what keeps clear of it: modals, the command palette,
-   tooltips and the media dialog read this where an overlay would report its own height. */
-html[data-kodo-window-chrome="custom"] {
+  /* The strip the window buttons sit in, for what keeps clear of it: modals, the command palette,
+     tooltips and the media dialog read this where an overlay would report its own height. */
   --native-titlebar-height: 47px;
 }
 

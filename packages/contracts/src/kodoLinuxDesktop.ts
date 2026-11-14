@@ -39,6 +39,8 @@ export interface KodoLinuxDesktopBridge {
   readonly onWindowChrome: (listener: (state: KodoWindowChromeState) => void) => () => void;
   /** Maximize toggles; from fullscreen it leaves fullscreen. */
   readonly runWindowAction: (action: KodoWindowButton) => Promise<void>;
+  /** The header bar's window buttons are mounted. A loaded page that never says so gets the recovery dialog. */
+  readonly reportWindowChromeReady: () => Promise<void>;
   readonly getUseSystemTitleBar: () => Promise<boolean>;
   /** Takes effect the next time the app starts: a window's frame cannot change once it exists. */
   readonly setUseSystemTitleBar: (enabled: boolean) => Promise<void>;
