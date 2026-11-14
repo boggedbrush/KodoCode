@@ -143,18 +143,20 @@ interface Setup {
   readonly scheduled: Array<Effect.Effect<void>>;
 }
 
-function setup(options: {
-  readonly platform?: NodeJS.Platform;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly stateDir?: string;
-  /** What the portal reports as it starts; absent means it lacks the setting. */
-  readonly portal?: (handlers: LinuxDesktopSettingsHandlers) => void;
-  readonly gsettings?: (schema: string, key: string) => Promise<string | null>;
-  /** The portal's `ready`; absent means it has answered already. */
-  readonly portalReady?: Promise<unknown>;
-  readonly recoveryDialogs?: boolean;
-  readonly writePreference?: KodoLinuxDesktopDependencies["writePreference"];
-} = {}): Setup {
+function setup(
+  options: {
+    readonly platform?: NodeJS.Platform;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly stateDir?: string;
+    /** What the portal reports as it starts; absent means it lacks the setting. */
+    readonly portal?: (handlers: LinuxDesktopSettingsHandlers) => void;
+    readonly gsettings?: (schema: string, key: string) => Promise<string | null>;
+    /** The portal's `ready`; absent means it has answered already. */
+    readonly portalReady?: Promise<unknown>;
+    readonly recoveryDialogs?: boolean;
+    readonly writePreference?: KodoLinuxDesktopDependencies["writePreference"];
+  } = {},
+): Setup {
   const gsettings = vi.fn(options.gsettings ?? (async () => null));
   const stopPortal = vi.fn();
   const watchPortal = vi.fn((handlers: LinuxDesktopSettingsHandlers) => {
@@ -438,9 +440,17 @@ describe("reportUnavailable", () => {
         return answer;
       },
     );
-    return { ...context, shown: shownAt(0), shownAt, choose: (response: number) => choose(response) };
+    return {
+      ...context,
+      shown: shownAt(0),
+      shownAt,
+      choose: (response: number) => choose(response),
+    };
   };
-  const attached = (setupOptions?: Parameters<typeof setup>[0], windowOptions?: { visible: boolean }) => {
+  const attached = (
+    setupOptions?: Parameters<typeof setup>[0],
+    windowOptions?: { visible: boolean },
+  ) => {
     const context = dialog(setupOptions);
     const fake = fakeWindow(windowOptions);
     context.desktop.attach(fake.window, "kodo", context.host);
@@ -471,7 +481,9 @@ describe("reportUnavailable", () => {
     (kind) =>
       Effect.gen(function* () {
         const { desktop, window, shown, choose, reload, close } = attached();
-        const fiber = yield* Effect.forkChild(desktop.reportUnavailable(window, "unresponsive" === kind ? kind : kind));
+        const fiber = yield* Effect.forkChild(
+          desktop.reportUnavailable(window, "unresponsive" === kind ? kind : kind),
+        );
         const options = yield* Deferred.await(shown);
         const { actions } = unavailableChoices(kind);
         assert.notStrictEqual(actions[options.cancelId ?? -1], "close");
@@ -537,8 +549,10 @@ describe("reportUnavailable", () => {
 });
 
 describe("a page that loaded without mounting the window buttons", () => {
-  const load = (context: ReturnType<typeof attachedPage>, name: "did-start-loading" | "did-finish-load") =>
-    context.contentsListeners.get(name)?.();
+  const load = (
+    context: ReturnType<typeof attachedPage>,
+    name: "did-start-loading" | "did-finish-load",
+  ) => context.contentsListeners.get(name)?.();
   const attachedPage = (setupOptions?: Parameters<typeof setup>[0]) => {
     const context = setup(setupOptions);
     const fake = fakeWindow();
@@ -572,7 +586,8 @@ describe("a page that loaded without mounting the window buttons", () => {
       Effect.gen(function* () {
         const context = attachedPage();
         load(context, "did-start-loading");
-        if (when === "before the page finished loading") context.desktop.markChromeReady(context.window);
+        if (when === "before the page finished loading")
+          context.desktop.markChromeReady(context.window);
         load(context, "did-finish-load");
         const fiber = yield* waitedOn(context);
         if (when === "during the wait") context.desktop.markChromeReady(context.window);

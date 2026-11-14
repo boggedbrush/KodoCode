@@ -38,8 +38,7 @@ export function kodoLinuxDesktopPreload(
       onWindowChrome: (listener) =>
         listen(ipcRenderer, Channels.KODO_WINDOW_CHROME_CHANNEL, isChromeState, listener),
       runWindowAction: (action) => ipcRenderer.invoke(Channels.KODO_WINDOW_ACTION_CHANNEL, action),
-      reportWindowChromeReady: () =>
-        ipcRenderer.invoke(Channels.KODO_WINDOW_CHROME_READY_CHANNEL),
+      reportWindowChromeReady: () => ipcRenderer.invoke(Channels.KODO_WINDOW_CHROME_READY_CHANNEL),
       getUseSystemTitleBar: async () =>
         (await ipcRenderer.invoke(Channels.KODO_GET_USE_SYSTEM_TITLE_BAR_CHANNEL)) === true,
       setUseSystemTitleBar: (enabled) =>
