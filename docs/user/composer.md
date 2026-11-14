@@ -71,7 +71,9 @@ start in it.
 - **Plan** works out an approach and presents a plan; nothing changes until you
   accept it. Read-only.
 - **Code** implements changes.
-- **Review** reviews your working changes. Read-only.
+- **Review** reviews your working changes. Read-only. The **Review** button on a turn's
+  changed-files card switches the thread to Review and puts a request to review that turn in the
+  composer; you press send. It is not offered on workers, on the Orchestrator, or while a turn runs.
 
 Switch with the chip, with **Shift+Tab** in the composer (it cycles Ask, Plan,
 Code, Review; in a nested list item it outdents instead), or by sending `/ask`,
@@ -335,6 +337,8 @@ inline in the lead's conversation, and you can open one to see what it did or to
   and a turn starts at most eight. Before it starts a worker T3 Code checks the usage limit of
   the worker's provider against the same "Stop at usage limit" setting a loop uses, and refuses
   with a message the lead passes on to you. It refuses the same way when the limit cannot be read.
+  The lead is also told its usage with each message and can read it with `t3_usage_status`; see
+  [Orchestrator](./orchestrator.md#usage).
 - **Turning it on.** The chip is disabled, with the reason on hover, while a turn or a loop runs,
   while workers are running, and when the thread's provider cannot receive the delegation tools.
   It is also in the command palette (**Toggle sub-agents**, which you can bind to a key under
@@ -351,6 +355,9 @@ inline in the lead's conversation, and you can open one to see what it did or to
   says how much each contributed. Work from before this was added is not back-filled.
 - **Stop.** Stop on the lead stops every worker. **Stop workers**, in the banner above the
   composer while workers run, ends them and leaves the lead's turn going.
+
+A worker that runs without activity past **Settings → Threads → Quiet worker time** is marked
+quiet on its own line and in the lead's; it is only a flag.
 
 A loop is cheaper for multi-round work (implement, review, fix until clean), because it runs
 those rounds without lead turns. You can run `/loop` on a thread that is not leading; a lead does
@@ -534,7 +541,8 @@ composer when it is empty, and is discarded otherwise.
 ## Commands and skills
 
 Type `/` for commands or `$` to add a skill from the selected environment and
-provider. On mobile, both are also available before starting a thread on
+provider. The menu groups them under headings (Kodo, Loop, Built in, Provider commands, Skills),
+each with a one-line description, including `/loop status` and `/loop stop`. On mobile, both are also available before starting a thread on
 **New task**.
 
 The slash menu also includes skills unless you turn off **Settings → Chat →

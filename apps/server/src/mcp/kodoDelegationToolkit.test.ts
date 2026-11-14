@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import { McpSchema, McpServer } from "effect/ai";
 
+import { KodoLeadUsage } from "../kodo/delegation/leadUsage.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as McpHttpServer from "./McpHttpServer.ts";
@@ -47,6 +48,20 @@ const client = McpSchema.McpServerClient.of({
   },
   getClient: Effect.die("unused"),
 });
+
+const USAGE_STATUS = {
+  providers: [
+    {
+      instanceId: "codex",
+      name: "Codex",
+      state: "ok" as const,
+      readAgeSeconds: 12,
+      windows: [{ name: "5-hour", usedPercent: 62, resetsInMinutes: 130 }],
+    },
+  ],
+  stopAtPercent: 90,
+  note: "n",
+};
 
 const declaredFailure = (result: McpSchema.CallToolResult) => {
   const text = result.content[0];
@@ -91,6 +106,12 @@ const withTools = <A, E>(
       Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
       Layer.provide(NodeCrypto.layer),
       Layer.provide(ServerSettings.layerTest({ kodoSubAgentsMaxWorkers: 4 })),
+      // Only the caller's own thread has a usage reading; any other id reads as gone.
+      Layer.provide(
+        Layer.mock(KodoLeadUsage)({
+          status: (id) => Effect.succeed(id === callerId ? USAGE_STATUS : undefined),
+        }),
+      ),
       Layer.provide(
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getThreadShell: (id) => Effect.succeed(shells[id] ?? null),
@@ -198,4 +219,20 @@ it.effect("reports the workers of a lead with their mode, status and model", () 
       expect(own.structuredContent).toMatchObject({ enabled: false, workers: [] });
     }),
   ),
+);
+
+it.effect(
+  "t3_usage_status reads the caller's own usage, for a read-only caller too, and writes nothing",
+  () =>
+    withTools("plan", ({ call, commands }) =>
+      Effect.gen(function* () {
+        const result = yield* call("t3_usage_status", {});
+        expect(result.isError).toBe(false);
+        expect(result.structuredContent).toMatchObject({
+          stopAtPercent: 90,
+          providers: [{ name: "Codex", windows: [{ name: "5-hour", usedPercent: 62 }] }],
+        });
+        expect(yield* Ref.get(commands)).toEqual([]);
+      }),
+    ),
 );

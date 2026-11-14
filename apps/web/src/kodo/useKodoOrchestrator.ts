@@ -11,15 +11,18 @@ import { useEffect, useState } from "react";
 
 import {
   kodoOrchestratorState,
+  kodoOrchestratorStatusLine,
   kodoOrchestratorUnavailableReason,
   kodoOrchestratorWorkerActivity,
   latestKodoOrchestratorThreadId,
   NO_KODO_ORCHESTRATOR_WORKERS,
+  type KodoNeedsYouItem,
   type KodoOrchestratorState,
   type KodoOrchestratorWorkers,
 } from "@t3tools/shared/kodoOrchestrator";
 import { toastManager } from "../components/ui/toast";
 import { usePrimarySettings } from "../hooks/useSettings";
+import { useNowMinute } from "../hooks/useNowMinute";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useQuietThreadShell } from "../state/entities";
@@ -28,6 +31,7 @@ import { environmentThreadShells } from "../state/threads";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { registerKodoOrchestratorOpen } from "./orchestrator.logic";
+import { useKodoNeedsYouItems } from "./useKodoNeedsYou";
 
 const EMPTY_PROVIDERS: ReadonlyArray<never> = Object.freeze([]);
 
@@ -46,7 +50,13 @@ const orchestratorWorkersAtom = Atom.family((key: string) => {
       inEnvironment(get(environmentThreadShells.quietThreadShellsAtom), environmentId),
       threadId,
     );
-    if (next.live === previous.live && next.needsYou === previous.needsYou) return previous;
+    if (
+      next.live === previous.live &&
+      next.approvals === previous.approvals &&
+      next.questions === previous.questions
+    ) {
+      return previous;
+    }
     previous = next;
     return next;
   }).pipe(Atom.withLabel(`kodo-orchestrator-workers:${key}`));
@@ -104,9 +114,14 @@ export function useKodoOrchestratorUnavailableReason(
 const NO_PROVIDERS_ATOM = Atom.make<ReadonlyArray<never> | null>(null);
 
 export interface KodoOrchestratorView {
+  readonly environmentId: EnvironmentId | null;
+  /** What waits on the person across the Orchestrator, its workers and the sub-agent leads. */
+  readonly needsYou: ReadonlyArray<KodoNeedsYouItem>;
   /** Shown only for the machine this window is the primary of, and while the setting is on. */
   readonly visible: boolean;
   readonly state: KodoOrchestratorState;
+  /** The one line under its title: why it needs you, or what it is doing and for how long. */
+  readonly statusLine: string;
   /** The Orchestrator conversation is the one on screen. */
   readonly active: boolean;
   readonly opening: boolean;
@@ -130,6 +145,9 @@ export function useKodoOrchestrator(): KodoOrchestratorView {
       : scopeThreadRef(environmentId, threadId);
   const shell = useQuietThreadShell(ref);
   const workers = useKodoOrchestratorWorkers(environmentId, threadId);
+  // The minute clock the thread rows already read: elapsed time moves once a minute, never per second.
+  const nowMinute = useNowMinute();
+  const needsYou = useKodoNeedsYouItems(environmentId, threadId);
   const unavailable = useKodoOrchestratorUnavailableReason(environmentId);
   const routeThreadId = useParams({ strict: false, select: (params) => params.threadId });
   const ensure = useOrchestrationCommand(serverEnvironment.ensureKodoOrchestrator, {
@@ -172,8 +190,11 @@ export function useKodoOrchestrator(): KodoOrchestratorView {
   );
 
   return {
+    environmentId,
+    needsYou,
     visible,
     state: kodoOrchestratorState(shell, workers),
+    statusLine: kodoOrchestratorStatusLine(shell, workers, Date.parse(`${nowMinute}:00.000Z`)),
     active: typeof routeThreadId === "string" && isKodoOrchestratorThreadId(routeThreadId),
     opening,
     unavailable,

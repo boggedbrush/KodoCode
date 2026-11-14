@@ -2,6 +2,7 @@ import type { ProjectThreadAwarenessV2Input } from "@t3tools/shared/agentAwarene
 import { pendingGuestMessageCount } from "@t3tools/contracts";
 import { kodoLoopShellStatus } from "@t3tools/contracts"; // KODO: loop-state
 import { recordEndedKodoLoop } from "../kodo/ledger/loopLedgerStore.ts"; // KODO: loop-ledger-write
+import { isKodoStartRequest } from "../kodo/swarm/startRequest.ts"; // KODO: start-request-state
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
 import { projectTurnItemForWire } from "./WireProjection.ts";
 import * as Stream from "effect/Stream";
@@ -1513,6 +1514,7 @@ function pendingRuntimeRequestSummary(
     kind: request.kind,
     createdAt: request.createdAt,
     blocking: request.responseCapability.type !== "message",
+    ...(isKodoStartRequest(request) ? { kodoStart: true } : {}), // KODO: start-request-state
   };
 }
 
@@ -1644,6 +1646,8 @@ export function threadShellFromProjection(
       : { kodoLoopStatus: kodoLoopShellStatus(projection.thread.kodoLoop) }),
     // KODO: delegation-state
     ...(projection.thread.kodoLead == null ? {} : { kodoLead: projection.thread.kodoLead }),
+    // KODO: quiet-watch
+    ...(projection.thread.kodoQuiet == null ? {} : { kodoQuiet: projection.thread.kodoQuiet }),
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
     pullRequests: threadPullRequestsOf(projection.thread),
@@ -1957,6 +1961,8 @@ function shellFromState(input: {
       : { kodoLoopStatus: kodoLoopShellStatus(input.state.thread.kodoLoop) }),
     // KODO: delegation-state
     ...(input.state.thread.kodoLead == null ? {} : { kodoLead: input.state.thread.kodoLead }),
+    // KODO: quiet-watch
+    ...(input.state.thread.kodoQuiet == null ? {} : { kodoQuiet: input.state.thread.kodoQuiet }),
     branch: input.state.thread.branch,
     worktreePath: input.state.thread.worktreePath,
     pullRequests: threadPullRequestsOf(input.state.thread),

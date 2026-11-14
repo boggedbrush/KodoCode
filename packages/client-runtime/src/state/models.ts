@@ -145,6 +145,8 @@ export interface EnvironmentThreadShell {
   readonly interactionMode: OrchestrationV2ThreadShell["interactionMode"];
   readonly kodoModeModel?: OrchestrationV2ThreadShell["kodoModeModel"]; // KODO: mode-models-state
   readonly kodoLead?: OrchestrationV2ThreadShell["kodoLead"]; // KODO: delegation-state
+  /** The server's watchdog finds this worker's running turn silent. */
+  readonly kodoQuiet?: NonNullable<OrchestrationV2ThreadShell["kodoQuiet"]>; // KODO: quiet-watch
   readonly branch: string | null;
   readonly worktreePath: string | null;
   readonly lineage: OrchestrationV2ThreadShell["lineage"];
@@ -162,6 +164,8 @@ export interface EnvironmentThreadShell {
   readonly hasPendingUserInput: boolean;
   readonly pendingUserInputAt?: string | null;
   readonly pendingSubagentRequest?: PendingSubagentRequest | null;
+  /** The pending approval is the Orchestrator's card asking whether to start a worker. */
+  readonly pendingKodoStart?: boolean; // KODO: start-request-state
   /** Guest messages waiting for the owner to send or dismiss. */
   readonly pendingGuestMessageCount?: number;
   readonly hasActionableProposedPlan: boolean;
@@ -296,6 +300,8 @@ export function presentThreadShell(
     ...(thread.kodoModeModel === undefined ? {} : { kodoModeModel: thread.kodoModeModel }),
     // KODO: delegation-state
     ...(thread.kodoLead == null ? {} : { kodoLead: thread.kodoLead }),
+    // KODO: quiet-watch
+    ...(thread.kodoQuiet == null ? {} : { kodoQuiet: thread.kodoQuiet }),
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     pullRequests: threadPullRequestsOf(thread),
@@ -324,6 +330,8 @@ export function presentThreadShell(
         ? iso(thread.pendingRuntimeRequest.createdAt)
         : null,
     pendingSubagentRequest,
+    // KODO: start-request-state
+    ...(thread.pendingRuntimeRequest?.kodoStart === true ? { pendingKodoStart: true } : {}),
     pendingGuestMessageCount: thread.pendingGuestMessageCount ?? 0,
     hasActionableProposedPlan: thread.hasActionableProposedPlan,
     pendingBackgroundTasks: thread.pendingBackgroundTasks ?? [],

@@ -36,6 +36,8 @@ import { ModelSelection } from "./modelSelection.ts";
 import { KodoModeModelsSetting, KodoModeModelsPatch } from "./kodoModeModels.ts"; // KODO: mode-models-setting
 import { KodoLoopSetting, KodoLoopSettingsPatch } from "./kodoLoop.ts"; // KODO: loop-setting
 import {
+  KODO_QUIET_DEFAULT_MINUTES,
+  KODO_QUIET_MAX_MINUTES,
   KODO_SUB_AGENTS_DEFAULT_MAX_WORKERS,
   KODO_SUB_AGENTS_MAX_WORKERS_LIMIT,
 } from "./kodoDelegation.ts"; // KODO: sub-agents-setting
@@ -524,6 +526,8 @@ export const ClientSettingsSchema = Schema.Struct({
   boringSidebarMultilineRows: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
+  // KODO: compact-thread-list - every thread row on one line, as the shelves show them
+  kodoCompactThreadList: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   toolCallVisibility: ToolCallVisibility.pipe(
     Schema.withDecodingDefault(Effect.succeed("showAll" as const)),
   ),
@@ -1415,6 +1419,10 @@ export const ServerSettings = Schema.Struct({
   kodoSubAgentsMaxWorkers: Schema.Finite.pipe(
     Schema.withDecodingDefault(Effect.succeed(KODO_SUB_AGENTS_DEFAULT_MAX_WORKERS)),
   ),
+  // KODO: quiet-watch-setting - minutes a running worker may make no event before it is flagged quiet; 0 turns the flag off. Readers clamp it.
+  kodoQuietAfterMinutes: Schema.Finite.pipe(
+    Schema.withDecodingDefault(Effect.succeed(KODO_QUIET_DEFAULT_MINUTES)),
+  ),
   // KODO: orchestrator-setting - whether the pinned Orchestrator row is shown. Its model is the existing orchestrator slot.
   kodoOrchestratorEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   // KODO: orchestrator-setting - whether the person confirms each worker the Orchestrator would start. Only a person changes it.
@@ -1873,6 +1881,9 @@ export const ServerSettingsPatch = Schema.Struct({
   kodoSubAgentsMaxWorkers: Schema.optionalKey(
     Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: KODO_SUB_AGENTS_MAX_WORKERS_LIMIT })),
   ), // KODO: sub-agents-setting
+  kodoQuietAfterMinutes: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: KODO_QUIET_MAX_MINUTES })),
+  ), // KODO: quiet-watch-setting
   kodoOrchestratorEnabled: Schema.optionalKey(Schema.Boolean), // KODO: orchestrator-setting
   kodoOrchestratorAskBeforeStart: Schema.optionalKey(Schema.Boolean), // KODO: orchestrator-setting
   /** Replaces each project's override set; null removes it. Omitted providerInstances retains its stored value. */
@@ -2074,6 +2085,7 @@ export const ClientSettingsPatch = Schema.Struct({
   showSkillsInSlashMenu: Schema.optionalKey(Schema.Boolean),
   boringSidebarEnabled: Schema.optionalKey(Schema.Boolean),
   boringSidebarMultilineRows: Schema.optionalKey(Schema.Boolean),
+  kodoCompactThreadList: Schema.optionalKey(Schema.Boolean), // KODO: compact-thread-list
   toolCallVisibility: Schema.optionalKey(ToolCallVisibility),
   screenReaderAnnouncements: Schema.optionalKey(ScreenReaderAnnouncements),
   threadDetailsUsageEnabled: Schema.optionalKey(Schema.Boolean),

@@ -19,6 +19,7 @@ export function LabsSettingsPanel() {
     <SettingsPageContainer>
       <SettingsSection id="beta" title="Beta">
         <BoringSidebarRow />
+        <CompactThreadListRow />
         {/* Clerk is only mounted when this build has T3 Connect. */}
         {hasCloudPublicConfig() ? <GuestLinksRowWithSignIn /> : <GuestLinksRow />}
         <LinkedEnvironmentsRow />
@@ -27,6 +28,25 @@ export function LabsSettingsPanel() {
         <FastWorktreeCheckoutRow />
       </SettingsSection>
     </SettingsPageContainer>
+  );
+}
+
+// KODO: compact-thread-list
+function CompactThreadListRow() {
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...searchableSetting("compact-thread-list")}
+      description="Show every thread in the sidebar on one line. Off keeps the project, branch and pull request under each active thread's title."
+      control={
+        <Switch
+          checked={settings.kodoCompactThreadList}
+          onCheckedChange={(checked) => updateSettings({ kodoCompactThreadList: Boolean(checked) })}
+          aria-label="Compact thread list"
+        />
+      }
+    />
   );
 }
 

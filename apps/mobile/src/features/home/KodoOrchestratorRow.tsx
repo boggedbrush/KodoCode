@@ -7,13 +7,17 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import {
   KODO_ORCHESTRATOR_STATE_LABEL,
+  kodoNeedsYouItems,
+  kodoNeedsYouRowView,
   kodoOrchestratorState,
+  kodoOrchestratorStatusLine,
   kodoOrchestratorWorkerActivity,
   latestKodoOrchestratorThreadId,
   type KodoOrchestratorState,
 } from "@t3tools/shared/kodoOrchestrator";
 import { useAtomValue } from "@effect/atom-react";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
+import { minuteTick } from "@t3tools/client-runtime/clock";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
@@ -74,8 +78,28 @@ function EnvironmentOrchestratorRow(props: {
       ),
     [environmentId, shells, threadId],
   );
+  // What waits on the person across the Orchestrator, its workers and the sub-agent leads.
+  const needsYou = useMemo(
+    () =>
+      kodoNeedsYouItems(
+        [
+          ...(shell === null ? [] : [shell]),
+          ...shells.filter((candidate) => candidate.environmentId === environmentId),
+        ],
+        threadId,
+      ),
+    [environmentId, shell, shells, threadId],
+  );
+  const [showNeedsYou, setShowNeedsYou] = useState(false);
   const ensure = useAtomCommand(serverEnvironment.ensureKodoOrchestrator, { reportFailure: false });
   const [opening, setOpening] = useState(false);
+  // The minute clock the web rows read: elapsed time moves once a minute, never per second.
+  const nowMinute = useSyncExternalStore(
+    minuteTick.subscribe,
+    minuteTick.getSnapshot,
+    minuteTick.getSnapshot,
+  );
+  const statusLine = kodoOrchestratorStatusLine(shell, workers, Date.parse(`${nowMinute}:00.000Z`));
   if (enabled === false) return null;
   const state = kodoOrchestratorState(shell, workers);
   const label = KODO_ORCHESTRATOR_STATE_LABEL[state];
@@ -108,17 +132,56 @@ function EnvironmentOrchestratorRow(props: {
   };
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Orchestrator, ${label}`}
-      disabled={opening}
-      onPress={() => void open()}
-      className="mx-4 mb-2 min-h-11 flex-row items-center gap-3 rounded-2xl bg-grouped-card px-4"
-      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-    >
-      <View className={`size-2.5 rounded-full ${DOT_CLASS[state]}`} />
-      <Text className="flex-1 text-sm font-t3-medium text-foreground">Orchestrator</Text>
-      <Text className="text-xs text-foreground-muted">{label}</Text>
-    </Pressable>
+    <View className="mx-4 mb-2 gap-1">
+      <View className="min-h-11 flex-row items-center gap-3 rounded-2xl bg-grouped-card px-4">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Orchestrator, ${label}, ${statusLine}`}
+          disabled={opening}
+          onPress={() => void open()}
+          className="min-h-11 flex-1 flex-row items-center gap-3"
+          style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+        >
+          <View className={`size-2.5 rounded-full ${DOT_CLASS[state]}`} />
+          <Text className="text-sm font-t3-medium text-foreground">Orchestrator</Text>
+          <Text className="shrink text-xs text-foreground-muted" numberOfLines={1}>
+            {statusLine}
+          </Text>
+        </Pressable>
+        {needsYou.length === 0 ? null : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Needs you, ${needsYou.length} waiting`}
+            accessibilityState={{ expanded: showNeedsYou }}
+            onPress={() => setShowNeedsYou(!showNeedsYou)}
+            className="min-h-11 min-w-11 items-center justify-center"
+          >
+            <Text className="text-xs font-t3-medium text-amber-600">{needsYou.length} waiting</Text>
+          </Pressable>
+        )}
+      </View>
+      {showNeedsYou
+        ? needsYou.map((item) => {
+            const view = kodoNeedsYouRowView(item);
+            return (
+              <Pressable
+                key={item.threadId}
+                accessibilityRole="button"
+                accessibilityLabel={`${item.title}, ${view.label}`}
+                onPress={() => props.onOpen(environmentId, item.threadId as ThreadId)}
+                className="min-h-11 justify-center rounded-2xl bg-grouped-card px-4 py-2"
+                style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+              >
+                <Text className="text-sm text-foreground" numberOfLines={1}>
+                  {item.title}
+                </Text>
+                <Text className="text-xs text-foreground-muted" numberOfLines={1}>
+                  {view.label} · {view.context}
+                </Text>
+              </Pressable>
+            );
+          })
+        : null}
+    </View>
   );
 }

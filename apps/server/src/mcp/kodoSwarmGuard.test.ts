@@ -46,6 +46,7 @@ import { PullRequestReviewGuideService } from "../pullRequest/PullRequestReviewG
 import { ScheduledTaskService } from "../scheduledTasks/ScheduledTaskService.ts";
 import { SecretRequests } from "../secrets/SecretRequests.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
+import { KodoLeadUsage } from "../kodo/delegation/leadUsage.ts";
 import { SourceControlRepositoryService } from "../sourceControl/SourceControlRepositoryService.ts";
 import { GitVcsDriver } from "../vcs/GitVcsDriver.ts";
 import { VcsStatusBroadcaster } from "../vcs/VcsStatusBroadcaster.ts";
@@ -69,6 +70,7 @@ const handlerServices = (
     Layer.mock(DocumentText)({}),
     Layer.mock(GitVcsDriver)({}),
     Layer.mock(GitWorkflowService)({}),
+    Layer.mock(KodoLeadUsage)({}),
     Layer.mock(ManagedProjectFolders)({ namedProjectsRoot: "" }),
     Layer.mock(McpProviderSessions)({}),
     Layer.mock(OrchestratorV2)({}),
@@ -210,6 +212,7 @@ it("lists only reads of projects and threads, and the tools that start and stop 
     "t3_thread_list",
     "t3_thread_read",
     "t3_thread_search",
+    "t3_usage_status",
     "task_cancel",
     "task_status",
   ]);

@@ -1,7 +1,7 @@
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { type RunId } from "@t3tools/contracts";
 import { canForkProjectedAssistantItem } from "@t3tools/client-runtime/state/thread-workflows";
-import { memo, use, useState } from "react";
+import { memo, use, useState, useSyncExternalStore } from "react";
 import { type ChatMessage, type TurnDiffSummary } from "../../types";
 import ChatMarkdown from "../ChatMarkdown";
 import { GitForkIcon } from "lucide-react";
@@ -26,6 +26,11 @@ import { MESSAGE_HEADING_LEVEL, MessageAuthorHeading } from "./TimelineRowParts"
 import { useKodoFindingsReplacesBlock } from "../../kodo/findingsBlockStore"; // KODO: findings-card
 import { kodoInlineBlockStage, readKodoInlineBlocks } from "../../kodo/inlineBlocks.logic"; // KODO: inline-kodo-blocks
 import { KodoInlineFindings, KodoInlineVerdict } from "../../kodo/KodoInlineBlocks"; // KODO: inline-kodo-blocks
+import {
+  hasKodoReviewRequest,
+  requestKodoReview,
+  subscribeKodoReviewRequest,
+} from "../../kodo/reviewRequest"; // KODO: review-action
 
 export function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" }> }) {
   const ctx = use(TimelineRowCtx);
@@ -377,9 +382,21 @@ function AssistantChangedFilesSectionInner({
       : null,
   );
   const onFileContextMenu = useFileContextMenuHandler(ctx.activeThreadEnvironmentId);
+  // KODO: review-action - offered only on the newest turn's card, and only while the thread offers it
+  const kodoReviewKey = routeThreadKey;
+  const kodoReviewOffered = useSyncExternalStore(
+    subscribeKodoReviewRequest,
+    () => hasKodoReviewRequest(kodoReviewKey),
+    () => false,
+  );
 
   return (
     <ChangedFilesCard
+      onKodoReview={
+        kodoReviewOffered && thread?.latestRun?.runId === turnSummary.runId
+          ? () => requestKodoReview(kodoReviewKey)
+          : undefined
+      }
       runId={turnSummary.runId}
       files={checkpointFiles}
       totals={checkpointFileTotals(turnSummary)}

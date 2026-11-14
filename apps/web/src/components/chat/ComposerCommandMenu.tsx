@@ -29,7 +29,8 @@ import { memo, useLayoutEffect, useRef } from "react";
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
-import { Command, CommandGroup, CommandItem, CommandList } from "../ui/command";
+import { Command, CommandGroup, CommandGroupLabel, CommandItem, CommandList } from "../ui/command";
+import { kodoSlashRuns } from "../../kodo/slashGroups"; // KODO: slash-groups
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
@@ -147,20 +148,29 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
             aria-label={props.triggerKind ? LISTBOX_LABEL_BY_TRIGGER[props.triggerKind] : undefined}
             className="max-h-72 min-h-0 scroll-pb-6"
           >
-            <CommandGroup>
-              {props.items.map((item) => (
-                <ComposerCommandMenuItem
-                  key={item.id}
-                  optionId={composerSuggestionOptionId(props.listId, item.id)}
-                  item={item}
-                  triggerKind={props.triggerKind}
-                  resolvedTheme={props.resolvedTheme}
-                  isActive={props.activeItemId === item.id}
-                  onHighlight={props.onHighlightedItemChange}
-                  onSelect={props.onSelect}
-                />
-              ))}
-            </CommandGroup>
+            {/* KODO: slash-groups - a heading where the group changes; one group for every other menu */}
+            {(props.triggerKind === "slash-command"
+              ? kodoSlashRuns(props.items)
+              : [{ heading: null, items: props.items }]
+            ).map((run) => (
+              <CommandGroup key={run.heading ?? "all"}>
+                {run.heading === null ? null : (
+                  <CommandGroupLabel data-kodo-slash-heading>{run.heading}</CommandGroupLabel>
+                )}
+                {run.items.map((item) => (
+                  <ComposerCommandMenuItem
+                    key={item.id}
+                    optionId={composerSuggestionOptionId(props.listId, item.id)}
+                    item={item}
+                    triggerKind={props.triggerKind}
+                    resolvedTheme={props.resolvedTheme}
+                    isActive={props.activeItemId === item.id}
+                    onHighlight={props.onHighlightedItemChange}
+                    onSelect={props.onSelect}
+                  />
+                ))}
+              </CommandGroup>
+            ))}
           </CommandList>
         ) : (
           <div className="px-5 pt-3.5 pb-7">

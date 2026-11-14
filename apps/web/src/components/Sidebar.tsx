@@ -993,6 +993,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
   const boringSidebarEnabled = useClientSettings((settings) => settings.boringSidebarEnabled);
   const folderRowsMultiline = useClientSettings((settings) => settings.boringSidebarMultilineRows);
+  // KODO: compact-thread-list - one line per thread, whatever its section
+  const kodoCompactRows = useClientSettings((settings) => settings.kodoCompactThreadList);
   const newThreadContext = useHandleNewThread();
   // Row callbacks capture only the handler; the rest of the context changes with the route.
   const { handleNewThread } = newThreadContext;
@@ -3329,10 +3331,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         const isCard =
                           section === "active" || section === "pinned" || section === "working";
                         const rowVariant = folderRow
-                          ? folderRowsMultiline
+                          ? folderRowsMultiline && !kodoCompactRows // KODO: compact-thread-list
                             ? "folder-multiline"
                             : "folder"
-                          : isCard
+                          : isCard && !kodoCompactRows // KODO: compact-thread-list
                             ? "card"
                             : "slim";
                         return (

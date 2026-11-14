@@ -85,6 +85,7 @@ export const STATIC_KEYBINDING_COMMANDS = [
   "projectSearch.toggle",
   "usage.open",
   "orchestrator.open", // KODO: orchestrator-open - opens the Orchestrator conversation; no default binding
+  "orchestrator.needsYou", // KODO: orchestrator-open - opens the Needs you inbox; no default binding
   "theme.select",
   "appearance.cycle",
   "themeEditor.toggle",

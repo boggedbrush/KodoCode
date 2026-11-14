@@ -36,8 +36,18 @@ describe("buildShortcutSections", () => {
       ["kodo.cycleMode", 1],
       ["composer.subAgents", 0],
       ["orchestrator.open", 0],
+      ["orchestrator.needsYou", 0],
     ]);
     expect(kodo?.entries[0]?.shortcuts[0]).toMatchObject({ key: "tab", shiftKey: true });
+  });
+
+  it("ships the Kodo commands without a default key, so none can overlap an existing binding", () => {
+    for (const command of ["composer.subAgents", "orchestrator.open", "orchestrator.needsYou"]) {
+      expect(
+        DEFAULT_RESOLVED_KEYBINDINGS.filter((binding) => binding.command === command),
+        command,
+      ).toEqual([]);
+    }
   });
 
   it("shows a key someone bound to a Kodo command, once and only under Kodo", () => {

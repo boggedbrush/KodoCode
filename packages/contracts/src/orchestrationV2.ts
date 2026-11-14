@@ -84,7 +84,7 @@ import {
   KodoLoopShellStatus,
   KodoLoopStageRef,
 } from "./kodoLoop.ts"; // KODO: loop-state
-import { KodoLead, LenientKodoLead } from "./kodoDelegation.ts"; // KODO: delegation-state
+import { KodoLead, KodoQuiet, LenientKodoLead } from "./kodoDelegation.ts"; // KODO: delegation-state
 import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
 import { OrchestrationProjectShell } from "./orchestrationProject.ts";
 import {
@@ -466,6 +466,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   kodoLoop: Schema.optional(KodoLoop),
   /** KODO: delegation-state - set while this thread leads sub-agent workers. */
   kodoLead: Schema.optional(LenientKodoLead),
+  /** KODO: quiet-watch - set while the watchdog finds this worker's running turn silent. */
+  kodoQuiet: Schema.optional(Schema.NullOr(KodoQuiet)),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -2107,6 +2109,8 @@ export const OrchestrationV2PendingRuntimeRequestSummary = Schema.Struct({
   createdAt: Schema.DateTimeUtc,
   /** False for async questions the run keeps working past. Absent from older servers. */
   blocking: Schema.optional(Schema.Boolean),
+  /** The Orchestrator's card asking whether to start a worker. Absent for every other request. */
+  kodoStart: Schema.optional(Schema.Boolean), // KODO: start-request-state
 });
 export type OrchestrationV2PendingRuntimeRequestSummary =
   typeof OrchestrationV2PendingRuntimeRequestSummary.Type;
@@ -2132,6 +2136,7 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   kodoModeModel: Schema.optional(KodoThreadModeModel), // KODO: mode-models-state
   kodoLoopStatus: Schema.optional(KodoLoopShellStatus), // KODO: loop-state
   kodoLead: Schema.optional(LenientKodoLead), // KODO: delegation-state
+  kodoQuiet: Schema.optional(Schema.NullOr(KodoQuiet)), // KODO: quiet-watch
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -3666,6 +3671,16 @@ const OrchestrationV2InternalCommand = Schema.Union([
     outcome: Schema.Literals(["pending", "cancelled"]),
     prompt: TrimmedNonEmptyString,
     reason: Schema.String,
+  }),
+  /**
+   * KODO: quiet-watch - flags (or clears) a worker whose running turn has made no event for a while.
+   * Internal so no client or agent can raise or clear a flag; it changes nothing but the flag.
+   */
+  Schema.Struct({
+    type: Schema.Literal("kodo.quiet.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    quiet: Schema.NullOr(KodoQuiet),
   }),
   /**
    * Records or updates a link an agent asked the user to make. Internal so no

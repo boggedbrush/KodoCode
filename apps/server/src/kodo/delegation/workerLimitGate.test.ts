@@ -16,7 +16,15 @@ const provider = (
   displayName: "Codex",
   usageLimits: {
     checkedAt: DateTime.formatIso(DateTime.makeUnsafe(over.checkedAt ?? NOW)),
-    windows: [{ id: "5h", label: "5 hour", usedPercent, windowDurationMins: 300 }],
+    windows: [
+      {
+        id: "5h",
+        label: "5 hour",
+        usedPercent,
+        windowDurationMins: 300,
+        resetsAt: DateTime.formatIso(DateTime.makeUnsafe(NOW + 130 * 60_000)),
+      },
+    ],
   } as never,
 });
 
@@ -47,6 +55,8 @@ describe("the usage-limit gate before a worker starts", () => {
       const message = yield* run(deps({ providers: Effect.succeed([provider(92)]) }));
       expect(message).toMatch(/usage limit of Codex is at 92%/);
       expect(message).toMatch(/No worker was started/);
+      expect(message).toMatch(/at or above the 90%/);
+      expect(message).toMatch(/resets in 2h 10m, at 14:10 UTC/);
     }),
   );
 

@@ -18,7 +18,7 @@ import * as Schema from "effect/Schema";
 
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { kodoSteerText } from "../kodo/interactionMode.ts"; // KODO: mode-instructions
-import { kodoLeadInstructionsFor } from "../kodo/delegation/leadInstructions.ts"; // KODO: delegation-instructions
+import * as KodoLeadUsage from "../kodo/delegation/leadUsage.ts"; // KODO: delegation-instructions
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 
@@ -93,6 +93,8 @@ export const layer: Layer.Layer<
   ProviderTurnControlServiceV2,
   Effect.gen(function* () {
     const projections = yield* ProjectionStore.ProjectionStoreV2;
+    // KODO: delegation-instructions - optional, so a layer without it sends a lead's instructions alone
+    const kodoLeadUsage = yield* Effect.serviceOption(KodoLeadUsage.KodoLeadUsage);
     const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
 
     const load = Effect.fn("ProviderTurnControlService.load")(function* (input: {
@@ -370,6 +372,11 @@ export const layer: Layer.Layer<
           }
           // KODO: mode-instructions - a steer carries the thread's current mode block too.
           const steeredThread = yield* projections.getThreadShell(input.threadId);
+          // KODO: delegation-instructions
+          const kodoLeadText =
+            steeredThread == null
+              ? undefined
+              : yield* KodoLeadUsage.kodoLeadInstructionsWithUsage(kodoLeadUsage, steeredThread);
           yield* loaded.session.value
             .steerTurn({
               threadId: input.threadId,
@@ -388,8 +395,7 @@ export const layer: Layer.Layer<
                     mode: steeredThread?.interactionMode,
                     driver: loaded.providerThread.driver,
                     // KODO: delegation-instructions
-                    leadInstructions:
-                      steeredThread == null ? undefined : kodoLeadInstructionsFor(steeredThread),
+                    leadInstructions: kodoLeadText,
                   },
                 ), // KODO: mode-instructions
                 attachments: message.attachments,

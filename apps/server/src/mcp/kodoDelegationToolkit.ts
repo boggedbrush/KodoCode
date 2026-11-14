@@ -1,6 +1,6 @@
 // Kodo: agent access to sub-agents. `t3_sub_agents_set` sends the same command as the composer
 // switch (`thread.kodo-lead.set`), so the orchestrator judges an agent as it judges a person; the
-// tool also refuses a read-only caller up front. `t3_sub_agents_status` is a read.
+// tool also refuses a read-only caller up front. `t3_sub_agents_status` and `t3_usage_status` are reads.
 import { CommandId, OrchestratorMcpFailure, ThreadId } from "@t3tools/contracts";
 import { kodoThreadOwnModel } from "@t3tools/shared/kodoModeModel";
 import * as Effect from "effect/Effect";
@@ -9,6 +9,8 @@ import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 
 import { isKodoLead } from "../kodo/delegation/leadGuard.ts";
+import { KodoLeadUsage } from "../kodo/delegation/leadUsage.ts";
+import { KodoUsageStatus } from "../kodo/delegation/usageLine.ts";
 import { kodoInteractionModeRank } from "../kodo/interactionMode.ts";
 import { kodoMaxWorkers } from "../kodo/delegation/limits.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
@@ -28,6 +30,7 @@ const dependencies = [
   ThreadManagementService.ThreadManagementService,
   SecureRandom.SecureRandom,
   ServerSettings.ServerSettingsService,
+  KodoLeadUsage,
 ];
 
 /** The newest workers a status lists. */
@@ -76,7 +79,25 @@ const SubAgentsStatusTool = Tool.make("t3_sub_agents_status", {
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 
-export const KodoDelegationToolkit = Toolkit.make(SubAgentsSetTool, SubAgentsStatusTool);
+const UsageStatusTool = Tool.make("t3_usage_status", {
+  description:
+    "Read your usage before you delegate: each provider's limit windows (percent used, reset time), what this conversation has spent (you and workers), and the percent where delegation is refused. Read-only.",
+  parameters: Tool.EmptyParams,
+  success: KodoUsageStatus,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Get usage status")
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true);
+
+export const KodoDelegationToolkit = Toolkit.make(
+  SubAgentsSetTool,
+  SubAgentsStatusTool,
+  UsageStatusTool,
+);
 
 const readStatus = Effect.fn("mcp.kodoSubAgentsStatus")(function* (threadId: ThreadId | undefined) {
   const { threads, projection } = yield* readThread(threadId);
@@ -160,6 +181,20 @@ const handlers = {
   ),
   t3_sub_agents_status: McpToolAccess.reads((input: { readonly threadId?: ThreadId | undefined }) =>
     readStatus(input.threadId),
+  ),
+  t3_usage_status: McpToolAccess.readsAsCaller(() =>
+    Effect.gen(function* () {
+      const { caller } = yield* readCaller();
+      const usage = yield* KodoLeadUsage;
+      const status = caller === undefined ? undefined : yield* usage.status(caller.id);
+      return (
+        status ??
+        (yield* new OrchestratorMcpFailure({
+          code: "orchestration_error",
+          message: "The usage of this thread could not be read.",
+        }))
+      );
+    }),
   ),
 } satisfies McpToolAccess.Handlers<typeof KodoDelegationToolkit.tools>;
 

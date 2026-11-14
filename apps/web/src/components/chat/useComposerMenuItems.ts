@@ -2,6 +2,7 @@ import {
   matchComposerEnvironmentItems,
   matchComposerThreadItems,
 } from "@t3tools/client-runtime/composerThreadItems";
+import { groupKodoSlashItems } from "../../kodo/slashGroups"; // KODO: slash-groups
 import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import type {
@@ -259,6 +260,21 @@ export function useComposerMenuItems({
           label: "/loop",
           description: "Plan, code, review and judge a request, round after round",
         },
+        // KODO: slash-groups - the two forms of /loop the server answers without a turn
+        {
+          id: "slash:loop:status",
+          type: "slash-command" as const,
+          command: "loop",
+          label: "/loop status",
+          description: "Show where this thread's loop is",
+        },
+        {
+          id: "slash:loop:stop",
+          type: "slash-command" as const,
+          command: "loop",
+          label: "/loop stop",
+          description: "Stop this thread's loop",
+        },
         // KODO: mode-slash-items
         ...KODO_MODE_SLASH_COMMAND_ITEMS.map((item) => ({
           id: `slash:mode:${item.command}`,
@@ -337,11 +353,14 @@ export function useComposerMenuItems({
         composerTrigger.rangeStart === 0,
       );
       // KODO: mode-slash-items (mode commands match by name prefix only, not by description)
-      return searchSlashCommandItems(slashCommandItems, query).filter(
-        (item) =>
-          item.type !== "slash-command" ||
-          !isKodoModeSlashCommand(item.command) ||
-          kodoModeSlashMatchesQuery(item.command, query),
+      // KODO: slash-groups - the menu draws a heading where the group changes
+      return groupKodoSlashItems(
+        searchSlashCommandItems(slashCommandItems, query).filter(
+          (item) =>
+            item.type !== "slash-command" ||
+            !isKodoModeSlashCommand(item.command) ||
+            kodoModeSlashMatchesQuery(item.command, query),
+        ),
       );
     }
     if (composerTrigger.kind === "skill") {

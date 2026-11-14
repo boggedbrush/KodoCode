@@ -2,11 +2,7 @@
 // that start work (OrchestratorMcpService for delegate_task and create_threads, the project toolkit
 // for t3_thread_launch), which pass what they already hold; the instance registry is optional, as in
 // the loop, and without it the provider list's reading of the limits stands.
-import {
-  ProviderInstanceId,
-  type OrchestrationV2ThreadShell,
-  type ThreadId,
-} from "@t3tools/contracts";
+import type { OrchestrationV2ThreadShell, ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -22,6 +18,7 @@ import {
   makeKodoLeadLocks,
   type KodoLeadShell,
 } from "./leadGuard.ts";
+import { makeKodoLimitSources } from "./limitSources.ts";
 import { kodoGuardWorkerLimit } from "./workerLimitGate.ts";
 
 // One lock set for every guard: the cap is read from the store, so two calls for one lead must not
@@ -59,36 +56,10 @@ export const makeKodoDelegationGuard = (services: KodoDelegationGuardServices) =
       Effect.orElseSucceed(() => undefined),
     ),
   };
-  const instances = services.instanceRegistry;
   const limitDeps = {
     providers: services.providerRegistry.getProviders,
     stopAtPercent: settings.pipe(Effect.map((value) => value.loop.budget.stopAtLimitPercent)),
-    ...(Option.isSome(instances)
-      ? {
-          readLimits: (instanceId: string) =>
-            instances.value
-              .getInstance(ProviderInstanceId.make(instanceId))
-              .pipe(
-                Effect.flatMap((instance) =>
-                  instance === undefined
-                    ? services.providerRegistry.getProviders.pipe(
-                        Effect.map(
-                          (providers) =>
-                            providers.find((provider) => provider.instanceId === instanceId)
-                              ?.usageLimits,
-                        ),
-                      )
-                    : instance.snapshot.getSnapshot.pipe(
-                        Effect.map((snapshot) => snapshot.usageLimits),
-                      ),
-                ),
-              ),
-          refreshLimits: (instanceId: string) =>
-            instances.value
-              .getInstance(ProviderInstanceId.make(instanceId))
-              .pipe(Effect.flatMap((instance) => instance?.snapshot.refreshUsage ?? Effect.void)),
-        }
-      : {}),
+    ...makeKodoLimitSources(services),
   };
   return {
     /** Refuses a caller that is a worker, before anything of the call is read. */

@@ -3,6 +3,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
+  KODO_QUIET_DEFAULT_MINUTES,
   KODO_SUB_AGENTS_DEFAULT_MAX_WORKERS,
   ProjectId,
   ServerSettings,
@@ -45,13 +46,16 @@ it.effect(
       const initial = yield* service.getSettings;
       assert.isFalse(initial.kodoSubAgentsDefault);
       assert.equal(initial.kodoSubAgentsMaxWorkers, KODO_SUB_AGENTS_DEFAULT_MAX_WORKERS);
+      assert.equal(initial.kodoQuietAfterMinutes, KODO_QUIET_DEFAULT_MINUTES);
 
       const next = yield* service.updateSettings({
         kodoSubAgentsDefault: true,
         kodoSubAgentsMaxWorkers: 5,
+        kodoQuietAfterMinutes: 12,
       });
       assert.isTrue(next.kodoSubAgentsDefault);
       assert.equal(next.kodoSubAgentsMaxWorkers, 5);
+      assert.equal(next.kodoQuietAfterMinutes, 12);
       const saved = yield* decodeSettingsJson(yield* fs.readFileString(config.settingsPath));
       assert.isTrue(saved.kodoSubAgentsDefault);
       assert.equal(saved.kodoSubAgentsMaxWorkers, 5);
@@ -86,5 +90,15 @@ it("a patch for the live-worker cap outside 1 to 6 whole workers is refused", ()
   }
   for (const good of [1, 3, 6]) {
     assert.isTrue(Exit.isSuccess(decodePatch({ kodoSubAgentsMaxWorkers: good })), String(good));
+  }
+});
+
+it("a patch for the quiet-worker time outside 0 to 240 whole minutes is refused", () => {
+  const decodePatch = Schema.decodeUnknownExit(ServerSettingsPatch);
+  for (const bad of [-1, 241, 2.5]) {
+    assert.isTrue(Exit.isFailure(decodePatch({ kodoQuietAfterMinutes: bad })), String(bad));
+  }
+  for (const good of [0, 5, 240]) {
+    assert.isTrue(Exit.isSuccess(decodePatch({ kodoQuietAfterMinutes: good })), String(good));
   }
 });

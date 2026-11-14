@@ -21,6 +21,17 @@ export const KodoLead = Schema.Struct({ kind: KodoLeadKind });
 export type KodoLead = typeof KodoLead.Type;
 
 /** A stored lead this build cannot read (a newer kind) reads as no lead rather than failing the thread. */
+/** A worker whose run has made no event for a while: flagged by the server's watchdog, never acted on. */
+export const KodoQuiet = Schema.Struct({
+  /** When the worker's last event was. */
+  since: Schema.String,
+});
+export type KodoQuiet = typeof KodoQuiet.Type;
+
+/** How long a running worker may be silent before it is flagged, in minutes: the setting's default, and the most it allows. */
+export const KODO_QUIET_DEFAULT_MINUTES = 5;
+export const KODO_QUIET_MAX_MINUTES = 240;
+
 export const LenientKodoLead = Schema.NullOr(KodoLead).pipe(
   Schema.catchDecoding(() => Effect.succeedSome(null)),
 );

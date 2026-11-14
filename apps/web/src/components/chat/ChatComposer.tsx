@@ -1998,9 +1998,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       // KODO: loop-slash-items
       if (item.command === "loop") {
-        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "/loop ", {
-          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
-        });
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          `${item.label} `,
+          {
+            expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          },
+        );
         if (applied) setComposerHighlightedItemId(null);
         return;
       }

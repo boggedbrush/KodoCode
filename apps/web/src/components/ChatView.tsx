@@ -161,6 +161,8 @@ import { KodoInteractionModeStatusProvider } from "../kodo/interactionModeStatus
 import { useKodoLoop } from "../kodo/useKodoLoop"; // KODO: loop-card
 import { isKodoLoopRunning } from "../kodo/loopCard.logic"; // KODO: loop-card
 import { useKodoSubAgents } from "../kodo/useKodoSubAgents"; // KODO: sub-agents
+import { kodoReviewOffered } from "../kodo/reviewRequest"; // KODO: review-action
+import { useKodoReviewRequest } from "../kodo/useKodoReviewRequest"; // KODO: review-action
 import { resolveProjectSettings as resolveKodoProjectSettings } from "@t3tools/shared/projectSettings"; // KODO: sub-agents
 import { buildThreadRouteParams } from "../threadRoutes";
 import { useTheme } from "../hooks/useTheme";
@@ -2648,6 +2650,23 @@ export default function ChatView(props: ChatViewProps) {
     canOperateThread,
     threadIdle: latestRunSettled,
     setThreadError,
+  });
+  // KODO: review-action - "Review" on a turn's changed-files card
+  useKodoReviewRequest({
+    threadKey: routeThreadKey,
+    offered: kodoReviewOffered({
+      isServerThread,
+      canOperateThread,
+      isWorker: activeThread?.lineage.relationshipToParent === "subagent",
+      isOrchestrator: kodoThreadIsOrchestrator,
+      isSendBusy: isSendBusy || !latestRunSettled,
+      modeLocked: kodoLoopRunning,
+    }),
+    composerRef,
+    commitInteractionMode,
+    setThreadError: (message) => {
+      if (activeThreadId !== null) setThreadError(activeThreadId, message);
+    },
   });
   // KODO: sub-agents - the composer's switch for this thread, and the banner of running workers
   const kodoSubAgents = useKodoSubAgents({

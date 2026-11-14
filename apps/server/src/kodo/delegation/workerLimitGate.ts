@@ -4,6 +4,7 @@
 // reading, refuses, so a limit that cannot be checked is not skipped.
 import { OrchestratorMcpFailure, type ServerProvider } from "@t3tools/contracts";
 import { fullestKodoLimitWindow } from "@t3tools/shared/kodoLoopLimits";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 
 import { readFreshKodoLimits, type KodoLimitSource } from "../loop/limitReading.ts";
@@ -47,6 +48,8 @@ export const kodoGuardWorkerLimit = Effect.fn("KodoDelegation.guardLimit")(funct
     const fullest = fullestKodoLimitWindow(reading);
     if (fullest === null) return;
     const refusal = kodoWorkerLimitRefusal({
+      nowMs: yield* Clock.currentTimeMillis,
+      resetsAt: fullest.resetsAt,
       provider: provider?.displayName ?? provider?.driver ?? instanceId,
       percent: fullest.usedPercent,
       window: fullest.name,

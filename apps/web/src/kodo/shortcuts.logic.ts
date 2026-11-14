@@ -30,7 +30,11 @@ const NO_MODIFIERS = { metaKey: false, ctrlKey: false, altKey: false, modKey: fa
 
 // The Kodo commands that ship without a default key. They are listed even unbound, under Kodo,
 // so the overview says they exist.
-const KODO_COMMANDS: ReadonlyArray<KeybindingCommand> = ["composer.subAgents", "orchestrator.open"];
+const KODO_COMMANDS: ReadonlyArray<KeybindingCommand> = [
+  "composer.subAgents",
+  "orchestrator.open",
+  "orchestrator.needsYou",
+];
 
 // Shift+Tab is handled by the composer itself (components/chat/composerCommandKey.ts), not by a
 // keybinding command, so the registry cannot list it.
@@ -45,6 +49,7 @@ const KODO_FIXED_ENTRIES: ReadonlyArray<ShortcutEntry> = [
 const KODO_TITLES: Partial<Record<KeybindingCommand, string>> = {
   "composer.subAgents": "Toggle sub-agents for this thread",
   "orchestrator.open": "Open the Orchestrator",
+  "orchestrator.needsYou": "Show what needs you",
   "shortcuts.open": "Show keyboard shortcuts",
 };
 

@@ -4,6 +4,7 @@ import * as DateTime from "effect/DateTime";
 
 import {
   KODO_LIMIT_MAX_AGE_MS,
+  formatKodoMinutes,
   fullestKodoLimitWindow,
   observedKodoLimitChange,
   readKodoLimitWindows,
@@ -37,7 +38,7 @@ describe("reading limit windows", () => {
       state: "ok",
       checkedAtMs: NOW - 60_000,
       windows: [
-        { id: "session", name: "5-hour", usedPercent: 92 },
+        { id: "session", name: "5-hour", usedPercent: 92, resetsAt: inMinutes(60) },
         { id: "weekly", name: "weekly", usedPercent: 40 },
       ],
     });
@@ -174,5 +175,19 @@ describe("the change seen around a stage", () => {
   it("says nothing when either reading cannot be used", () => {
     expect(observedKodoLimitChange({ state: "stale" }, ok(46))).toEqual([]);
     expect(observedKodoLimitChange(ok(40), { state: "missing" })).toEqual([]);
+  });
+});
+
+describe("short spans of minutes", () => {
+  it.each([
+    [0, "0m"],
+    [12, "12m"],
+    [59.6, "1h"],
+    [130, "2h 10m"],
+    [120, "2h"],
+    [47 * 60, "47h"],
+    [72 * 60, "3d"],
+  ])("%s minutes read %s", (minutes, expected) => {
+    expect(formatKodoMinutes(minutes)).toBe(expected);
   });
 });

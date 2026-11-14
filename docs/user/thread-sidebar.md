@@ -159,6 +159,11 @@ Pinned threads stay above the folders, and Snoozed and Settled stay below them. 
 can drag a thread onto the composer to mention it, but not within the sidebar, and the Working
 section is off. Each device keeps its own choice.
 
+### Compact thread list
+
+Turn on **Settings → Labs → Compact thread list** to show every thread on one line. Off, active
+threads keep the project, branch and pull request under their title. Each device keeps its own choice.
+
 ## Settle finished work
 
 Choose **Settle thread** from its menu to move finished work out of the active list

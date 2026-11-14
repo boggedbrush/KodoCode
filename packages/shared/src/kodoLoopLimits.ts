@@ -11,12 +11,27 @@ import type { ServerProviderUsageLimits } from "@t3tools/contracts";
  */
 export const KODO_LIMIT_MAX_AGE_MS = 2 * 60_000;
 
+const HOUR_MINS = 60;
+
+/** "12m", "2h 10m", "3d": a span of whole minutes as a short phrase, for resets and elapsed time. */
+export function formatKodoMinutes(minutes: number): string {
+  const whole = Math.max(0, Math.round(minutes));
+  if (whole < 60) return `${whole}m`;
+  if (whole < 48 * HOUR_MINS) {
+    const rest = whole % HOUR_MINS;
+    return `${Math.floor(whole / HOUR_MINS)}h${rest === 0 ? "" : ` ${rest}m`}`;
+  }
+  return `${Math.round(whole / (24 * HOUR_MINS))}d`;
+}
+
 export interface KodoLimitWindow {
   /** The provider's own window id, stable across readings. */
   readonly id: string;
   /** How the window reads in a sentence: "5-hour", "weekly", or the provider's label. */
   readonly name: string;
   readonly usedPercent: number;
+  /** When the window resets, as the provider reported it. */
+  readonly resetsAt?: string;
 }
 
 export type KodoLimitReading =
@@ -31,7 +46,6 @@ export type KodoLimitReading =
   /** The provider reports no limit windows (or none are known). */
   | { readonly state: "missing" };
 
-const HOUR_MINS = 60;
 const WEEK_MINS = 7 * 24 * HOUR_MINS;
 
 function windowName(window: {
@@ -77,6 +91,7 @@ export function readKodoLimitWindows(
       id: window.id,
       name: windowName(window),
       usedPercent: Math.max(0, Math.min(100, window.usedPercent)),
+      ...(window.resetsAt === undefined ? {} : { resetsAt: window.resetsAt }),
     })),
   };
 }

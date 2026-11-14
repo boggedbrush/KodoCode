@@ -40,6 +40,8 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   onToggleAllDirectories: () => void;
   onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
   onFileContextMenu?: ChangedFileContextMenuHandler | undefined;
+  /** KODO: review-action - present while the thread offers a review of this turn. */
+  onKodoReview?: (() => void) | undefined;
 }) {
   const {
     runId,
@@ -78,6 +80,18 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {props.onKodoReview === undefined ? null : (
+            // KODO: review-action
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost-muted"
+              data-kodo-review-action
+              onClick={props.onKodoReview}
+            >
+              Review
+            </Button>
+          )}
           {hasDirectories && (
             <Tooltip>
               <TooltipTrigger

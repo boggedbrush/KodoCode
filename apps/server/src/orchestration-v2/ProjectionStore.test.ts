@@ -5759,6 +5759,49 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         }
       }
 
+      // KODO: start-request-state - the Orchestrator's start card says so on the shell, in both read paths.
+      for (const [nativeRequestRef, kodoStart] of [
+        [
+          {
+            driver: ProviderDriverKind.make("kodo"),
+            nativeId: "start-request",
+            strength: "strong",
+          },
+          true,
+        ],
+        [null, undefined],
+      ] as const) {
+        yield* projectionStore.apply({
+          id: EventId.make(`event:projection-shell-start:${kodoStart === true}`),
+          type: "runtime-request.updated",
+          threadId,
+          nodeId: rootNodeId,
+          driver,
+          occurredAt: now,
+          payload: {
+            id: RuntimeRequestId.make("request:projection-shell-start"),
+            nodeId: rootNodeId,
+            providerTurnId: null,
+            nativeRequestRef,
+            kind: "permission",
+            status: "pending",
+            responseCapability: { type: "message" },
+            createdAt: now,
+            resolvedAt: null,
+          },
+        });
+        const projection = yield* projectionStore.getThreadProjection(threadId);
+        const sqlShell = (yield* projectionStore.getShellSnapshot()).threads.find(
+          (row) => row.id === threadId,
+        )!;
+        for (const startShell of [
+          sqlShell,
+          ProjectionStore.threadShellFromProjection(projection),
+        ]) {
+          assert.equal(startShell.pendingRuntimeRequest?.kodoStart, kodoStart);
+        }
+      }
+
       yield* projectionStore.apply({
         id: EventId.make("event:projection-shell-interruptible:waiting"),
         type: "run.updated",

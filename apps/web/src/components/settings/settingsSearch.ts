@@ -350,6 +350,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["sub-agents workers limit concurrent cap lead delegate"],
     environmentOnly: true,
   },
+  // KODO: sub-agents-search
+  {
+    id: "sub-agents-quiet-after",
+    title: "Quiet worker time",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["quiet silent stuck worker watchdog minutes no activity orchestrator"],
+    environmentOnly: true,
+  },
   {
     id: "default-permissions",
     title: "Permissions",
@@ -530,6 +539,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     // Shown inside the boring sidebar row only while it is on, so search lands on the parent.
     targetId: "boring-sidebar",
     searchTerms: ["beta boring sidebar folder rows multiline branch pull request details"],
+  },
+  // KODO: compact-thread-list
+  {
+    id: "compact-thread-list",
+    title: "Compact thread list",
+    to: "/settings/labs",
+    searchTerms: ["sidebar density rows one line compact thread list"],
   },
   {
     id: "tool-call-visibility",

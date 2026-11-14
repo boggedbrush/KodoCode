@@ -49,7 +49,7 @@ import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter"
 import * as ProviderEventIngestor from "./ProviderEventIngestor.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
 import { kodoModeAnnouncer } from "../kodo/interactionMode.ts"; // KODO: mode-instructions
-import { kodoLeadInstructionsFor } from "../kodo/delegation/leadInstructions.ts"; // KODO: delegation-instructions
+import * as KodoLeadUsage from "../kodo/delegation/leadUsage.ts"; // KODO: delegation-instructions
 import type { ProjectionStoreV2Error } from "./ProjectionStore.ts";
 import {
   knownProviderFailureMessage,
@@ -629,6 +629,8 @@ export const layer: Layer.Layer<
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
     const finalizationObserver = yield* RunFinalizationService.RunFinalizationObserver;
     const turnAnalytics = yield* ProviderUsageAnalytics.ProviderTurnAnalytics;
+    // KODO: delegation-instructions - optional, so a layer without it sends a lead's instructions alone
+    const kodoLeadUsage = yield* Effect.serviceOption(KodoLeadUsage.KodoLeadUsage);
 
     const writeFinalRunEvents = Effect.fn("RunExecutionService.writeFinalRunEvents")(
       function* (input: {
@@ -1783,6 +1785,11 @@ export const layer: Layer.Layer<
           key: `mcp_app_${entry.itemId.replace(/[^\w.-]/g, "_")}`,
           text: entry.text,
         }));
+        // KODO: delegation-instructions - a lead's instructions and its usage line
+        const kodoLeadText = yield* KodoLeadUsage.kodoLeadInstructionsWithUsage(
+          kodoLeadUsage,
+          input.appThread,
+        );
         const turnInput = {
           appThread: input.appThread,
           threadId: input.run.threadId,
@@ -1807,7 +1814,7 @@ export const layer: Layer.Layer<
             instructions: input.runtimePolicy.modeInstructions,
             hasPriorTurns: input.nativeThreadHasTurns ?? input.providerTurnOrdinal > 1,
             // KODO: delegation-instructions - a lead's model is told it leads workers
-            leadInstructions: kodoLeadInstructionsFor(input.appThread),
+            leadInstructions: kodoLeadText,
           }),
           modelSelection: input.modelSelection,
           runtimePolicy: input.runtimePolicy,

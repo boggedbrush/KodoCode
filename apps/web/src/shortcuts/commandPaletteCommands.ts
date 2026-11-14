@@ -14,7 +14,7 @@ import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
 import { type CommandHandler, type CommandScopeOptions, registerCommands } from "./dispatcher";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { resolveThreadRouteTarget } from "../threadRoutes";
-import { requestKodoOrchestratorOpen } from "../kodo/orchestrator.logic"; // KODO: orchestrator-open
+import { requestKodoInboxOpen, requestKodoOrchestratorOpen } from "../kodo/orchestrator.logic"; // KODO: orchestrator-open
 
 function consume(event: KeyboardEvent): void {
   event.preventDefault();
@@ -99,6 +99,13 @@ export function installCommandPaletteCommands(
         if (event.repeat) return;
         dispatchCommandPalette({ _tag: "SetOpen", open: false });
         requestKodoOrchestratorOpen();
+      },
+      // KODO: orchestrator-open
+      "orchestrator.needsYou": (event) => {
+        consume(event);
+        if (event.repeat) return;
+        dispatchCommandPalette({ _tag: "SetOpen", open: false });
+        requestKodoInboxOpen();
       },
       "commandPalette.toggle": toggleOverlay("commandPalette.toggle"),
       "filePicker.toggle": toggleOverlay("filePicker.toggle"),

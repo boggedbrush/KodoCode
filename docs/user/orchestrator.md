@@ -11,7 +11,10 @@ blue while it works, and amber when it needs you. It is blue while the Orchestra
 running and also while any worker it started is running, even after the Orchestrator has finished
 its turn. It is amber for an approval or a question from the Orchestrator or from one of its
 workers, including the card that asks whether a worker may start. With the sidebar closed, the dot
-alone stays at the top left of the window; click it to open the conversation. You can also use
+alone stays at the top left of the window; click it to open the conversation. A second line under
+the title says why it needs you (**Start approval**, **Approval**, **Worker approval**,
+**Question**, **Usage limit** with its reset, or **Error**), or what it is doing: **Working 3m**
+(whole minutes, updated once a minute) and **waiting on 2 workers**. You can also use
 **Open Orchestrator** in the command palette, and bind a key to `orchestrator.open` in **Settings →
 Keybindings**. On mobile it is the first row of the thread list, and it scrolls away with the list.
 
@@ -27,6 +30,31 @@ There is one per environment: the window shows the one on its primary environmen
 one on the environment you selected. The Orchestrators of other environments you have linked are not
 shown in this window, and neither are their workers' conversations; open that environment's own
 window to use them.
+
+## Needs you
+
+The inbox icon at the right of the row counts everything waiting on you across the Orchestrator,
+the workers it started, threads that lead sub-agents, and their workers: start cards, approvals,
+questions, and workers marked quiet. Click it, or use **Show what needs you** in the command
+palette (bind a key to `orchestrator.needsYou`; none is set). **Open** jumps to the thread. A short
+approval can be answered right there with the same **Approve** and **Decline** its own card has; a
+long one asks you to open the thread and read it all first. On mobile, the **waiting** label on the
+row opens a list that jumps to each thread.
+
+A worker is **quiet** when its turn is running and has shown no activity for the time set in
+**Settings → Threads → Quiet worker time** (five minutes by default, 0 turns it off). Time spent
+waiting for your answer does not count. It is only a flag, shown in the inbox, on the lead's line
+under the header and on the worker's own; nothing is stopped or restarted.
+
+## Usage
+
+The Orchestrator and every sub-agents lead are given a short line with each message: for each
+provider they and their workers can use, how full its limit windows are and when they reset (or
+"unknown" when the reading is missing or more than two minutes old), what this conversation has
+spent so far, and the percent at which starting work is refused. They can read the detail with
+`t3_usage_status`. They are told to check it before starting work, to prefer fewer, larger tasks
+when usage is high, to tell you and stop near the limit, and never to retry a refusal. A refusal
+names the used percent, the limit and when the window resets.
 
 ## What it does
 

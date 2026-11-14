@@ -357,7 +357,7 @@ export default {
     {
       id: "agent-context-budget-loop-tools",
       file: "apps/server/src/provider/agentContextBudget.json",
-      set: [{ path: ["mcpToolListJsonBytes"], value: 50101 }],
+      set: [{ path: ["mcpToolListJsonBytes"], value: 50408 }],
     },
     {
       id: "root-kodo-scripts",
@@ -389,6 +389,16 @@ export default {
   // are stable kebab-case hook names; the text after the name is free.
   // `kodo:check` warns about files with a marker that is not listed here.
   hooks: [
+    {
+      file: "apps/server/src/orchestration-v2/ProjectionStore.test.ts",
+      hooks: ["start-request-state"],
+    },
+    { file: "apps/web/src/components/chat/ChangedFilesTree.tsx", hooks: ["review-action"] },
+    { file: "apps/web/src/components/chat/ComposerCommandMenu.tsx", hooks: ["slash-groups"] },
+    {
+      file: "apps/web/src/components/settings/LabsSettingsPanel.tsx",
+      hooks: ["compact-thread-list"],
+    },
     {
       file: "packages/provider-core/src/server/subagentProjection.ts",
       hooks: ["delegation-child"],
@@ -429,6 +439,7 @@ export default {
         "sub-agents-search",
         "orchestrator-search",
         "linux-desktop-search",
+        "compact-thread-list",
       ],
     },
     { file: "apps/web/src/components/chat/useComposerSelection.ts", hooks: ["mode-models-send"] },
@@ -438,7 +449,14 @@ export default {
     },
     {
       file: "apps/server/src/orchestration-v2/ProjectionStore.ts",
-      hooks: ["mode-models-state", "loop-state", "loop-ledger-write", "delegation-state"],
+      hooks: [
+        "mode-models-state",
+        "loop-state",
+        "loop-ledger-write",
+        "delegation-state",
+        "start-request-state",
+        "quiet-watch",
+      ],
     },
     {
       file: "apps/server/src/orchestration-v2/ThreadManagementService.ts",
@@ -446,7 +464,7 @@ export default {
     },
     {
       file: "apps/server/src/orchestration-v2/runtimeLayer.ts",
-      hooks: ["loop-worker", "delegation-ledger"],
+      hooks: ["loop-worker", "delegation-ledger", "quiet-watch"],
     },
     {
       file: "apps/server/src/orchestration-v2/testkit/OrchestratorScenario.ts",
@@ -465,13 +483,20 @@ export default {
     { file: "apps/server/src/ws.test.ts", hooks: ["loop-ledger-rpc"] },
     {
       file: "packages/client-runtime/src/state/models.ts",
-      hooks: ["mode-models-state", "delegation-state"],
+      hooks: ["mode-models-state", "delegation-state", "start-request-state", "quiet-watch"],
     },
     { file: "packages/shared/src/serverSettings.ts", hooks: ["mode-models-setting"] },
     { file: "apps/server/src/serverSettings.ts", hooks: ["mode-models-setting", "loop-setting"] },
     {
       file: "packages/contracts/src/settings.ts",
-      hooks: ["mode-models-setting", "loop-setting", "sub-agents-setting", "orchestrator-setting"],
+      hooks: [
+        "mode-models-setting",
+        "loop-setting",
+        "sub-agents-setting",
+        "orchestrator-setting",
+        "quiet-watch-setting",
+        "compact-thread-list",
+      ],
     },
     { file: "apps/web/src/components/onboarding/WelcomePage.tsx", hooks: ["telemetry-copy"] },
     {
@@ -658,6 +683,7 @@ export default {
         "delegation-loop",
         "swarm-delegate",
         "swarm-guard",
+        "quiet-watch",
       ],
     },
     {
@@ -707,7 +733,10 @@ export default {
       file: "apps/server/src/peer/RemoteDelegation.ts",
       hooks: ["mode-peer-limit", "mode-child-limit"],
     },
-    { file: "apps/server/src/server.ts", hooks: ["prompt-enhance-http", "loop-ledger-rpc"] },
+    {
+      file: "apps/server/src/server.ts",
+      hooks: ["prompt-enhance-http", "loop-ledger-rpc", "delegation-instructions"],
+    },
     { file: "apps/server/src/telemetry/AnalyticsService.ts", hooks: ["telemetry-endpoint"] },
     { file: "apps/server/vite.config.ts", hooks: ["telemetry-endpoint"] },
     {
@@ -740,11 +769,12 @@ export default {
         "sub-agents",
         "worker-header",
         "orchestrator-lock",
+        "review-action",
       ],
     },
     {
       file: "apps/web/src/components/chat/TimelineAssistantRows.tsx",
-      hooks: ["findings-card", "inline-kodo-blocks"],
+      hooks: ["findings-card", "inline-kodo-blocks", "review-action"],
     },
     {
       file: "apps/web/src/components/CommandPalette.tsx",
@@ -801,7 +831,7 @@ export default {
     { file: "apps/web/src/components/chat/ModelPickerSidebar.tsx", hooks: ["usage-picker-hint"] },
     {
       file: "apps/web/src/components/chat/useComposerMenuItems.ts",
-      hooks: ["mode-slash-items", "usage-slash-items", "loop-slash-items"],
+      hooks: ["mode-slash-items", "usage-slash-items", "loop-slash-items", "slash-groups"],
     },
     {
       file: "apps/web/src/components/chat/composerSlashCommandSearch.ts",
@@ -931,6 +961,8 @@ export default {
         "delegation-state",
         "delegation-command",
         "swarm-delegate",
+        "start-request-state",
+        "quiet-watch",
       ],
     },
     {
@@ -1038,7 +1070,10 @@ export default {
     { file: "apps/mobile/src/features/home/HomeScreen.tsx", hooks: ["orchestrator-row"] },
     { file: "apps/server/src/mcp/McpSessionRegistry.ts", hooks: ["swarm-guard"] },
     { file: "apps/server/src/mcp/McpSessionRegistry.test.ts", hooks: ["swarm-guard"] },
-    { file: "apps/web/src/components/Sidebar.tsx", hooks: ["orchestrator-row"] },
+    {
+      file: "apps/web/src/components/Sidebar.tsx",
+      hooks: ["orchestrator-row", "compact-thread-list"],
+    },
     { file: "apps/web/src/shortcuts/commandPaletteCommands.ts", hooks: ["orchestrator-open"] },
     {
       file: "packages/client-runtime/src/state/commandPermissions.test.ts",
@@ -1138,6 +1173,31 @@ export default {
       path: "evals/mcp-tool-use/cases/sub-agents.ndjson",
       why: "Sub-agent mode evals (lead block and the two sub-agent tool descriptions)",
     },
+    {
+      path: "apps/server/src/kodo/delegation/usageLine.ts",
+      why: "Usage line and status a lead is given",
+    },
+    {
+      path: "apps/server/src/kodo/delegation/leadUsage.ts",
+      why: "Lead usage service and its delivery with the lead's instructions",
+    },
+    { path: "apps/server/src/kodo/delegation/limitSources.ts" },
+    {
+      path: "apps/server/src/kodo/watchdog/quietWatch.ts",
+      why: "Silence watchdog: flags a quiet worker",
+    },
+    { path: "apps/web/src/kodo/KodoNeedsYouInbox.tsx", why: "Needs you inbox" },
+    { path: "apps/web/src/kodo/useKodoNeedsYou.ts" },
+    { path: "apps/web/src/kodo/needsYouCommand.ts" },
+    { path: "apps/web/src/kodo/reviewRequest.ts", why: "Review action on a turn's changed files" },
+    { path: "apps/web/src/kodo/useKodoReviewRequest.ts" },
+    { path: "apps/web/src/kodo/slashGroups.ts", why: "Slash menu headings" },
+    { path: "apps/server/src/kodo/delegation/usageLine.test.ts" },
+    { path: "apps/server/src/kodo/delegation/leadUsage.test.ts" },
+    { path: "apps/server/src/kodo/watchdog/quietWatch.test.ts" },
+    { path: "apps/web/src/kodo/needsYouCommand.test.ts" },
+    { path: "apps/web/src/kodo/reviewRequest.test.ts" },
+    { path: "apps/web/src/kodo/slashGroups.test.ts" },
     { path: "apps/web/src/components/settings/KodoSubAgentsSettings.tsx" },
     {
       path: "packages/contracts/src/kodoOrchestrator.ts",
@@ -1371,6 +1431,12 @@ export default {
   // so add a new Kodo test here in the same change.
   verify: {
     testFiles: [
+      "apps/server/src/kodo/delegation/leadUsage.test.ts",
+      "apps/server/src/kodo/delegation/usageLine.test.ts",
+      "apps/server/src/kodo/watchdog/quietWatch.test.ts",
+      "apps/web/src/kodo/needsYouCommand.test.ts",
+      "apps/web/src/kodo/reviewRequest.test.ts",
+      "apps/web/src/kodo/slashGroups.test.ts",
       "apps/server/src/orchestration-v2/ProviderSessionManager.test.ts",
       "apps/server/src/kodo/ledger/delegationLedger.test.ts",
       "apps/server/src/kodo/swarm/swarm.test.ts",

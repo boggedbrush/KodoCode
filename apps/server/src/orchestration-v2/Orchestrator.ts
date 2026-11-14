@@ -691,6 +691,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "secret_request.record":
     case "link_request.record":
     case "kodo.start-request.record": // KODO: swarm-delegate
+    case "kodo.quiet.set": // KODO: quiet-watch
       return command.threadId;
     case "thread.fork":
     case "thread.merge_back":
@@ -9751,6 +9752,37 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     },
   );
 
+  // KODO: quiet-watch - the flag on a silent worker; it changes nothing else of the thread (kodo/watchdog/quietWatch.ts)
+  const dispatchKodoQuietSet = Effect.fn("orchestrationV2.dispatch.kodoQuietSet")(function* (
+    command: Extract<OrchestrationV2InternalCommand, { readonly type: "kodo.quiet.set" }>,
+    events: Ref.Ref<Array<OrchestrationV2DomainEvent>>,
+  ) {
+    const { thread } = yield* projectionStore
+      .getThreadRecords(command.threadId, [], { turnItemTypes: [] })
+      .pipe(
+        Effect.mapError(
+          (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+        ),
+      );
+    // Setting what is already set is no change, so a repeat leaves no event behind.
+    if (
+      thread.deletedAt !== null ||
+      (thread.kodoQuiet?.since ?? null) === (command.quiet?.since ?? null)
+    ) {
+      return;
+    }
+    yield* emit(
+      events,
+      command,
+    )({
+      type: "thread.metadata-updated",
+      threadId: command.threadId,
+      providerInstanceId: thread.providerInstanceId,
+      occurredAt: yield* DateTime.now,
+      payload: { ...thread, kodoQuiet: command.quiet },
+    });
+  });
+
   // KODO: swarm-delegate - the Orchestrator's start confirmation, raised and withdrawn (kodo/swarm/startRequest.ts)
   const dispatchKodoStartRequestRecord = Effect.fn(
     "orchestrationV2.dispatch.kodoStartRequestRecord",
@@ -14513,6 +14545,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       case "kodo.start-request.record": // KODO: swarm-delegate
         yield* dispatchKodoStartRequestRecord(command, events);
+        break;
+      case "kodo.quiet.set": // KODO: quiet-watch
+        yield* dispatchKodoQuietSet(command, events);
         break;
       default:
         return yield* dispatchUnsupported(command);

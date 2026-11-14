@@ -59,6 +59,7 @@ import {
   BugIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
+  InboxIcon, // KODO: orchestrator-palette
   NetworkIcon, // KODO: sub-agents-palette
   ChevronRightIcon,
   CornerLeftUpIcon,
@@ -281,8 +282,11 @@ import {
 } from "../kodo/subAgents.logic";
 // KODO: orchestrator-palette
 import {
+  hasKodoInboxHost,
   hasKodoOrchestratorOpen,
+  requestKodoInboxOpen,
   requestKodoOrchestratorOpen,
+  subscribeKodoInbox,
   subscribeKodoOrchestratorOpen,
 } from "../kodo/orchestrator.logic";
 import { threadRecentUse } from "@t3tools/shared/paletteSearch";
@@ -1292,6 +1296,8 @@ function OpenCommandPaletteDialog(props: {
     hasKodoOrchestratorOpen,
     () => false,
   );
+  // KODO: orchestrator-palette - the inbox opens only while a row hosts it
+  const kodoInboxMounted = useSyncExternalStore(subscribeKodoInbox, hasKodoInboxHost, () => false);
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0) {
@@ -1688,6 +1694,21 @@ function OpenCommandPaletteDialog(props: {
       shortcutCommand: "orchestrator.open",
       run: async () => {
         requestKodoOrchestratorOpen();
+      },
+    });
+  }
+
+  // KODO: orchestrator-palette
+  if (kodoInboxMounted) {
+    actionItems.push({
+      kind: "action",
+      value: "action:open-needs-you",
+      searchTerms: ["needs you", "inbox", "approvals", "questions", "waiting", "orchestrator"],
+      title: "Show what needs you",
+      icon: <InboxIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "orchestrator.needsYou",
+      run: async () => {
+        requestKodoInboxOpen();
       },
     });
   }

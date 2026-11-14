@@ -1,4 +1,6 @@
 import {
+  KODO_QUIET_DEFAULT_MINUTES,
+  KODO_QUIET_MAX_MINUTES,
   KODO_SUB_AGENTS_DEFAULT_MAX_WORKERS,
   KODO_SUB_AGENTS_MAX_WORKERS_LIMIT,
 } from "@t3tools/contracts";
@@ -22,6 +24,11 @@ export function KodoSubAgentsSettings(props: { readonly isProjectScope: boolean 
   const updateSettings = useUpdateScopedSettings();
   const mixedDefault = useScopedSettingsMixed(["kodoSubAgentsDefault"]);
   const mixedMax = useScopedSettingsMixed(["kodoSubAgentsMaxWorkers"]);
+  const mixedQuiet = useScopedSettingsMixed(["kodoQuietAfterMinutes"]);
+  const quietMinutes = Math.min(
+    KODO_QUIET_MAX_MINUTES,
+    Math.max(0, Math.floor(settings.kodoQuietAfterMinutes)),
+  );
   const maxWorkers = Math.min(
     KODO_SUB_AGENTS_MAX_WORKERS_LIMIT,
     Math.max(1, Math.floor(settings.kodoSubAgentsMaxWorkers)),
@@ -94,6 +101,49 @@ export function KodoSubAgentsSettings(props: { readonly isProjectScope: boolean 
                   parsed !== maxWorkers
                 ) {
                   updateSettings({ kodoSubAgentsMaxWorkers: parsed });
+                }
+              }}
+            />
+          }
+        />
+      )}
+      {props.isProjectScope ? null : (
+        <SettingsRow
+          serverScoped
+          settingKeys={["kodoQuietAfterMinutes"]}
+          mixed={mixedQuiet}
+          {...searchableSetting("sub-agents-quiet-after")}
+          description="Minutes a running worker may show no activity before it is marked quiet. Time waiting for your answer does not count. 0 turns it off. A quiet worker is only flagged, never stopped."
+          resetAction={
+            mixedQuiet || quietMinutes !== KODO_QUIET_DEFAULT_MINUTES ? (
+              <SettingResetButton
+                label="quiet worker time"
+                onClick={() =>
+                  updateSettings({ kodoQuietAfterMinutes: KODO_QUIET_DEFAULT_MINUTES })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Input
+              size="sm"
+              type="number"
+              min={0}
+              max={KODO_QUIET_MAX_MINUTES}
+              step={1}
+              className="w-full sm:w-28"
+              defaultValue={quietMinutes}
+              key={quietMinutes}
+              aria-label="Minutes before a worker is marked quiet"
+              onBlur={(event) => {
+                const parsed = Number(event.target.value);
+                if (
+                  Number.isInteger(parsed) &&
+                  parsed >= 0 &&
+                  parsed <= KODO_QUIET_MAX_MINUTES &&
+                  parsed !== quietMinutes
+                ) {
+                  updateSettings({ kodoQuietAfterMinutes: parsed });
                 }
               }}
             />

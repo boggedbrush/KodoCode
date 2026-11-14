@@ -5,6 +5,7 @@ import {
   KODO_ORCHESTRATOR_STATE_LABEL,
   type KodoOrchestratorState,
 } from "@t3tools/shared/kodoOrchestrator";
+import { KodoNeedsYouInbox } from "./KodoNeedsYouInbox";
 import { KODO_ORCHESTRATOR_DOT_CLASS } from "./orchestrator.logic";
 import { useKodoOrchestrator } from "./useKodoOrchestrator";
 
@@ -31,11 +32,20 @@ export function KodoOrchestratorRow() {
     <SidebarMenuButton
       isActive={orchestrator.active}
       disabled={orchestrator.opening}
-      aria-label={`Orchestrator, ${label}`}
+      size="lg"
+      aria-label={`Orchestrator, ${label}${orchestrator.statusLine === label ? "" : `, ${orchestrator.statusLine}`}`}
       onClick={orchestrator.open}
     >
       <KodoOrchestratorDot state={orchestrator.state} />
-      <span className="min-w-0 flex-1 truncate">Orchestrator</span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate">Orchestrator</span>
+        <span
+          data-kodo-orchestrator-status
+          className="truncate text-xs font-normal text-sidebar-muted-foreground"
+        >
+          {orchestrator.statusLine}
+        </span>
+      </span>
       {orchestrator.unavailable === null ? null : (
         <TriangleAlertIcon
           aria-hidden
@@ -43,20 +53,29 @@ export function KodoOrchestratorRow() {
           className="size-3.5 shrink-0 text-warning"
         />
       )}
-      <span className="sr-only">{label}</span>
     </SidebarMenuButton>
   );
   return (
     <SidebarMenu data-kodo-orchestrator-row>
       <SidebarMenuItem>
-        {orchestrator.unavailable === null ? (
-          button
-        ) : (
-          <Tooltip>
-            <TooltipTrigger render={button} />
-            <TooltipPopup side="right">{orchestrator.unavailable}</TooltipPopup>
-          </Tooltip>
-        )}
+        <div className="flex items-center gap-1">
+          <div className="min-w-0 flex-1">
+            {orchestrator.unavailable === null ? (
+              button
+            ) : (
+              <Tooltip>
+                <TooltipTrigger render={button} />
+                <TooltipPopup side="right">{orchestrator.unavailable}</TooltipPopup>
+              </Tooltip>
+            )}
+          </div>
+          {orchestrator.environmentId === null ? null : (
+            <KodoNeedsYouInbox
+              environmentId={orchestrator.environmentId}
+              items={orchestrator.needsYou}
+            />
+          )}
+        </div>
       </SidebarMenuItem>
     </SidebarMenu>
   );

@@ -4,13 +4,30 @@
 import {
   KodoDelegationUsageReadError,
   type KodoDelegationUsage,
+  type OrchestrationV2ThreadShell,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
-import type * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
+import type * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import { type DelegationSide, summarizeDelegation } from "./delegationUsage.ts";
 import type { PriceTokens } from "../loop/loopSpend.ts";
+
+type KodoReadError = { readonly _tag: string };
+
+/** The three reads a usage figure needs; the orchestrator and the projection store both have them. */
+export interface KodoDelegationReads {
+  readonly getThreadShell: (
+    threadId: ThreadId,
+  ) => Effect.Effect<OrchestrationV2ThreadShell | null, KodoReadError>;
+  readonly getThreadRecords: <K extends ProjectionStore.ProjectionRecordField>(
+    threadId: ThreadId,
+    fields: ReadonlyArray<K>,
+  ) => Effect.Effect<ProjectionStore.ProjectionRecords<K>, KodoReadError>;
+  readonly listAppOwnedChildThreadIds: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<ThreadId>, KodoReadError>;
+}
 
 /**
  * The most workers one read prices. The cap on a lead's workers is on live ones, so a long-lived lead
@@ -20,7 +37,7 @@ const MAX_WORKERS_PRICED = 64;
 
 /** A thread's model and every provider turn it has run: what the usage figures are computed from. */
 export const readDelegationSide = Effect.fn("KodoDelegationUsage.side")(function* (
-  orchestrator: Pick<Orchestrator.OrchestratorV2["Service"], "getThreadShell" | "getThreadRecords">,
+  orchestrator: Pick<KodoDelegationReads, "getThreadShell" | "getThreadRecords">,
   threadId: ThreadId,
 ) {
   const shell = yield* orchestrator.getThreadShell(threadId);
@@ -34,10 +51,7 @@ export const readDelegationSide = Effect.fn("KodoDelegationUsage.side")(function
 });
 
 export const makeKodoDelegationUsageReader = (deps: {
-  readonly orchestrator: Pick<
-    Orchestrator.OrchestratorV2["Service"],
-    "getThreadShell" | "getThreadRecords" | "listAppOwnedChildThreadIds"
-  >;
+  readonly orchestrator: KodoDelegationReads;
   readonly price: PriceTokens;
 }) => {
   const { orchestrator, price } = deps;

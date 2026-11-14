@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import { KODO_SUB_AGENTS_MAX_WORKERS_PER_TURN } from "@t3tools/contracts";
 
 import { kodoMaxWorkers, kodoWorkerCapRefusal, kodoWorkerLimitRefusal } from "./limits.ts";
@@ -47,11 +48,28 @@ describe("the caps on a lead's workers", () => {
 });
 
 describe("the usage-limit refusal", () => {
-  const input = { provider: "Claude", window: "5-hour", stopAtPercent: 90 };
+  const now = Date.UTC(2026, 10, 13, 12, 0, 0);
+  const input = { provider: "Claude", window: "5-hour", stopAtPercent: 90, nowMs: now };
   it("passes below the threshold and refuses at it, naming the provider and the window", () => {
     expect(kodoWorkerLimitRefusal({ ...input, percent: 89.9 })).toBeUndefined();
     expect(kodoWorkerLimitRefusal({ ...input, percent: 90 })).toMatch(
       /5-hour usage limit of Claude is at 90%/,
+    );
+  });
+  it("carries the used percent, the limit and the reset time, and says not to retry", () => {
+    const message = kodoWorkerLimitRefusal({
+      ...input,
+      percent: 92.4,
+      resetsAt: DateTime.formatIso(DateTime.makeUnsafe(now + 130 * 60_000)),
+    });
+    expect(message).toMatch(/is at 92%/);
+    expect(message).toMatch(/at or above the 90%/);
+    expect(message).toMatch(/resets in 2h 10m, at 14:10 UTC/);
+    expect(message).toMatch(/do not retry this call/);
+  });
+  it("says so when the provider gave no reset time", () => {
+    expect(kodoWorkerLimitRefusal({ ...input, percent: 95 })).toMatch(
+      /has not said when it resets/,
     );
   });
 });
