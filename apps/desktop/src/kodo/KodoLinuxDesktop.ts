@@ -250,7 +250,6 @@ export class KodoLinuxDesktop {
   });
 
   private startPortal() {
-    if (this.stopped) return INERT_PORTAL;
     if (this.portal === null) {
       try {
         this.portal = this.dependencies.watchPortal({
@@ -370,7 +369,7 @@ export class KodoLinuxDesktop {
     });
     window.webContents.on("did-finish-load", () => {
       this.dismissUnavailable(window);
-      host.run(this.expectChrome(window));
+      host.run(this.expectChrome(window, this.pageLoads.get(window)));
     });
   }
 
@@ -452,13 +451,19 @@ export class KodoLinuxDesktop {
   private readonly expectChrome = Effect.fn("KodoLinuxDesktop.expectChrome")(function* (
     this: KodoLinuxDesktop,
     window: Electron.BrowserWindow,
+    load: number | undefined,
   ): Effect.fn.Return<void> {
     if (this.chromeReady.has(window)) return;
-    const load = this.pageLoads.get(window);
     yield* Effect.sleep(CHROME_READY_WAIT);
     if (this.chromeReady.has(window) || this.pageLoads.get(window) !== load) return;
     yield* this.reportUnavailable(window, "gone");
   });
+
+  private openUnavailableDialog(window: Electron.BrowserWindow) {
+    const answered = new AbortController();
+    this.unavailableDialogs.set(window, answered);
+    return answered;
+  }
 
   private dismissUnavailable(window: Electron.BrowserWindow) {
     this.unavailableDialogs.get(window)?.abort();
@@ -480,8 +485,7 @@ export class KodoLinuxDesktop {
     ) {
       return;
     }
-    const answered = new AbortController();
-    this.unavailableDialogs.set(window, answered);
+    const answered = this.openUnavailableDialog(window);
     const { buttons, actions } = unavailableChoices(kind);
     const response = yield* Effect.promise(() =>
       tracked.host

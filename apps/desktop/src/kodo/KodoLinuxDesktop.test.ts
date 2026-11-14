@@ -200,13 +200,17 @@ const withTemporaryDirectory = <A, E>(use: (directory: string) => Effect.Effect<
   );
 
 describe("prepareFrame", () => {
-  it.effect("takes GNOME's layout from the portal without spawning anything", () =>
+  it.effect("takes GNOME's layout from the portal when both answer", () =>
     Effect.gen(function* () {
-      const { desktop, gsettings } = setup({
+      const { desktop, host } = setup({
         portal: (handlers) => handlers.onButtonLayout(LAYOUT),
+        gsettings: async () => "':minimize,close'",
       });
+      const { window } = fakeWindow();
       assert.strictEqual(yield* desktop.prepareFrame(), "kodo");
-      assert.strictEqual(gsettings.mock.calls.length, 0);
+      desktop.attach(window, "kodo", host);
+      assert.deepStrictEqual(desktop.chromeState(window)?.right, ["close"]);
+      assert.deepStrictEqual(desktop.chromeState(window)?.left, []);
     }),
   );
 
@@ -248,16 +252,18 @@ describe("prepareFrame", () => {
 
   it.effect("keeps the portal's layout when gsettings answers after it", () =>
     Effect.gen(function* () {
-      const gsettingsAnswer = yield* Deferred.make<string>();
-      const { desktop, host } = setup({
+      let answerGsettings: (output: string) => void = () => undefined;
+      const gsettingsAnswer = new Promise<string>((resolve) => (answerGsettings = resolve));
+      const { desktop, host, gsettings } = setup({
         portal: (handlers) => handlers.onButtonLayout({ left: ["close"], right: [] }),
-        gsettings: () => Effect.runPromise(Deferred.await(gsettingsAnswer)),
+        gsettings: () => gsettingsAnswer,
       });
       const { window } = fakeWindow();
       assert.strictEqual(yield* desktop.prepareFrame(), "kodo");
       desktop.attach(window, "kodo", host);
-      yield* Deferred.succeed(gsettingsAnswer, "':minimize,close'");
-      yield* Effect.promise(() => Promise.resolve());
+      answerGsettings("':minimize,close'");
+      yield* Effect.promise(() => gsettingsAnswer);
+      assert.strictEqual(gsettings.mock.calls.length, 1);
       assert.deepStrictEqual(desktop.chromeState(window)?.left, ["close"]);
     }),
   );
@@ -420,17 +426,19 @@ describe("reportUnavailable", () => {
   /** A dialog the test answers itself, and what it was asked. */
   const dialog = (setupOptions: Parameters<typeof setup>[0] = {}) => {
     const context = setup(setupOptions);
-    const shown = Deferred.makeUnsafe<Electron.MessageBoxOptions>();
+    const asked: Array<Deferred.Deferred<Electron.MessageBoxOptions>> = [];
+    const shownAt = (index: number) => (asked[index] ??= Deferred.makeUnsafe());
+    let calls = 0;
     let choose: (response: number) => void = () => undefined;
     context.showMessageBox.mockImplementation(
       (_parent: unknown, options: Electron.MessageBoxOptions) => {
         const answer = new Promise((resolve) => (choose = (response) => resolve({ response })));
         options.signal?.addEventListener("abort", () => choose(options.cancelId ?? 0));
-        Deferred.doneUnsafe(shown, Effect.succeed(options));
+        Deferred.doneUnsafe(shownAt(calls++), Effect.succeed(options));
         return answer;
       },
     );
-    return { ...context, shown, choose: (response: number) => choose(response) };
+    return { ...context, shown: shownAt(0), shownAt, choose: (response: number) => choose(response) };
   };
   const attached = (setupOptions?: Parameters<typeof setup>[0], windowOptions?: { visible: boolean }) => {
     const context = dialog(setupOptions);
@@ -441,7 +449,7 @@ describe("reportUnavailable", () => {
 
   it.effect("offers reload and close once at a time, and does what was chosen", () =>
     Effect.gen(function* () {
-      const { desktop, window, shown, choose, showMessageBox, reload, close } = attached();
+      const { desktop, window, shown, shownAt, choose, showMessageBox, reload, close } = attached();
       const first = yield* Effect.forkChild(desktop.reportUnavailable(window, "gone"));
       yield* Deferred.await(shown);
       yield* desktop.reportUnavailable(window, "gone");
@@ -451,7 +459,7 @@ describe("reportUnavailable", () => {
       assert.strictEqual(reload.mock.calls.length, 1);
 
       const second = yield* Effect.forkChild(desktop.reportUnavailable(window, "gone"));
-      yield* Effect.promise(() => Promise.resolve());
+      yield* Deferred.await(shownAt(1));
       choose(1);
       yield* Fiber.join(second);
       assert.strictEqual(close.mock.calls.length, 1);
@@ -633,29 +641,32 @@ describe("start", () => {
 });
 
 describe("setUseSystemTitleBar", () => {
-  it.effect("keeps the last value when toggles overlap", () =>
+  it.effect("writes one toggle at a time and keeps the last", () =>
     Effect.gen(function* () {
-      const firstWriteStarted = yield* Deferred.make<void>();
-      const releaseFirstWrite = yield* Deferred.make<void>();
-      let saved: boolean | undefined;
+      let firstWriteStarted: () => void = () => undefined;
+      const started = new Promise<void>((resolve) => (firstWriteStarted = resolve));
+      let releaseFirstWrite: () => void = () => undefined;
+      const released = new Promise<void>((resolve) => (releaseFirstWrite = resolve));
+      const writes: Array<string> = [];
       const { desktop } = setup({
         writePreference: async (_directory, _file, enabled) => {
+          writes.push(`start ${enabled}`);
           if (enabled) {
-            await Effect.runPromise(
-              Deferred.succeed(firstWriteStarted, undefined).pipe(
-                Effect.andThen(Deferred.await(releaseFirstWrite)),
-              ),
-            );
+            firstWriteStarted();
+            await released;
           }
-          saved = enabled;
+          writes.push(`end ${enabled}`);
         },
       });
       const first = yield* Effect.forkChild(desktop.setUseSystemTitleBar(true));
-      yield* Deferred.await(firstWriteStarted);
+      yield* Effect.promise(() => started);
       const second = yield* Effect.forkChild(desktop.setUseSystemTitleBar(false));
-      yield* Deferred.succeed(releaseFirstWrite, undefined);
+      // The second toggle has been asked for; it must not write while the first is still writing.
+      yield* Effect.yieldNow;
+      assert.deepStrictEqual(writes, ["start true"]);
+      releaseFirstWrite();
       yield* Fiber.joinAll([first, second]);
-      assert.strictEqual(saved, false);
+      assert.deepStrictEqual(writes, ["start true", "end true", "start false", "end false"]);
     }),
   );
 
