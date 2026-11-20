@@ -4,8 +4,9 @@
  * itself is the built-in "kodo" theme (packages/shared/src/kodoTheme.ts), not CSS.
  */
 
-/* GNOME look, scoped to the Kodo theme (see kodo-gnome.css). */
+/* Adwaita look, scoped to the Kodo theme (see kodo-gnome.css, kodo-adwaita.css). */
 @import "./kodo-gnome.css";
+@import "./kodo-adwaita.css";
 
 /* Header bar window buttons of the Linux desktop app. */
 @import "./kodo-window-chrome.css";

@@ -1,0 +1,126 @@
+/*
+ * Kodo "Adwaita" look, second half: surfaces kodo-gnome.css does not reach (alert dialogs, toasts,
+ * boxed-list settings groups, press feedback). Same rules as there: scoped to
+ * `html[data-theme-id="kodo"]` so other themes are untouched, unlayered so it outranks Tailwind
+ * utilities on `components/ui` primitives, no gating on platform. Values are libadwaita 1.6
+ * constants: 18px dialog radius, 12px card radius, 50px row height, near-black toast.
+ */
+
+html[data-theme-id="kodo"] {
+  --adw-card-border: rgb(0 0 6 / 8%);
+  --adw-toast-bg: #262629;
+}
+html[data-theme-id="kodo"].dark {
+  --adw-card-border: rgb(255 255 255 / 8%);
+  --adw-toast-bg: #3b3b3f;
+}
+
+/* GTK buttons do not shrink while pressed. */
+html[data-theme-id="kodo"] [data-slot="button"]:active {
+  scale: none;
+}
+
+/* AdwAlertDialog: flat scrim, centred heading and body, equal-width button row, no footer band. */
+html[data-theme-id="kodo"] [data-slot="alert-dialog-backdrop"] {
+  background-color: rgb(0 0 6 / 25%);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+html[data-theme-id="kodo"].dark [data-slot="alert-dialog-backdrop"] {
+  background-color: rgb(0 0 0 / 50%);
+}
+html[data-theme-id="kodo"] [data-slot="alert-dialog-popup"] {
+  background-color: var(--popover);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-radius: 18px;
+  box-shadow: var(--adw-popover-shadow);
+}
+html[data-theme-id="kodo"] [data-slot="alert-dialog-header"] {
+  align-items: center;
+  text-align: center;
+}
+html[data-theme-id="kodo"] [data-slot="alert-dialog-title"] {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+html[data-theme-id="kodo"] [data-slot="alert-dialog-description"] {
+  color: var(--foreground);
+}
+html[data-theme-id="kodo"] [data-slot="alert-dialog-footer"] {
+  flex-flow: row wrap;
+  justify-content: stretch;
+  gap: 12px;
+  border-top: 0;
+  background: transparent;
+  padding: 0 24px 24px;
+}
+html[data-theme-id="kodo"] [data-slot="alert-dialog-footer"] > * {
+  flex: 1 1 7rem;
+}
+html[data-theme-id="kodo"]
+  [data-slot="alert-dialog-footer"]
+  :is([data-slot="button"], [data-slot="alert-dialog-close"]) {
+  height: 36px;
+}
+/* AlertDialogClose overrides the button's data-slot, so the flat-fill rule of kodo-gnome.css
+   (matched on data-slot="button") needs this twin. */
+html[data-theme-id="kodo"] [data-slot="alert-dialog-close"].border-input {
+  background-color: var(--adw-control-fill);
+  background-clip: border-box;
+  border-color: transparent;
+  box-shadow: none;
+}
+html[data-theme-id="kodo"] [data-slot="alert-dialog-close"].border-input:hover {
+  background-color: var(--adw-control-fill-hover);
+}
+html[data-theme-id="kodo"] [data-slot="alert-dialog-close"].border-input::before {
+  box-shadow: none;
+}
+
+/* AdwToast: a dark pill with white text, in both colour schemes. The tokens are re-pointed so
+   the toast's own text, icon and action colours read on the dark fill. */
+html[data-theme-id="kodo"] :is([data-slot="toast-viewport"] > *, [data-slot="toast-popup"]) {
+  --foreground: #fff;
+  --popover-foreground: #fff;
+  --muted-foreground: rgb(255 255 255 / 85%);
+  --destructive-foreground: #ff7b63;
+  --warning-foreground: #f8e45c;
+  background-color: var(--adw-toast-bg);
+  color: #fff;
+  border-color: transparent;
+  border-radius: 24px;
+  box-shadow: 0 2px 8px rgb(0 0 6 / 25%);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+/* Utilities resolve their colour before the token override above, so the dim texts are set directly. */
+html[data-theme-id="kodo"]
+  :is([data-slot="toast-viewport"], [data-slot="toast-viewport-anchored"])
+  :is([data-slot="toast-description"], button) {
+  color: rgb(255 255 255 / 85%);
+}
+html[data-theme-id="kodo"] [data-slot="toast-close"] {
+  background-color: var(--adw-toast-bg);
+  border-color: rgb(255 255 255 / 20%);
+  color: rgb(255 255 255 / 80%);
+  backdrop-filter: none;
+}
+
+/* AdwPreferencesGroup boxed list: opaque card, hairline border, no shadow, regular-weight row
+   titles and 50px rows. The plain variant (`space-y-1`) is not a boxed list. */
+html[data-theme-id="kodo"] [data-slot="settings-group"]:not(.space-y-1) {
+  background-color: var(--card);
+  border-color: var(--adw-card-border);
+  border-radius: 12px;
+  box-shadow: none;
+}
+html[data-theme-id="kodo"] [data-slot="settings-group"]:not(.space-y-1) > * + * {
+  border-color: var(--adw-card-border);
+}
+html[data-theme-id="kodo"] [data-slot="settings-row"] {
+  min-height: 50px;
+}
+html[data-theme-id="kodo"] [data-slot="settings-row"] h3 {
+  font-weight: 400;
+}

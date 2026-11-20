@@ -1258,6 +1258,7 @@ export default {
     { path: "packages/shared/src/kodoTheme.ts" },
     { path: "apps/web/src/kodo.css" },
     { path: "apps/web/src/kodo-gnome.css" },
+    { path: "apps/web/src/kodo-adwaita.css" },
     {
       path: "apps/web/src/kodo-window-chrome.css",
       why: "Insets the headers keep for the Linux desktop app's own window buttons",
