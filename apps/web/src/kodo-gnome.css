@@ -112,7 +112,8 @@ html[data-theme-id="kodo"]
   background-color: var(--adw-control-fill);
   background-clip: border-box;
   border-color: transparent;
-  box-shadow: none;
+  /* Clear only the drop shadow; the focus ring shares the box-shadow property. */
+  --tw-shadow: 0 0 #0000;
 }
 html[data-theme-id="kodo"]
   :is([data-slot="button"].border-input, [data-slot="select-trigger"]):hover {

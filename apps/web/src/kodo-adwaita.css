@@ -33,8 +33,13 @@ html[data-theme-id="kodo"] [data-slot="alert-dialog-popup"] {
   background-color: var(--popover);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
-  border-radius: 18px;
   box-shadow: var(--adw-popover-shadow);
+}
+/* Below sm the popup is a bottom sheet with square corners (DIALOG_MOBILE_SHEET_CLASS). */
+@media (min-width: 40rem) {
+  html[data-theme-id="kodo"] [data-slot="alert-dialog-popup"] {
+    border-radius: 18px;
+  }
 }
 html[data-theme-id="kodo"] [data-slot="alert-dialog-header"] {
   align-items: center;
@@ -49,27 +54,28 @@ html[data-theme-id="kodo"] [data-slot="alert-dialog-description"] {
 }
 html[data-theme-id="kodo"] [data-slot="alert-dialog-footer"] {
   flex-flow: row wrap;
-  justify-content: stretch;
   gap: 12px;
   border-top: 0;
   background: transparent;
   padding: 0 24px 24px;
 }
 html[data-theme-id="kodo"] [data-slot="alert-dialog-footer"] > * {
-  flex: 1 1 7rem;
+  flex: 1 1 100%;
 }
 html[data-theme-id="kodo"]
   [data-slot="alert-dialog-footer"]
-  :is([data-slot="button"], [data-slot="alert-dialog-close"]) {
+  > :is([data-slot="button"], [data-slot="alert-dialog-close"]) {
+  flex: 1 1 7rem;
   height: 36px;
 }
 /* AlertDialogClose overrides the button's data-slot, so the flat-fill rule of kodo-gnome.css
-   (matched on data-slot="button") needs this twin. */
+   (matched on data-slot="button") needs this twin. Only the drop shadow is cleared: the focus
+   ring shares the box-shadow property. */
 html[data-theme-id="kodo"] [data-slot="alert-dialog-close"].border-input {
+  --tw-shadow: 0 0 #0000;
   background-color: var(--adw-control-fill);
   background-clip: border-box;
   border-color: transparent;
-  box-shadow: none;
 }
 html[data-theme-id="kodo"] [data-slot="alert-dialog-close"].border-input:hover {
   background-color: var(--adw-control-fill-hover);
@@ -78,12 +84,17 @@ html[data-theme-id="kodo"] [data-slot="alert-dialog-close"].border-input::before
   box-shadow: none;
 }
 
-/* AdwToast: a dark pill with white text, in both colour schemes. The tokens are re-pointed so
-   the toast's own text, icon and action colours read on the dark fill. */
+/* AdwToast: a dark pill with white text, in both colour schemes. Text utilities resolve through
+   the `--contrast-*` tokens, which are computed at :root, so those are re-pointed here; the
+   hover fills of ghost and outline actions come from `--accent` and `--muted`. */
 html[data-theme-id="kodo"] :is([data-slot="toast-viewport"] > *, [data-slot="toast-popup"]) {
-  --foreground: #fff;
-  --popover-foreground: #fff;
-  --muted-foreground: rgb(255 255 255 / 85%);
+  --contrast-foreground: #fff;
+  --contrast-popover-foreground: #fff;
+  --contrast-muted-foreground: rgb(255 255 255 / 85%);
+  --contrast-input: rgb(255 255 255 / 20%);
+  --accent: rgb(255 255 255 / 12%);
+  --muted: rgb(255 255 255 / 12%);
+  --popover: var(--adw-toast-bg);
   --destructive-foreground: #ff7b63;
   --warning-foreground: #f8e45c;
   background-color: var(--adw-toast-bg);
@@ -94,11 +105,18 @@ html[data-theme-id="kodo"] :is([data-slot="toast-viewport"] > *, [data-slot="toa
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
-/* Utilities resolve their colour before the token override above, so the dim texts are set directly. */
-html[data-theme-id="kodo"]
-  :is([data-slot="toast-viewport"], [data-slot="toast-viewport-anchored"])
-  :is([data-slot="toast-description"], button) {
-  color: rgb(255 255 255 / 85%);
+/* Outline actions keep a flat translucent fill like every other Kodo outline button. */
+html[data-theme-id="kodo"] [data-slot="toast-action"].border-input {
+  --tw-shadow: 0 0 #0000;
+  background-color: rgb(255 255 255 / 10%);
+  background-clip: border-box;
+  border-color: transparent;
+}
+html[data-theme-id="kodo"] [data-slot="toast-action"].border-input:hover {
+  background-color: rgb(255 255 255 / 16%);
+}
+html[data-theme-id="kodo"] [data-slot="toast-action"].border-input::before {
+  box-shadow: none;
 }
 html[data-theme-id="kodo"] [data-slot="toast-close"] {
   background-color: var(--adw-toast-bg);
@@ -108,19 +126,31 @@ html[data-theme-id="kodo"] [data-slot="toast-close"] {
 }
 
 /* AdwPreferencesGroup boxed list: opaque card, hairline border, no shadow, regular-weight row
-   titles and 50px rows. The plain variant (`space-y-1`) is not a boxed list. */
-html[data-theme-id="kodo"] [data-slot="settings-group"]:not(.space-y-1) {
+   titles and 50px rows. The plain variant (`space-y-1`) is not a boxed list, and the provider
+   detail pane keeps its sections flat (index.css). */
+html[data-theme-id="kodo"] [data-slot="settings-group"]:not(.space-y-1, [data-provider-detail] *) {
   background-color: var(--card);
   border-color: var(--adw-card-border);
   border-radius: 12px;
   box-shadow: none;
 }
-html[data-theme-id="kodo"] [data-slot="settings-group"]:not(.space-y-1) > * + * {
+html[data-theme-id="kodo"]
+  [data-slot="settings-group"]:not(.space-y-1, [data-provider-detail] *)
+  > *
+  + * {
   border-color: var(--adw-card-border);
 }
-html[data-theme-id="kodo"] [data-slot="settings-row"] {
+html[data-theme-id="kodo"]
+  [data-slot="settings-group"]:not(.space-y-1, [data-provider-detail] *)
+  > [data-slot="settings-row"] {
   min-height: 50px;
 }
-html[data-theme-id="kodo"] [data-slot="settings-row"] h3 {
+/* The row title: row > layout > text column > title line > h3. */
+html[data-theme-id="kodo"]
+  [data-slot="settings-row"]
+  > div:first-child
+  > div:first-child
+  > div:first-child
+  > h3 {
   font-weight: 400;
 }
